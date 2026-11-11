@@ -1,0 +1,7 @@
+{
+  "name": "maxflow",
+  "private": true,
+  "type": "module",
+  "bin": { "maxflow": "./cli.ts" },
+  "scripts": { "start": "bun server.ts" }
+}

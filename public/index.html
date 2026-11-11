@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>maxflow</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" />
+  <style>
+    :root { --bg: #0d0f12; --panel: #15181d; --line: #262b33; --fg: #d7dce2; --dim: #7d8590; --accent: #6cb6ff; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { display: grid; grid-template-columns: 240px 1fr; }
+    aside { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+    header { padding: 12px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
+    header b { color: var(--accent); }
+    button { background: none; border: 1px solid var(--line); color: var(--fg); border-radius: 4px; padding: 3px 8px; font: inherit; cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    ul { list-style: none; margin: 0; padding: 0; overflow: auto; }
+    li { padding: 8px 12px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; gap: 6px; align-items: center; }
+    li.active { background: #1d2229; }
+    li .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    li .dot { width: 7px; height: 7px; border-radius: 50%; background: #3fb950; flex: none; }
+    li .dot.dead { background: var(--dim); }
+    li .x { color: var(--dim); border: none; padding: 0 4px; }
+    main { min-width: 0; min-height: 0; padding: 6px; }
+    #term { height: 100%; }
+    #empty { color: var(--dim); padding: 24px; }
+    @media (max-width: 640px) { body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } aside { max-height: 30vh; } }
+  </style>
+</head>
+<body>
+  <aside>
+    <header><b>maxflow</b><button id="new">+ new</button></header>
+    <ul id="list"></ul>
+  </aside>
+  <main><div id="term"></div><div id="empty" hidden>No sessions. Click + new.</div></main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.js"></script>
+  <script>
+    const list = document.getElementById("list");
+    let term, fit, ws, current;
+
+    async function refresh() {
+      const sessions = await (await fetch("/api/sessions")).json();
+      list.replaceChildren(...sessions.map((s) => {
+        const li = document.createElement("li");
+        li.className = s.id === current ? "active" : "";
+        li.title = `${s.cmd.join(" ")}\n${s.cwd}`;
+        li.innerHTML = `<span class="dot ${s.running ? "" : "dead"}"></span><span class="name"></span><button class="x" title="kill">×</button>`;
+        li.querySelector(".name").textContent = s.name;
+        li.onclick = () => attach(s.id);
+        li.querySelector(".x").onclick = async (e) => {
+          e.stopPropagation();
+          await fetch(`/api/sessions/${s.id}`, { method: "DELETE" });
+          if (s.id === current) { ws?.close(); term?.dispose(); term = current = null; history.replaceState(null, "", "/"); }
+          refresh();
+        };
+        return li;
+      }));
+      document.getElementById("empty").hidden = sessions.length > 0;
+      if (!current && sessions.length) attach((sessions.find((s) => location.pathname === `/s/${s.id}`) ?? sessions[0]).id);
+    }
+
+    function attach(id) {
+      if (id === current) return;
+      ws?.close();
+      term?.dispose();
+      current = id;
+      history.replaceState(null, "", `/s/${id}`);
+      term = new Terminal({ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13, cursorBlink: true, allowProposedApi: true, theme: { background: "#0d0f12" } });
+      fit = new FitAddon.FitAddon();
+      term.loadAddon(fit);
+      term.loadAddon(new WebLinksAddon.WebLinksAddon());
+      term.open(document.getElementById("term"));
+      fit.fit();
+      ws = new WebSocket(`ws://${location.host}/ws/${id}`);
+      ws.binaryType = "arraybuffer";
+      const send = (m) => ws.readyState === 1 && ws.send(JSON.stringify(m));
+      ws.onopen = () => send({ type: "resize", cols: term.cols, rows: term.rows });
+      ws.onmessage = (e) => term.write(new Uint8Array(e.data));
+      ws.onclose = () => refresh();
+      term.onData((data) => send({ type: "input", data }));
+      term.onResize(({ cols, rows }) => send({ type: "resize", cols, rows }));
+      term.focus();
+      refresh();
+    }
+
+    document.getElementById("new").onclick = async () => {
+      const cmd = prompt("Command (blank = login shell)", "") ?? null;
+      if (cmd === null) return;
+      const s = await (await fetch("/api/sessions", { method: "POST", body: JSON.stringify({ cmd: cmd || undefined }) })).json();
+      current = null;
+      attach(s.id);
+    };
+    new ResizeObserver(() => fit?.fit()).observe(document.querySelector("main"));
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>
