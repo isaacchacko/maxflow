@@ -12,6 +12,7 @@ type Session = {
   cmd: string[];
   cwd: string;
   createdAt: number;
+  lastOutputAt: number;
   proc: Subprocess;
   chunks: Uint8Array[];
   bytes: number;
@@ -38,6 +39,7 @@ function tmux(...args: string[]) {
 function push(session: Session, chunk: Uint8Array) {
   session.chunks.push(chunk);
   session.bytes += chunk.length;
+  session.lastOutputAt = Date.now();
   while (session.bytes > SCROLLBACK_BYTES && session.chunks.length > 1) session.bytes -= session.chunks.shift()!.length;
   for (const ws of session.clients) ws.sendBinary(chunk);
 }
@@ -57,7 +59,7 @@ function attachViewer(session: Session, cols = 120, rows = 34) {
 
 function createSession(name: string, cmd: string[], cwd: string, chatId?: string, cols = 120, rows = 34): Session {
   const id = crypto.randomUUID().slice(0, 8);
-  const session = { id, name, cmd, cwd, chatId, createdAt: Date.now(), chunks: [], bytes: 0, clients: new Set(), exitCode: null } as unknown as Session;
+  const session = { id, name, cmd, cwd, chatId, createdAt: Date.now(), lastOutputAt: Date.now(), chunks: [], bytes: 0, clients: new Set(), exitCode: null } as unknown as Session;
   const t = tmuxName(id);
   const created = tmux("new-session", "-d", "-s", t, "-x", String(cols), "-y", String(rows), "-c", cwd, "-e", `MAXFLOW_SESSION=${id}`, "--", ...cmd);
   if (!created.ok) throw new Error(`tmux new-session failed for ${cmd.join(" ")}`);
@@ -83,6 +85,7 @@ function adoptSessions() {
     const hasHistory = Number(tmux("display-message", "-p", "-t", t, "#{history_size}").out) > 0;
     const history = hasHistory ? tmux("capture-pane", "-p", "-e", "-J", "-t", t, "-S", "-", "-E", "-1").out : "";
     if (history.trim()) push(session, new TextEncoder().encode(history.replace(/\n/g, "\r\n")));
+    session.lastOutputAt = session.createdAt;
     sessions.set(id, session);
     attachViewer(session);
   }
@@ -96,6 +99,7 @@ const describe = (s: Session) => ({
   cmd: s.cmd,
   cwd: s.cwd,
   createdAt: s.createdAt,
+  lastOutputAt: s.lastOutputAt,
   clients: s.clients.size,
   running: s.exitCode === null,
   exitCode: s.exitCode,
@@ -165,6 +169,13 @@ Bun.serve<{ id: string }>({
         s.proc.kill();
         for (const ws of s.clients) ws.close();
         return new Response(null, { status: 204 });
+      }
+      if (req.method === "PATCH") {
+        const body = (await req.json().catch(() => ({}))) as { name?: string };
+        if (body.name?.trim()) {
+          s.name = body.name.trim().slice(0, 80);
+          tmux("set-option", "-t", tmuxName(s.id), "@mf", JSON.stringify({ name: s.name, cmd: s.cmd, cwd: s.cwd, chatId: s.chatId, createdAt: s.createdAt }));
+        }
       }
       return Response.json(describe(s));
     }

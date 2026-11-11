@@ -9,23 +9,44 @@
     :root { --bg: #0d0f12; --panel: #15181d; --line: #262b33; --fg: #d7dce2; --dim: #7d8590; --accent: #6cb6ff; }
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
-    body { display: grid; grid-template-columns: 240px 1fr; }
+    body { display: grid; grid-template-columns: 260px 1fr; }
+    body.collapsed { grid-template-columns: 44px 1fr; }
     aside { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
-    header { padding: 12px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
+    header { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 6px; }
     header b { color: var(--accent); }
+    #toggle { border: none; color: var(--dim); padding: 0 4px; font-size: 15px; }
+    .count { color: var(--dim); font-weight: normal; margin-left: 4px; }
     button { background: none; border: 1px solid var(--line); color: var(--fg); border-radius: 4px; padding: 3px 8px; font: inherit; cursor: pointer; }
     button:hover { border-color: var(--accent); }
     ul { list-style: none; margin: 0; padding: 0; overflow: auto; }
     li { padding: 8px 12px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; gap: 6px; align-items: center; }
-    li.active { background: #1d2229; }
-    li .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    li .dot { width: 7px; height: 7px; border-radius: 50%; background: #3fb950; flex: none; }
-    li .dot.dead { background: var(--dim); }
-    li .x { color: var(--dim); border: none; padding: 0 4px; }
+    #list { padding: 6px; }
+    #list li { border: none; border-left: 2px solid transparent; border-radius: 4px; padding: 7px 8px; gap: 9px; margin-bottom: 2px; }
+    #list li:hover { background: #1a1e24; }
+    #list li.active { background: #1d2229; border-left-color: var(--accent); }
+    #list li.ended .name { color: var(--dim); }
+    #list .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    #list .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #list .name[contenteditable=true] { outline: 1px solid var(--accent); text-overflow: clip; cursor: text; }
+    #list .meta { color: var(--dim); font-size: 11px; display: flex; gap: 8px; }
+    #list .meta .cwd { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+    #list .meta .busy { color: #3fb950; }
+    #list .meta .code { color: #f85149; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; flex: none; }
+    .dot.busy { animation: pulse 1s ease-in-out infinite; }
+    .dot.dead { background: var(--dim); }
+    @keyframes pulse { 50% { opacity: .25; } }
+    .kind { color: #d2a8ff; flex: none; width: 1em; text-align: center; }
+    #list .x { color: var(--dim); border: none; padding: 0 4px; visibility: hidden; }
+    #list li:hover .x, #list li.active .x { visibility: visible; }
+    #list .x:hover { color: #f85149; }
+    body.collapsed header b, body.collapsed header .btns, body.collapsed #list .body, body.collapsed #list .x, body.collapsed #list .kind { display: none; }
+    body.collapsed header { justify-content: center; padding: 10px 0; }
+    body.collapsed #list li { justify-content: center; padding: 10px 0; }
     main { min-width: 0; min-height: 0; padding: 6px; }
     #term { height: 100%; }
     #empty { color: var(--dim); padding: 24px; }
-    @media (max-width: 640px) { body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } aside { max-height: 30vh; } }
+    @media (max-width: 640px) { body, body.collapsed { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } aside { max-height: 30vh; } #toggle { display: none; } }
     #picker { position: fixed; inset: 0; background: #000a; display: flex; align-items: flex-start; justify-content: center; padding: 8vh 16px; z-index: 10; }
     #picker[hidden] { display: none; }
     #picker .box { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; width: min(760px, 100%); max-height: 80vh; display: flex; flex-direction: column; }
@@ -39,11 +60,25 @@
     #chats .m .cwd { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
     .badge { color: #e3b341; } .badge.mf { color: var(--accent); }
     header .btns { display: flex; gap: 6px; }
+    header .btns button { padding: 3px 6px; white-space: nowrap; }
+    header button.on { border-color: var(--accent); color: var(--accent); }
+    main { position: relative; }
+    /* Hidden by visibility, not display: a collapsed canvas makes the renderer refit the camera to a 1x1 box. */
+    #graph { position: absolute; inset: 6px; visibility: hidden; }
+    body.graphing #graph { visibility: visible; }
+    body.graphing #term, body.graphing #empty { display: none; }
+    #tip { position: absolute; z-index: 5; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; width: max-content; max-width: 360px; box-shadow: 0 6px 24px #0008; font-size: 12px; line-height: 1.45; }
+    #tip[hidden] { display: none; }
+    #tip .h { color: var(--fg); font-weight: bold; margin-bottom: 4px; overflow-wrap: anywhere; }
+    #tip .r { display: grid; grid-template-columns: 64px 1fr; gap: 8px; }
+    #tip .k { color: var(--dim); }
+    #tip .v { overflow-wrap: anywhere; }
+    #tip .prompt { color: var(--dim); margin-top: 6px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   </style>
 </head>
 <body>
   <aside>
-    <header><b>maxflow</b><span class="btns"><button id="resume" title="Resume a Claude chat (r)">resume</button><button id="new">+ new</button></span></header>
+    <header><button id="toggle" title="Toggle sidebar (⌘B)">☰</button><b>maxflow<span class="count" id="count"></span></b><span class="btns"><button id="graphBtn" title="Graph of agent sessions (⌘G)">◎</button><button id="resume" title="Resume a Claude chat (r)">resume</button><button id="new" title="New zsh session (⌃T)">+ new</button></span></header>
     <ul id="list"></ul>
   </aside>
   <div id="picker" hidden>
@@ -52,24 +87,41 @@
       <ul id="chats"></ul>
     </div>
   </div>
-  <main><div id="term"></div><div id="empty" hidden>No sessions. Click + new.</div></main>
+  <main><div id="term"></div><div id="graph"></div><div id="tip" hidden></div><div id="empty" hidden>No sessions. Click + new or press ⌃T.</div></main>
 
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@isaacchacko/graph@0.2.0/dist/graph-view.js"></script>
   <script>
     const list = document.getElementById("list");
     let term, fit, ws, current;
 
+    // Output within this window counts as the session working right now.
+    const BUSY_MS = 4000;
+    let renaming = false;
+
     async function refresh() {
+      if (renaming) return;
       const sessions = await (await fetch("/api/sessions")).json();
+      lastSessions = sessions;
+      if (graph) { graph.setData(graphData(sessions)); renderTip(); }
+      document.getElementById("count").textContent = sessions.length ? String(sessions.length) : "";
       list.replaceChildren(...sessions.map((s) => {
+        const busy = s.running && Date.now() - s.lastOutputAt < BUSY_MS;
         const li = document.createElement("li");
-        li.className = s.id === current ? "active" : "";
-        li.title = `${s.cmd.join(" ")}\n${s.cwd}`;
-        li.innerHTML = `<span class="dot ${s.running ? "" : "dead"}"></span><span class="name"></span><button class="x" title="kill">×</button>`;
+        li.className = [s.id === current && "active", !s.running && "ended"].filter(Boolean).join(" ");
+        li.title = `${s.name}\n${s.cmd.join(" ")}\n${s.cwd}`;
+        li.innerHTML = `<span class="dot ${!s.running ? "dead" : busy ? "busy" : ""}"></span><span class="body"><span class="name"></span><span class="meta"><span class="cwd"></span><span class="when"></span></span></span><span class="kind"></span><button class="x" title="kill">×</button>`;
         li.querySelector(".name").textContent = s.name;
-        li.onclick = () => attach(s.id);
+        li.querySelector(".cwd").textContent = ltr(home(s.cwd));
+        const when = li.querySelector(".when");
+        if (!s.running) { when.textContent = `exit ${s.exitCode ?? "?"}`; when.classList.toggle("code", !!s.exitCode); }
+        else if (busy) { when.textContent = "working"; when.classList.add("busy"); }
+        else when.textContent = ago(s.lastOutputAt);
+        if (s.chatId) { li.querySelector(".kind").textContent = "✻"; li.querySelector(".kind").title = "Claude chat"; }
+        li.onclick = () => openSession(s.id);
+        li.querySelector(".name").ondblclick = (e) => { e.stopPropagation(); rename(e.target, s); };
         li.querySelector(".x").onclick = async (e) => {
           e.stopPropagation();
           await fetch(`/api/sessions/${s.id}`, { method: "DELETE" });
@@ -81,6 +133,115 @@
       document.getElementById("empty").hidden = sessions.length > 0;
       if (!current && sessions.length) attach((sessions.find((s) => location.pathname === `/s/${s.id}`) ?? sessions[0]).id);
     }
+
+    // Graph view: one unlinked node per session, with a tooltip that follows the hovered node as the layout moves.
+    const graphEl = document.getElementById("graph"), tip = document.getElementById("tip");
+    let graph = null, lastSessions = [], hoverId = null, tipFrame = 0;
+    const chatInfo = new Map();
+    const sessionColor = (s) => !s.running ? "#484f58" : Date.now() - s.lastOutputAt < BUSY_MS ? "#3fb950" : s.chatId ? "#d2a8ff" : "#d7dce2";
+
+    const graphData = (sessions) => ({
+      nodes: sessions.map((s) => ({ id: s.id, label: s.name, color: sessionColor(s), size: s.chatId ? 2.4 : 1.8 })),
+      links: [],
+    });
+
+    function showGraph(on) {
+      document.body.classList.toggle("graphing", on);
+      document.getElementById("graphBtn").classList.toggle("on", on);
+      if (!on) { setHover(null); return term?.focus(); }
+      const first = !graph;
+      if (first) {
+        graph = new GraphView.GraphRenderer(graphEl, {
+          theme: { background: "#0d0f12", node: "#7d8590", link: "#30363d", text: "#d7dce2", accent: "#6cb6ff", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" },
+        });
+        graph.on("nodeHover", ({ id }) => setHover(id));
+        graph.on("nodeClick", ({ id }) => openSession(id));
+      }
+      graph.setData(graphData(lastSessions));
+      graph.setSelection(current ? { kind: "node", id: current } : null);
+      if (first) graph.zoomToFit();
+    }
+
+    function openSession(id) {
+      showGraph(false);
+      attach(id);
+    }
+
+    function setHover(id) {
+      hoverId = id;
+      cancelAnimationFrame(tipFrame);
+      if (!id) return void (tip.hidden = true);
+      renderTip();
+      const follow = () => {
+        const box = graph.getNodeScreenBox(hoverId);
+        if (!box) return void (tip.hidden = true);
+        const right = graphEl.offsetLeft + box.x + box.r + 12;
+        const fitsRight = right + tip.offsetWidth < graphEl.offsetLeft + graphEl.offsetWidth;
+        tip.style.left = `${fitsRight ? right : graphEl.offsetLeft + box.x - box.r - 12 - tip.offsetWidth}px`;
+        tip.style.top = `${Math.max(graphEl.offsetTop, graphEl.offsetTop + box.y - tip.offsetHeight / 2)}px`;
+        tipFrame = requestAnimationFrame(follow);
+      };
+      follow();
+    }
+
+    function renderTip() {
+      const s = lastSessions.find((s) => s.id === hoverId);
+      if (!s) return void (tip.hidden = true);
+      const rows = [];
+      const row = (k, v) => rows.push(`<div class="r"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`);
+      const busy = s.running && Date.now() - s.lastOutputAt < BUSY_MS;
+      row("status", !s.running ? `exited ${s.exitCode ?? "?"}` : busy ? "working" : `idle ${ago(s.lastOutputAt)}`);
+      row("kind", s.chatId ? "Claude chat" : "shell");
+      row("command", s.cmd.join(" "));
+      row("folder", home(s.cwd));
+      row("started", `${ago(s.createdAt)} ago`);
+      row("viewers", String(s.clients));
+      row("session", s.id);
+      let extra = "";
+      if (s.chatId) {
+        row("chat", s.chatId);
+        const chat = chatInfo.get(s.chatId);
+        if (chat) extra = `<div class="prompt">${esc(chat.prompt || chat.title || "")}</div>`;
+        else if (!chatInfo.has(s.chatId)) {
+          chatInfo.set(s.chatId, null);
+          fetch(`/api/chats?limit=1&q=${s.chatId}`).then((r) => r.json()).then(([c]) => { chatInfo.set(s.chatId, c ?? { title: "" }); renderTip(); });
+        }
+      }
+      tip.innerHTML = `<div class="h">${esc(s.name)}</div>${rows.join("")}${extra}`;
+      tip.hidden = false;
+    }
+
+    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    const toggleGraph = () => showGraph(!document.body.classList.contains("graphing"));
+    document.getElementById("graphBtn").onclick = toggleGraph;
+    addEventListener("keydown", (e) => { if (e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey && e.key === "g") { e.preventDefault(); e.stopPropagation(); toggleGraph(); } }, true);
+
+    function rename(el, s) {
+      renaming = true;
+      el.contentEditable = "true";
+      el.focus();
+      getSelection().selectAllChildren(el);
+      const done = async (save) => {
+        el.onblur = el.onkeydown = null;
+        el.contentEditable = "false";
+        renaming = false;
+        const name = el.textContent.trim();
+        if (save && name && name !== s.name) await fetch(`/api/sessions/${s.id}`, { method: "PATCH", body: JSON.stringify({ name }) });
+        refresh();
+        term?.focus();
+      };
+      el.onkeydown = (e) => { if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); done(e.key === "Enter"); } };
+      el.onblur = () => done(true);
+    }
+
+    const toggleSidebar = (collapsed = !document.body.classList.contains("collapsed")) => {
+      document.body.classList.toggle("collapsed", collapsed);
+      try { localStorage.setItem("mf.collapsed", collapsed ? "1" : "0"); } catch {}
+      requestAnimationFrame(() => fit?.fit());
+    };
+    try { toggleSidebar(localStorage.getItem("mf.collapsed") === "1"); } catch {}
+    document.getElementById("toggle").onclick = () => toggleSidebar();
+    addEventListener("keydown", (e) => { if (e.metaKey && !e.altKey && !e.ctrlKey && e.key === "b") { e.preventDefault(); e.stopPropagation(); toggleSidebar(); } }, true);
 
     // What macOS terminals send for ⌘/⌥ editing keys; xterm.js leaves these to the browser.
     function macKey(e) {
@@ -96,7 +257,7 @@
       term?.dispose();
       current = id;
       history.replaceState(null, "", `/s/${id}`);
-      term = new Terminal({ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13, cursorBlink: true, allowProposedApi: true, theme: { background: "#0d0f12" } });
+      term = new Terminal({ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13, cursorBlink: true, allowProposedApi: true, macOptionClickForcesSelection: true, theme: { background: "#0d0f12" } });
       fit = new FitAddon.FitAddon();
       term.loadAddon(fit);
       term.loadAddon(new WebLinksAddon.WebLinksAddon());
@@ -128,8 +289,10 @@
     try { bypass.checked = localStorage.getItem("mf.bypass") !== "0"; } catch { bypass.checked = true; }
     bypass.onchange = () => { try { localStorage.setItem("mf.bypass", bypass.checked ? "1" : "0"); } catch {} };
 
-    const ago = (t) => { const m = (Date.now() - t) / 60000; return m < 60 ? `${Math.round(m)}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; };
+    const ago = (t) => { const m = (Date.now() - t) / 60000; return m < 1 ? "now" : m < 60 ? `${Math.round(m)}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; };
     const home = (p) => p.replace(/^\/Users\/[^/]+/, "~");
+    // Marks keep a path left-to-right inside the rtl boxes that truncate it from the left.
+    const ltr = (t) => `\u200e${t}\u200e`;
 
     function renderChats() {
       chatList.replaceChildren(...chats.map((c, i) => {
@@ -138,7 +301,7 @@
         li.title = c.prompt;
         li.innerHTML = `<span class="t"></span><span class="m"><span class="cwd"></span><span class="badge"></span><span>${ago(c.mtime)}</span></span>`;
         li.querySelector(".t").textContent = c.title;
-        li.querySelector(".cwd").textContent = home(c.cwd);
+        li.querySelector(".cwd").textContent = ltr(home(c.cwd));
         const badge = li.querySelector(".badge");
         if (c.session) { badge.textContent = "open in maxflow"; badge.classList.add("mf"); }
         else if (c.live) badge.textContent = "open elsewhere";
@@ -180,13 +343,13 @@
     };
     if (location.hash === "#resume") openPicker();
 
-    document.getElementById("new").onclick = async () => {
-      const cmd = prompt("Command (blank = login shell)", "") ?? null;
-      if (cmd === null) return;
-      const s = await (await fetch("/api/sessions", { method: "POST", body: JSON.stringify({ cmd: cmd || undefined }) })).json();
+    async function newShell() {
+      const s = await (await fetch("/api/sessions", { method: "POST", body: JSON.stringify({ name: "zsh" }) })).json();
       current = null;
       attach(s.id);
-    };
+    }
+    document.getElementById("new").onclick = newShell;
+    addEventListener("keydown", (e) => { if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key === "t") { e.preventDefault(); e.stopPropagation(); newShell(); } }, true);
     new ResizeObserver(() => fit?.fit()).observe(document.querySelector("main"));
     refresh();
     setInterval(refresh, 3000);
