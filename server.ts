@@ -1,4 +1,5 @@
 import type { ServerWebSocket, Subprocess } from "bun";
+import { findChat, listChats } from "./chats";
 
 const PORT = Number(process.env.MAXFLOW_PORT ?? 4747);
 const HOST = "127.0.0.1";
@@ -16,6 +17,7 @@ type Session = {
   bytes: number;
   clients: Set<ServerWebSocket<{ id: string }>>;
   exitCode: number | null;
+  chatId?: string;
 };
 
 const sessions = new Map<string, Session>();
@@ -23,9 +25,9 @@ const sessions = new Map<string, Session>();
 // If maxflow itself was launched from a Claude Code session, its markers would make every child claude think it's a subagent.
 const childEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT)/.test(k)));
 
-function createSession(name: string, cmd: string[], cwd: string, cols = 120, rows = 34): Session {
+function createSession(name: string, cmd: string[], cwd: string, chatId?: string, cols = 120, rows = 34): Session {
   const id = crypto.randomUUID().slice(0, 8);
-  const session = { id, name, cmd, cwd, createdAt: Date.now(), chunks: [], bytes: 0, clients: new Set(), exitCode: null } as unknown as Session;
+  const session = { id, name, cmd, cwd, chatId, createdAt: Date.now(), chunks: [], bytes: 0, clients: new Set(), exitCode: null } as unknown as Session;
   session.proc = Bun.spawn(cmd, {
     cwd,
     env: { ...childEnv, TERM: "xterm-256color", COLORTERM: "truecolor", MAXFLOW_SESSION: id },
@@ -60,6 +62,7 @@ const describe = (s: Session) => ({
   clients: s.clients.size,
   running: s.exitCode === null,
   exitCode: s.exitCode,
+  chatId: s.chatId,
 });
 
 // Only pages served from this server may drive it; blocks other sites from reaching localhost.
@@ -90,6 +93,29 @@ Bun.serve<{ id: string }>({
       const cmd = typeof body.cmd === "string" ? ["zsh", "-lc", body.cmd] : body.cmd?.length ? body.cmd : [process.env.SHELL ?? "zsh", "-l"];
       const s = createSession(body.name || cmd.join(" ").slice(0, 40), cmd, body.cwd || process.env.HOME!);
       return Response.json(describe(s), { status: 201 });
+    }
+
+    if (path === "/api/chats" && req.method === "GET") {
+      const q = url.searchParams.get("q")?.toLowerCase() ?? "";
+      const limit = Number(url.searchParams.get("limit") ?? 100);
+      const open = new Map([...sessions.values()].filter((s) => s.chatId && s.exitCode === null).map((s) => [s.chatId!, s.id]));
+      const chats = (await listChats())
+        .filter((c) => !q || `${c.title} ${c.prompt} ${c.cwd} ${c.id}`.toLowerCase().includes(q))
+        .slice(0, limit)
+        .map((c) => ({ ...c, session: open.get(c.id) ?? null }));
+      return Response.json(chats);
+    }
+
+    const resume = path.match(/^\/api\/chats\/([0-9a-f-]{36})\/resume$/);
+    if (resume && req.method === "POST") {
+      const body = (await req.json().catch(() => ({}))) as { bypass?: boolean; force?: boolean };
+      const open = [...sessions.values()].find((s) => s.chatId === resume[1] && s.exitCode === null);
+      if (open) return Response.json(describe(open));
+      const chat = await findChat(resume[1]);
+      if (!chat) return new Response("no such chat", { status: 404 });
+      if (chat.live && !body.force) return Response.json({ error: "live", chat }, { status: 409 });
+      const cmd = ["claude", "--resume", chat.id, ...(body.bypass ? ["--permission-mode", "bypassPermissions"] : [])];
+      return Response.json(describe(createSession(chat.title.slice(0, 40), cmd, chat.cwd, chat.id)), { status: 201 });
     }
 
     const one = path.match(/^\/api\/sessions\/([\w-]+)$/);

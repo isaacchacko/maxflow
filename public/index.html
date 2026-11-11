@@ -26,13 +26,32 @@
     #term { height: 100%; }
     #empty { color: var(--dim); padding: 24px; }
     @media (max-width: 640px) { body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } aside { max-height: 30vh; } }
+    #picker { position: fixed; inset: 0; background: #000a; display: flex; align-items: flex-start; justify-content: center; padding: 8vh 16px; z-index: 10; }
+    #picker[hidden] { display: none; }
+    #picker .box { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; width: min(760px, 100%); max-height: 80vh; display: flex; flex-direction: column; }
+    #picker .bar { display: flex; gap: 10px; align-items: center; padding: 10px; border-bottom: 1px solid var(--line); }
+    #picker input[type=search] { flex: 1; background: var(--bg); border: 1px solid var(--line); color: var(--fg); padding: 6px 8px; border-radius: 4px; font: inherit; }
+    #picker label { color: var(--dim); white-space: nowrap; }
+    #chats li { flex-direction: column; align-items: stretch; gap: 3px; }
+    #chats li.sel { background: #1d2229; }
+    #chats .t { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #chats .m { color: var(--dim); font-size: 11px; display: flex; gap: 10px; }
+    #chats .m .cwd { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+    .badge { color: #e3b341; } .badge.mf { color: var(--accent); }
+    header .btns { display: flex; gap: 6px; }
   </style>
 </head>
 <body>
   <aside>
-    <header><b>maxflow</b><button id="new">+ new</button></header>
+    <header><b>maxflow</b><span class="btns"><button id="resume" title="Resume a Claude chat (r)">resume</button><button id="new">+ new</button></span></header>
     <ul id="list"></ul>
   </aside>
+  <div id="picker" hidden>
+    <div class="box">
+      <div class="bar"><input type="search" id="q" placeholder="Search chats by title, prompt, folder, id" autocomplete="off" /><label><input type="checkbox" id="bypass" /> bypass perms</label></div>
+      <ul id="chats"></ul>
+    </div>
+  </div>
   <main><div id="term"></div><div id="empty" hidden>No sessions. Click + new.</div></main>
 
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
@@ -86,6 +105,63 @@
       term.focus();
       refresh();
     }
+
+    const picker = document.getElementById("picker"), q = document.getElementById("q"), chatList = document.getElementById("chats"), bypass = document.getElementById("bypass");
+    let chats = [], sel = 0, searchTimer;
+    try { bypass.checked = localStorage.getItem("mf.bypass") !== "0"; } catch { bypass.checked = true; }
+    bypass.onchange = () => { try { localStorage.setItem("mf.bypass", bypass.checked ? "1" : "0"); } catch {} };
+
+    const ago = (t) => { const m = (Date.now() - t) / 60000; return m < 60 ? `${Math.round(m)}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; };
+    const home = (p) => p.replace(/^\/Users\/[^/]+/, "~");
+
+    function renderChats() {
+      chatList.replaceChildren(...chats.map((c, i) => {
+        const li = document.createElement("li");
+        li.className = i === sel ? "sel" : "";
+        li.title = c.prompt;
+        li.innerHTML = `<span class="t"></span><span class="m"><span class="cwd"></span><span class="badge"></span><span>${ago(c.mtime)}</span></span>`;
+        li.querySelector(".t").textContent = c.title;
+        li.querySelector(".cwd").textContent = home(c.cwd);
+        const badge = li.querySelector(".badge");
+        if (c.session) { badge.textContent = "open in maxflow"; badge.classList.add("mf"); }
+        else if (c.live) badge.textContent = "open elsewhere";
+        li.onclick = () => resumeChat(c);
+        return li;
+      }));
+      chatList.children[sel]?.scrollIntoView({ block: "nearest" });
+    }
+
+    async function loadChats() {
+      chatList.innerHTML = `<li style="color:var(--dim)">loading…</li>`;
+      chats = await (await fetch(`/api/chats?limit=150&q=${encodeURIComponent(q.value)}`)).json();
+      sel = 0;
+      renderChats();
+    }
+
+    async function resumeChat(c, force = false) {
+      const res = await fetch(`/api/chats/${c.id}/resume`, { method: "POST", body: JSON.stringify({ bypass: bypass.checked, force }) });
+      if (res.status === 409) {
+        if (confirm(`"${c.title}" is already open in another claude process. Resuming it here too will fork the transcript. Continue?`)) return resumeChat(c, true);
+        return;
+      }
+      if (!res.ok) return alert(await res.text());
+      const s = await res.json();
+      picker.hidden = true;
+      current = null;
+      attach(s.id);
+    }
+
+    function openPicker() { picker.hidden = false; q.value = ""; q.focus(); loadChats(); }
+    document.getElementById("resume").onclick = openPicker;
+    picker.onclick = (e) => { if (e.target === picker) picker.hidden = true; };
+    q.oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadChats, 150); };
+    q.onkeydown = (e) => {
+      if (e.key === "ArrowDown") { sel = Math.min(sel + 1, chats.length - 1); renderChats(); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); renderChats(); e.preventDefault(); }
+      else if (e.key === "Enter" && chats[sel]) resumeChat(chats[sel]);
+      else if (e.key === "Escape") { picker.hidden = true; term?.focus(); }
+    };
+    if (location.hash === "#resume") openPicker();
 
     document.getElementById("new").onclick = async () => {
       const cmd = prompt("Command (blank = login shell)", "") ?? null;

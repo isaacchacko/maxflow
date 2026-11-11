@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// maxflow new [--name N] [--cwd DIR] [-- cmd ...] | maxflow ls | maxflow resume <claude-session-id>
+// maxflow new [--name N] [--cwd DIR] [-- cmd ...] | maxflow ls | maxflow chats [query] | maxflow resume <claude-session-id> [--safe] [--force]
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 const [verb, ...rest] = process.argv.slice(2);
 
@@ -11,14 +11,20 @@ async function create(body: { name?: string; cmd?: string[]; cwd?: string }) {
 
 if (verb === "ls") {
   for (const s of await (await fetch(`${base}/api/sessions`)).json()) console.log(`${s.id}  ${s.running ? "run " : "exit"}  ${s.name}  ${base}/s/${s.id}`);
+} else if (verb === "chats") {
+  for (const c of await (await fetch(`${base}/api/chats?limit=30&q=${encodeURIComponent(rest.join(" "))}`)).json())
+    console.log(`${c.id}  ${c.session ? "mf  " : c.live ? "live" : "    "}  ${c.title.slice(0, 60).padEnd(60)}  ${c.cwd}`);
 } else if (verb === "resume" && rest[0]) {
-  await create({ name: `claude ${rest[0].slice(0, 8)}`, cmd: ["claude", "--resume", rest[0], ...rest.slice(1)], cwd: process.cwd() });
+  const res = await fetch(`${base}/api/chats/${rest[0]}/resume`, { method: "POST", body: JSON.stringify({ bypass: !rest.includes("--safe"), force: rest.includes("--force") }) });
+  if (res.status === 409) console.error("that chat is open in another claude process; rerun with --force to fork it"), process.exit(1);
+  if (!res.ok) console.error(await res.text()), process.exit(1);
+  console.log(`${base}/s/${(await res.json()).id}`);
 } else if (verb === "new") {
   const dash = rest.indexOf("--");
   const flags = dash === -1 ? rest : rest.slice(0, dash);
   const flag = (k: string) => (flags.includes(k) ? flags[flags.indexOf(k) + 1] : undefined);
   await create({ name: flag("--name"), cwd: flag("--cwd") ?? process.cwd(), cmd: dash === -1 ? undefined : rest.slice(dash + 1) });
 } else {
-  console.log("usage: maxflow ls | maxflow new [--name N] [--cwd DIR] [-- cmd ...] | maxflow resume <claude-session-id> [claude flags]");
+  console.log("usage: maxflow ls | maxflow new [--name N] [--cwd DIR] [-- cmd ...] | maxflow chats [query] | maxflow resume <claude-session-id> [--safe] [--force]");
   process.exit(1);
 }
