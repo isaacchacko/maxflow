@@ -1,6 +1,6 @@
 # maxflow
 
-Local web terminal for agent work on this machine. A Bun server on `127.0.0.1:4747` runs commands in real PTYs (Bun's built-in `terminal` spawn, no native deps) and streams them to xterm.js in the browser. Sessions outlive the tab: reload or open a second tab and you reattach, with up to 2 MB of scrollback replayed.
+Local web terminal for agent work on this machine. A Bun server on `127.0.0.1:4747` runs commands in real PTYs (Bun's built-in `terminal` spawn, no native deps) and streams them to xterm.js in the browser. Every session runs inside tmux on a private socket (`tmux -L maxflow`, config in `tmux.conf`: no prefix, no status bar), so it outlives both the tab and the server: on startup maxflow adopts any `mf-*` tmux sessions, replays their history and reattaches. You can also reach one from a terminal with `tmux -L maxflow attach -t mf-<id>`.
 
 ```sh
 bun server.ts                      # http://localhost:4747  (MAXFLOW_PORT to change)

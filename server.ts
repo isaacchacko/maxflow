@@ -24,34 +24,71 @@ const sessions = new Map<string, Session>();
 
 // If maxflow itself was launched from a Claude Code session, its markers would make every child claude think it's a subagent.
 const childEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT)/.test(k)));
+const termEnv = { LANG: "en_US.UTF-8", ...childEnv, TERM: "xterm-256color", COLORTERM: "truecolor" };
+
+// Commands live in tmux sessions on a private socket so they survive server restarts; maxflow only attaches to them.
+const TMUX = ["tmux", "-L", "maxflow", "-f", new URL("./tmux.conf", import.meta.url).pathname];
+const tmuxName = (id: string) => `mf-${id}`;
+
+function tmux(...args: string[]) {
+  const r = Bun.spawnSync([...TMUX, ...args], { env: termEnv });
+  return { ok: r.exitCode === 0, out: r.stdout.toString() };
+}
+
+function push(session: Session, chunk: Uint8Array) {
+  session.chunks.push(chunk);
+  session.bytes += chunk.length;
+  while (session.bytes > SCROLLBACK_BYTES && session.chunks.length > 1) session.bytes -= session.chunks.shift()!.length;
+  for (const ws of session.clients) ws.sendBinary(chunk);
+}
+
+function attachViewer(session: Session, cols = 120, rows = 34) {
+  session.proc = Bun.spawn([...TMUX, "attach-session", "-t", tmuxName(session.id)], {
+    env: termEnv,
+    terminal: { cols, rows, data: (_term, data) => push(session, new Uint8Array(data)) },
+  });
+  session.proc.exited.then(() => {
+    if (sessions.get(session.id) !== session) return;
+    if (tmux("has-session", "-t", tmuxName(session.id)).ok) return void setTimeout(() => attachViewer(session, cols, rows), 500);
+    session.exitCode = 0;
+    push(session, new TextEncoder().encode(`\r\n\x1b[2m[session ended]\x1b[0m\r\n`));
+  });
+}
 
 function createSession(name: string, cmd: string[], cwd: string, chatId?: string, cols = 120, rows = 34): Session {
   const id = crypto.randomUUID().slice(0, 8);
   const session = { id, name, cmd, cwd, chatId, createdAt: Date.now(), chunks: [], bytes: 0, clients: new Set(), exitCode: null } as unknown as Session;
-  session.proc = Bun.spawn(cmd, {
-    cwd,
-    env: { ...childEnv, TERM: "xterm-256color", COLORTERM: "truecolor", MAXFLOW_SESSION: id },
-    terminal: {
-      cols,
-      rows,
-      data(_term, data) {
-        const chunk = new Uint8Array(data);
-        session.chunks.push(chunk);
-        session.bytes += chunk.length;
-        while (session.bytes > SCROLLBACK_BYTES && session.chunks.length > 1) session.bytes -= session.chunks.shift()!.length;
-        for (const ws of session.clients) ws.sendBinary(chunk);
-      },
-    },
-  });
-  session.proc.exited.then((code) => {
-    session.exitCode = code;
-    const note = new TextEncoder().encode(`\r\n\x1b[2m[process exited with code ${code}]\x1b[0m\r\n`);
-    session.chunks.push(note);
-    for (const ws of session.clients) ws.sendBinary(note);
-  });
+  const t = tmuxName(id);
+  const created = tmux("new-session", "-d", "-s", t, "-x", String(cols), "-y", String(rows), "-c", cwd, "-e", `MAXFLOW_SESSION=${id}`, "--", ...cmd);
+  if (!created.ok) throw new Error(`tmux new-session failed for ${cmd.join(" ")}`);
+  const meta = { name, cmd, cwd, chatId, createdAt: session.createdAt };
+  tmux("set-option", "-t", t, "@mf", JSON.stringify(meta));
   sessions.set(id, session);
+  attachViewer(session, cols, rows);
   return session;
 }
+
+// Pick up sessions that outlived a previous server, seeding scrollback from tmux's history.
+function adoptSessions() {
+  for (const t of tmux("list-sessions", "-F", "#{session_name}").out.split("\n")) {
+    if (!t.startsWith("mf-")) continue;
+    const id = t.slice(3);
+    let meta;
+    try {
+      meta = JSON.parse(tmux("show-options", "-v", "-t", t, "@mf").out);
+    } catch {
+      meta = { name: t, cmd: [], cwd: "", createdAt: Date.now() };
+    }
+    const session = { id, ...meta, chunks: [], bytes: 0, clients: new Set(), exitCode: null } as unknown as Session;
+    const hasHistory = Number(tmux("display-message", "-p", "-t", t, "#{history_size}").out) > 0;
+    const history = hasHistory ? tmux("capture-pane", "-p", "-e", "-J", "-t", t, "-S", "-", "-E", "-1").out : "";
+    if (history.trim()) push(session, new TextEncoder().encode(history.replace(/\n/g, "\r\n")));
+    sessions.set(id, session);
+    attachViewer(session);
+  }
+  if (sessions.size) console.log(`adopted ${sessions.size} tmux session(s)`);
+}
+adoptSessions();
 
 const describe = (s: Session) => ({
   id: s.id,
@@ -123,9 +160,10 @@ Bun.serve<{ id: string }>({
       const s = sessions.get(one[1]);
       if (!s) return new Response("no such session", { status: 404 });
       if (req.method === "DELETE") {
+        sessions.delete(s.id);
+        tmux("kill-session", "-t", tmuxName(s.id));
         s.proc.kill();
         for (const ws of s.clients) ws.close();
-        sessions.delete(s.id);
         return new Response(null, { status: 204 });
       }
       return Response.json(describe(s));
