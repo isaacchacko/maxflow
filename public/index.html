@@ -67,6 +67,15 @@
     #graph { position: absolute; inset: 6px; visibility: hidden; }
     body.graphing #graph { visibility: visible; }
     body.graphing #term, body.graphing #empty { display: none; }
+    #gbar { position: absolute; top: 14px; left: 14px; z-index: 4; display: none; gap: 6px; align-items: center; }
+    body.graphing #gbar { display: flex; }
+    #gbar button { background: var(--panel); }
+    #gbar button.on { border-color: var(--accent); color: var(--accent); }
+    #gbar .hint { color: var(--dim); font-size: 11px; margin-left: 4px; }
+    #edgeEd { position: absolute; z-index: 6; display: flex; gap: 4px; background: var(--panel); border: 1px solid var(--accent); border-radius: 6px; padding: 4px; transform: translate(-50%, -50%); }
+    #edgeEd[hidden] { display: none; }
+    #edgeEd input { width: 160px; background: var(--bg); border: 1px solid var(--line); color: var(--fg); padding: 3px 6px; border-radius: 4px; font: inherit; }
+    #edgeEd button:hover { border-color: #f85149; color: #f85149; }
     #tip { position: absolute; z-index: 5; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; width: max-content; max-width: 360px; box-shadow: 0 6px 24px #0008; font-size: 12px; line-height: 1.45; }
     #tip[hidden] { display: none; }
     #tip .h { color: var(--fg); font-weight: bold; margin-bottom: 4px; overflow-wrap: anywhere; }
@@ -87,7 +96,10 @@
       <ul id="chats"></ul>
     </div>
   </div>
-  <main><div id="term"></div><div id="graph"></div><div id="tip" hidden></div><div id="empty" hidden>No sessions. Click + new or press ⌃T.</div></main>
+  <main><div id="term"></div><div id="graph"></div>
+    <div id="gbar"><button id="modeSelect" title="Select: drag nodes, click to open (S)">select</button><button id="modeEdit" title="Edges: drag node to node to link, click an edge to label or delete it (E)">edges</button><span class="hint" id="ghint"></span></div>
+    <div id="edgeEd" hidden><input id="edgeLabel" placeholder="label" autocomplete="off" /><button id="edgeDel" title="Delete edge (⌫)">delete</button></div>
+    <div id="tip" hidden></div><div id="empty" hidden>No sessions. Click + new or press ⌃T.</div></main>
 
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
@@ -134,28 +146,116 @@
       if (!current && sessions.length) attach((sessions.find((s) => location.pathname === `/s/${s.id}`) ?? sessions[0]).id);
     }
 
-    // Graph view: one unlinked node per session, with a tooltip that follows the hovered node as the layout moves.
+    // Graph view: one node per session, linked only by edges drawn by hand, with a tooltip that follows the hovered node as the layout moves.
     const graphEl = document.getElementById("graph"), tip = document.getElementById("tip");
     let graph = null, lastSessions = [], hoverId = null, tipFrame = 0;
     const chatInfo = new Map();
     const sessionColor = (s) => !s.running ? "#484f58" : Date.now() - s.lastOutputAt < BUSY_MS ? "#3fb950" : s.chatId ? "#d2a8ff" : "#d7dce2";
 
-    const graphData = (sessions) => ({
-      nodes: sessions.map((s) => ({ id: s.id, label: s.name, color: sessionColor(s), size: s.chatId ? 2.4 : 1.8 })),
-      links: [],
+    // Hand-drawn edges live only in this browser; an edge goes when either of its sessions does.
+    const edgeKey = (a, b) => [a, b].sort().join("|");
+    let edges = [], mode = "select", editing = null;
+    try { edges = JSON.parse(localStorage.getItem("mf.edges") || "[]"); } catch {}
+    const saveEdges = () => { try { localStorage.setItem("mf.edges", JSON.stringify(edges)); } catch {} };
+
+    const graphData = (sessions) => {
+      const ids = new Set(sessions.map((s) => s.id));
+      const live = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
+      if (sessions.length && live.length !== edges.length) { edges = live; saveEdges(); }
+      return {
+        nodes: sessions.map((s) => ({ id: s.id, label: s.name, color: sessionColor(s), size: s.chatId ? 2.4 : 1.8 })),
+        links: edges.map((e) => ({ source: e.source, target: e.target, label: e.label || "" })),
+      };
+    };
+
+    function setEdges(next) {
+      edges = next;
+      saveEdges();
+      graph.setData(graphData(lastSessions));
+    }
+
+    function setMode(m) {
+      mode = m;
+      closeEdgeEditor();
+      graph?.setOptions({ mode: m === "edit" ? "edit" : "select" });
+      document.getElementById("modeSelect").classList.toggle("on", m === "select");
+      document.getElementById("modeEdit").classList.toggle("on", m === "edit");
+      document.getElementById("ghint").textContent = m === "edit" ? "drag node → node · click edge to edit · right-click edge to delete" : "";
+    }
+
+    const edgeEd = document.getElementById("edgeEd"), edgeLabel = document.getElementById("edgeLabel");
+    let edgeFrame = 0;
+    function openEdgeEditor(source, target) {
+      const edge = edges.find((e) => edgeKey(e.source, e.target) === edgeKey(source, target));
+      if (!edge) return;
+      editing = edge;
+      graph.setSelection({ kind: "link", source: edge.source, target: edge.target });
+      edgeLabel.value = edge.label || "";
+      edgeEd.hidden = false;
+      cancelAnimationFrame(edgeFrame);
+      const follow = () => {
+        const p = graph.getLinkScreenMidpoint(editing.source, editing.target) ?? graph.getLinkScreenMidpoint(editing.target, editing.source);
+        if (!p) return closeEdgeEditor();
+        edgeEd.style.left = `${graphEl.offsetLeft + p.x}px`;
+        edgeEd.style.top = `${graphEl.offsetTop + p.y}px`;
+        edgeFrame = requestAnimationFrame(follow);
+      };
+      follow();
+      edgeLabel.focus();
+      edgeLabel.select();
+    }
+
+    function closeEdgeEditor() {
+      cancelAnimationFrame(edgeFrame);
+      if (!editing) return;
+      editing = null;
+      edgeEd.hidden = true;
+      graph?.setSelection(null);
+    }
+
+    const deleteEdge = (source, target) => {
+      closeEdgeEditor();
+      setEdges(edges.filter((e) => edgeKey(e.source, e.target) !== edgeKey(source, target)));
+    };
+
+    edgeLabel.oninput = () => { if (editing) { editing.label = edgeLabel.value.trim(); setEdges(edges); } };
+    edgeLabel.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); closeEdgeEditor(); }
+      else if (e.key === "Backspace" && !edgeLabel.value && editing) { e.preventDefault(); deleteEdge(editing.source, editing.target); }
+    };
+    document.getElementById("edgeDel").onclick = () => editing && deleteEdge(editing.source, editing.target);
+    document.getElementById("modeSelect").onclick = () => setMode("select");
+    document.getElementById("modeEdit").onclick = () => setMode("edit");
+    addEventListener("keydown", (e) => {
+      if (!document.body.classList.contains("graphing") || e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.("input, [contenteditable=true]")) return;
+      if (e.key === "s") setMode("select");
+      else if (e.key === "e") setMode("edit");
+      else if (e.key === "Escape") closeEdgeEditor();
+      else return;
+      e.preventDefault();
     });
 
     function showGraph(on) {
       document.body.classList.toggle("graphing", on);
       document.getElementById("graphBtn").classList.toggle("on", on);
-      if (!on) { setHover(null); return term?.focus(); }
+      if (!on) { setHover(null); closeEdgeEditor(); return term?.focus(); }
+      // The hidden terminal would otherwise keep the keyboard and swallow S/E.
+      document.activeElement?.blur();
       const first = !graph;
       if (first) {
         graph = new GraphView.GraphRenderer(graphEl, {
           theme: { background: "#0d0f12", node: "#7d8590", link: "#30363d", text: "#d7dce2", accent: "#6cb6ff", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" },
         });
         graph.on("nodeHover", ({ id }) => setHover(id));
-        graph.on("nodeClick", ({ id }) => openSession(id));
+        graph.on("nodeClick", ({ id }) => mode === "select" && openSession(id));
+        graph.on("connect", ({ source, target }) => {
+          if (source === target || edges.some((e) => edgeKey(e.source, e.target) === edgeKey(source, target))) return;
+          setEdges([...edges, { source, target, label: "" }]);
+        });
+        graph.on("linkClick", ({ source, target }) => openEdgeEditor(source, target));
+        graph.on("linkContextMenu", ({ source, target, event }) => { event.preventDefault(); deleteEdge(source, target); });
+        graph.on("backgroundClick", () => closeEdgeEditor());
+        setMode(mode);
       }
       graph.setData(graphData(lastSessions));
       graph.setSelection(current ? { kind: "node", id: current } : null);
