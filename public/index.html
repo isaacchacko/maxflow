@@ -69,8 +69,6 @@
     body.graphing #term, body.graphing #empty { display: none; }
     #gbar { position: absolute; top: 14px; left: 14px; z-index: 4; display: none; gap: 6px; align-items: center; }
     body.graphing #gbar { display: flex; }
-    #gbar button { background: var(--panel); }
-    #gbar button.on { border-color: var(--accent); color: var(--accent); }
     #gbar .hint { color: var(--dim); font-size: 11px; margin-left: 4px; }
     #edgeEd { position: absolute; z-index: 6; display: flex; gap: 4px; background: var(--panel); border: 1px solid var(--accent); border-radius: 6px; padding: 4px; transform: translate(-50%, -50%); }
     #edgeEd[hidden] { display: none; }
@@ -97,14 +95,14 @@
     </div>
   </div>
   <main><div id="term"></div><div id="graph"></div>
-    <div id="gbar"><button id="modeSelect" title="Select: drag nodes, click to open (S)">select</button><button id="modeEdit" title="Edges: drag node to node to link, click an edge to label or delete it (E)">edges</button><span class="hint" id="ghint"></span></div>
+    <div id="gbar"><span class="hint" id="ghint"></span></div>
     <div id="edgeEd" hidden><input id="edgeLabel" placeholder="label" autocomplete="off" /><button id="edgeDel" title="Delete edge (⌫)">delete</button></div>
     <div id="tip" hidden></div><div id="empty" hidden>No sessions. Click + new or press ⌃T.</div></main>
 
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@isaacchacko/graph@0.2.0/dist/graph-view.js"></script>
+  <script src="/vendor/graph-view.js"></script>
   <script>
     const list = document.getElementById("list");
     let term, fit, ws, current;
@@ -174,12 +172,12 @@
       graph.setData(graphData(lastSessions));
     }
 
-    function setMode(m) {
+    // The mode buttons are @isaacchacko/graph's own toolbar; this only reacts to its changes.
+    let modes = null;
+    const setMode = (m) => (modes ? modes.setMode(m) : (mode = m));
+    function onMode(m) {
       mode = m;
       closeEdgeEditor();
-      graph?.setOptions({ mode: m === "edit" ? "edit" : "select" });
-      document.getElementById("modeSelect").classList.toggle("on", m === "select");
-      document.getElementById("modeEdit").classList.toggle("on", m === "edit");
       document.getElementById("ghint").textContent = m === "edit" ? "drag node → node · click edge to edit · right-click edge to delete" : "";
     }
 
@@ -224,8 +222,6 @@
       else if (e.key === "Backspace" && !edgeLabel.value && editing) { e.preventDefault(); deleteEdge(editing.source, editing.target); }
     };
     document.getElementById("edgeDel").onclick = () => editing && deleteEdge(editing.source, editing.target);
-    document.getElementById("modeSelect").onclick = () => setMode("select");
-    document.getElementById("modeEdit").onclick = () => setMode("edit");
     addEventListener("keydown", (e) => {
       if (!document.body.classList.contains("graphing") || e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.("input, [contenteditable=true]")) return;
       if (e.key === "s") setMode("select");
@@ -255,6 +251,12 @@
         graph.on("linkClick", ({ source, target }) => openEdgeEditor(source, target));
         graph.on("linkContextMenu", ({ source, target, event }) => { event.preventDefault(); deleteEdge(source, target); });
         graph.on("backgroundClick", () => closeEdgeEditor());
+        modes = GraphView.createModeToolbar(graph, {
+          keys: false,
+          onChange: onMode,
+          tips: { select: "Select: drag nodes, click to open", edit: "Edit: link sessions, label or delete edges" },
+        });
+        document.getElementById("gbar").prepend(modes.element);
         setMode(mode);
       }
       graph.setData(graphData(lastSessions));
