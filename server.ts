@@ -20,12 +20,15 @@ type Session = {
 
 const sessions = new Map<string, Session>();
 
+// If maxflow itself was launched from a Claude Code session, its markers would make every child claude think it's a subagent.
+const childEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT)/.test(k)));
+
 function createSession(name: string, cmd: string[], cwd: string, cols = 120, rows = 34): Session {
   const id = crypto.randomUUID().slice(0, 8);
   const session = { id, name, cmd, cwd, createdAt: Date.now(), chunks: [], bytes: 0, clients: new Set(), exitCode: null } as unknown as Session;
   session.proc = Bun.spawn(cmd, {
     cwd,
-    env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", MAXFLOW_SESSION: id },
+    env: { ...childEnv, TERM: "xterm-256color", COLORTERM: "truecolor", MAXFLOW_SESSION: id },
     terminal: {
       cols,
       rows,
