@@ -176,6 +176,7 @@ Bun.serve<{ id: string }>({
     open(ws) {
       const s = sessions.get(ws.data.id)!;
       for (const chunk of s.chunks) ws.sendBinary(chunk);
+      ws.sendText("replayed");
       s.clients.add(ws);
     },
     message(ws, raw) {
