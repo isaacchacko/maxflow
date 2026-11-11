@@ -1,5 +1,8 @@
 import type { ServerWebSocket, Subprocess } from "bun";
+import { readFileSync, statSync } from "node:fs";
+import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
+import app from "./src/index.html";
 
 const PORT = Number(process.env.MAXFLOW_PORT ?? 4747);
 const HOST = "127.0.0.1";
@@ -16,10 +19,20 @@ type Session = {
   proc: Subprocess;
   chunks: Uint8Array[];
   bytes: number;
-  clients: Set<ServerWebSocket<{ id: string }>>;
+  clients: Set<ServerWebSocket<WsData>>;
   exitCode: number | null;
   chatId?: string;
+  lastScreen?: string;
+  inbox: string[];
+  // Reported by the Claude Code hooks in hooks/claude-state.sh; unset while no claude runs in the session.
+  claude?: { state: ClaudeState; at: number };
+  transcript?: string;
+  links?: { found: Candidate[]; offset: number; at: number };
 };
+type ClaudeState = "working" | "waiting" | "idle";
+
+// Each browser tab gets its own tmux client, so tmux hands it the full terminal state (modes, screen) on connect.
+type WsData = { id: string; pty?: Subprocess };
 
 const sessions = new Map<string, Session>();
 
@@ -41,7 +54,7 @@ function push(session: Session, chunk: Uint8Array) {
   session.bytes += chunk.length;
   session.lastOutputAt = Date.now();
   while (session.bytes > SCROLLBACK_BYTES && session.chunks.length > 1) session.bytes -= session.chunks.shift()!.length;
-  for (const ws of session.clients) ws.sendBinary(chunk);
+  for (const ws of session.clients) if (!ws.data.pty) ws.sendBinary(chunk);
 }
 
 function attachViewer(session: Session, cols = 120, rows = 34) {
@@ -59,7 +72,7 @@ function attachViewer(session: Session, cols = 120, rows = 34) {
 
 function createSession(name: string, cmd: string[], cwd: string, chatId?: string, cols = 120, rows = 34): Session {
   const id = crypto.randomUUID().slice(0, 8);
-  const session = { id, name, cmd, cwd, chatId, createdAt: Date.now(), lastOutputAt: Date.now(), chunks: [], bytes: 0, clients: new Set(), exitCode: null } as unknown as Session;
+  const session = { id, name, cmd, cwd, chatId, createdAt: Date.now(), lastOutputAt: Date.now(), chunks: [], bytes: 0, clients: new Set(), exitCode: null, inbox: [] } as unknown as Session;
   const t = tmuxName(id);
   const created = tmux("new-session", "-d", "-s", t, "-x", String(cols), "-y", String(rows), "-c", cwd, "-e", `MAXFLOW_SESSION=${id}`, "--", ...cmd);
   if (!created.ok) throw new Error(`tmux new-session failed for ${cmd.join(" ")}`);
@@ -81,17 +94,159 @@ function adoptSessions() {
     } catch {
       meta = { name: t, cmd: [], cwd: "", createdAt: Date.now() };
     }
-    const session = { id, ...meta, chunks: [], bytes: 0, clients: new Set(), exitCode: null } as unknown as Session;
+    const session = { id, ...meta, chunks: [], bytes: 0, clients: new Set(), exitCode: null, inbox: [] } as unknown as Session;
     const hasHistory = Number(tmux("display-message", "-p", "-t", t, "#{history_size}").out) > 0;
     const history = hasHistory ? tmux("capture-pane", "-p", "-e", "-J", "-t", t, "-S", "-", "-E", "-1").out : "";
     if (history.trim()) push(session, new TextEncoder().encode(history.replace(/\n/g, "\r\n")));
     session.lastOutputAt = session.createdAt;
+    try {
+      session.claude = JSON.parse(tmux("show-options", "-v", "-t", t, "@mf-claude").out);
+    } catch {}
+    session.transcript = tmux("show-options", "-v", "-t", t, "@mf-transcript").out.trim() || undefined;
     sessions.set(id, session);
     attachViewer(session);
   }
   if (sessions.size) console.log(`adopted ${sessions.size} tmux session(s)`);
 }
 adoptSessions();
+
+// Sentries are ordinary sessions, started once and kept by tmux across server restarts.
+const SENTRIES: Record<string, string[]> = Object.fromEntries(
+  ["gh", "rename", "health", "graph"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
+);
+if (process.env.MAXFLOW_SENTRIES !== "0")
+  for (const [name, cmd] of Object.entries(SENTRIES))
+    if (![...sessions.values()].some((s) => s.name === name && s.exitCode === null)) createSession(name, cmd, new URL(".", import.meta.url).pathname);
+
+// What an agent linked to each sentry in the graph is told about it.
+const CLI = new URL("./cli.ts", import.meta.url).pathname;
+const SENTRY_USES: Record<string, string> = {
+  "sentry:gh": `It polls GitHub every 30s for the PRs tied to a session and notifies that session when CI finishes, a review or comment lands, or the PR merges, closes or conflicts. A PR whose branch is checked out in your folder is tied to you already; tie any other with \`${CLI} gh watch <pr>\` (url, owner/repo#n or n). To block on one event instead: \`${CLI} sub 'gh/<owner>/<repo>/pr/<n>/ci'\`.`,
+  "sentry:health": `It watches the maxflow server itself and, when it stays unreachable for 2 minutes, starts a "maxflow recovery" claude session to fix and restart it.`,
+  "sentry:graph": `It decides which URLs you mention show up as nodes beside you in the maxflow graph: only ones you meant the user to open (a PR, a deploy, a page you published, a dev server you started), not incidental ones in code or docs. Put a URL you want the user to see on its own line in your reply. It also groups sessions by the work they share, and the graph draws a group's sessions close together.`,
+  "sentry:rename": `It titles your session in the maxflow sidebar by the topic you own. Pick your own title with \`${CLI} rename $MAXFLOW_SESSION <title>\` and it leaves you alone from then on.`,
+};
+
+const isSentry = (s: Session) => s.name.startsWith("sentry:");
+const isAgent = (s: Session) => !!s.claude || !!s.chatId || s.cmd[0] === "claude";
+
+// Without hooks a session counts as working while it prints; hooked claude says so itself, checked against two blind spots:
+// an Esc interrupt fires no hook (the spinner animates nonstop while working, so silence means it stopped),
+// and a permission dialog answered "no" fires none either (any redraw after the dialog means it was answered).
+const BUSY_MS = 4000, SPINNER_GAP_MS = 10_000, DIALOG_SETTLE_MS = 2000;
+function status(s: Session) {
+  if (s.exitCode !== null) return "exited";
+  if (isSentry(s)) return "idle";
+  const quiet = Date.now() - s.lastOutputAt;
+  if (!s.claude) return quiet < BUSY_MS ? "working" : "idle";
+  if (s.claude.state === "working") return quiet < SPINNER_GAP_MS ? "working" : "idle";
+  if (s.claude.state === "waiting") return s.lastOutputAt > s.claude.at + DIALOG_SETTLE_MS ? "idle" : "waiting";
+  return "idle";
+}
+
+function setClaudeState(s: Session, state: ClaudeState | "gone") {
+  s.claude = state === "gone" ? undefined : { state, at: Date.now() };
+  tmux("set-option", "-t", tmuxName(s.id), "@mf-claude", s.claude ? JSON.stringify(s.claude) : "");
+}
+
+function setTranscript(s: Session, path: string) {
+  if (!path.endsWith(".jsonl") || path === s.transcript) return;
+  s.transcript = path;
+  s.links = undefined;
+  tmux("set-option", "-t", tmuxName(s.id), "@mf-transcript", path);
+}
+
+// Candidate URLs a session has mentioned, oldest first, each with who wrote it and the text around it, for sentry:graph to judge.
+// Agents are read from their transcript, since claude hard-wraps long URLs on screen; shells from tmux history, which -J rejoins.
+// Only text the user or claude wrote counts, not tool output.
+type Candidate = { url: string; role: string; context: string };
+const PROJECTS = `${process.env.HOME}/.claude/projects`;
+const VERDICTS = `${process.env.HOME}/.maxflow/graph-links.json`;
+const URL_RE = /https?:\/\/[^\s<>"'`()[\]{}|\\^]+/g;
+const MAX_CANDIDATES = 40, SHELL_LINKS_MS = 5000, CONTEXT_CHARS = 200;
+function candidatesIn(text: string, role: string): Candidate[] {
+  return [...text.matchAll(URL_RE)]
+    .map((m) => ({
+      url: m[0].replace(/[.,;:!?*_~]+$/, "").replace(/\/$/, ""),
+      role,
+      context: text.slice(Math.max(0, m.index - CONTEXT_CHARS), m.index + m[0].length + CONTEXT_CHARS).replace(/\s+/g, " ").trim(),
+    }))
+    .filter((c) => URL.canParse(c.url) && /^[\w.-]*\w(:\d+)?$/.test(new URL(c.url).host));
+}
+// A URL mentioned again moves to the end with its newest context, so the cap drops the stalest ones.
+const addCandidates = (list: Candidate[], found: Candidate[]) => {
+  for (const c of found) {
+    const i = list.findIndex((o) => o.url === c.url);
+    if (i >= 0) list.splice(i, 1);
+    list.push(c);
+  }
+  list.splice(0, Math.max(0, list.length - MAX_CANDIDATES));
+};
+function textOf(rec: any) {
+  if (rec.isMeta || rec.isSidechain || (rec.type !== "user" && rec.type !== "assistant")) return "";
+  const c = rec.message?.content;
+  return typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("\n") : "";
+}
+function candidates(s: Session): Candidate[] {
+  if (isSentry(s)) return [];
+  const l = (s.links ??= { found: [], offset: 0, at: 0 });
+  // A resumed chat's transcript is known from its id before any hook reports it.
+  if (!s.transcript && s.chatId && !l.at) (l.at = Date.now()), (s.transcript = [...new Bun.Glob(`*/${s.chatId}.jsonl`).scanSync(PROJECTS)].map((f) => `${PROJECTS}/${f}`)[0]);
+  if (s.transcript) {
+    let buf: Buffer;
+    try {
+      buf = readFileSync(s.transcript).subarray(l.offset);
+    } catch {
+      return l.found;
+    }
+    // Stop at the last full line; a half-written record is read next time.
+    const end = buf.lastIndexOf(10) + 1;
+    if (end > 0) {
+      l.offset += end;
+      for (const line of buf.subarray(0, end).toString("utf8").split("\n")) {
+        if (!line.includes("http")) continue;
+        try {
+          const rec = JSON.parse(line);
+          addCandidates(l.found, candidatesIn(textOf(rec), rec.type));
+        } catch {}
+      }
+    }
+  } else if (s.exitCode === null && s.lastOutputAt > l.at && Date.now() - l.at > SHELL_LINKS_MS) {
+    l.at = Date.now();
+    l.found = [];
+    for (const line of tmux("capture-pane", "-p", "-J", "-t", tmuxName(s.id), "-S", "-2000").out.split("\n")) addCandidates(l.found, candidatesIn(line, "screen"));
+  }
+  return l.found;
+}
+
+// A JSON file sentry:graph writes, reread whenever it changes.
+function sentryFile<T>(path: string, empty: T) {
+  let mtime = 0, value = empty;
+  return () => {
+    try {
+      const m = statSync(path).mtimeMs;
+      if (m !== mtime) (value = JSON.parse(readFileSync(path, "utf8"))), (mtime = m);
+    } catch {}
+    return value;
+  };
+}
+// Its verdicts, { session: { url: keep } }; a URL it has not judged yet stays hidden.
+const verdicts = sentryFile<Record<string, Record<string, boolean>>>(VERDICTS, {});
+const links = (s: Session) => candidates(s).filter((c) => verdicts()[s.id]?.[c.url]).map((c) => c.url);
+// Its grouping of sessions by the work they share, { session: group }.
+const groups = sentryFile<Record<string, string>>(`${process.env.HOME}/.maxflow/graph-groups.json`, {});
+
+// An edge drawn in the graph: tell each agent end who is on the other side and how to reach it.
+function introduce(to: Session, other: Session) {
+  if (!isAgent(to) || to.exitCode !== null) return;
+  const who = `"${other.name}" (session ${other.id}, in ${other.cwd})`;
+  const text = isSentry(other)
+    ? `[maxflow] The user linked you to the ${other.name.slice(7)} sentry; it might be useful to you. ${SENTRY_USES[other.name] ?? `Its source is in ${new URL("./sentries/", import.meta.url).pathname}.`}`
+    : isAgent(other)
+      ? `[maxflow] The user linked you with another agent, ${who}, and thinks you two should talk. Communicate and see whether that's helpful; drop it if it isn't. Message it with \`${CLI} notify ${other.id} '<text>'\` (typed into its prompt once it is idle; say you are session ${to.id} so it can answer), and read its screen with \`${CLI} screen ${other.id} --history 200\`.`
+      : `[maxflow] The user linked you with the terminal session ${who}, running \`${other.cmd.join(" ")}\`; it may matter to your work. Read it with \`${CLI} screen ${other.id} --history 200\`, type into it with \`${CLI} send ${other.id} '<text>'\`.`;
+  to.inbox.push(text);
+}
 
 const describe = (s: Session) => ({
   id: s.id,
@@ -104,7 +259,42 @@ const describe = (s: Session) => ({
   running: s.exitCode === null,
   exitCode: s.exitCode,
   chatId: s.chatId,
+  pending: s.inbox.length,
+  status: status(s),
+  agent: isAgent(s),
+  links: links(s),
+  group: groups()[s.id] ?? null,
 });
+
+// Plain text of the visible pane plus `history` lines above it, trailing blank lines dropped.
+function screen(s: Session, history: number) {
+  const live = s.exitCode === null && tmux("capture-pane", "-p", "-J", "-t", tmuxName(s.id), ...(history > 0 ? ["-S", String(-history)] : []));
+  if (live && live.ok) return (s.lastScreen = live.out.trimEnd());
+  // The pane is gone once the command exits; fall back to the last capture, else a rough strip of the raw stream.
+  return s.lastScreen ?? new TextDecoder().decode(Buffer.concat(s.chunks)).replace(/\x1b\[[\d;]*[HfABCDG]/g, "\n").replace(/\x1b(\][^\x07]*\x07|\[[\d;?<>=]*[ -/]*[@-~]|[()][\w]|.)/g, "").replace(/\n\s*\n+/g, "\n").trimEnd();
+}
+
+// True when claude sits at an empty input box: the line under the box's top border holds only `❯` and dim placeholder text.
+function atEmptyPrompt(s: Session) {
+  const lines = tmux("capture-pane", "-p", "-e", "-t", tmuxName(s.id)).out.split("\n");
+  const plain = (l: string) => l.replace(/\x1b\[[\d;]*m/g, "");
+  const i = lines.findLastIndex((l, i) => i > 0 && plain(l).startsWith("❯") && /^─{10,}$/.test(plain(lines[i - 1]).trim()));
+  if (i < 0) return false;
+  const rest = lines[i].slice(lines[i].indexOf("❯") + 1).replace(/^[\s\u00a0]+/, "");
+  return rest.startsWith("\x1b[2m") || plain(rest).trim() === "";
+}
+
+// Notifications wait until the agent is idle at its prompt, so they never land mid-turn or in a permission dialog.
+const DELIVER_IDLE_MS = 4000;
+setInterval(async () => {
+  for (const s of sessions.values()) {
+    if (!s.inbox.length || s.exitCode !== null || Date.now() - s.lastOutputAt < DELIVER_IDLE_MS || !atEmptyPrompt(s)) continue;
+    const text = s.inbox.splice(0).join("\n");
+    tmux("send-keys", "-t", tmuxName(s.id), "-l", "--", text);
+    await Bun.sleep(150);
+    tmux("send-keys", "-t", tmuxName(s.id), "Enter");
+  }
+}, 1000);
 
 // Only pages served from this server may drive it; blocks other sites from reaching localhost.
 function sameOrigin(req: Request) {
@@ -114,9 +304,12 @@ function sameOrigin(req: Request) {
   return host === `localhost:${PORT}` || host === `${HOST}:${PORT}`;
 }
 
-Bun.serve<{ id: string }>({
+Bun.serve<WsData>({
   hostname: HOST,
   port: PORT,
+  idleTimeout: 0, // `wait` and event subscriptions long-poll
+  development: { hmr: true },
+  routes: { "/": app, "/s/*": app },
   async fetch(req, server) {
     if (!sameOrigin(req)) return new Response("forbidden", { status: 403 });
     const url = new URL(req.url);
@@ -132,7 +325,7 @@ Bun.serve<{ id: string }>({
     if (path === "/api/sessions" && req.method === "POST") {
       const body = (await req.json().catch(() => ({}))) as { name?: string; cmd?: string[] | string; cwd?: string };
       const cmd = typeof body.cmd === "string" ? ["zsh", "-lc", body.cmd] : body.cmd?.length ? body.cmd : [process.env.SHELL ?? "zsh", "-l"];
-      const s = createSession(body.name || cmd.join(" ").slice(0, 40), cmd, body.cwd || process.env.HOME!);
+      const s = createSession(body.name || cmd.join(" ").slice(0, 40), cmd, body.cwd?.replace(/^~(?=\/|$)/, process.env.HOME!) || process.env.HOME!);
       return Response.json(describe(s), { status: 201 });
     }
 
@@ -157,6 +350,73 @@ Bun.serve<{ id: string }>({
       if (chat.live && !body.force) return Response.json({ error: "live", chat }, { status: 409 });
       const cmd = ["claude", "--resume", chat.id, ...(body.bypass ? ["--permission-mode", "bypassPermissions"] : [])];
       return Response.json(describe(createSession(chat.title.slice(0, 40), cmd, chat.cwd, chat.id)), { status: 201 });
+    }
+
+    if (path === "/api/events" && req.method === "GET") {
+      const p = url.searchParams;
+      const after = p.get("after") === "now" ? latestSeq() : Number(p.get("after") ?? 0);
+      const events = await query(p.get("topic") ?? "**", after, Math.min(Number(p.get("wait") ?? 0), 3_600_000));
+      return Response.json(events, { headers: { "x-maxflow-seq": String(after) } });
+    }
+    if (path === "/api/events" && req.method === "POST") {
+      const body = (await req.json().catch(() => ({}))) as { topic?: string; data?: unknown };
+      if (!body.topic) return new Response("topic required", { status: 400 });
+      return Response.json(publish(body.topic, body.data ?? null), { status: 201 });
+    }
+
+    if (path === "/api/links" && req.method === "GET")
+      return Response.json([...sessions.values()].filter((s) => !isSentry(s)).map((s) => ({ id: s.id, name: s.name, cwd: s.cwd, running: s.exitCode === null, candidates: candidates(s) })));
+
+    if (path === "/api/link" && req.method === "POST") {
+      const body = (await req.json().catch(() => ({}))) as { a?: string; b?: string };
+      const a = sessions.get(body.a ?? ""), b = sessions.get(body.b ?? "");
+      if (!a || !b || a === b) return new Response("two sessions required", { status: 400 });
+      introduce(a, b), introduce(b, a);
+      return Response.json([describe(a), describe(b)]);
+    }
+
+    const act = path.match(/^\/api\/sessions\/([\w-]+)\/(input|screen|wait|notify|state)$/);
+    if (act) {
+      const s = sessions.get(act[1]);
+      if (!s) return new Response("no such session", { status: 404 });
+      const t = tmuxName(s.id);
+      if (act[2] === "input" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { text?: string; keys?: string[]; enter?: boolean };
+        if (s.exitCode !== null) return new Response("session ended", { status: 409 });
+        if (body.text) tmux("send-keys", "-t", t, "-l", "--", body.text);
+        if (body.keys?.length) tmux("send-keys", "-t", t, ...body.keys);
+        // A TUI like claude reads text + Enter in one burst as a paste, so the submit goes separately.
+        if (body.enter) await Bun.sleep(body.text ? 150 : 0), tmux("send-keys", "-t", t, "Enter");
+        return Response.json(describe(s));
+      }
+      if (act[2] === "notify" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { text?: string };
+        if (!body.text?.trim()) return new Response("text required", { status: 400 });
+        s.inbox.push(body.text.trim());
+        return Response.json(describe(s), { status: 202 });
+      }
+      if (act[2] === "state" && req.method === "POST") {
+        const { state, transcript } = (await req.json().catch(() => ({}))) as { state?: string; transcript?: string };
+        if (!["working", "waiting", "idle", "gone"].includes(state ?? "")) return new Response("state must be working, waiting, idle or gone", { status: 400 });
+        setClaudeState(s, state as ClaudeState | "gone");
+        if (transcript) setTranscript(s, transcript);
+        return Response.json(describe(s));
+      }
+      if (act[2] === "screen" && req.method === "GET") return Response.json({ ...describe(s), screen: screen(s, Number(url.searchParams.get("history") ?? 0)) });
+      if (act[2] === "wait" && req.method === "GET") {
+        const idle = Number(url.searchParams.get("idle") ?? 1500);
+        const timeout = Number(url.searchParams.get("timeout") ?? 120_000);
+        const match = url.searchParams.get("match");
+        const re = match ? new RegExp(match, "m") : null;
+        const start = Date.now();
+        for (;;) {
+          const text = screen(s, 0);
+          const reason = s.exitCode !== null ? "exited" : re ? (re.test(text) ? "match" : null) : Date.now() - Math.max(s.lastOutputAt, start) >= idle ? "idle" : null;
+          if (reason || Date.now() - start >= timeout) return Response.json({ ...describe(s), reason: reason ?? "timeout", screen: text });
+          await Bun.sleep(200);
+        }
+      }
+      return new Response("method not allowed", { status: 405 });
     }
 
     const one = path.match(/^\/api\/sessions\/([\w-]+)$/);
@@ -186,18 +446,27 @@ Bun.serve<{ id: string }>({
   websocket: {
     open(ws) {
       const s = sessions.get(ws.data.id)!;
-      for (const chunk of s.chunks) ws.sendBinary(chunk);
-      ws.sendText("replayed");
       s.clients.add(ws);
+      ws.sendText("replayed");
+      if (s.exitCode !== null) return void s.chunks.forEach((chunk) => ws.sendBinary(chunk));
+      ws.data.pty = Bun.spawn([...TMUX, "attach-session", "-t", tmuxName(s.id)], {
+        env: termEnv,
+        terminal: { cols: 120, rows: 34, data: (_term, data) => ws.sendBinary(new Uint8Array(data)) },
+      });
+      ws.data.pty.exited.then(() => {
+        if (ws.readyState !== 1) return;
+        ws.sendBinary(new TextEncoder().encode(`\r\n\x1b[2m[session ended]\x1b[0m\r\n`));
+      });
     },
     message(ws, raw) {
-      const s = sessions.get(ws.data.id);
-      if (!s || s.exitCode !== null) return;
+      const pty = ws.data.pty;
+      if (!pty || pty.exitCode !== null) return;
       const msg = JSON.parse(String(raw)) as { type: "input"; data: string } | { type: "resize"; cols: number; rows: number };
-      if (msg.type === "input") s.proc.terminal!.write(msg.data);
-      else if (msg.type === "resize" && msg.cols > 0 && msg.rows > 0) s.proc.terminal!.resize(msg.cols, msg.rows);
+      if (msg.type === "input") pty.terminal!.write(msg.data);
+      else if (msg.type === "resize" && msg.cols > 0 && msg.rows > 0) pty.terminal!.resize(msg.cols, msg.rows);
     },
     close(ws) {
+      ws.data.pty?.kill();
       sessions.get(ws.data.id)?.clients.delete(ws);
     },
   },
