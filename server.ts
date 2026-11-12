@@ -459,9 +459,13 @@ Bun.serve<WsData>({
       const s = sessions.get(act[1]);
       if (!s) return new Response("no such session", { status: 404 });
       const t = tmuxName(s.id);
+      const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
+      // Lets the graph show one session reading or writing another; held is true while a wait is still watching.
+      const touch = (kind: "read" | "write", held = false) => from && from !== s && publish(`touch/${from.id}/${s.id}`, { from: from.id, to: s.id, kind, held });
       if (act[2] === "input" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { text?: string; keys?: string[]; enter?: boolean };
         if (s.exitCode !== null) return new Response("session ended", { status: 409 });
+        touch("write");
         if (body.text) await tmuxAsync("send-keys", "-t", t, "-l", "--", body.text);
         if (body.keys?.length) await tmuxAsync("send-keys", "-t", t, ...body.keys);
         // A TUI like claude reads text + Enter in one burst as a paste, so the submit goes separately.
@@ -472,6 +476,7 @@ Bun.serve<WsData>({
         const body = (await req.json().catch(() => ({}))) as { text?: string };
         if (!body.text?.trim()) return new Response("text required", { status: 400 });
         s.inbox.push(body.text.trim());
+        touch("write");
         return Response.json(describe(s), { status: 202 });
       }
       if (act[2] === "state" && req.method === "POST") {
@@ -481,17 +486,18 @@ Bun.serve<WsData>({
         if (transcript) setTranscript(s, transcript);
         return Response.json(describe(s));
       }
-      if (act[2] === "screen" && req.method === "GET") return Response.json({ ...describe(s), screen: screen(s, Number(url.searchParams.get("history") ?? 0)) });
+      if (act[2] === "screen" && req.method === "GET") return touch("read"), Response.json({ ...describe(s), screen: screen(s, Number(url.searchParams.get("history") ?? 0)) });
       if (act[2] === "wait" && req.method === "GET") {
         const idle = Number(url.searchParams.get("idle") ?? 1500);
         const timeout = Number(url.searchParams.get("timeout") ?? 120_000);
         const match = url.searchParams.get("match");
         const re = match ? new RegExp(match, "m") : null;
         const start = Date.now();
+        touch("read", true);
         for (;;) {
           const text = screen(s, 0);
           const reason = s.exitCode !== null ? "exited" : re ? (re.test(text) ? "match" : null) : Date.now() - Math.max(s.lastOutputAt, start) >= idle ? "idle" : null;
-          if (reason || Date.now() - start >= timeout) return Response.json({ ...describe(s), reason: reason ?? "timeout", screen: text });
+          if (reason || Date.now() - start >= timeout) return touch("read"), Response.json({ ...describe(s), reason: reason ?? "timeout", screen: text });
           await Bun.sleep(200);
         }
       }

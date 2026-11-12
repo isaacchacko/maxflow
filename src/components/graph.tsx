@@ -127,6 +127,93 @@ function drawPixels(ctx: CanvasRenderingContext2D, box: { x: number; y: number; 
   ctx.restore();
 }
 
+// One session reading or writing another, from the server's touch/<from>/<to> events; end is null while a wait still watches.
+type Touch = { from: string; to: string; kind: "read" | "write"; start: number; end: number | null };
+type Box = { x: number; y: number; r: number };
+const FLY = 650, ACT = 1200, FADE = 450, HELD_LIMIT = 15 * 60_000;
+const actingUntil = (t: Touch) => (t.end === null ? Infinity : Math.max(t.start + FLY + ACT, t.end));
+const ease = (p: number) => (p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2);
+// The cursor flies along an arc, so it doesn't hide under a hand-drawn edge between the same two nodes.
+function arc(a: Box, b: Box) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const c = { x: (a.x + b.x) / 2 - dy * 0.25, y: (a.y + b.y) / 2 + dx * 0.25 };
+  const rim = (n: Box) => {
+    const d = Math.hypot(c.x - n.x, c.y - n.y) || 1;
+    return { x: n.x + ((c.x - n.x) / d) * n.r, y: n.y + ((c.y - n.y) / d) * n.r };
+  };
+  const p0 = rim(a), p1 = rim(b);
+  const at = (u: number) => ({ x: (1 - u) ** 2 * p0.x + 2 * (1 - u) * u * c.x + u * u * p1.x, y: (1 - u) ** 2 * p0.y + 2 * (1 - u) * u * c.y + u * u * p1.y });
+  const heading = (u: number) => Math.atan2(2 * (1 - u) * (c.y - p0.y) + 2 * u * (p1.y - c.y), 2 * (1 - u) * (c.x - p0.x) + 2 * u * (p1.x - c.x));
+  return { at, heading };
+}
+// A pointer flies from the reader to the node it touches, then scans it top to bottom (read) or streams packets into it (write).
+function drawTouch(ctx: CanvasRenderingContext2D, t: Touch, a: Box, b: Box, now: number, color: string, ink: string) {
+  const elapsed = now - t.start, flown = ease(Math.min(1, elapsed / FLY)), acting = elapsed - FLY;
+  const path = arc(a, b);
+  ctx.save();
+  ctx.globalAlpha = now <= actingUntil(t) ? 1 : Math.max(0, 1 - (now - actingUntil(t)) / FADE);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 1.25;
+  const faded = (alpha: number, paint: () => void) => {
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    paint();
+    ctx.restore();
+  };
+  faded(0.45, () => {
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    for (let i = 0; i <= 32; i++) {
+      const p = path.at((i / 32) * flown);
+      i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y);
+    }
+    ctx.stroke();
+  });
+  // A small node gets a lens wider than itself, or the scan line would be a few pixels long.
+  const lens = Math.max(b.r + 1, 12);
+  if (acting > 0) {
+    if (t.kind === "read") {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, lens, 0, Math.PI * 2);
+      ctx.clip();
+      const y = b.y - lens + ((acting % 900) / 900) * 2 * lens;
+      const glow = ctx.createLinearGradient(0, y - lens * 0.7, 0, y);
+      glow.addColorStop(0, "transparent");
+      glow.addColorStop(1, color);
+      faded(0.4, () => ((ctx.fillStyle = glow), ctx.fillRect(b.x - lens, y - lens * 0.7, lens * 2, lens * 0.7)));
+      ctx.fillRect(b.x - lens, y - 0.75, lens * 2, 1.5);
+      ctx.restore();
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, lens + 2, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      for (let k = 0; k < 3; k++) {
+        const p = path.at((acting / 700 + k / 3) % 1);
+        ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+      }
+      const pulse = (acting % 700) / 700;
+      faded(1 - pulse, () => (ctx.beginPath(), ctx.arc(b.x, b.y, lens + 2 + 10 * pulse, 0, Math.PI * 2), ctx.stroke()));
+    }
+  }
+  const tip = path.at(flown), angle = path.heading(Math.max(flown, 0.001));
+  const hover = acting > 0 ? Math.sin(acting / 160) * 1.5 : 0;
+  ctx.translate(tip.x + Math.cos(angle + Math.PI / 2) * hover, tip.y + Math.sin(angle + Math.PI / 2) * hover);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(-16, -7);
+  ctx.lineTo(-11, 0);
+  ctx.lineTo(-16, 7);
+  ctx.closePath();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = ink;
+  ctx.stroke();
+  ctx.fill();
+  ctx.restore();
+}
+
 // One node per session, linked by edges drawn by hand; drawing one asks why, then introduces the two ends with that reason, and edges live in this browser and go when either session does.
 export function GraphView({ sessions: all, visible, current, hideArchived, onOpen, onCreated, onArchive, onArchiveLinks, onToggleArchived }: {
   sessions: Session[];
@@ -169,7 +256,9 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   const [pendingKeys, setPendingKeys] = useState("");
   // While a G chord is pending, every group is outlined with the number that picks it.
   const pickingGroup = pendingKeys.startsWith("G");
-  const tip = useRef<HTMLDivElement>(null), editor = useRef<HTMLDivElement>(null), waves = useRef<HTMLCanvasElement>(null), hulls = useRef<HTMLCanvasElement>(null);
+  const tip = useRef<HTMLDivElement>(null), editor = useRef<HTMLDivElement>(null), waves = useRef<HTMLCanvasElement>(null), hulls = useRef<HTMLCanvasElement>(null), cursors = useRef<HTMLCanvasElement>(null);
+  const touches = useRef(new Map<string, Touch>());
+  const [touched, setTouched] = useState(0);
   const live = useRef({ edges, mode, onOpen, onArchive, onArchiveLinks, archivedUrls, onToggleArchived, newAgentHere: () => {}, toggleHub: (_hub: string) => {}, toggleUrls: () => {}, toggleGroups: () => {}, toggleTitles: () => {}, sessions, drafting: false, togglePick: (_id: string) => {}, groupChords: {} as Record<string, () => void>, groupNumbers: new Map<string, number>() });
 
   const setEdges = (next: Edge[]) => {
@@ -288,6 +377,58 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     frame = requestAnimationFrame(draw);
     return () => (cancelAnimationFrame(frame), clear());
   }, [visible, showGroups, pickingGroup]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const stop = new AbortController();
+    (async () => {
+      let after = "now";
+      while (!stop.signal.aborted) {
+        try {
+          const res = await fetch(`/api/events?topic=touch/**&after=${after}&wait=60000`, { signal: stop.signal });
+          const events: { seq: number; data: { from: string; to: string; kind: Touch["kind"]; held: boolean } }[] = await res.json();
+          after = String(events.at(-1)?.seq ?? res.headers.get("x-maxflow-seq"));
+          const now = performance.now();
+          for (const { data: d } of events) {
+            const key = `${d.from}>${d.to}>${d.kind}`, prev = touches.current.get(key);
+            const ongoing = prev && now < actingUntil(prev);
+            if (d.held) touches.current.set(key, { ...d, start: ongoing ? prev.start : now, end: null });
+            else if (ongoing) prev.end = now;
+            else touches.current.set(key, { ...d, start: now, end: now });
+          }
+          if (events.length) setTouched((n) => n + 1);
+        } catch {
+          if (!stop.signal.aborted) await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
+    })();
+    return () => stop.abort();
+  }, [visible]);
+
+  useEffect(() => {
+    const canvas = cursors.current!, ctx = canvas.getContext("2d")!;
+    const clear = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!visible) return clear();
+    const ink = css("--background"), colors = { read: css("--read"), write: css("--write") };
+    let frame = 0;
+    const draw = (now: number) => {
+      const dpr = devicePixelRatio, w = el.current!.offsetWidth, h = el.current!.offsetHeight;
+      if (canvas.width !== w * dpr || canvas.height !== h * dpr) (canvas.width = w * dpr), (canvas.height = h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      clear();
+      for (const [key, t] of touches.current) {
+        if (now > actingUntil(t) + FADE || now - t.start > HELD_LIMIT) {
+          touches.current.delete(key);
+          continue;
+        }
+        const a = graph.current?.getNodeScreenBox(t.from), b = graph.current?.getNodeScreenBox(t.to);
+        if (a && b) drawTouch(ctx, t, a, b, now, colors[t.kind], ink);
+      }
+      if (touches.current.size) frame = requestAnimationFrame(draw);
+    };
+    frame = requestAnimationFrame(draw);
+    return () => (cancelAnimationFrame(frame), clear());
+  }, [visible, touched]);
 
   // Tooltip and edge editor follow the layout as it moves.
   const active = sessions.filter((s) => isBusy(s) || isWaiting(s));
@@ -503,6 +644,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
       <div ref={el} className="absolute inset-0" />
       <canvas ref={hulls} className="pointer-events-none absolute inset-0 size-full" />
       <canvas ref={waves} className="pointer-events-none absolute inset-0 size-full" />
+      <canvas ref={cursors} className="pointer-events-none absolute inset-0 size-full" />
       <div className="absolute top-3 left-3 z-10 flex items-center gap-3">
         <ToggleGroup type="single" variant="outline" size="sm" value={mode} onValueChange={(v) => v && setMode(v as Mode)} className="bg-card shadow-sm">
           <ToggleGroupItem value="select" className="px-3">Select <Kbd className="ml-1">S</Kbd></ToggleGroupItem>

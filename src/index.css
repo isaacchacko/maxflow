@@ -30,6 +30,8 @@
   --sentry: oklch(0.75 0.14 55);
   --url: oklch(0.78 0.1 200);
   --waiting: oklch(0.85 0.15 95);
+  --read: oklch(0.8 0.13 230);
+  --write: oklch(0.84 0.16 80);
   --pr-open: oklch(0.72 0.17 150);
   --pr-merged: oklch(0.68 0.19 300);
   --pr-closed: oklch(0.66 0.2 25);

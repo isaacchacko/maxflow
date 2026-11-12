@@ -20,8 +20,11 @@ import * as slack from "./sentries/slack";
 const flag = (args: string[], k: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
 const positional = (args: string[], valued: string[]) => args.filter((a, i) => !a.startsWith("--") && !valued.includes(args[i - 1]));
 
+// The server draws a session reading or typing into another in the graph, so it needs to know who is calling.
+const caller = process.env.MAXFLOW_SESSION ? { "x-maxflow-from": process.env.MAXFLOW_SESSION } : undefined;
+
 async function call(path: string, init?: RequestInit) {
-  const res = await fetch(`${base}${path}`, init);
+  const res = await fetch(`${base}${path}`, { ...init, headers: caller });
   if (!res.ok) console.error(`${res.status} ${await res.text()}`), process.exit(1);
   return res.status === 204 ? null : res.json();
 }
