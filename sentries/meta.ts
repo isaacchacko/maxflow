@@ -67,7 +67,7 @@ function short(input: any) {
 }
 
 // An agent declares its wait again after each message wakes it, so repeating `maxflow wait` is the design working, not a loop.
-const isWait = (what: string) => /cli\.ts wait ((q|approval|ci|agent):\S+|done)\b/.test(what);
+const isWait = (what: string) => /cli\.ts wait ((q|approval|ci|agent|slack):\S+|done)\b/.test(what);
 
 function digest(s: Session, mark: Mark, lines: string[], now: number): Digest {
   const d: Digest = { id: s.id, title: s.name, turns: [], toolCalls: 0, toolMs: 0, modelMs: 0, slowTools: [], slowReplies: [], repeated: [] };

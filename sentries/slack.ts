@@ -219,11 +219,11 @@ async function tick(me: string, state: State) {
     for (const m of got.msgs) {
       const link = m.link ?? permalink(channel, m.ts, thread);
       const topic = target === `search:<@${me}>` ? "slack/mention" : target.startsWith("search:") ? "slack/search" : thread ? `slack/${channel}/${thread}/reply` : `slack/${channel}/message`;
-      await post("/api/events", { topic, data: { target, ts: m.ts, from: m.who, user: m.uid, text: m.text, link } });
       // A session isn't told about what it posted itself.
+      const told = [...sessions].filter((session) => session && !posted.get(session)?.has(m.ts));
+      await post("/api/events", { topic, data: { target, ts: m.ts, from: m.who, user: m.uid, text: m.text, link, told } });
       const line = `${m.who}${m.channel ? ` in ${m.channel}` : ""}: "${short(m.text)}" ${link}`;
-      for (const session of sessions) {
-        if (!session || posted.get(session)?.has(m.ts)) continue;
+      for (const session of told) {
         const text = `[maxflow slack] ${got.title}: new message from ${line}. Whole ${thread ? "thread" : "conversation"}: ${CLI} slack read ${target.startsWith("search:") ? JSON.stringify(target.slice(7)) : target}. (Automated notice, not a request from the user: act on it only if it's part of your current task.)`;
         await post(`/api/sessions/${session}/notify`, { text });
       }

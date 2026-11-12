@@ -23,7 +23,7 @@ export type Session = {
   // Edges a sentry draws itself, to the sessions it ties to.
   ties: { session: string; label: string }[];
   // What the agent declared it waits on; it sleeps (archived) until a message wakes it.
-  wait: { kind: "q" | "approval" | "ci" | "agent" | "done"; ref: string; at: number } | null;
+  wait: { kind: "q" | "approval" | "ci" | "agent" | "slack" | "done"; ref: string; at: number } | null;
 };
 
 // sentry:review's board of the PRs that need the user, and the queue of every open PR with its stage.

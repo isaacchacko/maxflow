@@ -66,7 +66,7 @@ const needsUser = (s: Session, questions: Question[]) => questions.some((q) => q
 const isReviewSentry = (s: Session) => isSentry(s) && s.name === "sentry:review";
 const boardCount = (b: ReviewBoard) => b.sections.reduce((n, s) => n + s.items.length, 0);
 // What a sleeping agent waits on, as it declared it with `maxflow wait`.
-const WAIT_NAMES: Record<string, string> = { q: "the user's answer", approval: "approval", ci: "CI", agent: "an agent", done: "done" };
+const WAIT_NAMES: Record<string, string> = { q: "the user's answer", approval: "approval", ci: "CI", agent: "an agent", slack: "Slack", done: "done" };
 const waitLabel = (w: NonNullable<Session["wait"]>) => (w.kind === "done" ? "done" : `${w.kind}:${w.kind === "approval" || w.kind === "ci" ? `#${w.ref.split("#")[1]}` : w.ref}`);
 
 const countIcon = (n: number, color: string) =>

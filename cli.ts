@@ -8,7 +8,7 @@ const usage = `usage:
   maxflow keys <id> <key...>                 tmux key names: Enter Escape C-c Up BTab ...
   maxflow screen <id> [--history N]          print the screen as plain text
   maxflow wait <id> [--idle MS] [--match RE] [--timeout MS]   block until quiet / RE on screen / exit, print screen
-  maxflow wait q:<id> | approval:<pr> | ci:<pr> | agent:<id> | done   declare what you wait on; you sleep from your turn's end until a message wakes you
+  maxflow wait q:<id> | approval:<pr> | ci:<pr> | agent:<id> | slack:<permalink | channel | #channel | query> | done   declare what you wait on; you sleep from your turn's end until a message wakes you
   maxflow rename <id> <name...> | maxflow kill <id>
   maxflow notify <id> <text...> [--isaac]    deliver text once the session is idle at an empty claude prompt; --isaac as for send
   maxflow ask <question...> [--re QID] [--default REC]   raise a question to the user through sentry:questions; returns at once.
@@ -69,7 +69,7 @@ if (verb === "ls") {
   await call(`/api/sessions/${rest[0]}/input`, { method: "POST", body: JSON.stringify({ keys: rest.slice(1) }) });
 } else if (verb === "screen" && rest[0]) {
   console.log((await call(`/api/sessions/${rest[0]}/screen?history=${flag(rest, "--history") ?? 0}`)).screen);
-} else if (verb === "wait" && /^(q|approval|ci|agent):.|^done$/.test(rest[0] ?? "")) {
+} else if (verb === "wait" && /^(q|approval|ci|agent|slack):.|^done$/.test(rest[0] ?? "")) {
   const me = process.env.MAXFLOW_SESSION;
   if (!me) console.error("wait works only inside a maxflow session"), process.exit(1);
   const [kind, ...ref] = rest[0].split(":");
@@ -81,6 +81,14 @@ if (verb === "ls") {
     target = pr;
     const prev = readWatches().find((w) => w.pr === pr)?.sessions ?? [];
     writeWatches([...readWatches().filter((w) => w.pr !== pr), { pr, sessions: [...new Set([...prev, me])] }]);
+  }
+  // A Slack wait ties the session to the thread, channel or search, so the slack sentry's next message there wakes it.
+  if (kind === "slack") {
+    const found = await slack.parseTarget([target, ...rest.slice(1)].join(" "));
+    if (!found) console.error(`no channel named ${target}`), process.exit(1);
+    target = found;
+    const prev = slack.readWatches().find((w) => w.target === found)?.sessions ?? [];
+    slack.writeWatches([...slack.readWatches().filter((w) => w.target !== found), { target: found, sessions: [...new Set([...prev, me])] }]);
   }
   await call(`/api/sessions/${me}/await`, { method: "POST", body: JSON.stringify({ kind, ref: target }) });
   console.log(`waiting on ${kind === "done" ? "nothing: done" : `${kind}:${target}`}. End your turn now; you sleep until a message wakes you.`);
