@@ -7,6 +7,9 @@ import { join } from "node:path";
 const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const WATCH_FILE = join(STATE_DIR, "gh-watch.json");
 const STATE_FILE = join(STATE_DIR, "gh-state.json");
+// The PRs sentry:review lists, with the sessions on each; watched here like explicit watches.
+export const REVIEW_WATCH_FILE = join(STATE_DIR, "review-watch.json");
+const PROJECTS = join(process.env.HOME!, ".claude", "projects");
 const INTERVAL_MS = Number(process.env.GH_SENTRY_INTERVAL ?? 30_000);
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 
@@ -102,11 +105,35 @@ export async function links(): Promise<Link[]> {
   return found;
 }
 
+// The agents post as the gh user too, so a comment by that user is the user's own only when no agent's tool call carries its text.
+const scanned = new Map<string, { offset: number; calls: string[] }>();
+async function agentCalls() {
+  const sessions = (await (await fetch(`${base}/api/sessions`)).json()) as { name: string; chatId?: string; transcript?: string }[];
+  const calls: string[] = [];
+  for (const s of sessions.filter((s) => !s.name.startsWith("sentry:"))) {
+    const path = s.transcript ?? (s.chatId ? [...new Bun.Glob(`*/${s.chatId}.jsonl`).scanSync(PROJECTS)].map((f) => join(PROJECTS, f))[0] : undefined);
+    if (!path || !existsSync(path)) continue;
+    const memo = scanned.get(path) ?? scanned.set(path, { offset: 0, calls: [] }).get(path)!;
+    const fresh = readFileSync(path).subarray(memo.offset);
+    const end = fresh.lastIndexOf(10) + 1;
+    memo.offset += end;
+    memo.calls.push(...fresh.subarray(0, end).toString().split("\n").filter((l) => l.includes('"tool_use"')));
+    calls.push(...memo.calls);
+  }
+  return calls;
+}
+
+// Stretches of the body that survive shell quoting, JSON escaping and a substituted $sha unchanged.
+function probes(body: string) {
+  const runs = body.slice(0, 600).match(/[^"'`$\\\x00-\x1f0-9]{20,}/g) ?? [];
+  return runs.map((r) => r.trim().slice(0, 80)).sort((a, b) => b.length - a.length).slice(0, 5);
+}
+
 const short = (text: string, n = 300) => (text.replace(/\s+/g, " ").trim().slice(0, n) + (text.length > n ? "…" : "")).trim();
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE"]);
 
 // Compares a PR to what the last tick saw. Returns [kind, data, line for the agent or null to only publish].
-function diff(pr: Pr, prev: PrState | undefined, me: string): [string, unknown, string | null][] {
+function diff(pr: Pr, prev: PrState | undefined, me: string, byAgent: (body: string) => boolean): [string, unknown, string | null][] {
   const rollup = pr.commits.nodes[0]?.commit.statusCheckRollup;
   const changes: [string, unknown, string | null][] = [];
   if (!prev) {
@@ -123,25 +150,30 @@ function diff(pr: Pr, prev: PrState | undefined, me: string): [string, unknown, 
   if (pr.mergeable === "CONFLICTING" && prev.mergeable !== "CONFLICTING") changes.push(["conflict", {}, "now conflicts with its base branch"]);
   if ((pr.reviewDecision ?? "") !== prev.decision) changes.push(["decision", { decision: pr.reviewDecision }, null]);
   const seen = new Set(prev.seen);
-  // The agents post as `me` too, so their own replies are published but never echoed back to them.
-  const tell = (login?: string) => (login && login !== me ? login : null);
+  // Agents' own posts are published but never echoed back to them; the user's own comments are passed on.
+  const tell = (login: string | undefined, body: string) => (!login ? null : login !== me ? login : byAgent(body) ? null : `the user (${me})`);
   for (const r of pr.reviews.nodes)
     if (!seen.has(r.id) && r.state !== "PENDING") {
-      const who = tell(r.author?.login);
+      const who = r.author?.login === me && !r.body.trim() ? null : tell(r.author?.login, r.body);
       changes.push(["review", { id: r.id, author: r.author?.login, state: r.state, body: r.body }, who && `review from ${who}: ${r.state.toLowerCase().replace("_", " ")}${r.body ? ` "${short(r.body)}"` : ""}`]);
     }
   for (const c of pr.comments.nodes)
     if (!seen.has(c.id)) {
-      const who = tell(c.author?.login);
+      const who = tell(c.author?.login, c.body);
       changes.push(["comment", { id: c.id, author: c.author?.login, body: c.body, url: c.url }, who && `comment from ${who}: "${short(c.body)}" ${c.url}`]);
     }
   for (const t of pr.reviewThreads.nodes)
     for (const c of t.comments.nodes)
       if (!seen.has(c.id)) {
-        const who = tell(c.author?.login);
+        const who = tell(c.author?.login, c.body);
         changes.push(["thread", { id: c.id, author: c.author?.login, path: c.path, body: c.body, url: c.url }, who && `comment from ${who} on ${c.path}: "${short(c.body)}" ${c.url}`]);
       }
   return changes;
+}
+
+function hasOwnNew(pr: Pr, prev: PrState, me: string) {
+  const seen = new Set(prev.seen);
+  return [...pr.reviews.nodes, ...pr.comments.nodes, ...pr.reviewThreads.nodes.flatMap((t) => t.comments.nodes)].some((c) => !seen.has(c.id) && c.author?.login === me);
 }
 
 function snapshot(pr: Pr): PrState {
@@ -159,6 +191,7 @@ const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 
 
 async function tick(me: string, state: Record<string, PrState>) {
   const all = await links();
+  for (const w of readJson<Watch[]>(REVIEW_WATCH_FILE, [])) for (const session of w.sessions.length ? w.sessions : [""]) all.push({ pr: w.pr, repo: w.pr.split("#")[0], session });
   const repos = new Map<string, { numbers: Set<number>; branches: Set<string> }>();
   for (const l of all) {
     const r = repos.get(l.repo) ?? repos.set(l.repo, { numbers: new Set(), branches: new Set() }).get(l.repo)!;
@@ -177,9 +210,15 @@ async function tick(me: string, state: Record<string, PrState>) {
       (listeners.get(key) ?? listeners.set(key, new Set()).get(key)!).add(l.session);
     }
   }
+  let calls: string[] | undefined;
+  const byAgent = (body: string) => {
+    const ps = probes(body);
+    return !!calls?.some((c) => ps.some((p) => c.includes(p)));
+  };
   for (const [key, pr] of prs) {
     const [repo, n] = key.split("#");
-    const changes = diff(pr, state[key], me);
+    if (!calls && state[key] && hasOwnNew(pr, state[key], me)) calls = await agentCalls();
+    const changes = diff(pr, state[key], me, byAgent);
     state[key] = snapshot(pr);
     for (const [kind, data] of changes) await post("/api/events", { topic: `gh/${repo}/pr/${n}/${kind}`, data: { pr: key, ...(data as object) } });
     const lines = changes.flatMap(([, , line]) => (line ? [line] : []));
