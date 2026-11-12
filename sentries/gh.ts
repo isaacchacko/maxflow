@@ -71,22 +71,31 @@ function fetchPrs(repo: string, numbers: number[], branches: string[]) {
 
 type Link = { pr?: string; repo: string; branch?: string; session: string };
 
+// The repo for a bare PR number declared outside a checkout: the one whose PR of that number the session mentioned last, else the one it mentions most.
+function linkedRepo(urls: string[], ref: string) {
+  const prs = urls.flatMap((u) => u.match(/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/)?.slice(1) ?? []);
+  const repos = prs.filter((_, i) => i % 2 === 0).map((r) => r.toLowerCase());
+  const exact = repos.findLast((_, i) => prs[i * 2 + 1] === ref.replace("#", ""));
+  return exact ?? repos.sort((a, b) => repos.filter((r) => r === b).length - repos.filter((r) => r === a).length)[0] ?? "";
+}
+
 // Which PR each live session is on: explicit watches, the branch checked out in its cwd, and set-pr.sh declarations.
-async function links(): Promise<Link[]> {
-  const sessions = (await (await fetch(`${base}/api/sessions`)).json()) as { id: string; name: string; cwd: string; running: boolean; chatId?: string }[];
+export async function links(): Promise<Link[]> {
+  const sessions = (await (await fetch(`${base}/api/sessions`)).json()) as { id: string; name: string; cwd: string; running: boolean; chatId?: string; transcript?: string; links?: string[] }[];
   const live = sessions.filter((s) => s.running && !s.name.startsWith("sentry:"));
   const found: Link[] = [];
   for (const w of readWatches()) for (const session of w.sessions.length ? w.sessions : [""]) found.push({ pr: w.pr, repo: w.pr.split("#")[0], session });
   for (const s of live) {
     const cwd = run(["tmux", "-L", "maxflow", "display-message", "-p", "-t", `mf-${s.id}`, "#{pane_current_path}"]) || s.cwd;
     const repo = repoOf(cwd);
-    if (!repo) continue;
-    const branch = run(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"]);
+    const branch = repo && run(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"]);
     if (branch && !["HEAD", "main", "master"].includes(branch)) found.push({ repo, branch, session: s.id });
-    const declared = s.chatId ? join(process.env.HOME!, ".claude", "session-env", s.chatId, "pr") : "";
+    // A fresh chat's id is only known from the transcript path its hooks report.
+    const chatId = s.chatId ?? s.transcript?.match(/([\w-]+)\.jsonl$/)?.[1];
+    const declared = chatId ? join(process.env.HOME!, ".claude", "session-env", chatId, "pr") : "";
     if (declared && existsSync(declared))
       for (const ref of readFileSync(declared, "utf8").split("\n").filter(Boolean)) {
-        const pr = parsePr(ref.trim(), cwd);
+        const pr = parsePr(ref.trim(), cwd) ?? parsePr(ref.trim().replace(/^#?(\d+)$/, `${linkedRepo(s.links ?? [], ref.trim())}#$1`), cwd);
         if (pr) found.push({ pr, repo: pr.split("#")[0], session: s.id });
       }
   }
