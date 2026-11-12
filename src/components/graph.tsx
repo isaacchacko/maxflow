@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { GraphRenderer } from "@isaacchacko/graph";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Archive, Bot, ChevronDown, ChevronUp, ExternalLink, GitPullRequest, GitPullRequestDraft, Hash, HeartPulse, Link2, Radar, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
+import { Archive, Bot, ChevronDown, ChevronUp, ExternalLink, GitMerge, GitPullRequest, GitPullRequestDraft, Hammer, Hash, HeartPulse, Link2, Radar, ScanEye, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
@@ -49,10 +49,12 @@ function hubsOf(sessions: Session[]) {
 const prColors = (sessions: Session[]) => new Map(sessions.flatMap((s) => Object.entries(s.prs)).map(([u, state]) => [u, css(`--pr-${state}`)]));
 // Served by maxflow from the site or Google so it is same-origin; the graph keeps a plain dot if neither loads.
 const favicon = (host: string) => `/api/favicon?host=${encodeURIComponent(host)}`;
-// A sentry's node shows what it watches, drawn in the sentry color.
+// A sentry's node shows what it watches, drawn in the sentry color; an agent's shows the role sentry:graph gave it.
 const SENTRY_ICONS: Record<string, LucideIcon> = { gh: GitPullRequest, slack: Hash, rename: Tag, health: HeartPulse, graph: Waypoints, review: GitPullRequestDraft };
-const sentryIcon = (s: Session, color: string) => {
-  const Icon = SENTRY_ICONS[displayName(s)] ?? Radar;
+const ROLE_ICONS: Record<string, LucideIcon> = { review: ScanEye, implement: Hammer, conflicts: GitMerge };
+const nodeIcon = (s: Session, color: string) => {
+  const Icon = isSentry(s) ? (SENTRY_ICONS[displayName(s)] ?? Radar) : s.role && ROLE_ICONS[s.role];
+  if (!Icon) return undefined;
   return `data:image/svg+xml,${encodeURIComponent(renderToStaticMarkup(<Icon color={color} size={48} strokeWidth={2.25} />))}`;
 };
 // sentry:review's PR queue hangs off its node, drawn with how many PRs on its board need the user; clicking it opens the board.
@@ -346,7 +348,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
         ...sessions.map((s) => {
           const at = placeAt.current.get(s.id);
           placeAt.current.delete(s.id);
-          return { id: s.id, label: showTitles ? s.name : "", color: sessionColor(s), icon: isSentry(s) ? sentryIcon(s, sessionColor(s)) : undefined, size: (s.agent || isSentry(s) ? 2.4 : 1.8) * (isBusy(s) || isWaiting(s) ? 1.6 : 1), ...at };
+          return { id: s.id, label: showTitles ? s.name : "", color: sessionColor(s), icon: nodeIcon(s, sessionColor(s)), size: (s.agent || isSentry(s) ? 2.4 : 1.8) * (isBusy(s) || isWaiting(s) ? 1.6 : 1), ...at };
         }),
         ...children.map((id) => ({ id, label: "", color: archivedUrls.has(urlOfNode(id)) ? ARCHIVED : (prs.get(urlOfNode(id)) ?? css("--url")), size: 1 })),
         ...[...hubs].map(([hub, urls]) => ({ id: hub, label: showTitles ? hostOfHub(hub) : "", color: allArchived(urls) ? ARCHIVED : (urls.length === 1 && prs.get(urls[0])) || css("--url"), icon: favicon(hostOfHub(hub)), size: 3 })),

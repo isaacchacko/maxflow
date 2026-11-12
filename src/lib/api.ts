@@ -17,6 +17,7 @@ export type Session = {
   archivedLinks: string[];
   prs: Record<string, "open" | "closed" | "merged">;
   group: string | null;
+  role: "review" | "implement" | "conflicts" | null;
   archived: boolean;
   // Edges a sentry draws itself, to the sessions it ties to.
   ties: { session: string; label: string }[];

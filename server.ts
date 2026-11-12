@@ -138,7 +138,7 @@ const SENTRY_USES: Record<string, string> = {
   "sentry:gh": `It polls GitHub every 30s for the PRs tied to a session and notifies that session when CI finishes, a review or comment lands (the user's own comments included), or the PR merges, closes or conflicts. A PR whose branch is checked out in your folder, or that you declared with \`~/.claude/set-pr.sh\`, is tied to you already; tie any other with \`${CLI} gh watch <pr>\` (url, owner/repo#n or n). To block on one event instead: \`${CLI} sub 'gh/<owner>/<repo>/pr/<n>/ci'\`.`,
   "sentry:slack": `It polls Slack every minute for the threads, channels and searches tied to a session and notifies that session of each new message. A thread you posted in through the Slack connector is tied to you already, for 3 days after your last post; tie any other with \`${CLI} slack watch <permalink | channel id | #channel | search query>\`. It also publishes every mention of the user as slack/mention: block on one with \`${CLI} sub 'slack/mention'\`, or on a thread with \`${CLI} sub 'slack/<channel>/<thread ts>/reply'\`.`,
   "sentry:health": `It watches the maxflow server itself and, when it stays unreachable for 2 minutes, starts a "maxflow recovery" claude session to fix and restart it.`,
-  "sentry:graph": `It decides which URLs you mention show up as nodes beside you in the maxflow graph: only ones you meant the user to open (a PR, a deploy, a page you published, a dev server you started), not incidental ones in code or docs. Put a URL you want the user to see on its own line in your reply. It also groups sessions by the work they share, and the graph draws a group's sessions close together.`,
+  "sentry:graph": `It decides which URLs you mention show up as nodes beside you in the maxflow graph: only ones you meant the user to open (a PR, a deploy, a page you published, a dev server you started), not incidental ones in code or docs. Put a URL you want the user to see on its own line in your reply. It also groups sessions by the work they share, and the graph draws a group's sessions close together, and it names each agent's role (review, implement, conflicts) for the icon on its node.`,
   "sentry:review": `It is an agent that keeps the user's queue of open PRs moving to prod or closed, and delivers comments on them that no session heard, by reviving the chat that opened the PR. If your PR's comments reach you, that is how. Don't request reviewers yourself; the user does.`,
   "sentry:rename": `It titles your session in the maxflow sidebar by the topic you own. Pick your own title with \`${CLI} rename $MAXFLOW_SESSION <title>\` and it leaves you alone from then on.`,
 };
@@ -290,6 +290,8 @@ const ARCHIVED_LINKS = `${process.env.HOME}/.maxflow/archived-links.json`;
 const archivedLinks = new Set<string>((() => { try { return JSON.parse(readFileSync(ARCHIVED_LINKS, "utf8")) as string[]; } catch { return []; } })());
 // Its grouping of sessions by the work they share, { session: group }.
 const groups = sentryFile<Record<string, string>>(`${process.env.HOME}/.maxflow/graph-groups.json`, {});
+// Its reading of each agent's role, { session: "review" | "implement" | "conflicts" | null }.
+const roles = sentryFile<Record<string, string | null>>(`${process.env.HOME}/.maxflow/graph-roles.json`, {});
 // sentry:review's edges to the sessions on PRs waiting for a reviewer, [{ session, label }].
 const reviewEdges = sentryFile<{ session: string; label: string }[]>(`${process.env.HOME}/.maxflow/review-edges.json`, []);
 // Its board of the PRs that need the user, { updated, next, sections: [{ title, items: [{ pr, url, note }] }] }, and the queue of every open PR it reads.
@@ -339,6 +341,7 @@ const describe = (s: Session, shown = links(s)) => ({
   archivedLinks: shown.filter((u) => archivedLinks.has(u)),
   prs: Object.fromEntries(shown.flatMap((u) => (prStates.has(u) ? [[u, prStates.get(u)]] : []))),
   group: groups()[s.id] ?? null,
+  role: roles()[s.id] ?? null,
   archived: !!s.archived,
   ties: s.name === "sentry:review" ? reviewEdges() : [],
 });
