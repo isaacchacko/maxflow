@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 if (!process.env.MAXFLOW_SESSION) process.exit(0);
 const input = JSON.parse(await Bun.stdin.text());
 const cli = `${process.env.HOME}/Programs/maxflow/cli.ts`;
-const how = `run \`${cli} ask '<question>'\`, making it stand on its own (what you found, the options, your recommendation), then keep working on whatever doesn't hang on the answer; his answer is typed into your prompt as a [maxflow] message`;
+const how = `run \`${cli} ask '<question>' [--default '<rec>']\`, making it stand on its own (what you found, the options, your recommendation; --default only when the step is reversible), keep working on whatever doesn't hang on the answer, then \`${cli} wait q:<id>\`; his answer is typed into your prompt as a [maxflow] message`;
 
 if (input.hook_event_name === "PreToolUse" && input.tool_name === "AskUserQuestion") {
   console.log(JSON.stringify({
