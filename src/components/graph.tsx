@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { GraphRenderer } from "@isaacchacko/graph";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Archive, Bot, ChevronDown, ChevronUp, GitPullRequest, GitPullRequestDraft, Hash, HeartPulse, Link2, Radar, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
+import { Archive, Bot, ChevronDown, ChevronUp, ExternalLink, GitPullRequest, GitPullRequestDraft, Hash, HeartPulse, Link2, Radar, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ago, api, displayName, home, isBusy, isSentry, isWaiting, kindOf, store, type Session } from "@/lib/api";
+import { ago, api, displayName, home, isBusy, isSentry, isWaiting, kindOf, store, type QueuedPr, type ReviewBoard, type Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/sidebar";
 
@@ -55,6 +55,14 @@ const sentryIcon = (s: Session, color: string) => {
   const Icon = SENTRY_ICONS[displayName(s)] ?? Radar;
   return `data:image/svg+xml,${encodeURIComponent(renderToStaticMarkup(<Icon color={color} size={48} strokeWidth={2.25} />))}`;
 };
+// sentry:review's PR queue hangs off its node, drawn with how many PRs on its board need the user; clicking it opens the board.
+const QUEUE_NODE = "pr-queue";
+const isReviewSentry = (s: Session) => s.name === "sentry:review";
+const boardCount = (b: ReviewBoard) => b.sections.reduce((n, s) => n + s.items.length, 0);
+const countIcon = (n: number, color: string) =>
+  `data:image/svg+xml,${encodeURIComponent(renderToStaticMarkup(
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><text x="24" y="25" textAnchor="middle" dominantBaseline="central" fill={color} fontFamily="Inter, ui-sans-serif, system-ui, sans-serif" fontWeight={700} fontSize={n > 99 ? 20 : n > 9 ? 28 : 34}>{n}</text></svg>,
+  ))}`;
 // sentry:graph groups sessions by shared work; every pair in a group is joined by a hidden link that pulls them together.
 const groupPulls = (sessions: Session[]) => {
   const byGroup = Map.groupBy(sessions.filter((s) => s.group), (s) => s.group!);
@@ -241,6 +249,8 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   const [showGroups, setShowGroups] = useState(() => store.get("mf.groups") === "1");
   const [hover, setHover] = useState<string | null>(null);
   const [editing, setEditing] = useState<Edge | null>(null);
+  const [review, setReview] = useState<{ board: ReviewBoard | null; queue: QueuedPr[] }>({ board: null, queue: [] });
+  const [showQueue, setShowQueue] = useState(false);
   // A just-drawn edge waiting for its reason; nobody is introduced until it gets one.
   const unsent = useRef<Edge | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -259,7 +269,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   const tip = useRef<HTMLDivElement>(null), editor = useRef<HTMLDivElement>(null), waves = useRef<HTMLCanvasElement>(null), hulls = useRef<HTMLCanvasElement>(null), cursors = useRef<HTMLCanvasElement>(null);
   const touches = useRef(new Map<string, Touch>());
   const [touched, setTouched] = useState(0);
-  const live = useRef({ edges, mode, onOpen, onArchive, onArchiveLinks, archivedUrls, onToggleArchived, newAgentHere: () => {}, toggleHub: (_hub: string) => {}, toggleUrls: () => {}, toggleGroups: () => {}, toggleTitles: () => {}, sessions, drafting: false, togglePick: (_id: string) => {}, groupChords: {} as Record<string, () => void>, groupNumbers: new Map<string, number>() });
+  const live = useRef({ edges, mode, onOpen, onArchive, onArchiveLinks, archivedUrls, onToggleArchived, newAgentHere: () => {}, toggleQueue: () => {}, toggleHub: (_hub: string) => {}, toggleUrls: () => {}, toggleGroups: () => {}, toggleTitles: () => {}, sessions, drafting: false, togglePick: (_id: string) => {}, groupChords: {} as Record<string, () => void>, groupNumbers: new Map<string, number>() });
 
   const setEdges = (next: Edge[]) => {
     setEdgesState(next);
@@ -273,7 +283,9 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     } as never);
     g.on("nodeHover", ({ id }) => setHover(id));
     g.on("nodeClick", ({ id }) => {
-      if (isDomainNode(id) || isUrlNode(id)) {
+      if (id === QUEUE_NODE) {
+        if (!live.current.drafting) live.current.toggleQueue();
+      } else if (isDomainNode(id) || isUrlNode(id)) {
         const urls = isDomainNode(id) ? (hubsOf(live.current.sessions).get(id) ?? []) : [urlOfNode(id)];
         if (live.current.drafting) return;
         if (urls.length === 1) open(urls[0], "_blank", "noopener");
@@ -283,6 +295,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     });
     g.on("nodeContextMenu", ({ id, event }) => {
       event.preventDefault();
+      if (id === QUEUE_NODE) return;
       if (isDomainNode(id) || isUrlNode(id)) {
         const urls = isDomainNode(id) ? (hubsOf(live.current.sessions).get(id) ?? []) : [urlOfNode(id)];
         return live.current.onArchiveLinks(urls, !urls.every((u) => live.current.archivedUrls.has(u)));
@@ -292,7 +305,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     });
     g.on("connect", ({ source, target }) => {
       const { edges } = live.current;
-      if (source === target || [source, target].some((id) => isUrlNode(id) || isDomainNode(id)) || edges.some((e) => edgeKey(e.source, e.target) === edgeKey(source, target))) return;
+      if (source === target || [source, target].some((id) => id === QUEUE_NODE || isUrlNode(id) || isDomainNode(id)) || edges.some((e) => edgeKey(e.source, e.target) === edgeKey(source, target))) return;
       const edge = { source, target, label: "" };
       setEdges([...edges, edge]);
       unsent.current = edge;
@@ -304,7 +317,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
       setEditing(null);
       setEdges(live.current.edges.filter((e) => edgeKey(e.source, e.target) !== edgeKey(source, target)));
     });
-    g.on("backgroundClick", () => (setEditing(null), setDraft(null)));
+    g.on("backgroundClick", () => (setEditing(null), setDraft(null), setShowQueue(false)));
     g.on("backgroundDoubleClick", ({ world, event }) => {
       const r = el.current!.getBoundingClientRect();
       setEditing(null);
@@ -326,6 +339,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     const kept = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
     if (all.length && kept.length !== edges.length) return setEdges(kept);
     const hubs = showUrls ? hubsOf(sessions) : new Map<string, string[]>();
+    const reviewer = review.board && sessions.find(isReviewSentry);
     const children = [...hubs].filter(([hub, urls]) => urls.length > 1 && expanded.includes(hub)).flatMap(([hub, urls]) => urls.map((u) => urlNode(hub, u)));
     g.setData({
       nodes: [
@@ -336,6 +350,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
         }),
         ...children.map((id) => ({ id, label: "", color: archivedUrls.has(urlOfNode(id)) ? ARCHIVED : (prs.get(urlOfNode(id)) ?? css("--url")), size: 1 })),
         ...[...hubs].map(([hub, urls]) => ({ id: hub, label: showTitles ? hostOfHub(hub) : "", color: allArchived(urls) ? ARCHIVED : (urls.length === 1 && prs.get(urls[0])) || css("--url"), icon: favicon(hostOfHub(hub)), size: 3 })),
+        ...(reviewer ? [{ id: QUEUE_NODE, label: showTitles ? "PR queue" : "", color: css("--sentry"), icon: countIcon(boardCount(review.board!), css("--sentry")), size: 3 }] : []),
       ],
       links: [
         ...edges.filter((e) => shown.has(e.source) && shown.has(e.target)).map((e) => ({ source: e.source, target: e.target, label: e.label })),
@@ -343,19 +358,20 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
         ...groupPulls(sessions),
         ...(showUrls ? sessions.flatMap((s) => [...new Set(s.links.map((u) => hubOf(s, u)))].map((hub) => ({ source: s.id, target: hub, length: 0.6 }))) : []),
         ...children.map((id) => ({ source: id.slice(URL_NODE.length, id.lastIndexOf(" ")), target: id, length: 0.4 })),
+        ...(reviewer ? [{ source: reviewer.id, target: QUEUE_NODE, length: 0.6 }] : []),
       ],
     } as never);
     if (!fitted.current && sessions.length) (fitted.current = true), g.zoomToFit();
-  }, [all, hideArchived, edges, visible, showUrls, showTitles, expanded]);
+  }, [all, hideArchived, edges, visible, showUrls, showTitles, expanded, review]);
 
   useEffect(() => graph.current?.setOptions({ mode } as never), [mode, visible]);
   useEffect(() => {
     if (!graph.current || !visible) return;
-    const node = found ?? current;
+    const node = found ?? (showQueue ? QUEUE_NODE : current);
     graph.current.setSelection(editing ? { kind: "link", source: editing.source, target: editing.target } : node ? { kind: "node", id: node } : null);
-  }, [editing, found, current, visible]);
+  }, [editing, found, current, visible, showQueue]);
   useEffect(() => {
-    if (!visible) (setHover(null), setEditing(null), setDraft(null), setQuery(null));
+    if (!visible) (setHover(null), setEditing(null), setDraft(null), setQuery(null), setShowQueue(false));
     else (document.activeElement as HTMLElement | null)?.blur(); // the hidden terminal would otherwise keep the keyboard and swallow S/E
   }, [visible]);
   useEffect(() => setEditing(null), [mode]);
@@ -377,6 +393,14 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     frame = requestAnimationFrame(draw);
     return () => (cancelAnimationFrame(frame), clear());
   }, [visible, showGroups, pickingGroup]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const load = () => api.review().then(setReview, () => {});
+    load();
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -492,7 +516,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
       if (e.key === "Escape") {
         e.preventDefault();
         if (pending.current) return setChord("");
-        return setEditing(null), setDraft(null);
+        return setEditing(null), setDraft(null), setShowQueue(false);
       }
       const seq = pending.current + e.key;
       const all = { ...chords, ...live.current.groupChords };
@@ -564,6 +588,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   const hoveredUrl = hover && isUrlNode(hover) ? urlOfNode(hover) : null;
   const hoveredHub = hover && isDomainNode(hover) ? hover : null;
   const hubUrls = hoveredHub ? (hubsOf(sessions).get(hoveredHub) ?? []) : [];
+  const toggleQueue = () => setShowQueue((q) => !q);
   const toggleHub = (hub: string) => setExpanded((e) => (e.includes(hub) ? e.filter((h) => h !== hub) : [...e, hub]));
   const newAgentHere = () => {
     const r = el.current!.getBoundingClientRect();
@@ -586,7 +611,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     store.set("mf.urls", showUrls ? "0" : "1");
     setShowUrls(!showUrls);
   };
-  live.current = { edges, mode, onOpen, onArchive, onArchiveLinks, archivedUrls, onToggleArchived, newAgentHere, toggleHub, toggleUrls, toggleGroups, toggleTitles, sessions, drafting: !!draft, togglePick, groupChords, groupNumbers };
+  live.current = { edges, mode, onOpen, onArchive, onArchiveLinks, archivedUrls, onToggleArchived, newAgentHere, toggleQueue, toggleHub, toggleUrls, toggleGroups, toggleTitles, sessions, drafting: !!draft, togglePick, groupChords, groupNumbers };
   useEffect(() => { if (!draft) setPicked([]); }, [draft]);
   const needle = query?.trim().toLowerCase();
   const matches = needle
@@ -714,6 +739,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
           onCancel={() => setDraft(null)}
         />
       )}
+      {showQueue && review.board && <QueuePanel board={review.board} queue={review.queue} onOpen={onOpen} onClose={() => setShowQueue(false)} />}
       {hovered && !draft && <NodeCard s={hovered} ref={tip} />}
       {hoveredUrl && !draft && <UrlCard url={hoveredUrl} from={sessions.filter((s) => s.links.includes(hoveredUrl))} archived={archivedUrls.has(hoveredUrl)} ref={tip} />}
       {hoveredHub && !draft && (hubUrls.length === 1
@@ -804,6 +830,69 @@ function FindBar({ query, onQuery, count, at, onStep, onClose }: {
       <Button variant="ghost" size="icon" className="size-7" title="Next match (↵)" disabled={!count} onClick={() => onStep(1)}><ChevronDown /></Button>
       <Button variant="ghost" size="icon" className="size-7" title="Close (Esc)" onClick={onClose}><X /></Button>
     </div>
+  );
+}
+
+// Stages of an open PR, nearest prod first, as sentries/review.ts names them.
+const STAGES = ["merging", "approved", "needs reviewer", "in review", "ci running", "changes requested", "ci failing", "conflict", "draft"];
+const stageRank = (stage: string) => (STAGES.includes(stage) ? STAGES.indexOf(stage) : STAGES.length);
+
+// sentry:review's board: the one thing to do next, its sections of PRs that need the user, then every open PR by stage.
+function QueuePanel({ board, queue, onOpen, onClose }: { board: ReviewBoard; queue: QueuedPr[]; onOpen: (id: string) => void; onClose: () => void }) {
+  const byStage = [...Map.groupBy(queue, (p) => p.stage)].sort(([a], [b]) => stageRank(a) - stageRank(b));
+  return (
+    <div className="absolute top-14 right-3 bottom-3 z-20 flex w-[26rem] max-w-[calc(100%-1.5rem)] flex-col rounded-lg border bg-popover text-xs shadow-xl">
+      <div className="flex items-center gap-2 border-b px-3 py-2">
+        <GitPullRequestDraft className="size-4 text-sentry" />
+        <span className="font-medium text-foreground">PR queue</span>
+        <span className="text-muted-foreground">updated {ago(Date.parse(board.updated))} ago</span>
+        <Button variant="ghost" size="icon" className="ml-auto size-7" title="Close (Esc)" onClick={onClose}><X /></Button>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
+        {board.next && <p className="rounded-md border border-sentry/40 bg-sentry/10 p-2.5 text-sm text-foreground">{board.next}</p>}
+        {board.sections.map((section) => (
+          <section key={section.title} className="flex flex-col gap-1">
+            <h3 className="font-medium text-foreground">{section.title} <span className="text-muted-foreground">{section.items.length}</span></h3>
+            {section.items.map((item) => (
+              <div key={item.url} className="flex items-baseline gap-2">
+                <PrLink url={item.url} label={item.pr} />
+                <span className="text-muted-foreground">{item.note}</span>
+              </div>
+            ))}
+          </section>
+        ))}
+        <section className="flex flex-col gap-3 border-t pt-3">
+          <h3 className="font-medium text-foreground">Every open PR <span className="text-muted-foreground">{queue.length}</span></h3>
+          {byStage.map(([stage, prs]) => (
+            <div key={stage} className="flex flex-col gap-1">
+              <h4 className="text-[11px] tracking-wide text-muted-foreground uppercase">{stage} · {prs.length}</h4>
+              {prs.map((p) => (
+                <div key={p.url} className="flex flex-col">
+                  <div className="flex items-baseline gap-2">
+                    <PrLink url={p.url} label={p.pr.replace(/^[\w.-]+\//, "")} />
+                    <span className="truncate text-foreground" title={p.title}>{p.title}</span>
+                  </div>
+                  {p.sessions.length > 0 && (
+                    <div className="flex flex-wrap gap-x-2 pl-1 text-muted-foreground">
+                      {p.sessions.map((s) => <button key={s.id} type="button" className="truncate hover:text-foreground hover:underline" onClick={() => onOpen(s.id)}>{s.name}</button>)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function PrLink({ url, label }: { url: string; label: string }) {
+  return (
+    <a href={url} target="_blank" rel="noopener" className="inline-flex shrink-0 items-center gap-1 font-mono text-url hover:underline">
+      {label}
+      <ExternalLink className="size-3" />
+    </a>
   );
 }
 
