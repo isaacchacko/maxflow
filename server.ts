@@ -429,7 +429,10 @@ function stopAgent(s: Session) {
   const chat = s.chatId ?? s.transcript?.match(/([0-9a-f-]{36})\.jsonl$/)?.[1];
   if (s.asleep || !chat || isSentry(s) || !isAgent(s) || s.exitCode !== null || s.claude?.state === "working" || s.claude?.state === "waiting") return;
   const note = "[maxflow] archived: claude stopped to free its memory; unarchive to resume this chat";
-  if (!tmux("respawn-pane", "-k", "-t", tmuxName(s.id), "--", "sh", "-c", `echo '${note}'; exec tail -f /dev/null`).ok) return;
+  // The respawn keeps the pane's history but wipes its screen, which holds the chat's last reply, so the placeholder prints that screen back first.
+  const screen = `${process.env.HOME}/.maxflow/asleep-${s.id}.ans`;
+  writeFileSync(screen, tmux("capture-pane", "-p", "-e", "-J", "-t", tmuxName(s.id)).out.trimEnd() + "\x1b[0m\n");
+  if (!tmux("respawn-pane", "-k", "-t", tmuxName(s.id), "--", "sh", "-c", `cat '${screen}'; rm -f '${screen}'; echo '${note}'; exec tail -f /dev/null`).ok) return;
   s.asleep = chat;
   tmux("set-option", "-t", tmuxName(s.id), "@mf-asleep", chat);
   setClaudeState(s, "gone");
