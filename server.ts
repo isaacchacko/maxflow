@@ -252,7 +252,7 @@ function candidates(s: Session): Candidate[] {
   return l.found;
 }
 
-// A JSON file sentry:graph writes, reread whenever it changes.
+// A JSON file a sentry writes, reread whenever it changes.
 function sentryFile<T>(path: string, empty: T) {
   let mtime = 0, value = empty;
   return () => {
@@ -292,6 +292,9 @@ const archivedLinks = new Set<string>((() => { try { return JSON.parse(readFileS
 const groups = sentryFile<Record<string, string>>(`${process.env.HOME}/.maxflow/graph-groups.json`, {});
 // sentry:review's edges to the sessions on PRs waiting for a reviewer, [{ session, label }].
 const reviewEdges = sentryFile<{ session: string; label: string }[]>(`${process.env.HOME}/.maxflow/review-edges.json`, []);
+// Its board of the PRs that need the user, { updated, next, sections: [{ title, items: [{ pr, url, note }] }] }, and the queue of every open PR it reads.
+const reviewBoard = sentryFile<unknown>(`${process.env.HOME}/.maxflow/review-board.json`, null);
+const reviewQueue = sentryFile<unknown[]>(`${process.env.HOME}/.maxflow/review-queue.json`, []);
 
 // An edge drawn in the graph: tell each agent end who is on the other side and how to reach it.
 function introduce(to: Session, other: Session, why?: string) {
@@ -455,6 +458,8 @@ Bun.serve<WsData>({
       if (!favicons.has(host)) favicons.set(host, fetchFavicon(host));
       return (await favicons.get(host))?.clone() ?? new Response("no favicon", { status: 404 });
     }
+
+    if (path === "/api/review" && req.method === "GET") return Response.json({ board: reviewBoard(), queue: reviewQueue() });
 
     if (path === "/api/links" && req.method === "GET")
       return Response.json([...sessions.values()].filter((s) => !isSentry(s)).map((s) => ({ id: s.id, name: s.name, cwd: s.cwd, running: s.exitCode === null, candidates: candidates(s) })));
