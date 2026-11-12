@@ -30,6 +30,8 @@ type Session = {
   transcript?: string;
   links?: { found: Candidate[]; offset: number; at: number; repo?: string };
   archived?: boolean;
+  // The chat an archived agent was stopped in to free its memory; unarchiving resumes it.
+  asleep?: string;
   sentry?: boolean;
   // What the agent declared it waits on with `maxflow wait`; it sleeps (archived) from the end of its turn until a message wakes it.
   wait?: Wait;
@@ -128,6 +130,7 @@ function adoptSessions() {
     } catch {}
     session.transcript = tmux("show-options", "-v", "-t", t, "@mf-transcript").out.trim() || undefined;
     session.archived = tmux("show-options", "-v", "-t", t, "@mf-archived").out.trim() === "1";
+    session.asleep = tmux("show-options", "-v", "-t", t, "@mf-asleep").out.trim() || undefined;
     session.sentry = tmux("show-options", "-v", "-t", t, "@mf-sentry").out.trim() === "1";
     try {
       session.wait = JSON.parse(tmux("show-options", "-v", "-t", t, "@mf-wait").out) || undefined;
@@ -218,7 +221,8 @@ function touchFrom(req: Request, s: Session, kind: "read" | "write", held = fals
   const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
   if (from && from !== s) publish(`touch/${from.id}/${s.id}`, { from: from.id, to: s.id, kind, held });
 }
-const isAgent = (s: Session) => !!s.claude || !!s.chatId || s.cmd[0] === "claude";
+const isAgent = (s: Session) => !!s.claude || !!s.chatId || !!s.asleep || s.cmd[0] === "claude";
+for (const s of sessions.values()) if (s.archived) stopAgent(s);
 
 // Without hooks a session counts as working while it prints; hooked claude says so itself, checked against two blind spots:
 // an Esc interrupt fires no hook (the spinner animates nonstop while working, so silence means it stopped),
@@ -383,6 +387,25 @@ function queue(s: Session, text: string) {
 function setArchived(s: Session, archived: boolean) {
   s.archived = archived;
   tmux("set-option", "-t", tmuxName(s.id), "@mf-archived", archived ? "1" : "0");
+  if (archived) stopAgent(s);
+  else resumeAgent(s);
+}
+// An archived agent between turns has its claude stopped, keeping the tmux session, so it holds no memory until it is unarchived.
+function stopAgent(s: Session) {
+  const chat = s.chatId ?? s.transcript?.match(/([0-9a-f-]{36})\.jsonl$/)?.[1];
+  if (s.asleep || !chat || isSentry(s) || !isAgent(s) || s.exitCode !== null || s.claude?.state === "working" || s.claude?.state === "waiting") return;
+  const note = "[maxflow] archived: claude stopped to free its memory; unarchive to resume this chat";
+  if (!tmux("respawn-pane", "-k", "-t", tmuxName(s.id), "--", "sh", "-c", `echo '${note}'; exec tail -f /dev/null`).ok) return;
+  s.asleep = chat;
+  tmux("set-option", "-t", tmuxName(s.id), "@mf-asleep", chat);
+  setClaudeState(s, "gone");
+}
+function resumeAgent(s: Session) {
+  if (!s.asleep || s.exitCode !== null) return;
+  const bypass = s.cmd.some((a) => a.includes("bypassPermissions")) ? ["--permission-mode", "bypassPermissions"] : [];
+  if (!tmux("respawn-pane", "-k", "-t", tmuxName(s.id), "-c", s.cwd, "-e", `MAXFLOW_SESSION=${s.id}`, "--", "claude", "--resume", s.asleep, ...bypass).ok) return;
+  s.asleep = undefined;
+  tmux("set-option", "-t", tmuxName(s.id), "@mf-asleep", "");
 }
 function setWait(s: Session, wait?: Wait) {
   s.wait = wait;
@@ -580,6 +603,7 @@ const describe = (s: Session, shown = links(s)) => ({
   group: groups()[s.id] ?? null,
   role: roles()[s.id] ?? null,
   archived: !!s.archived,
+  asleep: !!s.asleep,
   sentry: isSentry(s),
   ties: (isSentry(s) && (s.name === "sentry:questions" ? questionTies() : sentryTies[s.name]?.())) || [],
   wait: s.wait ?? null,
@@ -806,6 +830,7 @@ Bun.serve<WsData>({
           setWait(s, { ...s.wait, awake: false });
           setArchived(s, true);
         }
+        else if (state === "idle" && s.archived) stopAgent(s);
         if (s.wait && state === "working" && s.archived) endWait(s);
         return Response.json(describe(s));
       }
