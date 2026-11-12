@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { GraphRenderer } from "@isaacchacko/graph";
-import { Bot, ChevronDown, ChevronUp, Link2, Trash2, X } from "lucide-react";
+import { Archive, Bot, ChevronDown, ChevronUp, Link2, Shapes, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
@@ -11,24 +11,114 @@ import { StatusDot } from "@/components/sidebar";
 
 type Edge = { source: string; target: string; label: string };
 type Mode = "select" | "edit";
-type Draft = { x: number; y: number; world: { x: number; y: number } };
+// A group's router starts from a draft filled in for it: its name, brief and folder.
+type Draft = { x: number; y: number; world: { x: number; y: number }; name?: string; prompt?: string; cwd?: string };
 
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const edgeKey = (a: string, b: string) => [a, b].sort().join("|");
 // Color says what a node is; whether it is working or waiting on you is drawn inside it by drawPixels.
-// A URL a session mentioned is a node of its own, shared by every session that mentioned it.
+// A URL a session mentioned is a node of its own under its domain's node, "url:<hub id> <url>".
 const URL_NODE = "url:";
 const isUrlNode = (id: string) => id.startsWith(URL_NODE);
+// Its domain's node already names the host, so a URL is labeled by the rest.
 const shortUrl = (u: string) => {
-  const t = u.replace(/^https?:\/\/(www\.)?/, "");
+  const pr = u.match(/^https:\/\/github\.com\/[\w.-]+\/([\w.-]+)\/pull\/(\d+)/);
+  if (pr) return `${pr[1]}#${pr[2]}`;
+  const t = u.replace(/^https?:\/\/[^/?#]+/, "") || "/";
   return t.length > 40 ? `${t.slice(0, 39)}…` : t;
 };
+// Each group's sessions link to one node per host they mentioned, "domain:<host> <group>", drawn with the site's favicon.
+// Clicking it shows or hides its URLs; a host with one URL in the group is that URL's node and opens it.
+const DOMAIN_NODE = "domain:";
+const isDomainNode = (id: string) => id.startsWith(DOMAIN_NODE);
+const hostOf = (u: string) => new URL(u).host.replace(/^www\./, "");
+const hubOf = (s: Session, u: string) => `${DOMAIN_NODE}${hostOf(u)} ${s.group ?? s.id}`;
+const hostOfHub = (hub: string) => hub.slice(DOMAIN_NODE.length).split(" ")[0];
+const urlOfNode = (id: string) => id.slice(id.lastIndexOf(" ") + 1);
+const urlNode = (hub: string, u: string) => `${URL_NODE}${hub} ${u}`;
+function hubsOf(sessions: Session[]) {
+  const hubs = new Map<string, string[]>();
+  for (const s of sessions) for (const u of s.links) {
+    const urls = hubs.get(hubOf(s, u)) ?? hubs.set(hubOf(s, u), []).get(hubOf(s, u))!;
+    if (!urls.includes(u)) urls.push(u);
+  }
+  return hubs;
+}
+const favicons = new Map<string, HTMLImageElement | null>();
+// The site's own /favicon.ico, then Google's favicon service, then none (the node keeps its plain dot).
+function favicon(host: string) {
+  if (favicons.has(host)) return favicons.get(host);
+  const img = new Image(), sources = [`${/^localhost(:|$)/.test(host) ? "http" : "https"}://${host}/favicon.ico`, `https://www.google.com/s2/favicons?domain=${host}&sz=64`];
+  img.onerror = () => (sources.length ? (img.src = sources.shift()!) : favicons.set(host, null));
+  img.src = sources.shift()!;
+  favicons.set(host, img);
+  return img;
+}
+function drawFavicons(ctx: CanvasRenderingContext2D, g: GraphRenderer, hubs: string[], ring: string) {
+  for (const hub of hubs) {
+    const box = g.getNodeScreenBox(hub), img = favicon(hostOfHub(hub));
+    if (!box || box.r < 3 || !img?.complete || !img.naturalWidth) continue;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(box.x, box.y, box.r, 0, Math.PI * 2);
+    ctx.fillStyle = ring;
+    ctx.fill();
+    ctx.clip();
+    const side = box.r * 1.5;
+    ctx.drawImage(img, box.x - side / 2, box.y - side / 2, side, side);
+    ctx.restore();
+  }
+}
 // sentry:graph groups sessions by shared work; every pair in a group is joined by a hidden link that pulls them together.
 const groupPulls = (sessions: Session[]) => {
   const byGroup = Map.groupBy(sessions.filter((s) => s.group), (s) => s.group!);
   return [...byGroup.values()].flatMap((g) => g.flatMap((a, i) => g.slice(i + 1).map((b) => ({ source: a.id, target: b.id, length: 1, hidden: true }))));
 };
-const sessionColor = (s: Session) => (!s.running ? "#484f58" : isSentry(s) ? css("--sentry") : s.agent ? css("--chat") : css("--foreground"));
+// Each group's outline: the convex hull of a ring of points around each member, so one node gives a circle and two a capsule.
+function convexHull(points: [number, number][]) {
+  points.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o: number[], a: number[], b: number[]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = (pts: [number, number][]) =>
+    pts.reduce<[number, number][]>((h, p) => {
+      while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], p) <= 0) h.pop();
+      return h.push(p), h;
+    }, []);
+  const lower = half(points), upper = half([...points].reverse());
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
+}
+const groupHue = (name: string) => [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+function drawGroups(ctx: CanvasRenderingContext2D, graph: GraphRenderer, sessions: Session[], numbers?: Map<string, number>) {
+  for (const [name, members] of Map.groupBy(sessions.filter((s) => s.group), (s) => s.group!)) {
+    const ring: [number, number][] = [];
+    for (const s of members) {
+      const box = graph.getNodeScreenBox(s.id);
+      if (!box) continue;
+      const r = box.r + 22;
+      for (let i = 0; i < 24; i++) ring.push([box.x + r * Math.cos((i / 24) * Math.PI * 2), box.y + r * Math.sin((i / 24) * Math.PI * 2)]);
+    }
+    if (!ring.length) continue;
+    const hull = convexHull(ring), hue = groupHue(name);
+    ctx.beginPath();
+    hull.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    ctx.fillStyle = `hsl(${hue} 70% 65% / 0.07)`;
+    ctx.strokeStyle = `hsl(${hue} 70% 65% / 0.45)`;
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = "round";
+    ctx.fill();
+    ctx.stroke();
+    // The title sits above the outline, or below it when the toolbar would cover it.
+    const top = hull.reduce((a, b) => (b[1] < a[1] ? b : a)), bottom = hull.reduce((a, b) => (b[1] > a[1] ? b : a));
+    const above = top[1] - 6 > 60;
+    ctx.font = "600 12px Inter, ui-sans-serif, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = above ? "bottom" : "top";
+    ctx.fillStyle = `hsl(${hue} 70% 72%)`;
+    const title = numbers?.has(name) ? `${numbers.get(name)} · ${name}` : name;
+    ctx.fillText(title, above ? top[0] : bottom[0], above ? top[1] - 6 : bottom[1] + 6);
+  }
+}
+const sessionColor = (s: Session) => (!s.running || s.archived ? "#484f58" : isSentry(s) ? css("--sentry") : s.agent ? css("--chat") : css("--foreground"));
 
 // Pixel art clipped to a node's circle: water rising from the bottom in a sine wave while it works, three dots ticking in turn while it waits on you.
 function drawPixels(ctx: CanvasRenderingContext2D, box: { x: number; y: number; r: number }, t: number, working: boolean, ink: string) {
@@ -50,15 +140,31 @@ function drawPixels(ctx: CanvasRenderingContext2D, box: { x: number; y: number; 
   ctx.restore();
 }
 
-// One node per session, linked by edges drawn by hand; drawing one introduces the two ends, and edges live in this browser and go when either session does.
-export function GraphView({ sessions, visible, current, onOpen, onCreated }: { sessions: Session[]; visible: boolean; current: string | null; onOpen: (id: string) => void; onCreated: () => Promise<unknown> }) {
+// One node per session, linked by edges drawn by hand; drawing one asks why, then introduces the two ends with that reason, and edges live in this browser and go when either session does.
+export function GraphView({ sessions: all, visible, current, hideArchived, onOpen, onCreated, onArchive, onToggleArchived }: {
+  sessions: Session[];
+  visible: boolean;
+  current: string | null;
+  hideArchived: boolean;
+  onOpen: (id: string) => void;
+  onCreated: () => Promise<unknown>;
+  onArchive: (id: string, archived: boolean) => void;
+  onToggleArchived: () => void;
+}) {
+  // Edges to a hidden archived session are kept, so they come back when it is shown again.
+  const sessions = hideArchived ? all.filter((s) => !s.archived) : all;
   const el = useRef<HTMLDivElement>(null);
   const graph = useRef<GraphRenderer | null>(null);
   const [edges, setEdgesState] = useState<Edge[]>(() => { try { return JSON.parse(store.get("mf.edges") || "[]"); } catch { return []; } });
   const [mode, setMode] = useState<Mode>("select");
   const [showUrls, setShowUrls] = useState(() => store.get("mf.urls") !== "0");
+  const [expanded, setExpanded] = useState<string[]>([]);
+  const [showTitles, setShowTitles] = useState(() => store.get("mf.titles") !== "0");
+  const [showGroups, setShowGroups] = useState(() => store.get("mf.groups") === "1");
   const [hover, setHover] = useState<string | null>(null);
   const [editing, setEditing] = useState<Edge | null>(null);
+  // A just-drawn edge waiting for its reason; nobody is introduced until it gets one.
+  const unsent = useRef<Edge | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   // Sessions the new agent will be linked with; clicking nodes while drafting toggles them.
   const [picked, setPicked] = useState<string[]>([]);
@@ -68,8 +174,12 @@ export function GraphView({ sessions, visible, current, onOpen, onCreated }: { s
   // Where a just-created agent should first appear: the spot that was double-clicked.
   const placeAt = useRef(new Map<string, { x: number; y: number }>());
   const fitted = useRef(false);
-  const tip = useRef<HTMLDivElement>(null), editor = useRef<HTMLDivElement>(null), waves = useRef<HTMLCanvasElement>(null);
-  const live = useRef({ edges, mode, onOpen, newAgentHere: () => {}, toggleUrls: () => {}, drafting: false, togglePick: (_id: string) => {} });
+  const pending = useRef("");
+  const [pendingKeys, setPendingKeys] = useState("");
+  // While a G chord is pending, every group is outlined with the number that picks it.
+  const pickingGroup = pendingKeys.startsWith("G");
+  const tip = useRef<HTMLDivElement>(null), editor = useRef<HTMLDivElement>(null), waves = useRef<HTMLCanvasElement>(null), icons = useRef<HTMLCanvasElement>(null), hulls = useRef<HTMLCanvasElement>(null);
+  const live = useRef({ edges, mode, onOpen, onArchive, onToggleArchived, newAgentHere: () => {}, toggleHub: (_hub: string) => {}, toggleUrls: () => {}, toggleGroups: () => {}, toggleTitles: () => {}, sessions, drafting: false, togglePick: (_id: string) => {}, groupChords: {} as Record<string, () => void>, groupNumbers: new Map<string, number>() });
 
   const setEdges = (next: Edge[]) => {
     setEdgesState(next);
@@ -83,16 +193,26 @@ export function GraphView({ sessions, visible, current, onOpen, onCreated }: { s
     } as never);
     g.on("nodeHover", ({ id }) => setHover(id));
     g.on("nodeClick", ({ id }) => {
-      if (isUrlNode(id)) {
-        if (!live.current.drafting) open(id.slice(URL_NODE.length), "_blank", "noopener");
+      if (isDomainNode(id) || isUrlNode(id)) {
+        const urls = isDomainNode(id) ? (hubsOf(live.current.sessions).get(id) ?? []) : [urlOfNode(id)];
+        if (live.current.drafting) return;
+        if (urls.length === 1) open(urls[0], "_blank", "noopener");
+        else live.current.toggleHub(id);
       } else if (live.current.drafting) live.current.togglePick(id);
       else if (live.current.mode === "select") live.current.onOpen(id);
     });
+    g.on("nodeContextMenu", ({ id, event }) => {
+      event.preventDefault();
+      const s = live.current.sessions.find((s) => s.id === id);
+      if (s) live.current.onArchive(id, !s.archived);
+    });
     g.on("connect", ({ source, target }) => {
       const { edges } = live.current;
-      if (source === target || isUrlNode(source) || isUrlNode(target) || edges.some((e) => edgeKey(e.source, e.target) === edgeKey(source, target))) return;
-      setEdges([...edges, { source, target, label: "" }]);
-      api.link(source, target);
+      if (source === target || [source, target].some((id) => isUrlNode(id) || isDomainNode(id)) || edges.some((e) => edgeKey(e.source, e.target) === edgeKey(source, target))) return;
+      const edge = { source, target, label: "" };
+      setEdges([...edges, edge]);
+      unsent.current = edge;
+      setEditing(edge);
     });
     g.on("linkClick", ({ source, target }) => setEditing(live.current.edges.find((e) => edgeKey(e.source, e.target) === edgeKey(source, target)) ?? null));
     g.on("linkContextMenu", ({ source, target, event }) => {
@@ -114,27 +234,30 @@ export function GraphView({ sessions, visible, current, onOpen, onCreated }: { s
   useEffect(() => {
     const g = graph.current;
     if (!g) return;
-    const ids = new Set(sessions.map((s) => s.id));
+    const ids = new Set(all.map((s) => s.id)), shown = new Set(sessions.map((s) => s.id));
     const kept = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
-    if (sessions.length && kept.length !== edges.length) return setEdges(kept);
-    const urls = showUrls ? [...new Set(sessions.flatMap((s) => s.links))] : [];
+    if (all.length && kept.length !== edges.length) return setEdges(kept);
+    const hubs = showUrls ? hubsOf(sessions) : new Map<string, string[]>();
+    const children = [...hubs].filter(([hub, urls]) => urls.length > 1 && expanded.includes(hub)).flatMap(([hub, urls]) => urls.map((u) => urlNode(hub, u)));
     g.setData({
       nodes: [
         ...sessions.map((s) => {
           const at = placeAt.current.get(s.id);
           placeAt.current.delete(s.id);
-          return { id: s.id, label: s.name, color: sessionColor(s), size: (s.agent ? 2.4 : 1.8) * (isBusy(s) || isWaiting(s) ? 1.6 : 1), ...at };
+          return { id: s.id, label: showTitles ? s.name : "", color: sessionColor(s), size: (s.agent ? 2.4 : 1.8) * (isBusy(s) || isWaiting(s) ? 1.6 : 1), ...at };
         }),
-        ...urls.map((u) => ({ id: URL_NODE + u, label: shortUrl(u), color: css("--url"), size: 1 })),
+        ...children.map((id) => ({ id, label: "", color: css("--url"), size: 1 })),
+        ...[...hubs.keys()].map((hub) => ({ id: hub, label: showTitles ? hostOfHub(hub) : "", color: css("--url"), size: 3 })),
       ],
       links: [
-        ...edges.map((e) => ({ source: e.source, target: e.target, label: e.label })),
+        ...edges.filter((e) => shown.has(e.source) && shown.has(e.target)).map((e) => ({ source: e.source, target: e.target, label: e.label })),
         ...groupPulls(sessions),
-        ...(showUrls ? sessions.flatMap((s) => s.links.map((u) => ({ source: s.id, target: URL_NODE + u, length: 0.6 }))) : []),
+        ...(showUrls ? sessions.flatMap((s) => [...new Set(s.links.map((u) => hubOf(s, u)))].map((hub) => ({ source: s.id, target: hub, length: 0.6 }))) : []),
+        ...children.map((id) => ({ source: id.slice(URL_NODE.length, id.lastIndexOf(" ")), target: id, length: 0.4 })),
       ],
     } as never);
     if (!fitted.current && sessions.length) (fitted.current = true), g.zoomToFit();
-  }, [sessions, edges, visible, showUrls]);
+  }, [all, hideArchived, edges, visible, showUrls, showTitles, expanded]);
 
   useEffect(() => graph.current?.setOptions({ mode } as never), [mode, visible]);
   useEffect(() => {
@@ -147,6 +270,44 @@ export function GraphView({ sessions, visible, current, onOpen, onCreated }: { s
     else (document.activeElement as HTMLElement | null)?.blur(); // the hidden terminal would otherwise keep the keyboard and swallow S/E
   }, [visible]);
   useEffect(() => setEditing(null), [mode]);
+
+  // Group outlines are redrawn every frame so they follow the layout as it moves.
+  useEffect(() => {
+    const canvas = hulls.current!, ctx = canvas.getContext("2d")!;
+    const clear = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!visible || (!showGroups && !pickingGroup)) return clear();
+    let frame = 0;
+    const draw = () => {
+      const dpr = devicePixelRatio, w = el.current!.offsetWidth, h = el.current!.offsetHeight;
+      if (canvas.width !== w * dpr || canvas.height !== h * dpr) (canvas.width = w * dpr), (canvas.height = h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      clear();
+      if (graph.current) drawGroups(ctx, graph.current, live.current.sessions, pickingGroup ? live.current.groupNumbers : undefined);
+      frame = requestAnimationFrame(draw);
+    };
+    frame = requestAnimationFrame(draw);
+    return () => (cancelAnimationFrame(frame), clear());
+  }, [visible, showGroups, pickingGroup]);
+
+  // Favicons are drawn over the domain nodes every frame, since the graph draws only plain dots.
+  const hubKey = showUrls ? [...hubsOf(sessions).keys()].join("\n") : "";
+  useEffect(() => {
+    const canvas = icons.current!, ctx = canvas.getContext("2d")!;
+    const clear = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!visible || !hubKey) return clear();
+    const hubs = hubKey.split("\n"), ring = css("--card");
+    let frame = 0;
+    const draw = () => {
+      const dpr = devicePixelRatio, w = el.current!.offsetWidth, h = el.current!.offsetHeight;
+      if (canvas.width !== w * dpr || canvas.height !== h * dpr) (canvas.width = w * dpr), (canvas.height = h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      clear();
+      if (graph.current) drawFavicons(ctx, graph.current, hubs, ring);
+      frame = requestAnimationFrame(draw);
+    };
+    frame = requestAnimationFrame(draw);
+    return () => (cancelAnimationFrame(frame), clear());
+  }, [visible, hubKey]);
 
   // Tooltip and edge editor follow the layout as it moves.
   const active = sessions.filter((s) => isBusy(s) || isWaiting(s));
@@ -205,20 +366,84 @@ export function GraphView({ sessions, visible, current, onOpen, onCreated }: { s
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement).closest?.("input, [contenteditable=true]")) return;
-      if (e.key === "s") setMode("select");
-      else if (e.key === "e") setMode("edit");
-      else if (e.key === "n") live.current.newAgentHere();
-      else if (e.key === "l") live.current.toggleUrls();
-      else if (e.key === "Escape") (setEditing(null), setDraft(null));
-      else return;
-      e.preventDefault();
+      if (e.key === "Shift") return;
+      clearTimeout(chordTimer);
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (pending.current) return setChord("");
+        return setEditing(null), setDraft(null);
+      }
+      const seq = pending.current + e.key;
+      const all = { ...chords, ...live.current.groupChords };
+      const action = all[seq];
+      if (action) (e.preventDefault(), setChord(""), action());
+      else if (Object.keys(all).some((c) => c.startsWith(seq))) {
+        e.preventDefault();
+        setChord(seq);
+        chordTimer = setTimeout(() => setChord(""), seq.startsWith("G") ? 4000 : 1000);
+      } else setChord("");
     };
+    // Vim-style: a prefix key waits up to a second for the rest of its chord.
+    const chords: Record<string, () => void> = {
+      s: () => setMode("select"),
+      e: () => setMode("edit"),
+      n: () => live.current.newAgentHere(),
+      hl: () => live.current.toggleUrls(),
+      hg: () => live.current.toggleGroups(),
+      ha: () => live.current.onToggleArchived(),
+      ht: () => live.current.toggleTitles(),
+    };
+    const setChord = (seq: string) => ((pending.current = seq), setPendingKeys(seq));
+    let chordTimer: ReturnType<typeof setTimeout> | undefined;
     addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
+    return () => (removeEventListener("keydown", onKey), clearTimeout(chordTimer), setChord(""));
   }, [visible]);
 
+  // What the pending-chord panel lists; keys must match the chords table above.
+  const chordLabels: Record<string, string> = {
+    s: "select",
+    e: "edges",
+    n: "new agent",
+    hl: showUrls ? "hide links" : "show links",
+    hg: showGroups ? "hide groups" : "show groups",
+    ha: hideArchived ? "show archived" : "hide archived",
+    ht: showTitles ? "hide node titles" : "show node titles",
+  };
+  // G<n> picks a group (numbered in its outline), then a key acts on all of it: r starts a router for it.
+  const groups = Map.groupBy(sessions.filter((s) => s.group && s.running && !s.archived && !isSentry(s)), (s) => s.group!);
+  const groupNames = [...groups.keys()].sort().slice(0, 9);
+  const groupNumbers = new Map(groupNames.map((name, i) => [name, i + 1]));
+  const groupChords: Record<string, () => void> = {};
+  groupNames.forEach((name, i) => {
+    groupChords[`G${i + 1}r`] = () => routerFor(name);
+    chordLabels[`G${i + 1}r`] = `router for ${name}`;
+  });
+  // The new-agent draft, filled in for a router: every running member picked, so each is introduced to it.
+  const routerFor = (name: string) => {
+    const members = groups.get(name) ?? [];
+    const r = el.current!.getBoundingClientRect();
+    const boxes = members.flatMap((s) => graph.current!.getNodeScreenBox(s.id) ?? []);
+    const mid = (k: "x" | "y", size: number) =>
+      Math.min(Math.max(boxes.length ? boxes.reduce((a, b) => a + b[k], 0) / boxes.length : size / 2, 170), size - 170);
+    const x = mid("x", r.width), y = mid("y", r.height);
+    const cwds = Map.groupBy(members, (s) => s.cwd);
+    const cwd = [...cwds.entries()].sort((a, b) => b[1].length - a[1].length)[0]?.[0];
+    setEditing(null);
+    setDraft({
+      x,
+      y,
+      world: graph.current!.screenToWorld({ x, y }),
+      name: `router: ${name}`,
+      cwd: cwd && home(cwd),
+      prompt: `You're the router for "${name}", the ${members.length === 1 ? "session" : `${members.length} sessions`} sentry:graph grouped as that work; you've been introduced to each below. Find out what each is doing, keep them from duplicating or colliding with each other's work, pass along what one needs from another, and tell me only what needs me.`,
+    });
+    setPicked(members.map((s) => s.id));
+  };
   const hovered = sessions.find((s) => s.id === hover);
-  const hoveredUrl = hover && isUrlNode(hover) ? hover.slice(URL_NODE.length) : null;
+  const hoveredUrl = hover && isUrlNode(hover) ? urlOfNode(hover) : null;
+  const hoveredHub = hover && isDomainNode(hover) ? hover : null;
+  const hubUrls = hoveredHub ? (hubsOf(sessions).get(hoveredHub) ?? []) : [];
+  const toggleHub = (hub: string) => setExpanded((e) => (e.includes(hub) ? e.filter((h) => h !== hub) : [...e, hub]));
   const newAgentHere = () => {
     const r = el.current!.getBoundingClientRect();
     setEditing(null);
@@ -228,17 +453,25 @@ export function GraphView({ sessions, visible, current, onOpen, onCreated }: { s
     setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
     document.querySelector<HTMLInputElement>("[data-agent-prompt]")?.focus();
   };
+  const toggleGroups = () => {
+    store.set("mf.groups", showGroups ? "0" : "1");
+    setShowGroups(!showGroups);
+  };
+  const toggleTitles = () => {
+    store.set("mf.titles", showTitles ? "0" : "1");
+    setShowTitles(!showTitles);
+  };
   const toggleUrls = () => {
     store.set("mf.urls", showUrls ? "0" : "1");
     setShowUrls(!showUrls);
   };
-  live.current = { edges, mode, onOpen, newAgentHere, toggleUrls, drafting: !!draft, togglePick };
+  live.current = { edges, mode, onOpen, onArchive, onToggleArchived, newAgentHere, toggleHub, toggleUrls, toggleGroups, toggleTitles, sessions, drafting: !!draft, togglePick, groupChords, groupNumbers };
   useEffect(() => { if (!draft) setPicked([]); }, [draft]);
   const needle = query?.trim().toLowerCase();
   const matches = needle
     ? [
         ...sessions.filter((s) => displayName(s).toLowerCase().includes(needle)).map((s) => s.id),
-        ...(showUrls ? [...new Set(sessions.flatMap((s) => s.links))].filter((u) => u.toLowerCase().includes(needle)).map((u) => URL_NODE + u) : []),
+        ...(showUrls ? [...hubsOf(sessions)].flatMap(([hub, urls]) => urls.filter((u) => u.toLowerCase().includes(needle)).map((u) => (expanded.includes(hub) && urls.length > 1 ? urlNode(hub, u) : hub))).filter((id, i, a) => a.indexOf(id) === i) : []),
       ]
     : [];
   const matchKey = matches.join();
@@ -260,11 +493,11 @@ export function GraphView({ sessions, visible, current, onOpen, onCreated }: { s
 
   // With links, claude starts empty and gets the prompt and the introductions as one first message from its inbox.
   const startAgent = async (prompt: string, cwd: string, jump: boolean) => {
-    const at = draft!.world, peers = picked;
+    const at = draft!.world, name = draft!.name, peers = picked;
     prompt = prompt.trim();
     setDraft(null);
     store.set("mf.agentCwd", cwd);
-    const s = await api.agent(peers.length ? "" : prompt, cwd.trim() || "~", store.get("mf.bypass") !== "0", prompt);
+    const s = await api.agent(peers.length ? "" : prompt, cwd.trim() || "~", store.get("mf.bypass") !== "0", name ?? prompt);
     placeAt.current.set(s.id, at);
     if (prompt && peers.length) await api.notify(s.id, prompt);
     for (const p of peers) await api.link(s.id, p);
@@ -272,6 +505,11 @@ export function GraphView({ sessions, visible, current, onOpen, onCreated }: { s
     if (peers.length) setEdges([...live.current.edges, ...peers.map((p) => ({ source: s.id, target: p, label: "" }))]);
     if (jump) onOpen(s.id);
   };
+  // Closing a drawn edge's box without a reason drops the edge.
+  useEffect(() => {
+    const u = unsent.current;
+    if (u && editing !== u) (unsent.current = null), setEdges(live.current.edges.filter((e) => e !== u));
+  }, [editing]);
   const deleteEditing = () => {
     if (!editing) return;
     setEdges(edges.filter((e) => edgeKey(e.source, e.target) !== edgeKey(editing.source, editing.target)));
@@ -283,6 +521,8 @@ export function GraphView({ sessions, visible, current, onOpen, onCreated }: { s
     // Children inherit visibility, and a transition on it (shadcn's transition-all) would keep them on screen for its duration.
     <div className={cn("absolute inset-0", !visible && "[&_*]:transition-none")} style={{ visibility: visible ? "visible" : "hidden" }}>
       <div ref={el} className="absolute inset-0" />
+      <canvas ref={hulls} className="pointer-events-none absolute inset-0 size-full" />
+      <canvas ref={icons} className="pointer-events-none absolute inset-0 size-full" />
       <canvas ref={waves} className="pointer-events-none absolute inset-0 size-full" />
       <div className="absolute top-3 left-3 z-10 flex items-center gap-3">
         <ToggleGroup type="single" variant="outline" size="sm" value={mode} onValueChange={(v) => v && setMode(v as Mode)} className="bg-card shadow-sm">
@@ -293,24 +533,47 @@ export function GraphView({ sessions, visible, current, onOpen, onCreated }: { s
           <Bot /> New agent <Kbd className="ml-1">N</Kbd>
         </Button>
         <Button variant="outline" size="sm" className={cn("bg-card shadow-sm", !showUrls && "text-muted-foreground")} title="Show the URLs each session mentioned" onClick={toggleUrls}>
-          <Link2 /> {showUrls ? "Hide links" : "Show links"} <Kbd className="ml-1">L</Kbd>
+          <Link2 /> {showUrls ? "Hide links" : "Show links"} <Kbd className="ml-1">hl</Kbd>
         </Button>
-        {mode === "edit" && <span className="text-xs text-muted-foreground">drag node → node · click an edge to label · right-click to delete</span>}
+        <Button variant="outline" size="sm" className={cn("bg-card shadow-sm", !showGroups && "text-muted-foreground")} title="Outline the groups sentry:graph sorted sessions into" onClick={toggleGroups}>
+          <Shapes /> {showGroups ? "Hide groups" : "Show groups"} <Kbd className="ml-1">hg</Kbd>
+        </Button>
+        <Button variant="outline" size="sm" className={cn("bg-card shadow-sm", hideArchived && "text-muted-foreground")} title="Right-click a node to archive or unarchive it" onClick={onToggleArchived}>
+          <Archive /> {hideArchived ? "Show archived" : "Hide archived"} <Kbd className="ml-1">ha</Kbd>
+        </Button>
+        {mode === "edit" && <span className="text-xs text-muted-foreground">drag node → node and say why · click an edge to relabel · right-click to delete</span>}
       </div>
+      {pendingKeys && (
+        <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-1.5 rounded-lg border bg-popover p-2.5 text-sm shadow-lg">
+          <Kbd className="h-6 w-fit px-2 font-mono text-sm text-foreground">{pendingKeys}</Kbd>
+          {Object.entries(chordLabels).filter(([keys]) => keys.startsWith(pendingKeys)).map(([keys, label]) => (
+            <div key={keys} className="flex items-center gap-2">
+              <Kbd className="font-mono">{keys.slice(pendingKeys.length)}</Kbd>
+              <span className="text-muted-foreground">{label}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {query !== null && <FindBar query={query} onQuery={(q) => (setQuery(q), setFound(null))} count={matches.length} at={found ? matches.indexOf(found) : -1} onStep={findStep} onClose={closeFind} />}
       {editing && (
         <div ref={editor} className="absolute z-20 flex -translate-x-1/2 -translate-y-1/2 gap-1 rounded-lg border bg-popover p-1 shadow-lg">
           <Input
             autoFocus
-            placeholder="label"
+            placeholder={unsent.current === editing ? "why link these?" : "label"}
             defaultValue={editing.label}
-            className="h-7 w-44"
+            className={cn("h-7", unsent.current === editing ? "w-72" : "w-44")}
             onChange={(e) => {
               editing.label = e.target.value.trim();
               setEdges([...edges]);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === "Escape") (e.preventDefault(), setEditing(null));
+              if (e.key === "Enter" && unsent.current === editing) {
+                e.preventDefault();
+                if (!editing.label) return;
+                unsent.current = null;
+                api.link(editing.source, editing.target, editing.label);
+                setEditing(null);
+              } else if (e.key === "Enter" || e.key === "Escape") (e.preventDefault(), setEditing(null));
               else if (e.key === "Backspace" && !e.currentTarget.value) (e.preventDefault(), deleteEditing());
             }}
           />
@@ -323,7 +586,7 @@ export function GraphView({ sessions, visible, current, onOpen, onCreated }: { s
         <AgentDraft
           draft={draft}
           folders={[...new Set(sessions.map((s) => s.cwd))]}
-          peers={sessions.filter((s) => s.running)}
+          peers={sessions.filter((s) => s.running && !s.archived)}
           picked={picked}
           onToggle={togglePick}
           onStart={startAgent}
@@ -332,6 +595,9 @@ export function GraphView({ sessions, visible, current, onOpen, onCreated }: { s
       )}
       {hovered && !draft && <NodeCard s={hovered} ref={tip} />}
       {hoveredUrl && !draft && <UrlCard url={hoveredUrl} from={sessions.filter((s) => s.links.includes(hoveredUrl))} ref={tip} />}
+      {hoveredHub && !draft && (hubUrls.length === 1
+        ? <UrlCard url={hubUrls[0]} from={sessions.filter((s) => s.links.includes(hubUrls[0]))} ref={tip} />
+        : <DomainCard host={hostOfHub(hoveredHub)} urls={hubUrls} expanded={expanded.includes(hoveredHub)} ref={tip} />)}
     </div>
   );
 }
@@ -346,8 +612,8 @@ function AgentDraft({ draft, folders, peers, picked, onToggle, onStart, onCancel
   onStart: (prompt: string, cwd: string, jump: boolean) => void;
   onCancel: () => void;
 }) {
-  const [prompt, setPrompt] = useState("");
-  const [cwd, setCwd] = useState(() => store.get("mf.agentCwd") || "~");
+  const [prompt, setPrompt] = useState(draft.prompt ?? "");
+  const [cwd, setCwd] = useState(() => draft.cwd || store.get("mf.agentCwd") || "~");
   const keys = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") (e.preventDefault(), onStart(prompt, cwd, e.shiftKey));
     else if (e.key === "Escape") (e.preventDefault(), onCancel());
@@ -437,6 +703,18 @@ function UrlCard({ url, from, ref }: { url: string; from: Session[]; ref: React.
   );
 }
 
+function DomainCard({ host, urls, expanded, ref }: { host: string; urls: string[]; expanded: boolean; ref: React.RefObject<HTMLDivElement | null> }) {
+  return (
+    <div ref={ref} className="pointer-events-none absolute z-20 w-max max-w-sm rounded-lg border bg-popover p-3 text-xs shadow-xl">
+      <div className="mb-2 font-mono text-foreground">{host}</div>
+      <div className="flex flex-col gap-0.5 font-mono text-muted-foreground">
+        {urls.map((u) => <span key={u} className="truncate">{shortUrl(u)}</span>)}
+      </div>
+      <p className="mt-2 border-t pt-2 text-muted-foreground">click to {expanded ? "hide" : "show"} links</p>
+    </div>
+  );
+}
+
 const chatInfo = new Map<string, { title: string; prompt: string } | null>();
 
 function NodeCard({ s, ref }: { s: Session; ref: React.RefObject<HTMLDivElement | null> }) {
@@ -447,7 +725,7 @@ function NodeCard({ s, ref }: { s: Session; ref: React.RefObject<HTMLDivElement 
   }
   const chat = s.chatId ? chatInfo.get(s.chatId) : null;
   const rows: [string, string][] = [
-    ["status", !s.running ? `exited ${s.exitCode ?? "?"}` : isBusy(s) ? "working" : isWaiting(s) ? "waiting on you" : `idle ${ago(s.lastOutputAt)}`],
+    ["status", `${!s.running ? `exited ${s.exitCode ?? "?"}` : isBusy(s) ? "working" : isWaiting(s) ? "waiting on you" : `idle ${ago(s.lastOutputAt)}`}${s.archived ? " · archived" : ""}`],
     ["kind", kindOf(s)],
     ...(s.group ? [["group", s.group] as [string, string]] : []),
     ["command", s.cmd.join(" ")],
@@ -472,6 +750,7 @@ function NodeCard({ s, ref }: { s: Session; ref: React.RefObject<HTMLDivElement 
         ))}
       </dl>
       {chat && (chat.prompt || chat.title) && <p className="mt-2 line-clamp-3 border-t pt-2 text-muted-foreground">{chat.prompt || chat.title}</p>}
+      <p className="mt-2 border-t pt-2 text-muted-foreground">right-click to {s.archived ? "unarchive" : "archive"}</p>
     </div>
   );
 }

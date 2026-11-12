@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { History, Network, PanelLeft, Plus, X } from "lucide-react";
+import { Archive, ArchiveRestore, History, Network, PanelLeft, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
@@ -34,7 +34,15 @@ export function StatusDot({ s, className }: { s: Session; className?: string }) 
   );
 }
 
-function Row({ s, active, collapsed, onOpen, onKill, onRename }: { s: Session; active: boolean; collapsed: boolean; onOpen: () => void; onKill: () => void; onRename: (name: string) => void }) {
+function Row({ s, active, collapsed, onOpen, onKill, onArchive, onRename }: {
+  s: Session;
+  active: boolean;
+  collapsed: boolean;
+  onOpen: () => void;
+  onKill: () => void;
+  onArchive: () => void;
+  onRename: (name: string) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -49,7 +57,7 @@ function Row({ s, active, collapsed, onOpen, onKill, onRename }: { s: Session; a
   if (collapsed)
     return (
       <Tip label={displayName(s)} side="right">
-        <button onClick={onOpen} className={cn("flex h-8 w-full items-center justify-center rounded-md hover:bg-accent", active && "bg-accent")}>
+        <button onClick={onOpen} className={cn("flex h-8 w-full items-center justify-center rounded-md hover:bg-accent", active && "bg-accent", s.archived && "opacity-50")}>
           <StatusDot s={s} />
         </button>
       </Tip>
@@ -73,20 +81,29 @@ function Row({ s, active, collapsed, onOpen, onKill, onRename }: { s: Session; a
             className="w-full rounded-sm bg-background px-1 text-sm outline-none ring-1 ring-ring"
           />
         ) : (
-          <div onDoubleClick={(e) => (e.stopPropagation(), setEditing(true))} className={cn("truncate text-sm", !s.running && "text-muted-foreground")}>
+          <div onDoubleClick={(e) => (e.stopPropagation(), setEditing(true))} className={cn("truncate text-sm", (!s.running || s.archived) && "text-muted-foreground")}>
             {displayName(s)}
           </div>
         )}
       </div>
-      <button
-        title="Kill session"
-        onClick={(e) => (e.stopPropagation(), onKill())}
-        className={cn(
-          "absolute top-1/2 right-1.5 hidden size-6 -translate-y-1/2 items-center justify-center rounded-md border bg-popover text-muted-foreground shadow-sm group-hover:flex hover:text-destructive",
+      <div className="absolute top-1/2 right-1.5 hidden -translate-y-1/2 gap-1 group-hover:flex">
+        {!isSentry(s) && (
+          <button
+            title={s.archived ? "Unarchive" : "Archive"}
+            onClick={(e) => (e.stopPropagation(), onArchive())}
+            className="flex size-6 items-center justify-center rounded-md border bg-popover text-muted-foreground shadow-sm hover:text-foreground"
+          >
+            {s.archived ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}
+          </button>
         )}
-      >
-        <X className="size-3.5" />
-      </button>
+        <button
+          title="Kill session"
+          onClick={(e) => (e.stopPropagation(), onKill())}
+          className="flex size-6 items-center justify-center rounded-md border bg-popover text-muted-foreground shadow-sm hover:text-destructive"
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -102,13 +119,20 @@ type Props = {
   onNew: () => void;
   onOpen: (id: string) => void;
   onKill: (id: string) => void;
+  onArchive: (id: string, archived: boolean) => void;
+  hideArchived: boolean;
+  onToggleArchived: () => void;
   onRename: (id: string, name: string) => void;
 };
 
-export function Sidebar({ sessions, current, collapsed, graphing, onToggle, onGraph, onResume, onNew, onOpen, onKill, onRename }: Props) {
-  const agents = sessions.filter((s) => !isSentry(s)), sentries = sessions.filter(isSentry);
+export function Sidebar({ sessions, current, collapsed, graphing, onToggle, onGraph, onResume, onNew, onOpen, onKill, onArchive, hideArchived, onToggleArchived, onRename }: Props) {
+  const byActivity = [...sessions].sort((a, b) => b.activeAt - a.activeAt);
+  const agents = byActivity.filter((s) => !isSentry(s) && !s.archived), sentries = sessions.filter(isSentry);
+  const archived = byActivity.filter((s) => !isSentry(s) && s.archived);
   const rows = (list: Session[]) =>
-    list.map((s) => <Row key={s.id} s={s} active={s.id === current} collapsed={collapsed} onOpen={() => onOpen(s.id)} onKill={() => onKill(s.id)} onRename={(n) => onRename(s.id, n)} />);
+    list.map((s) => (
+      <Row key={s.id} s={s} active={s.id === current} collapsed={collapsed} onOpen={() => onOpen(s.id)} onKill={() => onKill(s.id)} onArchive={() => onArchive(s.id, !s.archived)} onRename={(n) => onRename(s.id, n)} />
+    ));
 
   return (
     <aside className="flex min-h-0 flex-col border-r bg-sidebar max-sm:max-h-[35vh] max-sm:border-r-0 max-sm:border-b">
@@ -144,6 +168,17 @@ export function Sidebar({ sessions, current, collapsed, graphing, onToggle, onGr
       </header>
       <ScrollArea className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
         <div className="flex flex-col gap-0.5 p-1.5">{rows(agents)}</div>
+        {archived.length > 0 && (
+          <div className="flex flex-col gap-0.5 p-1.5 pt-0">
+            {!collapsed && (
+              <button onClick={onToggleArchived} className="flex items-center px-2.5 pt-1 pb-1.5 text-[11px] font-medium tracking-wider text-muted-foreground uppercase hover:text-foreground">
+                Archived · {archived.length}
+                <span className="ml-auto normal-case tracking-normal">{hideArchived ? "show" : "hide"}</span>
+              </button>
+            )}
+            {!hideArchived && rows(archived)}
+          </div>
+        )}
       </ScrollArea>
       {sentries.length > 0 && (
         <div className="shrink-0 border-t p-1.5">

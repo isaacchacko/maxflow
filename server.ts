@@ -2,6 +2,7 @@ import type { ServerWebSocket, Subprocess } from "bun";
 import { readFileSync, statSync } from "node:fs";
 import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
+import { repoOf } from "./sentries/gh";
 import app from "./src/index.html";
 
 const PORT = Number(process.env.MAXFLOW_PORT ?? 4747);
@@ -28,6 +29,7 @@ type Session = {
   claude?: { state: ClaudeState; at: number };
   transcript?: string;
   links?: { found: Candidate[]; offset: number; at: number };
+  archived?: boolean;
 };
 type ClaudeState = "working" | "waiting" | "idle";
 
@@ -103,6 +105,7 @@ function adoptSessions() {
       session.claude = JSON.parse(tmux("show-options", "-v", "-t", t, "@mf-claude").out);
     } catch {}
     session.transcript = tmux("show-options", "-v", "-t", t, "@mf-transcript").out.trim() || undefined;
+    session.archived = tmux("show-options", "-v", "-t", t, "@mf-archived").out.trim() === "1";
     sessions.set(id, session);
     attachViewer(session);
   }
@@ -156,7 +159,7 @@ function setTranscript(s: Session, path: string) {
   tmux("set-option", "-t", tmuxName(s.id), "@mf-transcript", path);
 }
 
-// Candidate URLs a session has mentioned, oldest first, each with who wrote it and the text around it, for sentry:graph to judge.
+// Candidate URLs a session has mentioned, PRs named by number included, oldest first, each with who wrote it and the text around it, for sentry:graph to judge.
 // Agents are read from their transcript, since claude hard-wraps long URLs on screen; shells from tmux history, which -J rejoins.
 // Only text the user or claude wrote counts, not tool output.
 type Candidate = { url: string; role: string; context: string };
@@ -164,14 +167,22 @@ const PROJECTS = `${process.env.HOME}/.claude/projects`;
 const VERDICTS = `${process.env.HOME}/.maxflow/graph-links.json`;
 const URL_RE = /https?:\/\/[^\s<>"'`()[\]{}|\\^]+/g;
 const MAX_CANDIDATES = 40, SHELL_LINKS_MS = 5000, CONTEXT_CHARS = 200;
-function candidatesIn(text: string, role: string): Candidate[] {
-  return [...text.matchAll(URL_RE)]
-    .map((m) => ({
-      url: m[0].replace(/[.,;:!?*_~]+$/, "").replace(/\/$/, ""),
-      role,
-      context: text.slice(Math.max(0, m.index - CONTEXT_CHARS), m.index + m[0].length + CONTEXT_CHARS).replace(/\s+/g, " ").trim(),
-    }))
+// A PR named without its URL: owner/repo#n, PR n, PR #n, or a bare #n of 3+ digits, which resolves against the session's repo.
+const PR_REF_RE = /\b([\w.-]+\/[\w.-]+)#(\d+)\b|\bPR\s*#?(\d{2,})\b|(?<![\w/&#])#(\d{3,})\b/gi;
+const repos = new Map<string, string>();
+const repoFor = (cwd: string) => repos.get(cwd) ?? repos.set(cwd, repoOf(cwd)).get(cwd)!;
+// GitHub's owner and repo are case-insensitive; one spelling keeps a PR to one node.
+const canonical = (url: string) => url.replace(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\//i, (m, r) => m.replace(r, r.toLowerCase()));
+function candidatesIn(text: string, role: string, repo: string): Candidate[] {
+  const around = (at: number, len: number) => text.slice(Math.max(0, at - CONTEXT_CHARS), at + len + CONTEXT_CHARS).replace(/\s+/g, " ").trim();
+  const urls = [...text.matchAll(URL_RE)]
+    .map((m) => ({ at: m.index, url: canonical(m[0].replace(/[.,;:!?*_~]+$/, "").replace(/\/$/, "")), len: m[0].length }))
     .filter((c) => URL.canParse(c.url) && /^[\w.-]*\w(:\d+)?$/.test(new URL(c.url).host));
+  const prs = [...text.replace(URL_RE, (u) => " ".repeat(u.length)).matchAll(PR_REF_RE)].flatMap((m) => {
+    const r = m[1]?.toLowerCase() ?? repo;
+    return r ? [{ at: m.index, url: `https://github.com/${r}/pull/${m[2] ?? m[3] ?? m[4]}`, len: m[0].length }] : [];
+  });
+  return [...urls, ...prs].sort((a, b) => a.at - b.at).map((c) => ({ url: c.url, role, context: around(c.at, c.len) }));
 }
 // A URL mentioned again moves to the end with its newest context, so the cap drops the stalest ones.
 const addCandidates = (list: Candidate[], found: Candidate[]) => {
@@ -204,17 +215,17 @@ function candidates(s: Session): Candidate[] {
     if (end > 0) {
       l.offset += end;
       for (const line of buf.subarray(0, end).toString("utf8").split("\n")) {
-        if (!line.includes("http")) continue;
+        if (!line.includes("http") && !line.includes("#") && !/\bPR\b/i.test(line)) continue;
         try {
           const rec = JSON.parse(line);
-          addCandidates(l.found, candidatesIn(textOf(rec), rec.type));
+          addCandidates(l.found, candidatesIn(textOf(rec), rec.type, repoFor(s.cwd)));
         } catch {}
       }
     }
   } else if (s.exitCode === null && s.lastOutputAt > l.at && Date.now() - l.at > SHELL_LINKS_MS) {
     l.at = Date.now();
     l.found = [];
-    for (const line of tmux("capture-pane", "-p", "-J", "-t", tmuxName(s.id), "-S", "-2000").out.split("\n")) addCandidates(l.found, candidatesIn(line, "screen"));
+    for (const line of tmux("capture-pane", "-p", "-J", "-t", tmuxName(s.id), "-S", "-2000").out.split("\n")) addCandidates(l.found, candidatesIn(line, "screen", repoFor(s.cwd)));
   }
   return l.found;
 }
@@ -237,15 +248,26 @@ const links = (s: Session) => candidates(s).filter((c) => verdicts()[s.id]?.[c.u
 const groups = sentryFile<Record<string, string>>(`${process.env.HOME}/.maxflow/graph-groups.json`, {});
 
 // An edge drawn in the graph: tell each agent end who is on the other side and how to reach it.
-function introduce(to: Session, other: Session) {
+function introduce(to: Session, other: Session, why?: string) {
   if (!isAgent(to) || to.exitCode !== null) return;
   const who = `"${other.name}" (session ${other.id}, in ${other.cwd})`;
+  const reason = why ? ` Why, in the user's words: "${why}".` : "";
   const text = isSentry(other)
-    ? `[maxflow] The user linked you to the ${other.name.slice(7)} sentry; it might be useful to you. ${SENTRY_USES[other.name] ?? `Its source is in ${new URL("./sentries/", import.meta.url).pathname}.`}`
+    ? `[maxflow] The user linked you to the ${other.name.slice(7)} sentry; it might be useful to you.${reason} ${SENTRY_USES[other.name] ?? `Its source is in ${new URL("./sentries/", import.meta.url).pathname}.`}`
     : isAgent(other)
-      ? `[maxflow] The user linked you with another agent, ${who}, and thinks you two should talk. Communicate and see whether that's helpful; drop it if it isn't. Message it with \`${CLI} notify ${other.id} '<text>'\` (typed into its prompt once it is idle; say you are session ${to.id} so it can answer), and read its screen with \`${CLI} screen ${other.id} --history 200\`.`
-      : `[maxflow] The user linked you with the terminal session ${who}, running \`${other.cmd.join(" ")}\`; it may matter to your work. Read it with \`${CLI} screen ${other.id} --history 200\`, type into it with \`${CLI} send ${other.id} '<text>'\`.`;
+      ? `[maxflow] The user linked you with another agent, ${who}, and wants you two talking; it got this same note about you.${reason} Start now: message it what you're working on and what you could use from it or offer it, then answer what it sends you. Keep it going while it helps; drop it once it doesn't. Message it with \`${CLI} notify ${other.id} '<text>'\` (typed into its prompt once it is idle; say you are session ${to.id} so it can answer), and read its screen with \`${CLI} screen ${other.id} --history 200\`.`
+      : `[maxflow] The user linked you with the terminal session ${who}, running \`${other.cmd.join(" ")}\`; it may matter to your work.${reason} Read it with \`${CLI} screen ${other.id} --history 200\`, type into it with \`${CLI} send ${other.id} '<text>'\`.`;
   to.inbox.push(text);
+}
+
+// A claude's TUI redraws nonstop, so for an agent its last transcript write is what counts as activity.
+function activeAt(s: Session) {
+  if (s.transcript) {
+    try {
+      return statSync(s.transcript).mtimeMs;
+    } catch {}
+  }
+  return isAgent(s) ? (s.claude?.at ?? s.createdAt) : s.lastOutputAt;
 }
 
 const describe = (s: Session) => ({
@@ -255,6 +277,7 @@ const describe = (s: Session) => ({
   cwd: s.cwd,
   createdAt: s.createdAt,
   lastOutputAt: s.lastOutputAt,
+  activeAt: activeAt(s),
   clients: s.clients.size,
   running: s.exitCode === null,
   exitCode: s.exitCode,
@@ -264,6 +287,7 @@ const describe = (s: Session) => ({
   agent: isAgent(s),
   links: links(s),
   group: groups()[s.id] ?? null,
+  archived: !!s.archived,
 });
 
 // Plain text of the visible pane plus `history` lines above it, trailing blank lines dropped.
@@ -368,10 +392,11 @@ Bun.serve<WsData>({
       return Response.json([...sessions.values()].filter((s) => !isSentry(s)).map((s) => ({ id: s.id, name: s.name, cwd: s.cwd, running: s.exitCode === null, candidates: candidates(s) })));
 
     if (path === "/api/link" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { a?: string; b?: string };
+      const body = (await req.json().catch(() => ({}))) as { a?: string; b?: string; why?: string };
       const a = sessions.get(body.a ?? ""), b = sessions.get(body.b ?? "");
       if (!a || !b || a === b) return new Response("two sessions required", { status: 400 });
-      introduce(a, b), introduce(b, a);
+      const why = body.why?.trim();
+      introduce(a, b, why), introduce(b, a, why);
       return Response.json([describe(a), describe(b)]);
     }
 
@@ -431,7 +456,11 @@ Bun.serve<WsData>({
         return new Response(null, { status: 204 });
       }
       if (req.method === "PATCH") {
-        const body = (await req.json().catch(() => ({}))) as { name?: string };
+        const body = (await req.json().catch(() => ({}))) as { name?: string; archived?: boolean };
+        if (typeof body.archived === "boolean") {
+          s.archived = body.archived;
+          tmux("set-option", "-t", tmuxName(s.id), "@mf-archived", body.archived ? "1" : "0");
+        }
         if (body.name?.trim()) {
           s.name = body.name.trim().slice(0, 80);
           tmux("set-option", "-t", tmuxName(s.id), "@mf", JSON.stringify({ name: s.name, cmd: s.cmd, cwd: s.cwd, chatId: s.chatId, createdAt: s.createdAt }));

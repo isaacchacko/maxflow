@@ -17,6 +17,7 @@ export function App() {
   const [current, setCurrent] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(() => store.get("mf.collapsed") === "1");
   const [graphing, setGraphing] = useState(false);
+  const [hideArchived, setHideArchived] = useState(() => store.get("mf.hideArchived") === "1");
   const [resuming, setResuming] = useState(location.hash === "#resume");
   const term = useRef<TerminalHandle | null>(null);
 
@@ -50,6 +51,12 @@ export function App() {
     if (id === current) (setCurrent(null), history.replaceState(null, "", "/"));
     refresh();
   };
+  const archive = async (id: string, archived: boolean) => (await api.archive(id, archived), refresh());
+  const toggleArchived = () =>
+    setHideArchived((h) => {
+      store.set("mf.hideArchived", h ? "0" : "1");
+      return !h;
+    });
   const toggleSidebar = () =>
     setCollapsed((c) => {
       store.set("mf.collapsed", c ? "0" : "1");
@@ -89,11 +96,23 @@ export function App() {
           onNew={newShell}
           onOpen={open}
           onKill={kill}
+          onArchive={archive}
+          hideArchived={hideArchived}
+          onToggleArchived={toggleArchived}
           onRename={async (id, name) => (await api.rename(id, name), refresh())}
         />
         <main className="relative min-h-0 min-w-0">
           <div className={cn("absolute inset-0 py-2 pl-3 pr-1", graphing && "hidden")}>{current && <Terminal key={current} id={current} handle={term} onClose={refresh} />}</div>
-          <GraphView sessions={sessions} visible={graphing} current={current} onOpen={open} onCreated={refresh} />
+          <GraphView
+            sessions={sessions}
+            visible={graphing}
+            current={current}
+            hideArchived={hideArchived}
+            onOpen={open}
+            onCreated={refresh}
+            onArchive={archive}
+            onToggleArchived={toggleArchived}
+          />
           {loaded && !sessions.length && !graphing && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-muted-foreground">
               <TerminalSquare className="size-10 opacity-40" />

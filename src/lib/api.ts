@@ -5,6 +5,7 @@ export type Session = {
   cwd: string;
   createdAt: number;
   lastOutputAt: number;
+  activeAt: number;
   clients: number;
   running: boolean;
   exitCode: number | null;
@@ -14,6 +15,7 @@ export type Session = {
   agent: boolean;
   links: string[];
   group: string | null;
+  archived: boolean;
 };
 
 export type Chat = { id: string; title: string; prompt: string; cwd: string; mtime: number; live: boolean; session: string | null };
@@ -41,8 +43,9 @@ export const api = {
       body: JSON.stringify({ name: name.slice(0, 40) || "claude", cwd, cmd: ["claude", ...(bypass ? ["--permission-mode", "bypassPermissions"] : []), ...(prompt ? [prompt] : [])] }),
     }).then((r) => r.json()),
   notify: (id: string, text: string) => fetch(`/api/sessions/${id}/notify`, { method: "POST", body: JSON.stringify({ text }) }),
-  link: (a: string, b: string) => fetch("/api/link", { method: "POST", body: JSON.stringify({ a, b }) }),
+  link: (a: string, b: string, why?: string) => fetch("/api/link", { method: "POST", body: JSON.stringify({ a, b, why }) }),
   kill: (id: string) => fetch(`/api/sessions/${id}`, { method: "DELETE" }),
+  archive: (id: string, archived: boolean) => fetch(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ archived }) }),
   rename: (id: string, name: string) => fetch(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
   chats: (q: string, limit = 150): Promise<Chat[]> => fetch(`/api/chats?limit=${limit}&q=${encodeURIComponent(q)}`).then((r) => r.json()),
   resume: (id: string, bypass: boolean, force: boolean) => fetch(`/api/chats/${id}/resume`, { method: "POST", body: JSON.stringify({ bypass, force }) }),
