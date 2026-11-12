@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // health sentry: the moment the maxflow server stops answering, it takes over the port with a "down" page, and if the
-// server stays down it starts a claude agent to fix it, shown live on that page.
+// server stays down it starts a claude agent to fix it, shown live on that page. A frontend build that stays broken
+// while the API still answers gets an agent too.
 // It runs in tmux, so it outlives the server it watches, and it starts the agent straight in tmux for the same reason;
 // the server adopts that session like any other once it is back.
 import type { ServerWebSocket, Subprocess } from "bun";
@@ -9,6 +10,9 @@ import { join } from "node:path";
 const INTERVAL_MS = Number(process.env.HEALTH_INTERVAL ?? 1000);
 const PAGE_AFTER_MS = Number(process.env.HEALTH_PAGE_AFTER_MS ?? 3000);
 const DOWN_MS = Number(process.env.HEALTH_DOWN_MS ?? 45_000);
+// Hot reload catches agents mid-edit, so a build broken for a few seconds is normal; only one that stays broken counts.
+const BUILD_DOWN_MS = Number(process.env.HEALTH_BUILD_DOWN_MS ?? 60_000);
+const BUILD_EVERY_MS = 5000;
 const COOLDOWN_MS = Number(process.env.HEALTH_COOLDOWN_MS ?? 15 * 60_000);
 // After handing the port back, give the server this long to bind before covering for it again.
 const RELEASE_GRACE_MS = 15_000;
@@ -37,19 +41,41 @@ async function probe(): Promise<"up" | "refused" | "hung"> {
   }
 }
 
-function startAgent(downSince: number) {
-  const id = crypto.randomUUID().slice(0, 8);
+// Bun's dev server answers the page with a 500 "Build Failed" while any file in the bundle doesn't parse or resolve.
+async function buildOk() {
+  try {
+    return (await fetch(base, { signal: AbortSignal.timeout(10_000) })).status !== 500;
+  } catch {
+    return true; // unreachable is the down path's business
+  }
+}
+
+const RULES = `Other agents edit this repo with uncommitted work in the tree: fix the breakage in place rather than reverting or stashing their changes, and don't commit. Don't kill any tmux session on the maxflow socket; they are the user's running work. When it is fixed, say in a few lines what broke and what you changed.`;
+
+function downTask(since: number) {
   const status = launchd().out.split("\n").filter((l) => /state =|runs =|last exit|pid =/.test(l)).join("\n");
-  const log = run(["tail", "-n", "80", LOG]).out;
-  const prompt = `The maxflow server (${DIR}, launchd agent ${LABEL}, ${base}) has not answered since ${new Date(downSince).toLocaleTimeString()}, so the health sentry started you to bring it back. The user is watching you on the health sentry's "down" page, which holds the port until the server asks for it at startup.
+  return `The maxflow server (${DIR}, launchd agent ${LABEL}, ${base}) has not answered since ${new Date(since).toLocaleTimeString()}, so the health sentry started you to bring it back. The user is watching you on the health sentry's "down" page, which holds the port until the server asks for it at startup.
 
 launchd says:
 ${status}
 
 Last lines of ${LOG}:
-${log}
+${run(["tail", "-n", "80", LOG]).out}
 
-Find the root cause and fix it, then restart with \`launchctl kickstart -k gui/$(id -u)/${LABEL}\` and confirm \`curl -s ${base}/api/sessions\` answers with the session list. Other agents edit this repo with uncommitted work in the tree: fix the breakage in place rather than reverting or stashing their changes, and don't commit. Don't kill any tmux session on the maxflow socket; they are the user's running work. When it is back, say in a few lines what broke and what you changed.`;
+Find the root cause and fix it, then restart with \`launchctl kickstart -k gui/$(id -u)/${LABEL}\` and confirm \`curl -s ${base}/api/sessions\` answers with the session list. ${RULES}`;
+}
+
+function buildTask(since: number) {
+  return `The maxflow frontend (${DIR}/src, bundled by Bun's dev server with hot reload) has failed to build since ${new Date(since).toLocaleTimeString()}: ${base}/ answers 500 "Build Failed" while the API still works, so the user's UI is broken. The health sentry started you to fix it.
+
+Last lines of ${LOG} (the build error is in there):
+${run(["tail", "-n", "80", LOG]).out}
+
+The cause is usually another agent's edit caught halfway: a file cut off, or an import of a file not written yet. Check \`git status\`/\`git diff\` and which maxflow session is editing that file (\`./cli.ts ls\`, \`./cli.ts screen <id>\`); if its agent is still working on it, finish the edit the way it was clearly heading. Hot reload picks up the fix, no restart needed: confirm \`curl -s -o /dev/null -w '%{http_code}' ${base}/\` gives 200. ${RULES}`;
+}
+
+function startAgent(prompt: string) {
+  const id = crypto.randomUUID().slice(0, 8);
   const meta = { name: "maxflow recovery", cmd: ["claude"], cwd: DIR, createdAt: Date.now() };
   const t = `mf-${id}`;
   const created = run([...TMUX, "new-session", "-d", "-s", t, "-x", "120", "-y", "34", "-c", DIR, "-e", `MAXFLOW_SESSION=${id}`, "--", "claude", "--permission-mode", "bypassPermissions", prompt]);
@@ -72,7 +98,10 @@ let downSince: number | null = null;
 let agent: { id: string; tmux: string; at: number } | null = null;
 let page: ReturnType<typeof Bun.serve> | null = null;
 let releasedAt = 0;
+let buildBrokenSince: number | null = null;
+let buildCheckedAt = 0;
 // A server asking for the port back is alive and booting (adopting every tmux session takes ~20s), so the agent's clock restarts.
+const canStartAgent = () => !agent || (!run([...TMUX, "has-session", "-t", agent.tmux]).ok && Date.now() - agent.at >= COOLDOWN_MS);
 const agentDueAt = () => downSince && Math.max(downSince, releasedAt) + DOWN_MS;
 
 function state() {
@@ -145,7 +174,7 @@ function closePage() {
   console.log(`${stamp()}  server starting, handed the port back`);
 }
 
-console.log(`health sentry: polls ${base} every ${INTERVAL_MS / 1000}s; down page after ${PAGE_AFTER_MS / 1000}s, recovery agent after ${DOWN_MS / 1000}s`);
+console.log(`health sentry: polls ${base} every ${INTERVAL_MS / 1000}s; down page after ${PAGE_AFTER_MS / 1000}s, recovery agent after ${DOWN_MS / 1000}s down or ${BUILD_DOWN_MS / 1000}s with a broken build`);
 for (;;) {
   try {
     // While the down page holds the port the server can't be listening, so there's nothing to probe.
@@ -153,6 +182,21 @@ for (;;) {
     if (health === "up") {
       if (downSince) console.log(`${stamp()}  up again after ${Math.round((Date.now() - downSince) / 1000)}s`);
       downSince = null;
+      if (Date.now() - buildCheckedAt >= BUILD_EVERY_MS) {
+        buildCheckedAt = Date.now();
+        if (await buildOk()) {
+          if (buildBrokenSince) console.log(`${stamp()}  build fixed after ${Math.round((Date.now() - buildBrokenSince) / 1000)}s`);
+          buildBrokenSince = null;
+        } else {
+          if (!buildBrokenSince) console.log(`${stamp()}  frontend build broken`);
+          buildBrokenSince ??= Date.now();
+          if (Date.now() - buildBrokenSince >= BUILD_DOWN_MS && canStartAgent()) {
+            agent = startAgent(buildTask(buildBrokenSince));
+            console.log(`${stamp()}  build broken ${Math.round((Date.now() - buildBrokenSince) / 1000)}s, started recovery agent in ${agent.tmux}`);
+            await acceptTrust(agent.tmux);
+          }
+        }
+      }
     } else if (!launchd().ok) {
       // Unloaded on purpose (launchctl bootout/unload), so it is meant to be down.
       downSince = null;
@@ -160,9 +204,8 @@ for (;;) {
     } else {
       downSince ??= Date.now();
       if (!page && health === "refused" && Date.now() - downSince >= PAGE_AFTER_MS && Date.now() - releasedAt >= RELEASE_GRACE_MS) openPage();
-      const agentAlive = agent && run([...TMUX, "has-session", "-t", agent.tmux]).ok;
-      if (Date.now() >= agentDueAt()! && !agentAlive && (!agent || Date.now() - agent.at >= COOLDOWN_MS)) {
-        agent = startAgent(downSince);
+      if (Date.now() >= agentDueAt()! && canStartAgent()) {
+        agent = startAgent(downTask(downSince));
         console.log(`${stamp()}  down ${Math.round((Date.now() - downSince) / 1000)}s, started recovery agent in ${agent.tmux}`);
         await acceptTrust(agent.tmux);
       }
