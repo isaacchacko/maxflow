@@ -236,7 +236,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   const [edges, setEdgesState] = useState<Edge[]>(() => { try { return JSON.parse(store.get("mf.edges") || "[]"); } catch { return []; } });
   const [mode, setMode] = useState<Mode>("select");
   const [showUrls, setShowUrls] = useState(() => store.get("mf.urls") !== "0");
-  const [expanded, setExpanded] = useState<string[]>([]);
+  const [collapsed, setCollapsed] = useState<string[]>([]);
   const [showTitles, setShowTitles] = useState(() => store.get("mf.titles") !== "0");
   const [showGroups, setShowGroups] = useState(() => store.get("mf.groups") === "1");
   const [hover, setHover] = useState<string | null>(null);
@@ -326,7 +326,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     const kept = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
     if (all.length && kept.length !== edges.length) return setEdges(kept);
     const hubs = showUrls ? hubsOf(sessions) : new Map<string, string[]>();
-    const children = [...hubs].filter(([hub, urls]) => urls.length > 1 && expanded.includes(hub)).flatMap(([hub, urls]) => urls.map((u) => urlNode(hub, u)));
+    const children = [...hubs].filter(([hub, urls]) => urls.length > 1 && !collapsed.includes(hub)).flatMap(([hub, urls]) => urls.map((u) => urlNode(hub, u)));
     g.setData({
       nodes: [
         ...sessions.map((s) => {
@@ -346,7 +346,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
       ],
     } as never);
     if (!fitted.current && sessions.length) (fitted.current = true), g.zoomToFit();
-  }, [all, hideArchived, edges, visible, showUrls, showTitles, expanded]);
+  }, [all, hideArchived, edges, visible, showUrls, showTitles, collapsed]);
 
   useEffect(() => graph.current?.setOptions({ mode } as never), [mode, visible]);
   useEffect(() => {
@@ -564,7 +564,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   const hoveredUrl = hover && isUrlNode(hover) ? urlOfNode(hover) : null;
   const hoveredHub = hover && isDomainNode(hover) ? hover : null;
   const hubUrls = hoveredHub ? (hubsOf(sessions).get(hoveredHub) ?? []) : [];
-  const toggleHub = (hub: string) => setExpanded((e) => (e.includes(hub) ? e.filter((h) => h !== hub) : [...e, hub]));
+  const toggleHub = (hub: string) => setCollapsed((e) => (e.includes(hub) ? e.filter((h) => h !== hub) : [...e, hub]));
   const newAgentHere = () => {
     const r = el.current!.getBoundingClientRect();
     setEditing(null);
@@ -592,7 +592,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   const matches = needle
     ? [
         ...sessions.filter((s) => displayName(s).toLowerCase().includes(needle)).map((s) => s.id),
-        ...(showUrls ? [...hubsOf(sessions)].flatMap(([hub, urls]) => urls.filter((u) => u.toLowerCase().includes(needle)).map((u) => (expanded.includes(hub) && urls.length > 1 ? urlNode(hub, u) : hub))).filter((id, i, a) => a.indexOf(id) === i) : []),
+        ...(showUrls ? [...hubsOf(sessions)].flatMap(([hub, urls]) => urls.filter((u) => u.toLowerCase().includes(needle)).map((u) => (!collapsed.includes(hub) && urls.length > 1 ? urlNode(hub, u) : hub))).filter((id, i, a) => a.indexOf(id) === i) : []),
       ]
     : [];
   const matchKey = matches.join();
@@ -718,7 +718,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
       {hoveredUrl && !draft && <UrlCard url={hoveredUrl} from={sessions.filter((s) => s.links.includes(hoveredUrl))} archived={archivedUrls.has(hoveredUrl)} ref={tip} />}
       {hoveredHub && !draft && (hubUrls.length === 1
         ? <UrlCard url={hubUrls[0]} from={sessions.filter((s) => s.links.includes(hubUrls[0]))} archived={archivedUrls.has(hubUrls[0])} ref={tip} />
-        : <DomainCard host={hostOfHub(hoveredHub)} urls={hubUrls} archived={archivedUrls} expanded={expanded.includes(hoveredHub)} ref={tip} />)}
+        : <DomainCard host={hostOfHub(hoveredHub)} urls={hubUrls} archived={archivedUrls} expanded={!collapsed.includes(hoveredHub)} ref={tip} />)}
     </div>
   );
 }
