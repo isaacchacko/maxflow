@@ -71,18 +71,26 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
   const [cursor, setCursor] = useState<{ col: number; row: number } | null>(null);
   const filterInput = useRef<HTMLInputElement>(null);
   const named = useMemo(() => new Map(sessions.map((s) => [s.id, s.name])), [sessions]);
+  // A search reaches everything the board knows about a card, and every word must appear somewhere in it.
+  const words = filter.toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = (text: string) => words.every((w) => text.toLowerCase().includes(w));
   // The review sentry's queue stages a green PR with no reviewer yet as "needs reviewer": only the user sends it for approval.
-  const unreviewed = prs.filter((p) => p.stage === "needs reviewer").sort((a, b) => a.created.localeCompare(b.created));
+  const unreviewed = prs.filter((p) => p.stage === "needs reviewer" && hits(`${p.pr} ${p.title}`)).sort((a, b) => a.created.localeCompare(b.created));
   const task = tasks.find((t) => t.id === shown);
   const assistant = sessions.find((s) => s.sentry && s.name === "sentry:assistant" && s.running);
   const [chatting, setChatting] = useState(() => store.get("mf.tasksChat") !== "0");
   const toggleChat = () => setChatting((c) => (store.set("mf.tasksChat", c ? "0" : "1"), !c));
   const chat = useRef<TerminalHandle | null>(null);
 
-  const matches = (t: Task) => !filter || `${taskKey(t)} ${t.title} ${t.answer ?? ""}`.toLowerCase().includes(filter.toLowerCase());
+
+  const haystack = (t: Task) =>
+    [taskKey(t), t.title, t.answer, ...t.timeline.map((e) => e.text), ...t.links, ...t.sessions.map((id) => named.get(id) ?? id)].join("\n");
+  const matches = (t: Task) => hits(haystack(t));
+  // Dropped tasks stay off the board, except in a search, where they show in Done with their dashed circle.
+  const inColumn = (t: Task, status: Task["status"]) => t.status === status || (!!words.length && status === "done" && t.status === "dropped");
   const columns = COLUMNS.map((c) => {
-    const all = tasks.filter((t) => t.status === c.status && matches(t)).sort((a, b) => b.updated - a.updated);
-    return { ...c, all, cards: c.status === "done" ? all.slice(0, DONE_SHOWN) : all };
+    const all = tasks.filter((t) => inColumn(t, c.status) && matches(t)).sort((a, b) => b.updated - a.updated);
+    return { ...c, all, cards: c.status === "done" && !words.length ? all.slice(0, DONE_SHOWN) : all };
   });
   const selected = cursor && columns[cursor.col]?.cards[cursor.row];
 
@@ -128,7 +136,7 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
             value={filter}
             onChange={(e) => (setFilter(e.target.value), setCursor(null))}
             onKeyDown={(e) => e.key === "Escape" && (setFilter(""), e.currentTarget.blur())}
-            placeholder="Filter tasks"
+            placeholder="Search tasks"
             className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
           />
           {!filter && <Kbd>/</Kbd>}
@@ -162,7 +170,7 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
               </section>
             );
           })}
-          <CommentsColumn comments={comments} />
+          <CommentsColumn comments={comments.filter((c) => hits(`${c.pr} ${c.body} ${c.title} ${c.path ?? ""}`))} />
         </div>
         {assistant && chatting && (
           <aside className="flex w-[32rem] max-w-[40%] shrink-0 flex-col border-l">
@@ -171,6 +179,7 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
           </aside>
         )}
       </div>
+      {!!words.length && !columns.some((c) => c.all.length) && !unreviewed.length && <p className="absolute inset-x-0 top-1/2 text-center text-muted-foreground">No task mentions “{filter}”.</p>}
       {!tasks.length && !unreviewed.length && <p className="absolute inset-x-0 top-1/2 text-center text-muted-foreground">No tasks yet. The assistant adds them as you ask agents for things.</p>}
       <Dialog open={!!task} onOpenChange={(o) => !o && setShown(null)}>
         {task && <TaskDetail task={task} named={named} assistant={assistant?.id} onOpen={(id) => (setShown(null), onClose(), onOpen(id))} />}
