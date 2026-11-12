@@ -28,6 +28,10 @@ id=$(./cli.ts new --name job -- claude); id=${id##*/}
 
 `wait` prints the screen to stdout and its reason (`[match]`, `[idle]`, `[exited]`, `[timeout]`) to stderr, and exits 2 on timeout. The API underneath: `POST /api/sessions/:id/input {text?, keys?, enter?}`, `GET /api/sessions/:id/screen?history=N`, `GET /api/sessions/:id/wait?match=RE&idle=MS&timeout=MS`, `PATCH /api/sessions/:id {name?, archived?}`. After a session ends, `screen` returns the last capture.
 
+## What agents are told
+
+Every session's shell carries `MAXFLOW_SESSION=<id>`. A `SessionStart` hook in `~/.claude/settings.json` runs `hooks/claude-intro.sh` whenever claude starts, resumes, clears or compacts with that variable set, and puts `GET /api/sessions/:id/intro` into its context: what maxflow is, the agent's own id and name, how to rename, message other sessions, subscribe to events and archive itself, and what each running sentry does for it (the same text the graph's sentry edges send). Edit `intro()` in `server.ts` to change it.
+
 ## Events and sentries
 
 maxflow has a small event bus (`~/.maxflow/events.jsonl`). Topics are `/`-separated; `*` matches one segment, `**` any number.
