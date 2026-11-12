@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-// review sentry: the user's open PRs that are ready for a reviewer and have none yet (CI green, no conflict, not approved,
-// no review requested), each joined in the graph to the sessions working on it. Its screen is the list. It hands them to the gh sentry
+// review sentry: the user's open PRs that a running session is working on and that are ready for a reviewer with none yet (CI green,
+// no conflict, not approved, no review requested), each joined in the graph to those sessions. Its screen is the list. It hands them to the gh sentry
 // to watch, and redraws as soon as one of them changes, with the latest changes on screen.
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -46,12 +46,12 @@ function record(events: Event[]) {
 }
 
 async function tick() {
-  const prs = waiting();
+  const ready = waiting();
   const sessions = ((await (await fetch(`${base}/api/sessions`)).json()) as Session[]).filter((s) => s.running && !s.name.startsWith("sentry:"));
   const names = new Map(sessions.map((s) => [s.id, s.name]));
   const ties = await links();
   const on = new Map<string, Set<string>>();
-  for (const pr of prs) {
+  for (const pr of ready) {
     const repo = pr.repository.nameWithOwner.toLowerCase(), key = `${repo}#${pr.number}`;
     const ids = new Set([
       ...ties.filter((l) => l.session && l.repo === repo && (l.pr === key || l.branch === pr.headRefName)).map((l) => l.session),
@@ -59,25 +59,21 @@ async function tick() {
     ].filter((id) => names.has(id)));
     on.set(pr.url, ids);
   }
+  // An open PR no session is on is old work, not something to hand a reviewer now.
+  const prs = ready.filter((pr) => on.get(pr.url)!.size);
   listed = new Set(prs.map((pr) => `${pr.repository.nameWithOwner}#${pr.number}`.toLowerCase()));
   const watches: Watch[] = prs.map((pr) => ({ pr: `${pr.repository.nameWithOwner}#${pr.number}`.toLowerCase(), sessions: [...on.get(pr.url)!] }));
   writeFileSync(REVIEW_WATCH_FILE, JSON.stringify(watches));
   const label = (pr: Pr) => `${pr.repository.nameWithOwner.split("/")[1]}#${pr.number}`;
   writeFileSync(EDGES_FILE, JSON.stringify(prs.flatMap((pr) => [...on.get(pr.url)!].map((session) => ({ session, label: label(pr) })))));
 
-  const tied = prs.filter((pr) => on.get(pr.url)!.size), untied = prs.filter((pr) => !on.get(pr.url)!.size);
   const row = (pr: Pr) => `  ${label(pr).padEnd(16)} ${pr.title.slice(0, 80)}\n  ${" ".repeat(16)} ${pr.url}`;
   const out = [
     `\x1b[2J\x1b[H\x1b[1mPRs to look through and get a reviewer on\x1b[0m  (${new Date().toLocaleTimeString()}, every ${INTERVAL_MS / 1000}s)`,
-    `CI green, no conflict, not approved, no review requested yet.`,
+    `On a running session, CI green, no conflict, not approved, no review requested yet.`,
     "",
     ...(activity.length ? [`\x1b[1mLately\x1b[0m`, ...activity, ""] : []),
-    `\x1b[1mNo session (${untied.length})\x1b[0m`,
-    ...untied.map(row),
-    "",
-    // Last, so a short pane still shows the ones with an edge.
-    `\x1b[1mOn a session (${tied.length})\x1b[0m`,
-    ...tied.flatMap((pr) => [row(pr), `  ${" ".repeat(16)} \x1b[36m${[...on.get(pr.url)!].map((id) => names.get(id)).join(", ")}\x1b[0m`]),
+    ...prs.flatMap((pr) => [row(pr), `  ${" ".repeat(16)} \x1b[36m${[...on.get(pr.url)!].map((id) => names.get(id)).join(", ")}\x1b[0m`]),
   ];
   console.log(out.join("\n"));
   process.title = `review sentry (${prs.length} PRs)`;
