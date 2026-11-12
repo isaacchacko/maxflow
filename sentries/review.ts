@@ -11,6 +11,8 @@ const EDGES_FILE = join(STATE_DIR, "review-edges.json");
 const QUEUE_FILE = join(STATE_DIR, "review-queue.json");
 const INTERVAL_MS = Number(process.env.REVIEW_SENTRY_INTERVAL ?? 120_000);
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
+// Sent with each call that touches a session, so the graph draws this sentry doing it.
+const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 const agent = process.env.MAXFLOW_SESSION!;
 
 type Pr = {
@@ -19,7 +21,7 @@ type Pr = {
   commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
 };
 type Event = { seq: number; topic: string; data: { pr: string; told: string[]; who?: string | null; author?: string; state?: string; body?: string; url?: string; path?: string } };
-type Session = { id: string; name: string; running: boolean; links: string[] };
+type Session = { id: string; name: string; running: boolean; links: string[]; sentry: boolean };
 
 const QUERY = `query { search(query: "is:pr is:open author:@me archived:false", type: ISSUE, first: 100) { nodes { ... on PullRequest {
   number url title isDraft mergeable reviewDecision headRefName createdAt updatedAt repository { nameWithOwner } reviewRequests(first: 1) { totalCount }
@@ -45,14 +47,14 @@ function stage(pr: Pr) {
 
 const keyOf = (pr: Pr) => `${pr.repository.nameWithOwner}#${pr.number}`.toLowerCase();
 const label = (key: string) => key.split("/")[1];
-const notify = (text: string) => fetch(`${base}/api/sessions/${agent}/notify`, { method: "POST", body: JSON.stringify({ text: `[maxflow review] ${text}` }) });
+const notify = (text: string) => fetch(`${base}/api/sessions/${agent}/notify`, { method: "POST", headers: caller, body: JSON.stringify({ text: `[maxflow review] ${text}` }) });
 
 let stages = new Map<string, string>();
 let titles = new Map<string, string>();
 
 async function tick() {
   const prs = openPrs();
-  const sessions = ((await (await fetch(`${base}/api/sessions`)).json()) as Session[]).filter((s) => s.running && !s.name.startsWith("sentry:"));
+  const sessions = ((await (await fetch(`${base}/api/sessions`)).json()) as Session[]).filter((s) => s.running && !s.sentry);
   const names = new Map(sessions.map((s) => [s.id, s.name]));
   const ties = await links();
   const on = new Map<string, string[]>();

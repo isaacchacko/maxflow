@@ -30,6 +30,7 @@ type Session = {
   transcript?: string;
   links?: { found: Candidate[]; offset: number; at: number; repo?: string };
   archived?: boolean;
+  sentry?: boolean;
 };
 type ClaudeState = "working" | "waiting" | "idle";
 
@@ -113,6 +114,7 @@ function adoptSessions() {
     } catch {}
     session.transcript = tmux("show-options", "-v", "-t", t, "@mf-transcript").out.trim() || undefined;
     session.archived = tmux("show-options", "-v", "-t", t, "@mf-archived").out.trim() === "1";
+    session.sentry = tmux("show-options", "-v", "-t", t, "@mf-sentry").out.trim() === "1";
     sessions.set(id, session);
     attachViewer(session);
   }
@@ -128,9 +130,17 @@ const SENTRIES: Record<string, string[]> = Object.fromEntries(
 const reviewSource = (f: string) => new URL(`./sentries/${f}`, import.meta.url).pathname;
 SENTRIES["sentry:review"] = ["sh", "-c",
   `"${process.execPath}" "${reviewSource("review.ts")}" >"$HOME/.maxflow/review-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("review.md")}")"`];
+// A session is a sentry because the server started it as one, never because of its name.
+function markSentry(s: Session) {
+  s.sentry = true;
+  tmux("set-option", "-t", tmuxName(s.id), "@mf-sentry", "1");
+}
+// Sentries started before the flag existed: exactly a sentry's name, running a script from sentries/.
+for (const s of sessions.values())
+  if (!s.sentry && s.name in SENTRIES && s.cmd.join(" ").includes(reviewSource(""))) markSentry(s);
 if (process.env.MAXFLOW_SENTRIES !== "0")
   for (const [name, cmd] of Object.entries(SENTRIES))
-    if (![...sessions.values()].some((s) => s.name === name && s.exitCode === null)) createSession(name, cmd, new URL(".", import.meta.url).pathname);
+    if (![...sessions.values()].some((s) => s.sentry && s.name === name && s.exitCode === null)) markSentry(createSession(name, cmd, new URL(".", import.meta.url).pathname));
 
 // What an agent linked to each sentry in the graph is told about it.
 const CLI = new URL("./cli.ts", import.meta.url).pathname;
@@ -143,7 +153,12 @@ const SENTRY_USES: Record<string, string> = {
   "sentry:rename": `It titles your session in the maxflow sidebar by the topic you own. Pick your own title with \`${CLI} rename $MAXFLOW_SESSION <title>\` and it leaves you alone from then on.`,
 };
 
-const isSentry = (s: Session) => s.name.startsWith("sentry:");
+const isSentry = (s: Session) => !!s.sentry;
+// Lets the graph show one session reading or writing another; held is true while a wait is still watching.
+function touchFrom(req: Request, s: Session, kind: "read" | "write", held = false) {
+  const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
+  if (from && from !== s) publish(`touch/${from.id}/${s.id}`, { from: from.id, to: s.id, kind, held });
+}
 const isAgent = (s: Session) => !!s.claude || !!s.chatId || s.cmd[0] === "claude";
 
 // Without hooks a session counts as working while it prints; hooked claude says so itself, checked against two blind spots:
@@ -337,7 +352,8 @@ const describe = (s: Session, shown = links(s)) => ({
   prs: Object.fromEntries(shown.flatMap((u) => (prStates.has(u) ? [[u, prStates.get(u)]] : []))),
   group: groups()[s.id] ?? null,
   archived: !!s.archived,
-  ties: s.name === "sentry:review" ? reviewEdges() : [],
+  sentry: isSentry(s),
+  ties: isSentry(s) && s.name === "sentry:review" ? reviewEdges() : [],
 });
 
 // Plain text of the visible pane plus `history` lines above it, trailing blank lines dropped.
@@ -481,9 +497,7 @@ Bun.serve<WsData>({
       const s = sessions.get(act[1]);
       if (!s) return new Response("no such session", { status: 404 });
       const t = tmuxName(s.id);
-      const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-      // Lets the graph show one session reading or writing another; held is true while a wait is still watching.
-      const touch = (kind: "read" | "write", held = false) => from && from !== s && publish(`touch/${from.id}/${s.id}`, { from: from.id, to: s.id, kind, held });
+      const touch = (kind: "read" | "write", held = false) => touchFrom(req, s, kind, held);
       if (act[2] === "input" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { text?: string; keys?: string[]; enter?: boolean };
         if (s.exitCode !== null) return new Response("session ended", { status: 409 });
@@ -544,6 +558,7 @@ Bun.serve<WsData>({
           tmux("set-option", "-t", tmuxName(s.id), "@mf-archived", body.archived ? "1" : "0");
         }
         if (body.name?.trim()) {
+          touchFrom(req, s, "write");
           s.name = body.name.trim().slice(0, 80);
           tmux("set-option", "-t", tmuxName(s.id), "@mf", JSON.stringify({ name: s.name, cmd: s.cmd, cwd: s.cwd, chatId: s.chatId, createdAt: s.createdAt }));
         }

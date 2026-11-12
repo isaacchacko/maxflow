@@ -12,6 +12,8 @@ export const REVIEW_WATCH_FILE = join(STATE_DIR, "review-watch.json");
 const PROJECTS = join(process.env.HOME!, ".claude", "projects");
 const INTERVAL_MS = Number(process.env.GH_SENTRY_INTERVAL ?? 30_000);
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
+// Sent with each call that touches a session, so the graph draws this sentry doing it.
+const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 
 export type Watch = { pr: string; sessions: string[] };
 type PrState = { head: string; ci: string; state: string; mergeable: string; decision: string; seen: string[] };
@@ -84,8 +86,8 @@ function linkedRepo(urls: string[], ref: string) {
 
 // Which PR each live session is on: explicit watches, the branch checked out in its cwd, and set-pr.sh declarations.
 export async function links(): Promise<Link[]> {
-  const sessions = (await (await fetch(`${base}/api/sessions`)).json()) as { id: string; name: string; cwd: string; running: boolean; chatId?: string; transcript?: string; links?: string[] }[];
-  const live = sessions.filter((s) => s.running && !s.name.startsWith("sentry:"));
+  const sessions = (await (await fetch(`${base}/api/sessions`)).json()) as { id: string; name: string; cwd: string; running: boolean; sentry: boolean; chatId?: string; transcript?: string; links?: string[] }[];
+  const live = sessions.filter((s) => s.running && !s.sentry);
   const found: Link[] = [];
   for (const w of readWatches()) for (const session of w.sessions.length ? w.sessions : [""]) found.push({ pr: w.pr, repo: w.pr.split("#")[0], session });
   for (const s of live) {
@@ -108,9 +110,9 @@ export async function links(): Promise<Link[]> {
 // The agents post as the gh user too, so a comment by that user is the user's own only when no agent's tool call carries its text.
 const scanned = new Map<string, { offset: number; calls: string[] }>();
 async function agentCalls() {
-  const sessions = (await (await fetch(`${base}/api/sessions`)).json()) as { name: string; chatId?: string; transcript?: string }[];
+  const sessions = (await (await fetch(`${base}/api/sessions`)).json()) as { name: string; sentry: boolean; chatId?: string; transcript?: string }[];
   const calls: string[] = [];
-  for (const s of sessions.filter((s) => !s.name.startsWith("sentry:"))) {
+  for (const s of sessions.filter((s) => !s.sentry)) {
     const path = s.transcript ?? (s.chatId ? [...new Bun.Glob(`*/${s.chatId}.jsonl`).scanSync(PROJECTS)].map((f) => join(PROJECTS, f))[0] : undefined);
     if (!path || !existsSync(path)) continue;
     const memo = scanned.get(path) ?? scanned.set(path, { offset: 0, calls: [] }).get(path)!;
@@ -188,7 +190,7 @@ function snapshot(pr: Pr): PrState {
   };
 }
 
-const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", body: JSON.stringify(body) });
+const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", headers: caller, body: JSON.stringify(body) });
 
 async function tick(me: string, state: Record<string, PrState>) {
   const all = await links();

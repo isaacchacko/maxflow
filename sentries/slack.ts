@@ -14,6 +14,8 @@ const INTERVAL_MS = Number(process.env.SLACK_SENTRY_INTERVAL ?? 60_000);
 const POSTED_TIE_MS = Number(process.env.SLACK_POSTED_TIE_MS ?? 3 * 86_400_000);
 const DOMAIN = process.env.SLACK_DOMAIN ?? "dryftai";
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
+// Sent with each call that touches a session, so the graph draws this sentry doing it.
+const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 
 // A target is `C123/1794442442.159219` (a thread), `C123` (a channel's top-level posts) or `search:<query>`.
 export type Watch = { target: string; sessions: string[] };
@@ -82,7 +84,7 @@ async function search(query: string): Promise<Msg[]> {
 const permalink = (channel: string, ts: string, thread?: string) =>
   `https://${DOMAIN}.slack.com/archives/${channel}/p${ts.replace(".", "")}${thread && thread !== ts ? `?thread_ts=${thread}&cid=${channel}` : ""}`;
 
-type Session = { id: string; name: string; running: boolean; chatId?: string; transcript?: string };
+type Session = { id: string; name: string; running: boolean; sentry: boolean; chatId?: string; transcript?: string };
 type Tie = { target: string; session: string };
 
 // Threads a session's agent posted in through the Slack connector, read from its transcript, plus the ts of every message it posted.
@@ -119,7 +121,7 @@ function postedBy(s: Session) {
 
 async function ties(): Promise<{ ties: Tie[]; posted: Map<string, Set<string>> }> {
   const sessions = (await (await fetch(`${base}/api/sessions`)).json()) as Session[];
-  const live = sessions.filter((s) => s.running && !s.name.startsWith("sentry:"));
+  const live = sessions.filter((s) => s.running && !s.sentry);
   const alive = new Set(live.map((s) => s.id));
   const found: Tie[] = [];
   const posted = new Map<string, Set<string>>();
@@ -141,7 +143,7 @@ async function ties(): Promise<{ ties: Tie[]; posted: Map<string, Set<string>> }
 }
 
 const short = (text: string, n = 300) => (text.replace(/\s+/g, " ").trim().slice(0, n) + (text.length > n ? "…" : "")).trim();
-const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", body: JSON.stringify(body) });
+const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", headers: caller, body: JSON.stringify(body) });
 
 // New messages on a target since the last tick; the first look at a target only records where it stands.
 async function fresh(target: string, state: State): Promise<{ msgs: Msg[]; title: string }> {

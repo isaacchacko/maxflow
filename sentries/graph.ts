@@ -25,7 +25,7 @@ Some candidates are GitHub PRs the text named by number (#123, PR 123, owner/rep
 
 const GROUP_SYSTEM = `You group an engineer's running terminal and Claude agent sessions by the work they share, so a graph can draw related sessions close together. Sessions belong together when they work on the same project, feature, bug, ticket or PR; a shared folder alone is weak evidence when the titles point at unrelated work. Title each group the way a sidebar titles a session: 3 to 7 words naming the topic the group owns, e.g. "PRO-6201 safety stock dismissals" or "maxflow graph view". Name the ticket, PR, bug or feature when the sessions show one. Write a noun phrase, not a verb phrase. Never describe status, progress or the current step: no "fixing", "waiting on CI", "testing", "done". No quotes, no trailing period. Keep a group's existing title when it still names the right topic, so groups stay stable. Every session working on maxflow itself (the terminal and agent dashboard these sessions run in: its graph, sidebar, sentries, server or UI) goes in the one group "${MAXFLOW_GROUP}", never split by feature. A session unrelated to all others gets a group of its own. Reply with only JSON: {"<session id>": "<group name>", ...}, covering every session.`;
 
-type Session = { id: string; name: string; cmd: string[]; cwd: string; running: boolean; agent: boolean; links: string[]; group: string | null };
+type Session = { id: string; name: string; cmd: string[]; cwd: string; running: boolean; agent: boolean; links: string[]; group: string | null; sentry: boolean };
 type Candidate = { url: string; role: string; context: string };
 type Entry = { id: string; name: string; cwd: string; running: boolean; candidates: Candidate[] };
 
@@ -64,7 +64,7 @@ async function regroup() {
   if (key === groupedKey || Date.now() - groupedAt < GROUP_EVERY_MS) return;
   groupedAt = Date.now();
   // Sentries always form one group of their own; only the rest need judging.
-  const sentries = running.filter((s) => s.name.startsWith("sentry:")), sessions = running.filter((s) => !sentries.includes(s));
+  const sentries = running.filter((s) => s.sentry), sessions = running.filter((s) => !sentries.includes(s));
   const fixed = Object.fromEntries(sentries.map((s) => [s.id, SENTRY_GROUP]));
   for (const s of sessions) if (/maxflow/i.test(s.name) || s.cwd.startsWith(MAXFLOW_DIR)) fixed[s.id] = MAXFLOW_GROUP;
   if (sessions.length < 2) return void ((groupedKey = key), save(GROUPS_FILE, (groups = { ...Object.fromEntries(sessions.map((s) => [s.id, s.name])), ...fixed })));

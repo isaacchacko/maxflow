@@ -18,14 +18,15 @@ export type Session = {
   prs: Record<string, "open" | "closed" | "merged">;
   group: string | null;
   archived: boolean;
+  sentry: boolean;
   // Edges a sentry draws itself, to the sessions it ties to.
   ties: { session: string; label: string }[];
 };
 
 export type Chat = { id: string; title: string; prompt: string; cwd: string; mtime: number; live: boolean; session: string | null };
 
-export const isSentry = (s: Session) => s.name.startsWith("sentry:");
-export const displayName = (s: Session) => (isSentry(s) ? s.name.slice(7) : s.name);
+export const isSentry = (s: Session) => s.sentry;
+export const displayName = (s: Session) => (isSentry(s) ? s.name.replace(/^sentry:/, "") : s.name);
 export const isBusy = (s: Session) => s.status === "working";
 export const isWaiting = (s: Session) => s.status === "waiting";
 export const kindOf = (s: Session) => (isSentry(s) ? "sentry" : s.agent ? "Claude chat" : "shell");

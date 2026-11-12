@@ -11,10 +11,12 @@ const FIRST_CHARS = Number(process.env.RENAME_FIRST_CHARS ?? 400);
 const EVERY_CHARS = Number(process.env.RENAME_EVERY_CHARS ?? 4000);
 const MODEL = process.env.RENAME_MODEL ?? "haiku";
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
+// Sent with each call that touches a session, so the graph draws this sentry doing it.
+const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 
 const SYSTEM = `You title terminal sessions in a sidebar. Given a session's recent screen, reply with only its title: 3 to 7 words naming the topic the session owns, e.g. "PRO-6201 safety stock dismissals" or "maxflow gh sentry". Name the ticket, PR, bug or feature when the screen shows one. Write a noun phrase, not a verb phrase ("stalled CI on PRs 12194, 12192", not "Kicking stalled CI"). Never describe status, progress or the current step: no "fixing", "waiting on CI", "testing", "done". If the current title still names the right topic, reply with it unchanged. No quotes, no trailing period. If the screen shows no work yet (only a startup banner, an empty prompt, a bare shell), reply SKIP.`;
 
-type Session = { id: string; name: string; cmd: string[]; cwd: string; running: boolean };
+type Session = { id: string; name: string; cmd: string[]; cwd: string; running: boolean; sentry: boolean };
 type Mark = { lastSet?: string; pinned?: boolean };
 
 const marks: Record<string, Mark> = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {};
@@ -22,7 +24,7 @@ const marks: Record<string, Mark> = existsSync(STATE_FILE) ? JSON.parse(readFile
 const seen = new Map<string, Set<string>>();
 
 const screenLines = async (id: string) =>
-  ((await (await fetch(`${base}/api/sessions/${id}/screen?history=300`)).json()).screen as string).split("\n").map((l) => l.trim()).filter(Boolean);
+  ((await (await fetch(`${base}/api/sessions/${id}/screen?history=300`, { headers: caller })).json()).screen as string).split("\n").map((l) => l.trim()).filter(Boolean);
 
 async function title(s: Session, lines: string[]) {
   const screen = lines.join("\n").slice(-8000);
@@ -37,7 +39,7 @@ async function title(s: Session, lines: string[]) {
 }
 
 async function tick() {
-  const sessions = ((await (await fetch(`${base}/api/sessions`)).json()) as Session[]).filter((s) => s.running && !s.name.startsWith("sentry:"));
+  const sessions = ((await (await fetch(`${base}/api/sessions`)).json()) as Session[]).filter((s) => s.running && !s.sentry);
   for (const id of Object.keys(marks)) if (!sessions.some((s) => s.id === id)) delete marks[id];
   for (const s of sessions) {
     const mark = (marks[s.id] ??= {});
@@ -52,7 +54,7 @@ async function tick() {
     const name = await title(s, lines);
     seen.set(s.id, new Set(lines));
     if (!name || name === "SKIP" || name === s.name) continue;
-    await fetch(`${base}/api/sessions/${s.id}`, { method: "PATCH", body: JSON.stringify({ name }) });
+    await fetch(`${base}/api/sessions/${s.id}`, { method: "PATCH", headers: caller, body: JSON.stringify({ name }) });
     mark.lastSet = name;
     console.log(`${new Date().toLocaleTimeString()}  ${s.id}  ${s.name}  ->  ${name}`);
   }
