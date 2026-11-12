@@ -458,6 +458,8 @@ const QUESTIONS = `${process.env.HOME}/.maxflow/questions.json`;
 const questions: Question[] = (() => { try { return JSON.parse(readFileSync(QUESTIONS, "utf8")); } catch { return []; } })();
 const saveQuestions = () => writeFileSync(QUESTIONS, JSON.stringify(questions));
 const isOpen = (q: Question) => q.status === "gating" || q.status === "pending";
+// sentry:questions' edges to the sessions with a question open, labeled by its ids.
+const questionTies = () => [...Map.groupBy(questions.filter(isOpen), (q) => q.session)].map(([session, qs]) => ({ session, label: qs.map((q) => `q${q.id}`).join(" ") }));
 // Every answer the user gave in his queue; sentry:questions distills each into a standing rule, or null for a one-off, and answers new asks from them.
 type Decision = { q: number; session: string; name: string; question: string; answer: string; at: number; rule?: string | null };
 const DECISIONS = `${process.env.HOME}/.maxflow/decisions.json`;
@@ -552,7 +554,7 @@ const describe = (s: Session, shown = links(s)) => ({
   role: roles()[s.id] ?? null,
   archived: !!s.archived,
   sentry: isSentry(s),
-  ties: (isSentry(s) && sentryTies[s.name]?.()) || [],
+  ties: (isSentry(s) && (s.name === "sentry:questions" ? questionTies() : sentryTies[s.name]?.())) || [],
   wait: s.wait ?? null,
 });
 
@@ -677,6 +679,13 @@ Bun.serve<WsData>({
 
     if (path === "/api/review" && req.method === "GET") return Response.json({ board: reviewBoard(), queue: reviewQueue() });
 
+    // An agent using a sentry through the CLI (gh status, slack read, ...), drawn in the graph as it touching that sentry.
+    if (path === "/api/touch" && req.method === "POST") {
+      const body = (await req.json().catch(() => ({}))) as { sentry?: string; kind?: "read" | "write" };
+      const to = [...sessions.values()].find((o) => isSentry(o) && o.name === `sentry:${body.sentry}` && o.exitCode === null);
+      if (to) touchFrom(req, to, body.kind === "write" ? "write" : "read");
+      return new Response(null, { status: 204 });
+    }
     if (path === "/api/questions" && req.method === "GET") return Response.json(questions.slice(-200));
     if (path === "/api/questions" && req.method === "POST") {
       const body = (await req.json().catch(() => ({}))) as { session?: string; text?: string; re?: number; default?: string };
@@ -684,6 +693,8 @@ Bun.serve<WsData>({
       if (!s) return new Response("ask from inside a maxflow session ($MAXFLOW_SESSION)", { status: 400 });
       if (!body.text?.trim()) return new Response("text required", { status: 400 });
       const q = ask(s, body.text.trim(), body.re, body.default?.trim() || undefined);
+      const gate = [...sessions.values()].find((o) => isSentry(o) && o.name === "sentry:questions" && o.exitCode === null);
+      if (gate) touchFrom(req, gate, "write");
       return q ? Response.json(q, { status: 201 }) : new Response(`no question q${body.re} of yours`, { status: 404 });
     }
     const questionAct = path.match(/^\/api\/questions\/(\d+)$/);

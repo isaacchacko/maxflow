@@ -35,6 +35,9 @@ async function call(path: string, init?: RequestInit) {
   if (!res.ok) console.error(`${res.status} ${await res.text()}`), process.exit(1);
   return res.status === 204 ? null : res.json();
 }
+// Using a sentry through the CLI draws this session touching it in the graph; maxflow being down never fails the verb.
+const touchSentry = (sentry: string, kind: "read" | "write") =>
+  caller && fetch(`${base}/api/touch`, { method: "POST", headers: caller, body: JSON.stringify({ sentry, kind }) }).catch(() => {});
 
 async function create(body: { name?: string; cmd?: string[]; cwd?: string }) {
   const res = await fetch(`${base}/api/sessions`, { method: "POST", body: JSON.stringify(body) });
@@ -116,6 +119,7 @@ if (verb === "ls") {
     if (events.length) after = String(events.at(-1).seq);
   }
 } else if (verb === "gh" && rest[0] === "status") {
+  await touchSentry("gh", "read");
   const ref = positional(rest.slice(1), [])[0];
   const me = process.env.MAXFLOW_SESSION;
   const polled = readStatus();
@@ -142,6 +146,7 @@ if (verb === "ls") {
     console.log(rest.includes("--json") ? JSON.stringify(entry.pr) : `${render(key, entry.pr, entry.at)}\n`);
   }
 } else if (verb === "slack" && rest[0] === "read" && rest[1]) {
+  await touchSentry("slack", "read");
   const ref = positional(rest.slice(1), ["--last"]).join(" ");
   const target = await slack.parseTarget(ref);
   if (!target) console.error(`no channel named ${ref}`), process.exit(1);
@@ -160,6 +165,7 @@ if (verb === "ls") {
 } else if (verb === "gh" && rest[0] === "ls") {
   for (const w of readWatches()) console.log(`${w.pr}  ${w.sessions.join(", ") || "(no session)"}`);
 } else if (verb === "gh" && (rest[0] === "watch" || rest[0] === "unwatch") && rest[1]) {
+  await touchSentry("gh", "write");
   const pr = parsePr(rest[1], process.cwd());
   if (!pr) console.error(`can't tell which repo ${rest[1]} is in; use owner/repo#n or a PR url`), process.exit(1);
   const session = flag(rest, "--session") ?? process.env.MAXFLOW_SESSION;
@@ -171,6 +177,7 @@ if (verb === "ls") {
 } else if (verb === "slack" && rest[0] === "ls") {
   for (const w of slack.readWatches()) console.log(`${w.target}  ${w.sessions.join(", ") || "(no session)"}`);
 } else if (verb === "slack" && (rest[0] === "watch" || rest[0] === "unwatch") && rest[1]) {
+  await touchSentry("slack", "write");
   const target = await slack.parseTarget(positional(rest.slice(1), ["--session"]).join(" "));
   if (!target) console.error(`no channel named ${rest[1]}`), process.exit(1);
   const session = flag(rest, "--session") ?? process.env.MAXFLOW_SESSION;

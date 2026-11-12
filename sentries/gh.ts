@@ -62,22 +62,23 @@ type Pr = {
   reviewThreads: { nodes: { isResolved: boolean; comments: { nodes: { id: string; body: string; path: string; url: string; author: { login: string } | null }[] } }[] };
 };
 
-// One GraphQL request per repo, covering the PRs watched by number and the ones found by branch.
+// A repo's PRs watched by number and found by branch, asked 20 at a time: one query for ~80 runs into GitHub's 10s GraphQL timeout and comes back empty.
+const CHUNK = 20;
 export function fetchPrs(repo: string, numbers: number[], branches: string[]) {
   const [owner, name] = repo.split("/");
   const parts = [
     ...numbers.map((n) => `n${n}: pullRequest(number: ${n}) { ...F }`),
     ...branches.map((b, i) => `b${i}: pullRequests(headRefName: ${JSON.stringify(b)}, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { ...F } }`),
   ];
-  const q = `query { r: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${parts.join("\n")} } }\nfragment F on PullRequest { ${FIELDS} }`;
-  // One PR number that doesn't resolve makes gh exit 1, but the rest of the repo's data still comes back.
-  const res = Bun.spawnSync(["gh", "api", "graphql", "-f", `query=${q}`], { stderr: "pipe" });
-  let r: Record<string, any> | undefined;
-  try {
-    r = JSON.parse(res.stdout.toString()).data?.r;
-  } catch {}
-  if (res.exitCode !== 0) console.error(`${new Date().toLocaleTimeString()}  ${repo}: ${res.stderr.toString().trim().slice(0, 300)}`);
-  if (!r) return { byNumber: new Map<number, Pr>(), byBranch: new Map<string, Pr>() };
+  const r: Record<string, any> = {};
+  for (let i = 0; i < parts.length; i += CHUNK) {
+    const q = `query { r: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${parts.slice(i, i + CHUNK).join("\n")} } }\nfragment F on PullRequest { ${FIELDS} }`;
+    const res = Bun.spawnSync(["gh", "api", "graphql", "-f", `query=${q}`], { stderr: "pipe" });
+    const out = res.stdout.toString();
+    if (res.exitCode !== 0) console.error(`${new Date().toLocaleTimeString()}  ${repo}: graphql failed for ${parts.length > CHUNK ? `chunk ${i / CHUNK + 1}` : "its PRs"}: ${res.stderr.toString().trim().slice(0, 300)}`);
+    // One PR number that doesn't resolve makes gh exit 1, but the rest of the chunk's data still comes back.
+    try { Object.assign(r, JSON.parse(out).data?.r ?? {}); } catch {}
+  }
   return {
     byNumber: new Map(numbers.flatMap((n) => (r[`n${n}`] ? [[n, r[`n${n}`] as Pr]] : []))),
     byBranch: new Map(branches.flatMap((b, i) => (r[`b${i}`]?.nodes[0] ? [[b, r[`b${i}`].nodes[0] as Pr]] : []))),
