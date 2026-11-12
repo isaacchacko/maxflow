@@ -14,6 +14,9 @@ const usage = `usage:
   maxflow ask <question...> [--re QID] [--default REC]   raise a question to the user through sentry:questions; returns at once.
                                              --default: your recommendation for a reversible step, which you go ahead with if he hasn't answered in 3h
   maxflow questions [--all]                  the user's question queue
+  maxflow tasks [--all]                      the user's task board, with each task's timeline; --all adds done and dropped ones
+  maxflow task new <title...> | maxflow task <id> [--title T] [--status todo|doing|you|waiting|done|dropped] [--question] [--answer A]
+                                             [--session ID] [--link URL] [--event TEXT] [--at TIME]   sentry:assistant's edits to the board
   maxflow link <id> <id> [why...]            introduce two sessions to each other, as drawing an edge in the graph does
   maxflow sub <topic-glob> [--since SEQ] [--timeout MS] [--follow]   block for the next matching event, print it as JSON
   maxflow pub <topic> [json]
@@ -103,6 +106,26 @@ if (verb === "ls") {
   for (const q of await call("/api/questions"))
     if (rest.includes("--all") || q.status === "gating" || q.status === "pending")
       console.log(`q${q.id}  ${q.status.padEnd(9)}  ${q.name} (${q.session})\n${q.thread.map((m: { from: string; text: string }) => `  ${m.from}: ${m.text}`).join("\n")}\n`);
+} else if (verb === "tasks") {
+  for (const t of await call("/api/tasks"))
+    if (rest.includes("--all") || (t.status !== "done" && t.status !== "dropped"))
+      console.log(`t${t.id}  ${t.status.padEnd(7)}  ${t.kind === "question" ? "? " : ""}${t.title}  [${t.sessions.join(" ")}]\n${t.timeline.map((e: { at: number; text: string }) => `  ${new Date(e.at).toLocaleString()}  ${e.text}`).join("\n")}${t.answer ? `\n  answer: ${t.answer}` : ""}\n`);
+} else if (verb === "task" && rest[0]) {
+  const valued = ["--title", "--status", "--answer", "--session", "--link", "--event", "--at"];
+  const [ref, ...words] = positional(rest, valued);
+  const at = flag(rest, "--at");
+  const edit = {
+    title: flag(rest, "--title") ?? (ref === "new" ? words.join(" ") : undefined),
+    status: flag(rest, "--status"),
+    kind: rest.includes("--question") ? "question" : undefined,
+    answer: flag(rest, "--answer"),
+    session: flag(rest, "--session"),
+    link: flag(rest, "--link"),
+    event: flag(rest, "--event"),
+    at: at ? (/^\d+$/.test(at) ? Number(at) : Date.parse(at)) : undefined,
+  };
+  const t = await call(ref === "new" ? "/api/tasks" : `/api/tasks/${ref.replace(/^t/, "")}`, { method: "POST", body: JSON.stringify(edit) });
+  console.log(`t${t.id} ${t.status}: ${t.title}`);
 } else if (verb === "link" && rest[1]) {
   await call("/api/link", { method: "POST", body: JSON.stringify({ a: rest[0], b: rest[1], why: rest.slice(2).join(" ") || undefined }) });
 } else if (verb === "pub" && rest[0]) {

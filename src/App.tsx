@@ -9,7 +9,8 @@ import { Terminal, type TerminalHandle } from "@/components/terminal";
 import { GraphView } from "@/components/graph";
 import { ResumeDialog } from "@/components/resume-dialog";
 import { QuestionsPanel } from "@/components/questions";
-import { api, isSentry, store, type Question, type Session } from "@/lib/api";
+import { TasksBoard } from "@/components/tasks";
+import { api, isSentry, store, type Question, type Session, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export function App() {
@@ -22,6 +23,8 @@ export function App() {
   const [resuming, setResuming] = useState(location.hash === "#resume");
   const [questions, setQuestions] = useState<Question[]>([]);
   const [asking, setAsking] = useState(location.hash === "#questions");
+  const [tasking, setTasking] = useState(location.hash === "#tasks");
+  const [tasks, setTasks] = useState<Task[]>([]);
   const term = useRef<TerminalHandle | null>(null);
 
   const refresh = useCallback(() => api.sessions().then((s) => (setSessions(s), setLoaded(true))), []);
@@ -37,6 +40,14 @@ export function App() {
     const t = setInterval(refreshQuestions, 3000);
     return () => clearInterval(t);
   }, []);
+  useEffect(() => {
+    if (!tasking) return;
+    const refreshTasks = () => api.tasks().then(setTasks, () => {});
+    refreshTasks();
+    const t = setInterval(refreshTasks, 3000);
+    return () => clearInterval(t);
+  }, [tasking]);
+
   const waiting = questions.filter((q) => q.status === "pending").length;
   useEffect(() => void (document.title = waiting ? `(${waiting}) maxflow` : "maxflow"), [waiting]);
 
@@ -77,8 +88,8 @@ export function App() {
     });
 
   useEffect(() => {
-    if (!graphing) requestAnimationFrame(() => (term.current?.fit(), term.current?.focus()));
-  }, [graphing]);
+    if (!graphing && !tasking) requestAnimationFrame(() => (term.current?.fit(), term.current?.focus()));
+  }, [graphing, tasking]);
   useEffect(() => void requestAnimationFrame(() => term.current?.fit()), [collapsed]);
 
   useEffect(() => {
@@ -86,6 +97,7 @@ export function App() {
       const plain = !e.altKey && !e.shiftKey;
       if (e.metaKey && !e.ctrlKey && plain && e.key === "g") setGraphing((g) => !g);
       else if (e.metaKey && !e.ctrlKey && !e.altKey && e.key === "b") toggleSidebar();
+      else if (e.metaKey && !e.ctrlKey && plain && e.key === "k") setTasking((t) => !t);
       else if (e.ctrlKey && !e.metaKey && plain && e.key === "t") newShell();
       else return;
       e.preventDefault();
@@ -129,6 +141,7 @@ export function App() {
             onArchiveLinks={archiveLinks}
             onToggleArchived={toggleArchived}
           />
+          {tasking && <TasksBoard tasks={tasks} sessions={sessions} onOpen={open} onClose={() => setTasking(false)} />}
           {asking && <QuestionsPanel questions={questions} onOpen={open} onSettled={refreshQuestions} onClose={() => setAsking(false)} />}
           {loaded && !sessions.length && !graphing && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-muted-foreground">

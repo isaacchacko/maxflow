@@ -153,6 +153,9 @@ SENTRIES["sentry:review"] = ["sh", "-c",
 // The meta sentry is a claude agent that watches the other agents; its feed times their transcripts beside it.
 SENTRIES["sentry:meta"] = ["sh", "-c",
   `"${process.execPath}" "${reviewSource("meta.ts")}" >"$HOME/.maxflow/meta-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("meta.md")}")"`];
+// The assistant sentry is a claude agent that keeps the user's task board; its feed brings it his prompts and the fleet's events.
+SENTRIES["sentry:assistant"] = ["sh", "-c",
+  `"${process.execPath}" "${reviewSource("assistant.ts")}" >"$HOME/.maxflow/assistant-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("assistant.md")}")"`];
 // The funnel sentry is a claude agent that takes the user's requests and routes each to an agent.
 SENTRIES["sentry:funnel"] = ["sh", "-c", `exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("funnel.md")}")"`];
 // A session is a sentry because the server started it as one, never because of its name.
@@ -596,6 +599,47 @@ function settle(q: Question, action: Settle, text = "") {
       : `[maxflow] The user closed your question q${q.id} without answering. Go with your recommendation and carry on.`);
 }
 
+// The user's task board, which sentry:assistant derives from what he asks and what agents do; he never writes to it himself.
+const TASK_STATUSES = ["todo", "doing", "you", "waiting", "done", "dropped"] as const;
+type Task = {
+  id: number;
+  title: string;
+  kind: "task" | "question";
+  status: (typeof TASK_STATUSES)[number];
+  answer?: string;
+  sessions: string[];
+  links: string[];
+  at: number;
+  updated: number;
+  timeline: { at: number; text: string; session?: string }[];
+};
+type TaskEdit = Partial<Pick<Task, "title" | "kind" | "status" | "answer">> & { session?: string; link?: string; event?: string; at?: number };
+const TASKS = `${process.env.HOME}/.maxflow/tasks.json`;
+const tasks: Task[] = (() => { try { return JSON.parse(readFileSync(TASKS, "utf8")); } catch { return []; } })();
+const saveTasks = () => writeFileSync(TASKS, JSON.stringify(tasks));
+
+// at: when the event happened, which the assistant reads from the transcript it took it from; it defaults to now.
+function editTask(t: Task | undefined, edit: TaskEdit) {
+  if (edit.status && !TASK_STATUSES.includes(edit.status)) return `status is one of ${TASK_STATUSES.join(", ")}`;
+  const at = edit.at ?? Date.now();
+  if (!t) {
+    if (!edit.title) return "a new task needs a title";
+    t = { id: (tasks.at(-1)?.id ?? 0) + 1, title: edit.title, kind: "task", status: "todo", sessions: [], links: [], at, updated: at, timeline: [] };
+    tasks.push(t);
+  }
+  const moved = edit.status && edit.status !== t.status;
+  Object.assign(t, Object.fromEntries(Object.entries({ title: edit.title, kind: edit.kind, status: edit.status, answer: edit.answer }).filter(([, v]) => v !== undefined)));
+  if (edit.session && !t.sessions.includes(edit.session)) t.sessions.push(edit.session);
+  if (edit.link && !t.links.includes(edit.link)) t.links.push(edit.link);
+  if (edit.event || moved) {
+    t.timeline.push({ at, text: edit.event ?? `moved to ${t.status}`, ...(edit.session && { session: edit.session }) });
+    t.timeline.sort((a, b) => a.at - b.at);
+  }
+  t.updated = Math.max(t.updated, at);
+  saveTasks();
+  return t;
+}
+
 // An unanswered question with a default for a reversible step stops holding its agent after DEFAULT_AFTER_MS.
 setInterval(() => {
   for (const q of questions)
@@ -794,6 +838,14 @@ Bun.serve<WsData>({
       return Response.json(q);
     }
 
+    if (path === "/api/tasks" && req.method === "GET") return Response.json(tasks);
+    const task = path.match(/^\/api\/tasks(?:\/(\d+))?$/);
+    if (task && req.method === "POST") {
+      const t = task[1] ? tasks.find((o) => o.id === Number(task[1])) : undefined;
+      if (task[1] && !t) return new Response("no such task", { status: 404 });
+      const done = editTask(t, (await req.json().catch(() => ({}))) as TaskEdit);
+      return typeof done === "string" ? new Response(done, { status: 400 }) : Response.json(done, { status: t ? 200 : 201 });
+    }
     if (path === "/api/decisions" && req.method === "GET") return Response.json(decisions);
     const decisionAct = path.match(/^\/api\/decisions\/(\d+)$/);
     if (decisionAct && req.method === "PATCH") {
