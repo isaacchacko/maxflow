@@ -105,6 +105,9 @@ function adoptSessions() {
       meta = { name: t, cmd: [], cwd: "", createdAt: Date.now() };
     }
     const session = { id, ...meta, chunks: [], bytes: 0, clients: new Set(), exitCode: null, inbox: [] } as unknown as Session;
+    try {
+      session.inbox = JSON.parse(tmux("show-options", "-v", "-t", t, "@mf-inbox").out);
+    } catch {}
     const hasHistory = Number(tmux("display-message", "-p", "-t", t, "#{history_size}").out) > 0;
     const history = hasHistory ? tmux("capture-pane", "-p", "-e", "-J", "-t", t, "-S", "-", "-E", "-1").out : "";
     if (history.trim()) push(session, new TextEncoder().encode(history.replace(/\n/g, "\r\n")));
@@ -311,6 +314,12 @@ const groups = sentryFile<Record<string, string>>(`${process.env.HOME}/.maxflow/
 // sentry:review's edges to the sessions on PRs waiting for a reviewer, [{ session, label }].
 const reviewEdges = sentryFile<{ session: string; label: string }[]>(`${process.env.HOME}/.maxflow/review-edges.json`, []);
 
+// The inbox lives in tmux too, so a server restart doesn't drop a message the agent hasn't been given yet.
+function queue(s: Session, text: string) {
+  s.inbox.push(text);
+  tmux("set-option", "-t", tmuxName(s.id), "@mf-inbox", JSON.stringify(s.inbox));
+}
+
 // An edge drawn in the graph: tell each agent end who is on the other side and how to reach it.
 function introduce(to: Session, other: Session, why?: string) {
   if (!isAgent(to) || to.exitCode !== null) return;
@@ -321,7 +330,7 @@ function introduce(to: Session, other: Session, why?: string) {
     : isAgent(other)
       ? `[maxflow] The user linked you with another agent, ${who}, and wants you two talking; it got this same note about you.${reason} Start now: message it what you're working on and what you could use from it or offer it, then answer what it sends you. Keep it going while it helps; drop it once it doesn't. Message it with \`${CLI} notify ${other.id} '<text>'\` (typed into its prompt once it is idle; say you are session ${to.id} so it can answer), and read its screen with \`${CLI} screen ${other.id} --history 200\`.`
       : `[maxflow] The user linked you with the terminal session ${who}, running \`${other.cmd.join(" ")}\`; it may matter to your work.${reason} Read it with \`${CLI} screen ${other.id} --history 200\`, type into it with \`${CLI} send ${other.id} '<text>'\`.`;
-  to.inbox.push(text);
+  queue(to, text);
 }
 
 // A claude's TUI redraws nonstop, so for an agent its last transcript write is what counts as activity.
@@ -383,6 +392,7 @@ setInterval(async () => {
   for (const s of sessions.values()) {
     if (!s.inbox.length || s.exitCode !== null || Date.now() - s.lastOutputAt < DELIVER_IDLE_MS || !atEmptyPrompt(s)) continue;
     const text = s.inbox.splice(0).join("\n");
+    tmux("set-option", "-t", tmuxName(s.id), "@mf-inbox", "[]");
     await tmuxAsync("send-keys", "-t", tmuxName(s.id), "-l", "--", text);
     await Bun.sleep(150);
     await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Enter");
@@ -514,7 +524,7 @@ Bun.serve<WsData>({
       if (act[2] === "notify" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { text?: string };
         if (!body.text?.trim()) return new Response("text required", { status: 400 });
-        s.inbox.push(body.text.trim());
+        queue(s, body.text.trim());
         touch("write");
         return Response.json(describe(s), { status: 202 });
       }
