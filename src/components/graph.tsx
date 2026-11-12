@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { GraphRenderer } from "@isaacchacko/graph";
-import { Archive, Bot, ChevronDown, ChevronUp, Link2, Shapes, Trash2, X } from "lucide-react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { Archive, Bot, ChevronDown, ChevronUp, GitPullRequest, Hash, HeartPulse, Link2, Radar, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
@@ -44,31 +45,16 @@ function hubsOf(sessions: Session[]) {
   }
   return hubs;
 }
-const favicons = new Map<string, HTMLImageElement | null>();
-// The site's own /favicon.ico, then Google's favicon service, then none (the node keeps its plain dot).
-function favicon(host: string) {
-  if (favicons.has(host)) return favicons.get(host);
-  const img = new Image(), sources = [`${/^localhost(:|$)/.test(host) ? "http" : "https"}://${host}/favicon.ico`, `https://www.google.com/s2/favicons?domain=${host}&sz=64`];
-  img.onerror = () => (sources.length ? (img.src = sources.shift()!) : favicons.set(host, null));
-  img.src = sources.shift()!;
-  favicons.set(host, img);
-  return img;
-}
-function drawFavicons(ctx: CanvasRenderingContext2D, g: GraphRenderer, hubs: string[], ring: string) {
-  for (const hub of hubs) {
-    const box = g.getNodeScreenBox(hub), img = favicon(hostOfHub(hub));
-    if (!box || box.r < 3 || !img?.complete || !img.naturalWidth) continue;
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(box.x, box.y, box.r, 0, Math.PI * 2);
-    ctx.fillStyle = ring;
-    ctx.fill();
-    ctx.clip();
-    const side = box.r * 1.5;
-    ctx.drawImage(img, box.x - side / 2, box.y - side / 2, side, side);
-    ctx.restore();
-  }
-}
+// A PR's node is colored by whether it is open, closed or merged.
+const prColors = (sessions: Session[]) => new Map(sessions.flatMap((s) => Object.entries(s.prs)).map(([u, state]) => [u, css(`--pr-${state}`)]));
+// The site's own /favicon.ico, then Google's favicon service; the graph keeps a plain dot if neither loads.
+const favicon = (host: string) => [`${/^localhost(:|$)/.test(host) ? "http" : "https"}://${host}/favicon.ico`, `https://www.google.com/s2/favicons?domain=${host}&sz=64`];
+// A sentry's node shows what it watches, drawn in the sentry color.
+const SENTRY_ICONS: Record<string, LucideIcon> = { gh: GitPullRequest, slack: Hash, rename: Tag, health: HeartPulse, graph: Waypoints };
+const sentryIcon = (s: Session, color: string) => {
+  const Icon = SENTRY_ICONS[displayName(s)] ?? Radar;
+  return `data:image/svg+xml,${encodeURIComponent(renderToStaticMarkup(<Icon color={color} size={48} strokeWidth={2.25} />))}`;
+};
 // sentry:graph groups sessions by shared work; every pair in a group is joined by a hidden link that pulls them together.
 const groupPulls = (sessions: Session[]) => {
   const byGroup = Map.groupBy(sessions.filter((s) => s.group), (s) => s.group!);
@@ -118,7 +104,8 @@ function drawGroups(ctx: CanvasRenderingContext2D, graph: GraphRenderer, session
     ctx.fillText(title, above ? top[0] : bottom[0], above ? top[1] - 6 : bottom[1] + 6);
   }
 }
-const sessionColor = (s: Session) => (!s.running || s.archived ? "#484f58" : isSentry(s) ? css("--sentry") : s.agent ? css("--chat") : css("--foreground"));
+const ARCHIVED = "#484f58";
+const sessionColor = (s: Session) => (!s.running || s.archived ? ARCHIVED : isSentry(s) ? css("--sentry") : s.agent ? css("--chat") : css("--foreground"));
 
 // Pixel art clipped to a node's circle: water rising from the bottom in a sine wave while it works, three dots ticking in turn while it waits on you.
 function drawPixels(ctx: CanvasRenderingContext2D, box: { x: number; y: number; r: number }, t: number, working: boolean, ink: string) {
@@ -141,7 +128,7 @@ function drawPixels(ctx: CanvasRenderingContext2D, box: { x: number; y: number; 
 }
 
 // One node per session, linked by edges drawn by hand; drawing one asks why, then introduces the two ends with that reason, and edges live in this browser and go when either session does.
-export function GraphView({ sessions: all, visible, current, hideArchived, onOpen, onCreated, onArchive, onToggleArchived }: {
+export function GraphView({ sessions: all, visible, current, hideArchived, onOpen, onCreated, onArchive, onArchiveLinks, onToggleArchived }: {
   sessions: Session[];
   visible: boolean;
   current: string | null;
@@ -149,10 +136,14 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   onOpen: (id: string) => void;
   onCreated: () => Promise<unknown>;
   onArchive: (id: string, archived: boolean) => void;
+  onArchiveLinks: (urls: string[], archived: boolean) => void;
   onToggleArchived: () => void;
 }) {
-  // Edges to a hidden archived session are kept, so they come back when it is shown again.
-  const sessions = hideArchived ? all.filter((s) => !s.archived) : all;
+  // Edges to a hidden archived session are kept, so they come back when it is shown again; archived links hide along with them.
+  const archivedUrls = new Set(all.flatMap((s) => s.archivedLinks));
+  const sessions = hideArchived ? all.filter((s) => !s.archived).map((s) => ({ ...s, links: s.links.filter((u) => !archivedUrls.has(u)) })) : all;
+  const allArchived = (urls: string[]) => urls.every((u) => archivedUrls.has(u));
+  const prs = prColors(sessions);
   const el = useRef<HTMLDivElement>(null);
   const graph = useRef<GraphRenderer | null>(null);
   const [edges, setEdgesState] = useState<Edge[]>(() => { try { return JSON.parse(store.get("mf.edges") || "[]"); } catch { return []; } });
@@ -178,8 +169,8 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   const [pendingKeys, setPendingKeys] = useState("");
   // While a G chord is pending, every group is outlined with the number that picks it.
   const pickingGroup = pendingKeys.startsWith("G");
-  const tip = useRef<HTMLDivElement>(null), editor = useRef<HTMLDivElement>(null), waves = useRef<HTMLCanvasElement>(null), icons = useRef<HTMLCanvasElement>(null), hulls = useRef<HTMLCanvasElement>(null);
-  const live = useRef({ edges, mode, onOpen, onArchive, onToggleArchived, newAgentHere: () => {}, toggleHub: (_hub: string) => {}, toggleUrls: () => {}, toggleGroups: () => {}, toggleTitles: () => {}, sessions, drafting: false, togglePick: (_id: string) => {}, groupChords: {} as Record<string, () => void>, groupNumbers: new Map<string, number>() });
+  const tip = useRef<HTMLDivElement>(null), editor = useRef<HTMLDivElement>(null), waves = useRef<HTMLCanvasElement>(null), hulls = useRef<HTMLCanvasElement>(null);
+  const live = useRef({ edges, mode, onOpen, onArchive, onArchiveLinks, archivedUrls, onToggleArchived, newAgentHere: () => {}, toggleHub: (_hub: string) => {}, toggleUrls: () => {}, toggleGroups: () => {}, toggleTitles: () => {}, sessions, drafting: false, togglePick: (_id: string) => {}, groupChords: {} as Record<string, () => void>, groupNumbers: new Map<string, number>() });
 
   const setEdges = (next: Edge[]) => {
     setEdgesState(next);
@@ -203,6 +194,10 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     });
     g.on("nodeContextMenu", ({ id, event }) => {
       event.preventDefault();
+      if (isDomainNode(id) || isUrlNode(id)) {
+        const urls = isDomainNode(id) ? (hubsOf(live.current.sessions).get(id) ?? []) : [urlOfNode(id)];
+        return live.current.onArchiveLinks(urls, !urls.every((u) => live.current.archivedUrls.has(u)));
+      }
       const s = live.current.sessions.find((s) => s.id === id);
       if (s) live.current.onArchive(id, !s.archived);
     });
@@ -229,7 +224,11 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     graph.current = g;
   }, [visible]);
 
-  useEffect(() => () => graph.current?.destroy(), []);
+  // Fast Refresh reruns every effect, so a destroyed renderer must be dropped for the effect above to build a new one.
+  useEffect(() => () => {
+    graph.current?.destroy();
+    graph.current = null;
+  }, []);
 
   useEffect(() => {
     const g = graph.current;
@@ -244,10 +243,10 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
         ...sessions.map((s) => {
           const at = placeAt.current.get(s.id);
           placeAt.current.delete(s.id);
-          return { id: s.id, label: showTitles ? s.name : "", color: sessionColor(s), size: (s.agent ? 2.4 : 1.8) * (isBusy(s) || isWaiting(s) ? 1.6 : 1), ...at };
+          return { id: s.id, label: showTitles ? s.name : "", color: sessionColor(s), icon: isSentry(s) ? sentryIcon(s, sessionColor(s)) : undefined, size: (s.agent || isSentry(s) ? 2.4 : 1.8) * (isBusy(s) || isWaiting(s) ? 1.6 : 1), ...at };
         }),
-        ...children.map((id) => ({ id, label: "", color: css("--url"), size: 1 })),
-        ...[...hubs.keys()].map((hub) => ({ id: hub, label: showTitles ? hostOfHub(hub) : "", color: css("--url"), size: 3 })),
+        ...children.map((id) => ({ id, label: "", color: archivedUrls.has(urlOfNode(id)) ? ARCHIVED : (prs.get(urlOfNode(id)) ?? css("--url")), size: 1 })),
+        ...[...hubs].map(([hub, urls]) => ({ id: hub, label: showTitles ? hostOfHub(hub) : "", color: allArchived(urls) ? ARCHIVED : (urls.length === 1 && prs.get(urls[0])) || css("--url"), icon: favicon(hostOfHub(hub)), size: 3 })),
       ],
       links: [
         ...edges.filter((e) => shown.has(e.source) && shown.has(e.target)).map((e) => ({ source: e.source, target: e.target, label: e.label })),
@@ -288,26 +287,6 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     frame = requestAnimationFrame(draw);
     return () => (cancelAnimationFrame(frame), clear());
   }, [visible, showGroups, pickingGroup]);
-
-  // Favicons are drawn over the domain nodes every frame, since the graph draws only plain dots.
-  const hubKey = showUrls ? [...hubsOf(sessions).keys()].join("\n") : "";
-  useEffect(() => {
-    const canvas = icons.current!, ctx = canvas.getContext("2d")!;
-    const clear = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (!visible || !hubKey) return clear();
-    const hubs = hubKey.split("\n"), ring = css("--card");
-    let frame = 0;
-    const draw = () => {
-      const dpr = devicePixelRatio, w = el.current!.offsetWidth, h = el.current!.offsetHeight;
-      if (canvas.width !== w * dpr || canvas.height !== h * dpr) (canvas.width = w * dpr), (canvas.height = h * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      clear();
-      if (graph.current) drawFavicons(ctx, graph.current, hubs, ring);
-      frame = requestAnimationFrame(draw);
-    };
-    frame = requestAnimationFrame(draw);
-    return () => (cancelAnimationFrame(frame), clear());
-  }, [visible, hubKey]);
 
   // Tooltip and edge editor follow the layout as it moves.
   const active = sessions.filter((s) => isBusy(s) || isWaiting(s));
@@ -465,7 +444,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     store.set("mf.urls", showUrls ? "0" : "1");
     setShowUrls(!showUrls);
   };
-  live.current = { edges, mode, onOpen, onArchive, onToggleArchived, newAgentHere, toggleHub, toggleUrls, toggleGroups, toggleTitles, sessions, drafting: !!draft, togglePick, groupChords, groupNumbers };
+  live.current = { edges, mode, onOpen, onArchive, onArchiveLinks, archivedUrls, onToggleArchived, newAgentHere, toggleHub, toggleUrls, toggleGroups, toggleTitles, sessions, drafting: !!draft, togglePick, groupChords, groupNumbers };
   useEffect(() => { if (!draft) setPicked([]); }, [draft]);
   const needle = query?.trim().toLowerCase();
   const matches = needle
@@ -522,7 +501,6 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     <div className={cn("absolute inset-0", !visible && "[&_*]:transition-none")} style={{ visibility: visible ? "visible" : "hidden" }}>
       <div ref={el} className="absolute inset-0" />
       <canvas ref={hulls} className="pointer-events-none absolute inset-0 size-full" />
-      <canvas ref={icons} className="pointer-events-none absolute inset-0 size-full" />
       <canvas ref={waves} className="pointer-events-none absolute inset-0 size-full" />
       <div className="absolute top-3 left-3 z-10 flex items-center gap-3">
         <ToggleGroup type="single" variant="outline" size="sm" value={mode} onValueChange={(v) => v && setMode(v as Mode)} className="bg-card shadow-sm">
@@ -538,7 +516,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
         <Button variant="outline" size="sm" className={cn("bg-card shadow-sm", !showGroups && "text-muted-foreground")} title="Outline the groups sentry:graph sorted sessions into" onClick={toggleGroups}>
           <Shapes /> {showGroups ? "Hide groups" : "Show groups"} <Kbd className="ml-1">hg</Kbd>
         </Button>
-        <Button variant="outline" size="sm" className={cn("bg-card shadow-sm", hideArchived && "text-muted-foreground")} title="Right-click a node to archive or unarchive it" onClick={onToggleArchived}>
+        <Button variant="outline" size="sm" className={cn("bg-card shadow-sm", hideArchived && "text-muted-foreground")} title="Right-click a node or link to archive or unarchive it" onClick={onToggleArchived}>
           <Archive /> {hideArchived ? "Show archived" : "Hide archived"} <Kbd className="ml-1">ha</Kbd>
         </Button>
         {mode === "edit" && <span className="text-xs text-muted-foreground">drag node → node and say why · click an edge to relabel · right-click to delete</span>}
@@ -594,10 +572,10 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
         />
       )}
       {hovered && !draft && <NodeCard s={hovered} ref={tip} />}
-      {hoveredUrl && !draft && <UrlCard url={hoveredUrl} from={sessions.filter((s) => s.links.includes(hoveredUrl))} ref={tip} />}
+      {hoveredUrl && !draft && <UrlCard url={hoveredUrl} from={sessions.filter((s) => s.links.includes(hoveredUrl))} archived={archivedUrls.has(hoveredUrl)} ref={tip} />}
       {hoveredHub && !draft && (hubUrls.length === 1
-        ? <UrlCard url={hubUrls[0]} from={sessions.filter((s) => s.links.includes(hubUrls[0]))} ref={tip} />
-        : <DomainCard host={hostOfHub(hoveredHub)} urls={hubUrls} expanded={expanded.includes(hoveredHub)} ref={tip} />)}
+        ? <UrlCard url={hubUrls[0]} from={sessions.filter((s) => s.links.includes(hubUrls[0]))} archived={archivedUrls.has(hubUrls[0])} ref={tip} />
+        : <DomainCard host={hostOfHub(hoveredHub)} urls={hubUrls} archived={archivedUrls} expanded={expanded.includes(hoveredHub)} ref={tip} />)}
     </div>
   );
 }
@@ -686,7 +664,7 @@ function FindBar({ query, onQuery, count, at, onStep, onClose }: {
   );
 }
 
-function UrlCard({ url, from, ref }: { url: string; from: Session[]; ref: React.RefObject<HTMLDivElement | null> }) {
+function UrlCard({ url, from, archived, ref }: { url: string; from: Session[]; archived: boolean; ref: React.RefObject<HTMLDivElement | null> }) {
   return (
     <div ref={ref} className="pointer-events-none absolute z-20 w-max max-w-sm rounded-lg border bg-popover p-3 text-xs shadow-xl">
       <div className="mb-2 font-mono break-all text-foreground">{url}</div>
@@ -698,19 +676,19 @@ function UrlCard({ url, from, ref }: { url: string; from: Session[]; ref: React.
           </div>
         ))}
       </div>
-      <p className="mt-2 border-t pt-2 text-muted-foreground">click to open</p>
+      <p className="mt-2 border-t pt-2 text-muted-foreground">click to open · right-click to {archived ? "unarchive" : "archive"}</p>
     </div>
   );
 }
 
-function DomainCard({ host, urls, expanded, ref }: { host: string; urls: string[]; expanded: boolean; ref: React.RefObject<HTMLDivElement | null> }) {
+function DomainCard({ host, urls, archived, expanded, ref }: { host: string; urls: string[]; archived: Set<string>; expanded: boolean; ref: React.RefObject<HTMLDivElement | null> }) {
   return (
     <div ref={ref} className="pointer-events-none absolute z-20 w-max max-w-sm rounded-lg border bg-popover p-3 text-xs shadow-xl">
       <div className="mb-2 font-mono text-foreground">{host}</div>
       <div className="flex flex-col gap-0.5 font-mono text-muted-foreground">
-        {urls.map((u) => <span key={u} className="truncate">{shortUrl(u)}</span>)}
+        {urls.map((u) => <span key={u} className={cn("truncate", archived.has(u) && "line-through opacity-60")}>{shortUrl(u)}</span>)}
       </div>
-      <p className="mt-2 border-t pt-2 text-muted-foreground">click to {expanded ? "hide" : "show"} links</p>
+      <p className="mt-2 border-t pt-2 text-muted-foreground">click to {expanded ? "hide" : "show"} links · right-click to {urls.every((u) => archived.has(u)) ? "unarchive" : "archive"} all</p>
     </div>
   );
 }
