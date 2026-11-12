@@ -10,6 +10,7 @@ const usage = `usage:
   maxflow wait <id> [--idle MS] [--match RE] [--timeout MS]   block until quiet / RE on screen / exit, print screen
   maxflow rename <id> <name...> | maxflow kill <id>
   maxflow notify <id> <text...>              deliver text once the session is idle at an empty claude prompt
+  maxflow link <id> <id> [why...]            introduce two sessions to each other, as drawing an edge in the graph does
   maxflow sub <topic-glob> [--since SEQ] [--timeout MS] [--follow]   block for the next matching event, print it as JSON
   maxflow pub <topic> [json]
   maxflow gh watch <pr> [--session ID] | maxflow gh unwatch <pr> | maxflow gh ls
@@ -68,6 +69,8 @@ if (verb === "ls") {
   await call(`/api/sessions/${rest[0]}`, { method: "DELETE" });
 } else if (verb === "notify" && rest[1]) {
   await call(`/api/sessions/${rest[0]}/notify`, { method: "POST", body: JSON.stringify({ text: rest.slice(1).join(" ") }) });
+} else if (verb === "link" && rest[1]) {
+  await call("/api/link", { method: "POST", body: JSON.stringify({ a: rest[0], b: rest[1], why: rest.slice(2).join(" ") || undefined }) });
 } else if (verb === "pub" && rest[0]) {
   console.log(JSON.stringify(await call("/api/events", { method: "POST", body: JSON.stringify({ topic: rest[0], data: rest[1] ? JSON.parse(rest[1]) : null }) })));
 } else if (verb === "sub" && rest[0]) {

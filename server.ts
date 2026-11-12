@@ -139,6 +139,8 @@ function markSentry(s: Session) {
 for (const s of sessions.values())
   if (!s.sentry && s.name in SENTRIES && s.cmd.join(" ").includes(reviewSource(""))) markSentry(s);
 if (process.env.MAXFLOW_SENTRIES !== "0")
+// The flow sentry is a claude agent that takes the user's requests and routes each to an agent.
+SENTRIES["sentry:flow"] = ["sh", "-c", `exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("flow.md")}")"`];
   for (const [name, cmd] of Object.entries(SENTRIES))
     if (![...sessions.values()].some((s) => s.sentry && s.name === name && s.exitCode === null)) markSentry(createSession(name, cmd, new URL(".", import.meta.url).pathname));
 
@@ -159,6 +161,7 @@ function touchFrom(req: Request, s: Session, kind: "read" | "write", held = fals
   const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
   if (from && from !== s) publish(`touch/${from.id}/${s.id}`, { from: from.id, to: s.id, kind, held });
 }
+  "sentry:flow": `It is an agent that takes the user's requests and routes each to the agent that should own it, starting one when none does, and links that agent to others whose context would help. A request may reach you from it, ending with a line saying so; treat it as the user's.`,
 const isAgent = (s: Session) => !!s.claude || !!s.chatId || s.cmd[0] === "claude";
 
 // Without hooks a session counts as working while it prints; hooked claude says so itself, checked against two blind spots:
