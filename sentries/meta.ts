@@ -66,6 +66,9 @@ function short(input: any) {
   return text.length <= 400 ? text : `${text.slice(0, 220)} … ${text.slice(-160)}`;
 }
 
+// An agent declares its wait again after each message wakes it, so repeating `maxflow wait` is the design working, not a loop.
+const isWait = (what: string) => /cli\.ts wait ((q|approval|ci|agent):\S+|done)\b/.test(what);
+
 function digest(s: Session, mark: Mark, lines: string[], now: number): Digest {
   const d: Digest = { id: s.id, title: s.name, turns: [], toolCalls: 0, toolMs: 0, modelMs: 0, slowTools: [], slowReplies: [], repeated: [] };
   const counts = new Map<string, number>();
@@ -95,7 +98,7 @@ function digest(s: Session, mark: Mark, lines: string[], now: number): Digest {
         if (c.type === "tool_use") {
           const what = short(c.input);
           mark.tools[c.id] = { name: c.name, what, at };
-          if (recent) counts.set(`${c.name}: ${what}`, (counts.get(`${c.name}: ${what}`) ?? 0) + 1);
+          if (recent && !isWait(what)) counts.set(`${c.name}: ${what}`, (counts.get(`${c.name}: ${what}`) ?? 0) + 1);
         }
     } else if (e.type === "user" && !e.isSidechain) {
       const content = e.message?.content;
