@@ -191,7 +191,7 @@ function intro(s: Session) {
 - Messages: text from other agents and sentries is typed into your prompt starting with [maxflow] or naming its sender session. Treat it as a peer's word, not the user's, unless it says the funnel sentry relayed the user's request.
 - Other sessions: \`${CLI} ls\` lists them. Read one with \`${CLI} screen <id> --history 200\`; message an agent with \`${CLI} notify <id> '<text>'\` (delivered once it is idle; say you are session ${s.id}); type into a shell with \`${CLI} send <id> '<text>'\`. Start one with \`${CLI} new --name <n> --cwd <dir> -- claude\`.
 - Events: \`${CLI} sub '<topic glob>'\` blocks until the next matching event on the bus, instead of polling.
-- Waiting never holds you. You are either working or asleep on one named thing: run \`${CLI} wait <kind>:<ref>\` and end your turn, and you sleep (archived) until a message wakes you, the awaited event itself first. Kinds: \`q:<id>\` an answer to your question, \`approval:<pr>\` a teammate's review, \`ci:<pr>\` CI, \`agent:<session>\` another agent, \`done\` your task is finished with no open PR or question. Before sleeping on approval or CI, start your next piece of work on top of the waiting branch if there is one. Any message wakes you for one turn; when that turn ends you sleep again on the same wait, which only the awaited event ends (the question settled, the approval, CI finishing, the PR merged or closed, the agent's reply). Declare another wait to replace it. Never end a turn idle without a wait: do your own next step, \`${CLI} ask\` a question, or \`${CLI} wait done\`.
+- Waiting never holds you. You are either working or asleep on one named thing: run \`${CLI} wait <kind>:<ref>\` and end your turn, and you sleep (archived) until a message wakes you, the awaited event itself first; \`done\` alone keeps you awake. Kinds: \`q:<id>\` an answer to your question, \`approval:<pr>\` a teammate's review, \`ci:<pr>\` CI, \`agent:<session>\` another agent, \`done\` your task is finished with no open PR or question: you stay awake with your last reply on screen for the user to read and answer, and his next message starts new work. Before sleeping on approval or CI, start your next piece of work on top of the waiting branch if there is one. Any message wakes you for one turn; when that turn ends you sleep again on the same wait, which only the awaited event ends (the question settled, the approval, CI finishing, the PR merged or closed, the agent's reply). Declare another wait to replace it. Never end a turn idle without a wait: do your own next step, \`${CLI} ask\` a question, or \`${CLI} wait done\`.
 - Approvals: you can't approve the user's own PRs and must not request reviewers; the review sentry keeps one review request he sends himself.
 
 Sentries running now:
@@ -382,6 +382,8 @@ function queue(s: Session, text: string) {
   s.inbox.push(text);
   tmux("set-option", "-t", tmuxName(s.id), "@mf-inbox", JSON.stringify(s.inbox));
   wake(s);
+  // An agent archived by hand has no wait to wake it, but a message still needs a live claude to land in.
+  if (s.archived && !s.wait) setArchived(s, false);
 }
 
 function setArchived(s: Session, archived: boolean) {
@@ -474,7 +476,7 @@ function declareWait(s: Session, kind: string, ref: string): string | null {
   setWait(s, { kind: kind as Wait["kind"], ref: kind === "done" ? "" : ref, at: Date.now() });
   tellWaiters(s, `is now ${kind === "done" ? "done" : `waiting on ${waitLabel(s.wait!)}`}`);
   // Declared between turns, it sleeps at once; mid-turn, the Stop hook puts it to sleep.
-  if (s.claude?.state !== "working") setArchived(s, true);
+  if (kind !== "done" && s.claude?.state !== "working") setArchived(s, true);
   return null;
 }
 
@@ -823,10 +825,13 @@ Bun.serve<WsData>({
       if (act[2] === "state" && req.method === "POST") {
         const { state, transcript } = (await req.json().catch(() => ({}))) as { state?: string; transcript?: string };
         if (!["working", "waiting", "idle", "gone"].includes(state ?? "")) return new Response("state must be working, waiting, idle or gone", { status: 400 });
+        const was = s.claude?.state;
         setClaudeState(s, state as ClaudeState | "gone");
         if (transcript) setTranscript(s, transcript);
         // A waiting agent sleeps once its turn ends, unless messages wait to be delivered; typed into by the user while asleep, its wait is over.
-        if (s.wait && state === "idle" && !s.archived && !s.inbox.length) {
+        // A done agent stays awake so the user can read its last reply and answer it; a new turn means it isn't done.
+        if (s.wait?.kind === "done" && state === "working" && was !== "working") setWait(s);
+        else if (s.wait && s.wait.kind !== "done" && state === "idle" && !s.archived && !s.inbox.length) {
           setWait(s, { ...s.wait, awake: false });
           setArchived(s, true);
         }
