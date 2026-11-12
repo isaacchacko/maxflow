@@ -4,7 +4,7 @@
 // reaches no session. Exits with the agent.
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { links, REVIEW_WATCH_FILE, type Watch } from "./gh";
+import { links, markRead, ownComment, REVIEW_WATCH_FILE, type Watch } from "./gh";
 
 const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const EDGES_FILE = join(STATE_DIR, "review-edges.json");
@@ -20,7 +20,7 @@ type Pr = {
   createdAt: string; updatedAt: string; repository: { nameWithOwner: string }; reviewRequests: { totalCount: number }; autoMergeRequest: object | null;
   commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
 };
-type Event = { seq: number; topic: string; data: { pr: string; told: string[]; who?: string | null; author?: string; state?: string; body?: string; url?: string; path?: string } };
+type Event = { seq: number; topic: string; data: { pr: string; told: string[]; id?: string; who?: string | null; author?: string; state?: string; body?: string; url?: string; path?: string } };
 type Session = { id: string; name: string; running: boolean; links: string[]; sentry: boolean };
 
 const QUERY = `query { search(query: "is:pr is:open author:@me archived:false", type: ISSUE, first: 100) { nodes { ... on PullRequest {
@@ -110,7 +110,12 @@ if (import.meta.main) {
       if (!events) await Bun.sleep(left);
       if (!events?.length) continue;
       after = String(events.at(-1)!.seq);
-      for (const line of events.map(unheard).filter(Boolean)) await notify(line!);
+      for (const e of events) {
+        const line = unheard(e);
+        if (!line) continue;
+        await notify(line);
+        if (ownComment(e.data.who)) markRead(e.data.id!);
+      }
     }
   }
 }
