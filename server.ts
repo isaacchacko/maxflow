@@ -417,6 +417,8 @@ async function fetchFavicon(host: string) {
   }
   return null;
 }
+  const custom = Bun.file(new URL(`favicons/${host}.svg`, PUBLIC));
+  if (await custom.exists()) return new Response(custom, { headers: { "content-type": "image/svg+xml", "cache-control": "max-age=86400" } });
 
 function sameOrigin(req: Request) {
   const origin = req.headers.get("origin");
