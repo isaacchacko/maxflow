@@ -12,6 +12,8 @@ const GROUPS_FILE = join(STATE_DIR, "graph-groups.json");
 const GROUP_EVERY_MS = Number(process.env.GRAPH_GROUP_EVERY ?? 120_000);
 const MODEL = process.env.GRAPH_MODEL ?? "haiku";
 const SENTRY_GROUP = "maxflow sentries";
+const MAXFLOW_GROUP = "maxflow development";
+const MAXFLOW_DIR = join(import.meta.dir, "..");
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 
 const SYSTEM = `You curate a graph of an engineer's terminal and Claude agent sessions. Each URL a session mentions can become a clickable node beside it, and most mentions are noise. Keep a URL only if the engineer would want to click it from the graph:
@@ -21,7 +23,7 @@ const SYSTEM = `You curate a graph of an engineer's terminal and Claude agent se
 Drop URLs that are incidental: inside code, config, shell commands, logs or stack traces; library, CDN, package, API or docs references; example or placeholder URLs; asset or API endpoints; links to maxflow itself (localhost:4747); anything mentioned only in passing. Drop when unsure.
 Some candidates are GitHub PRs the text named by number (#123, PR 123, owner/repo#123) rather than linked; judge them the same way, keeping a PR that is the subject or product of the work. Each candidate comes with who wrote it (user, assistant, or screen for a plain terminal) and the text around it. Reply with only JSON: {"keep": ["<url>", ...]}, listing URLs exactly as given.`;
 
-const GROUP_SYSTEM = `You group an engineer's running terminal and Claude agent sessions by the work they share, so a graph can draw related sessions close together. Sessions belong together when they work on the same project, feature, bug, ticket or PR; a shared folder alone is weak evidence when the titles point at unrelated work. Title each group the way a sidebar titles a session: 3 to 7 words naming the topic the group owns, e.g. "PRO-6201 safety stock dismissals" or "maxflow graph view". Name the ticket, PR, bug or feature when the sessions show one. Write a noun phrase, not a verb phrase. Never describe status, progress or the current step: no "fixing", "waiting on CI", "testing", "done". No quotes, no trailing period. Keep a group's existing title when it still names the right topic, so groups stay stable. A session unrelated to all others gets a group of its own. Reply with only JSON: {"<session id>": "<group name>", ...}, covering every session.`;
+const GROUP_SYSTEM = `You group an engineer's running terminal and Claude agent sessions by the work they share, so a graph can draw related sessions close together. Sessions belong together when they work on the same project, feature, bug, ticket or PR; a shared folder alone is weak evidence when the titles point at unrelated work. Title each group the way a sidebar titles a session: 3 to 7 words naming the topic the group owns, e.g. "PRO-6201 safety stock dismissals" or "maxflow graph view". Name the ticket, PR, bug or feature when the sessions show one. Write a noun phrase, not a verb phrase. Never describe status, progress or the current step: no "fixing", "waiting on CI", "testing", "done". No quotes, no trailing period. Keep a group's existing title when it still names the right topic, so groups stay stable. Every session working on maxflow itself (the terminal and agent dashboard these sessions run in: its graph, sidebar, sentries, server or UI) goes in the one group "${MAXFLOW_GROUP}", never split by feature. A session unrelated to all others gets a group of its own. Reply with only JSON: {"<session id>": "<group name>", ...}, covering every session.`;
 
 type Session = { id: string; name: string; cmd: string[]; cwd: string; running: boolean; agent: boolean; links: string[]; group: string | null };
 type Candidate = { url: string; role: string; context: string };
@@ -64,12 +66,13 @@ async function regroup() {
   // Sentries always form one group of their own; only the rest need judging.
   const sentries = running.filter((s) => s.name.startsWith("sentry:")), sessions = running.filter((s) => !sentries.includes(s));
   const fixed = Object.fromEntries(sentries.map((s) => [s.id, SENTRY_GROUP]));
-  if (sessions.length < 2) return void ((groupedKey = key), save(GROUPS_FILE, (groups = { ...fixed, ...Object.fromEntries(sessions.map((s) => [s.id, s.name])) })));
+  for (const s of sessions) if (/maxflow/i.test(s.name) || s.cwd.startsWith(MAXFLOW_DIR)) fixed[s.id] = MAXFLOW_GROUP;
+  if (sessions.length < 2) return void ((groupedKey = key), save(GROUPS_FILE, (groups = { ...Object.fromEntries(sessions.map((s) => [s.id, s.name])), ...fixed })));
   const list = sessions
     .map((s) => `${s.id}: "${s.name}" in ${s.cwd}, running ${s.agent ? "claude" : s.cmd.join(" ")}${s.group ? `, now in "${s.group}"` : ""}${s.links.length ? `, links ${s.links.join(" ")}` : ""}`)
     .join("\n");
   const reply = await ask(GROUP_SYSTEM, `Sessions:\n${list}`);
-  groups = { ...fixed, ...Object.fromEntries(sessions.filter((s) => typeof reply[s.id] === "string").map((s) => [s.id, reply[s.id].trim()])) };
+  groups = { ...Object.fromEntries(sessions.filter((s) => typeof reply[s.id] === "string").map((s) => [s.id, reply[s.id].trim()])), ...fixed };
   groupedKey = key;
   save(GROUPS_FILE, groups);
   const byGroup = Map.groupBy(Object.entries(groups), ([, g]) => g);

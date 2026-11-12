@@ -5,6 +5,7 @@
     "": {
       "name": "maxflow",
       "dependencies": {
+        "@isaacchacko/graph": "/private/tmp/claude-501/-Users-isaac/11b3cccc-30b6-4525-8f1b-e06836658bcf/scratchpad/isaacchacko-graph-0.4.0.tgz",
         "@isaacchacko/graph": "0.2.0",
         "@xterm/addon-clipboard": "0.1.0",
         "@xterm/addon-fit": "0.10.0",
@@ -30,9 +31,6 @@
       },
     },
   },
-  "patchedDependencies": {
-    "@isaacchacko/graph@0.2.0": "patches/@isaacchacko%2Fgraph@0.2.0.patch",
-  },
   "packages": {
     "@floating-ui/core": ["@floating-ui/core@1.8.0", "", { "dependencies": { "@floating-ui/utils": "^0.2.12" } }, "sha512-0CIZ5itps/8x7BG8dEIhs53BvCUH2PCoogtakwRTut+Arm58sJooJ0AuZhLw2HJYIR5cMLNPBSS728sPho2khQ=="],
 
@@ -42,7 +40,7 @@
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.12", "", {}, "sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww=="],
 
-    "@isaacchacko/graph": ["@isaacchacko/graph@0.2.0", "", { "peerDependencies": { "react": ">=18" }, "optionalPeers": ["react"] }, "sha512-l5DnQM0PKPZGrGUGwTqUueH0EWPZJxfDmuhdQiNaO8bZ7+/TYX6LCmdv0W0hQLLsgwK1Voi2WQMFVTHKWSUmTw=="],
+    "@isaacchacko/graph": ["@isaacchacko/graph@/private/tmp/claude-501/-Users-isaac/11b3cccc-30b6-4525-8f1b-e06836658bcf/scratchpad/isaacchacko-graph-0.4.0.tgz", { "peerDependencies": { "react": ">=18" }, "optionalPeers": ["react"] }, "sha512-pQWXN6+8GQM8VNswaFGmhid9u8d8rZR60g1aVhny0TMJ782GeHFHHtQ+sCF9nyek0TXB4SrSL45wICYN5kbdrw=="],
 
     "@oven/bun-darwin-aarch64": ["@oven/bun-darwin-aarch64@1.4.4", "", { "os": "darwin", "cpu": "arm64" }, "sha512-zW/hxwc8sJAILGwB5eTC4i48ouGXf0V4lrxmEOk3JIE6JkYVW1TZh1E2pIempqsezgW1sckTIIDudFON8bJ2Mw=="],
 

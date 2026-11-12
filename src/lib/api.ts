@@ -14,6 +14,8 @@ export type Session = {
   status: "working" | "waiting" | "idle" | "exited";
   agent: boolean;
   links: string[];
+  archivedLinks: string[];
+  prs: Record<string, "open" | "closed" | "merged">;
   group: string | null;
   archived: boolean;
 };
@@ -46,6 +48,7 @@ export const api = {
   link: (a: string, b: string, why?: string) => fetch("/api/link", { method: "POST", body: JSON.stringify({ a, b, why }) }),
   kill: (id: string) => fetch(`/api/sessions/${id}`, { method: "DELETE" }),
   archive: (id: string, archived: boolean) => fetch(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ archived }) }),
+  archiveLinks: (urls: string[], archived: boolean) => fetch("/api/links", { method: "PATCH", body: JSON.stringify({ urls, archived }) }),
   rename: (id: string, name: string) => fetch(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
   chats: (q: string, limit = 150): Promise<Chat[]> => fetch(`/api/chats?limit=${limit}&q=${encodeURIComponent(q)}`).then((r) => r.json()),
   resume: (id: string, bypass: boolean, force: boolean) => fetch(`/api/chats/${id}/resume`, { method: "POST", body: JSON.stringify({ bypass, force }) }),

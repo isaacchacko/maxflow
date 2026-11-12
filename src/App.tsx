@@ -52,6 +52,7 @@ export function App() {
     refresh();
   };
   const archive = async (id: string, archived: boolean) => (await api.archive(id, archived), refresh());
+  const archiveLinks = async (urls: string[], archived: boolean) => (await api.archiveLinks(urls, archived), refresh());
   const toggleArchived = () =>
     setHideArchived((h) => {
       store.set("mf.hideArchived", h ? "0" : "1");
@@ -111,6 +112,7 @@ export function App() {
             onOpen={open}
             onCreated={refresh}
             onArchive={archive}
+            onArchiveLinks={archiveLinks}
             onToggleArchived={toggleArchived}
           />
           {loaded && !sessions.length && !graphing && (

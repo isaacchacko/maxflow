@@ -1,5 +1,5 @@
 import type { ServerWebSocket, Subprocess } from "bun";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { repoOf } from "./sentries/gh";
@@ -46,9 +46,16 @@ const termEnv = { LANG: "en_US.UTF-8", ...childEnv, TERM: "xterm-256color", COLO
 const TMUX = ["tmux", "-L", "maxflow", "-f", new URL("./tmux.conf", import.meta.url).pathname];
 const tmuxName = (id: string) => `mf-${id}`;
 
+// Sync calls block the event loop, which owns the attach clients' ptys; the timeout keeps a stalled tmux from wedging the server.
 function tmux(...args: string[]) {
-  const r = Bun.spawnSync([...TMUX, ...args], { env: termEnv });
+  const r = Bun.spawnSync([...TMUX, ...args], { env: termEnv, timeout: 5000 });
   return { ok: r.exitCode === 0, out: r.stdout.toString() };
+}
+// send-keys can wait on tmux flushing to attached clients, which only drain while the event loop runs, so it must not block.
+async function tmuxAsync(...args: string[]) {
+  const p = Bun.spawn([...TMUX, ...args], { env: termEnv, stdout: "pipe" });
+  const [out, code] = await Promise.all([new Response(p.stdout).text(), p.exited]);
+  return { ok: code === 0, out };
 }
 
 function push(session: Session, chunk: Uint8Array) {
@@ -254,6 +261,28 @@ function sentryFile<T>(path: string, empty: T) {
 // Its verdicts, { session: { url: keep } }; a URL it has not judged yet stays hidden.
 const verdicts = sentryFile<Record<string, Record<string, boolean>>>(VERDICTS, {});
 const links = (s: Session) => candidates(s).filter((c) => verdicts()[s.id]?.[c.url]).map((c) => c.url);
+// Whether each PR shown in the graph is open, closed or merged; one GraphQL request per repo, off the event loop.
+const PR_URL_RE = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)$/;
+const prStates = new Map<string, string>();
+async function refreshPrStates() {
+  const shown = [...new Set([...sessions.values()].flatMap((s) => links(s)))];
+  const byRepo = Map.groupBy(shown.map((u) => u.match(PR_URL_RE)).filter((m) => m !== null), (m) => m[1]);
+  for (const [repo, prs] of byRepo) {
+    const [owner, name] = repo.split("/");
+    const q = `query { r: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${prs.map((m) => `p${m[2]}: pullRequest(number: ${m[2]}) { state }`).join(" ")} } }`;
+    const p = Bun.spawn(["gh", "api", "graphql", "-f", `query=${q}`], { stdout: "pipe", stderr: "ignore" });
+    const out = await new Response(p.stdout).text();
+    let r: Record<string, { state: string } | null> = {};
+    try {
+      r = JSON.parse(out).data?.r ?? {};
+    } catch {}
+    for (const m of prs) if (r[`p${m[2]}`]) prStates.set(m[0], r[`p${m[2]}`]!.state.toLowerCase());
+  }
+}
+setInterval(() => refreshPrStates().catch(() => {}), 30_000);
+// Links archived from the graph, by URL across every session; the graph greys them out or hides them with archived sessions.
+const ARCHIVED_LINKS = `${process.env.HOME}/.maxflow/archived-links.json`;
+const archivedLinks = new Set<string>((() => { try { return JSON.parse(readFileSync(ARCHIVED_LINKS, "utf8")) as string[]; } catch { return []; } })());
 // Its grouping of sessions by the work they share, { session: group }.
 const groups = sentryFile<Record<string, string>>(`${process.env.HOME}/.maxflow/graph-groups.json`, {});
 
@@ -280,7 +309,7 @@ function activeAt(s: Session) {
   return isAgent(s) ? (s.claude?.at ?? s.createdAt) : s.lastOutputAt;
 }
 
-const describe = (s: Session) => ({
+const describe = (s: Session, shown = links(s)) => ({
   id: s.id,
   name: s.name,
   cmd: s.cmd,
@@ -296,7 +325,9 @@ const describe = (s: Session) => ({
   pending: s.inbox.length,
   status: status(s),
   agent: isAgent(s),
-  links: links(s),
+  links: shown,
+  archivedLinks: shown.filter((u) => archivedLinks.has(u)),
+  prs: Object.fromEntries(shown.flatMap((u) => (prStates.has(u) ? [[u, prStates.get(u)]] : []))),
   group: groups()[s.id] ?? null,
   archived: !!s.archived,
 });
@@ -325,9 +356,9 @@ setInterval(async () => {
   for (const s of sessions.values()) {
     if (!s.inbox.length || s.exitCode !== null || Date.now() - s.lastOutputAt < DELIVER_IDLE_MS || !atEmptyPrompt(s)) continue;
     const text = s.inbox.splice(0).join("\n");
-    tmux("send-keys", "-t", tmuxName(s.id), "-l", "--", text);
+    await tmuxAsync("send-keys", "-t", tmuxName(s.id), "-l", "--", text);
     await Bun.sleep(150);
-    tmux("send-keys", "-t", tmuxName(s.id), "Enter");
+    await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Enter");
   }
 }, 1000);
 
@@ -356,7 +387,7 @@ Bun.serve<WsData>({
       return server.upgrade(req, { data: { id: wsMatch[1] } }) ? undefined : new Response("upgrade failed", { status: 400 });
     }
 
-    if (path === "/api/sessions" && req.method === "GET") return Response.json([...sessions.values()].map(describe));
+    if (path === "/api/sessions" && req.method === "GET") return Response.json([...sessions.values()].map((s) => describe(s)));
     if (path === "/api/sessions" && req.method === "POST") {
       const body = (await req.json().catch(() => ({}))) as { name?: string; cmd?: string[] | string; cwd?: string };
       const cmd = typeof body.cmd === "string" ? ["zsh", "-lc", body.cmd] : body.cmd?.length ? body.cmd : [process.env.SHELL ?? "zsh", "-l"];
@@ -402,6 +433,14 @@ Bun.serve<WsData>({
     if (path === "/api/links" && req.method === "GET")
       return Response.json([...sessions.values()].filter((s) => !isSentry(s)).map((s) => ({ id: s.id, name: s.name, cwd: s.cwd, running: s.exitCode === null, candidates: candidates(s) })));
 
+    if (path === "/api/links" && req.method === "PATCH") {
+      const body = (await req.json().catch(() => ({}))) as { urls?: string[]; archived?: boolean };
+      if (!body.urls?.length || typeof body.archived !== "boolean") return new Response("urls and archived required", { status: 400 });
+      for (const u of body.urls) body.archived ? archivedLinks.add(u) : archivedLinks.delete(u);
+      writeFileSync(ARCHIVED_LINKS, JSON.stringify([...archivedLinks]));
+      return new Response(null, { status: 204 });
+    }
+
     if (path === "/api/link" && req.method === "POST") {
       const body = (await req.json().catch(() => ({}))) as { a?: string; b?: string; why?: string };
       const a = sessions.get(body.a ?? ""), b = sessions.get(body.b ?? "");
@@ -419,10 +458,10 @@ Bun.serve<WsData>({
       if (act[2] === "input" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { text?: string; keys?: string[]; enter?: boolean };
         if (s.exitCode !== null) return new Response("session ended", { status: 409 });
-        if (body.text) tmux("send-keys", "-t", t, "-l", "--", body.text);
-        if (body.keys?.length) tmux("send-keys", "-t", t, ...body.keys);
+        if (body.text) await tmuxAsync("send-keys", "-t", t, "-l", "--", body.text);
+        if (body.keys?.length) await tmuxAsync("send-keys", "-t", t, ...body.keys);
         // A TUI like claude reads text + Enter in one burst as a paste, so the submit goes separately.
-        if (body.enter) await Bun.sleep(body.text ? 150 : 0), tmux("send-keys", "-t", t, "Enter");
+        if (body.enter) await Bun.sleep(body.text ? 150 : 0), await tmuxAsync("send-keys", "-t", t, "Enter");
         return Response.json(describe(s));
       }
       if (act[2] === "notify" && req.method === "POST") {
