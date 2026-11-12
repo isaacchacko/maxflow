@@ -43,6 +43,20 @@ export type Question = {
   default?: string;
 };
 
+// A task on the user's board, which sentry:assistant derives from his prompts and moves as agents work.
+export type Task = {
+  id: number;
+  title: string;
+  kind: "task" | "question";
+  status: "todo" | "doing" | "you" | "waiting" | "done" | "dropped";
+  answer?: string;
+  sessions: string[];
+  links: string[];
+  at: number;
+  updated: number;
+  timeline: { at: number; text: string; session?: string }[];
+};
+
 export type Chat = { id: string; title: string; prompt: string; cwd: string; mtime: number; live: boolean; session: string | null };
 
 export const isSentry = (s: Session) => s.sentry;
@@ -76,6 +90,7 @@ export const api = {
   chats: (q: string, limit = 150): Promise<Chat[]> => fetch(`/api/chats?limit=${limit}&q=${encodeURIComponent(q)}`).then((r) => r.json()),
   review: (): Promise<{ board: ReviewBoard | null; queue: QueuedPr[] }> => fetch("/api/review").then((r) => r.json()),
   questions: (): Promise<Question[]> => fetch("/api/questions").then((r) => r.json()),
+  tasks: (): Promise<Task[]> => fetch("/api/tasks").then((r) => r.json()),
   settle: (id: number, action: "reply" | "dismiss", text?: string) => fetch(`/api/questions/${id}`, { method: "POST", body: JSON.stringify({ action, text }) }),
   resume: (id: string, bypass: boolean, force: boolean) => fetch(`/api/chats/${id}/resume`, { method: "POST", body: JSON.stringify({ bypass, force }) }),
 };
