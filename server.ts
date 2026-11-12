@@ -162,7 +162,7 @@ const SENTRY_USES: Record<string, string> = {
   "sentry:graph": `It decides which URLs you mention show up as nodes beside you in the maxflow graph: only ones you meant the user to open (a PR, a deploy, a page you published, a dev server you started), not incidental ones in code or docs. Put a URL you want the user to see on its own line in your reply. It also groups sessions by the work they share, and the graph draws a group's sessions close together, and it names each agent's role (review, implement, conflicts) for the icon on its node.`,
   "sentry:review": `It is an agent that keeps the user's queue of open PRs moving to prod or closed, and delivers comments on them that no session heard, by reviving the chat that opened the PR. If your PR's comments reach you, that is how. Don't request reviewers yourself; the user does.`,
   "sentry:flow": `It is an agent that takes the user's requests and routes each to the agent that should own it, starting one when none does, and links that agent to others whose context would help. A request may reach you from it, ending with a line saying so; treat it as the user's.`,
-  "sentry:meta": `Every 15 minutes it reads what every agent wrote since its last look and flags the ones running slow (a turn over 10 minutes, a tool call over 5, a model reply over 3, the same command run 4+ times), saying why in its pane and publishing meta/slow/<session>. If it names you, the cause it gives is worth a look.`,
+  "sentry:meta": `Every 15 minutes it reads what every agent wrote since its last look and flags the ones running slow (a turn over 10 minutes, a tool call over 5, a model reply over 3, the same command run 4+ times), and messages each slow one why and what to do instead, calling out a mistake it was already told about. Act on its message when it reaches you, and save it as a feedback memory if it names a habit. The lessons it has learned across agents are below.`,
   "sentry:questions": `It is the one way to raise a question to the user. Never end your turn on a question or wait in chat for him: run \`${CLI} ask '<question>'\` and keep working on whatever doesn't hang on the answer. Make the question stand on its own: what you found, the options, and your recommendation. The sentry sends back what you should decide yourself; the rest goes into the user's queue, and his answer is typed into your prompt as a [maxflow] message. Asking again while a question is open adds to it.`,
   "sentry:rename": `It titles your session in the maxflow sidebar by the topic you own. Pick your own title with \`${CLI} rename $MAXFLOW_SESSION <title>\` and it leaves you alone from then on.`,
   "sentry:ram": `Every 15s it kills any test, lint, typecheck or build job an agent runs locally once its process tree holds over 1.5% of the machine's RAM, and tells that agent to run it on the Blacksmith CI runners by pushing to its PR. Run those through CI from the start: push, then \`gh pr checks\`.`,
@@ -180,7 +180,18 @@ function intro(s: Session) {
 - Done: archive yourself with \`curl -s -X PATCH localhost:${PORT}/api/sessions/${s.id} -d '{"archived":true}'\` when the user says to.
 
 Sentries running now:
-${sentries.map((o) => `- ${o.name.slice(7)}: ${SENTRY_USES[o.name]}`).join("\n")}`;
+${sentries.map((o) => `- ${o.name.slice(7)}: ${SENTRY_USES[o.name]}`).join("\n")}${metaLessons(sentries)}`;
+}
+
+// The lessons the meta sentry drew from agents it found running slow, kept in ~/.maxflow/meta-lessons.json.
+function metaLessons(sentries: Session[]) {
+  if (!sentries.some((o) => o.name === "sentry:meta")) return "";
+  try {
+    const lessons = JSON.parse(readFileSync(`${process.env.HOME}/.maxflow/meta-lessons.json`, "utf8")) as string[];
+    return lessons.length ? `\n\nLessons the meta sentry learned from slow agents:\n${lessons.map((l) => `- ${l}`).join("\n")}` : "";
+  } catch {
+    return "";
+  }
 }
 
 const isSentry = (s: Session) => !!s.sentry;
