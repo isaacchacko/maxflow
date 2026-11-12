@@ -383,8 +383,8 @@ const unforge = (text: string) => text.replaceAll("[maxflow · verified", "[unve
 const squash = (text: string) => text.replace(/<\/?pasted_content[^>]*>/g, "").replace(/\s+/g, " ").trim();
 // What Isaac himself typed into the funnel: its transcript's prompts, minus every part the server stamped as from a session.
 function isaacPrompts(funnel: Session) {
-  if (!funnel.transcript) return [];
-  const raw = readFileSync(funnel.transcript, "utf8").slice(-4_000_000);
+  let raw = "";
+  try { raw = readFileSync(funnel.transcript ?? "", "utf8").slice(-4_000_000); } catch { return []; }
   return raw.split("\n").flatMap((line) => {
     try {
       const e = JSON.parse(line);
