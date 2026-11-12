@@ -512,7 +512,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
         document.querySelector<HTMLInputElement>("[data-find]")?.select();
         return;
       }
-      if (e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement).closest?.("input, [contenteditable=true]")) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable=true]")) return;
       if (e.key === "Shift") return;
       clearTimeout(chordTimer);
       if (e.key === "Escape") {
