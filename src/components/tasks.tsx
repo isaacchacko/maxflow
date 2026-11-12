@@ -5,7 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
 import { Terminal, type TerminalHandle } from "@/components/terminal";
-import { ago, store, type OpenComment, type QueuedPr, type Session, type Task } from "@/lib/api";
+import { ago, api, store, type OpenComment, type QueuedPr, type Session, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // Linear's status circles: an outline to start, filling as the work goes, a check when done.
@@ -173,7 +173,7 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
       </div>
       {!tasks.length && !unreviewed.length && <p className="absolute inset-x-0 top-1/2 text-center text-muted-foreground">No tasks yet. The assistant adds them as you ask agents for things.</p>}
       <Dialog open={!!task} onOpenChange={(o) => !o && setShown(null)}>
-        {task && <TaskDetail task={task} named={named} onOpen={(id) => (setShown(null), onClose(), onOpen(id))} />}
+        {task && <TaskDetail task={task} named={named} assistant={assistant?.id} onOpen={(id) => (setShown(null), onClose(), onOpen(id))} />}
       </Dialog>
     </div>
   );
@@ -260,7 +260,15 @@ function UnreviewedPrs({ prs }: { prs: QueuedPr[] }) {
 const when = (t: number) => new Date(t).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 // Linear's issue view: the title, answer and activity on the left, the properties in a sidebar.
-function TaskDetail({ task, named, onOpen }: { task: Task; named: Map<string, string>; onOpen: (id: string) => void }) {
+function TaskDetail({ task, named, assistant, onOpen }: { task: Task; named: Map<string, string>; assistant?: string; onOpen: (id: string) => void }) {
+  const [reply, setReply] = useState("");
+  const [sent, setSent] = useState(false);
+  const send = () => {
+    if (!assistant || !reply.trim()) return;
+    api.notify(assistant, `About ${taskKey(task)} "${task.title}": ${reply.trim()}`);
+    setReply("");
+    setSent(true);
+  };
   return (
     <DialogContent className="flex max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-4xl">
       <div className="flex min-w-0 flex-1 flex-col gap-5 overflow-y-auto px-7 py-6">
@@ -292,6 +300,19 @@ function TaskDetail({ task, named, onOpen }: { task: Task; named: Map<string, st
             ))}
           </ol>
         </section>
+        {assistant && (
+          <section className="flex flex-col gap-1.5">
+            <textarea
+              value={reply}
+              onChange={(e) => (setReply(e.target.value), setSent(false))}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send())}
+              rows={2}
+              placeholder="Reply to the assistant about this task…"
+              className="w-full resize-none rounded-md border bg-card px-3 py-2 text-[13px] outline-none placeholder:text-muted-foreground focus:border-ring"
+            />
+            <span className="text-xs text-muted-foreground">{sent ? "Sent to the assistant; it reads it at its next turn." : "↵ sends to the assistant, ⇧↵ for a new line"}</span>
+          </section>
+        )}
       </div>
       <aside className="flex w-64 shrink-0 flex-col gap-4 overflow-y-auto border-l bg-card/50 px-5 py-6 pr-10 text-[13px]">
         <Property label="Status">
