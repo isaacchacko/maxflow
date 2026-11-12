@@ -1,66 +1,166 @@
 # maxflow
 
-Local web terminal for agent work on this machine. A Bun server on `127.0.0.1:4747` runs commands in real PTYs (Bun's built-in `terminal` spawn, no native deps) and streams them to xterm.js in the browser. Every session runs inside tmux on a private socket (`tmux -L maxflow`, config in `tmux.conf`: no prefix, no status bar), so it outlives both the tab and the server: on startup maxflow adopts any `mf-*` tmux sessions, replays their history and reattaches. You can also reach one from a terminal with `tmux -L maxflow attach -t mf-<id>`.
+**A local web terminal for running a fleet of Claude Code agents, and the sentries that keep them moving.**
 
-```sh
-bun server.ts                      # http://localhost:4747  (MAXFLOW_PORT to change)
-./cli.ts new --name api -- bun dev # start a session, prints its link
-./cli.ts chats [query]             # list Claude Code chats, newest first
-./cli.ts resume <claude-session-id> [--safe] [--force]
-./cli.ts ls
+maxflow runs every agent in its own terminal session on your machine, shows them all in one browser tab as a sidebar and a live graph, and surrounds them with *sentries*: small background processes that watch GitHub, Slack, CI, RAM and the agents themselves, and type what each agent needs to know straight into its prompt. You stop polling. The agents stop polling. You answer questions when they matter and otherwise watch the work flow.
+
+```
+┌─ sidebar ─────────┐  ┌─ terminal / graph ──────────────────────────────────┐
+│ ● api#7031  ci ✓  │  │                                                      │
+│ ● fix-login  …    │  │   [gh] ──── api#7031 ──── PR 7031 (open)             │
+│ ◌ docs  asleep    │  │                │                                     │
+│ ── sentries ──    │  │   [slack] ── fix-login ── #eng thread                │
+│ gh slack review   │  │                                                      │
+│ funnel questions  │  │   [questions] ── docs                                │
+│ ? 2 questions     │  │                                                      │
+└───────────────────┘  └──────────────────────────────────────────────────────┘
 ```
 
-maxflow is an installable web app (`public/manifest.webmanifest`): in Chrome, open `http://localhost:4747` and choose Install (the icon at the right of the address bar) to get its own window, Dock icon and Launchpad entry.
+## Why
 
-## Driving from an agent
+Running five or ten coding agents at once breaks down in boring ways: terminals scattered across windows, agents burning turns on `gh pr checks` in a loop, every agent asking you something at once, comments on a PR that no agent ever hears, a test suite that eats the laptop. maxflow fixes the plumbing:
 
-Everything the browser does is also an HTTP call, so an agent can run a session, type into it and read it back without a websocket:
+- **Sessions that never die.** Every session is a real PTY inside a private tmux server, so it survives closing the tab and restarting maxflow. On boot the server adopts and reattaches every one.
+- **Everything is an HTTP call.** The browser and agents use the same API, so an agent can start another agent, type into it, wait for its prompt and read its screen with a one-line CLI.
+- **Push, not poll.** An event bus plus sentries turn "is CI done yet?" into a message that lands in the agent's prompt when CI is done.
+- **One queue for your attention.** Agents raise questions through `maxflow ask`; a gate bounces the ones they should decide themselves, and the rest wait for you in one panel.
+- **A picture of the work.** The graph view draws sessions, the PRs, tickets and pages they touch, and which sentries are watching them, grouped by the work they share.
+
+## Features
+
+| | |
+|---|---|
+| **Web terminal** | xterm.js over Bun's built-in PTY spawn (no native deps), tmux-backed, installable as a desktop app (PWA). |
+| **Agent CLI** | `new`, `send`, `keys`, `screen`, `wait`, `notify`, `kill`: drive any session from a script or another agent. |
+| **Resume** | Search every Claude Code chat on the machine and reopen it in its own folder, without forking a transcript that is already open. |
+| **Graph view** | Sessions, links and sentries as a force graph; PR nodes colored by state; groups by shared work; keyboard chords for everything. |
+| **Event bus** | Append-only JSONL with `/`-separated topics and `*` / `**` globs: `maxflow sub 'gh/**'`. |
+| **Sentries** | GitHub, Slack, review queue, request funnel, question gate, slow-agent coach, RAM guard, self-healing, titles, graph curation. |
+| **Agent intro** | A `SessionStart` hook tells every Claude Code agent where it is, its id, and how to use each running sentry. |
+| **Sleep, don't wait** | Agents declare what they wait on (`ci:<pr>`, `approval:<pr>`, `q:<id>`, `agent:<id>`) and are archived until the event wakes them. |
+
+## Quick start
+
+Requirements: macOS or Linux, [Bun](https://bun.sh) 1.3+, `tmux`, and [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`) for the agent features. The GitHub sentry uses the `gh` CLI; the Slack sentry uses an `mcp` CLI with a Slack connector.
 
 ```sh
-id=$(./cli.ts new --name job -- claude); id=${id##*/}
-./cli.ts wait $id --match 'trust this folder|❯'   # block until the prompt shows; prints the screen
-./cli.ts keys $id Down Enter                      # tmux key names: Enter Escape C-c Up BTab ...
-./cli.ts send $id 'fix the failing test'          # types the text, then Enter as a separate keystroke
-./cli.ts wait $id --idle 5000 --timeout 600000    # quiet for 5s (claude's spinner counts as output)
-./cli.ts screen $id --history 200                 # plain text, no escape codes
-./cli.ts kill $id
+git clone https://github.com/isaacchacko/maxflow
+cd maxflow
+bun install
+bun server.ts            # http://localhost:4747  (MAXFLOW_PORT to change)
 ```
 
-`wait` prints the screen to stdout and its reason (`[match]`, `[idle]`, `[exited]`, `[timeout]`) to stderr, and exits 2 on timeout. The API underneath: `POST /api/sessions/:id/input {text?, keys?, enter?}`, `GET /api/sessions/:id/screen?history=N`, `GET /api/sessions/:id/wait?match=RE&idle=MS&timeout=MS`, `PATCH /api/sessions/:id {name?, archived?}`. After a session ends, `screen` returns the last capture.
+Open <http://localhost:4747>, press **new**, and you have a terminal. In Chrome, use **Install** in the address bar to give maxflow its own window and Dock icon.
 
-## Events and sentries
-
-maxflow has a small event bus (`~/.maxflow/events.jsonl`). Topics are `/`-separated; `*` matches one segment, `**` any number.
+Start without the sentries while you try it out:
 
 ```sh
-./cli.ts sub 'gh/dryft-ai/app/pr/7031/ci'          # block until the next matching event, print it as JSON
-./cli.ts sub 'gh/**' --follow                       # stream
-./cli.ts pub some/topic '{"any":"json"}'
-./cli.ts notify <id> 'text'                         # typed into the session once it is idle at an empty claude prompt
+MAXFLOW_SENTRIES=0 bun server.ts
 ```
 
-Sentries are sessions the server starts on boot (`MAXFLOW_SENTRIES=0` to skip) and tmux keeps across restarts.
+### Hook it into Claude Code
 
-**gh** (`sentries/gh.ts`) runs one GraphQL poll per repo every 30s, covering every PR a live session is tied to. A session is tied to a PR when its cwd has the PR's branch checked out, when it declared the PR with `~/.claude/set-pr.sh` (a bare number resolves against the repo of the PR links the session mentioned), or when it ran `./cli.ts gh watch <pr>` (which defaults to `$MAXFLOW_SESSION`). The sentry publishes `gh/<owner>/<repo>/pr/<n>/{opened,push,ci,review,comment,thread,decision,conflict,merged,closed}`. For CI finishing, reviews, comments, conflicts, merges and closes, it also notifies the tied sessions. The agents post as the gh user too, so a comment or review by that user is passed on only when no agent's tool call in a maxflow transcript carries its text: the user's own comments reach the tied sessions, the agents' own posts are never echoed back. It also watches the PRs the review sentry lists (`review-watch.json`). State lives in `~/.maxflow/gh-state.json` and `gh-watch.json`.
+maxflow learns what each agent is doing (working, waiting on you, idle, gone) and briefs it on start through Claude Code hooks. Add these to `~/.claude/settings.json`, with the path pointing at your clone. Each command is a no-op outside maxflow.
 
-**slack** (`sentries/slack.ts`) polls Slack every 60s (`SLACK_SENTRY_INTERVAL`) through the `mcp` CLI's `claude.ai/slack` connector, so it needs no token of its own. A session is tied to a Slack thread when its agent posted there with the connector's `slack_send_message` (read from its transcript; the tie lasts 3 days past its last post there, `SLACK_POSTED_TIE_MS`), or when it ran `./cli.ts slack watch <ref>`, where `<ref>` is a message or thread permalink, a channel id or `#name` (its top-level posts), or anything else as a search query (`'from:<@U0C3LKB5BST>'`). The first look at a target only records where it stands; after that every new message is published as `slack/<channel>/<thread ts>/reply`, `slack/<channel>/message` or `slack/search`, and the tied sessions are notified, except of messages they posted themselves. Every mention of the user is published as `slack/mention` for anyone to `sub`, notifying nobody. Explicit watches end once every session they were for has. State lives in `~/.maxflow/slack-state.json` and `slack-watch.json`.
+```jsonc
+{
+  "hooks": {
+    "SessionStart":      [{ "hooks": [
+      { "type": "command", "command": "[ -n \"$MAXFLOW_SESSION\" ] && ~/maxflow/hooks/claude-state.sh idle || true" },
+      { "type": "command", "command": "[ -n \"$MAXFLOW_SESSION\" ] && ~/maxflow/hooks/claude-intro.sh || true" } ] }],
+    "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "[ -n \"$MAXFLOW_SESSION\" ] && ~/maxflow/hooks/claude-state.sh working || true" }] }],
+    "PreToolUse":        [{ "hooks": [{ "type": "command", "command": "[ -n \"$MAXFLOW_SESSION\" ] && ~/maxflow/hooks/claude-state.sh working || true" }] },
+                          { "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "[ -n \"$MAXFLOW_SESSION\" ] && ~/maxflow/hooks/claude-questions.ts || true" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "[ -n \"$MAXFLOW_SESSION\" ] && ~/maxflow/hooks/claude-state.sh waiting || true" }] }],
+    "Stop":              [{ "hooks": [
+      { "type": "command", "command": "[ -n \"$MAXFLOW_SESSION\" ] && ~/maxflow/hooks/claude-state.sh idle || true" },
+      { "type": "command", "command": "[ -n \"$MAXFLOW_SESSION\" ] && ~/maxflow/hooks/claude-questions.ts || true" } ] }],
+    "StopFailure":       [{ "hooks": [{ "type": "command", "command": "[ -n \"$MAXFLOW_SESSION\" ] && ~/maxflow/hooks/claude-state.sh idle || true" }] }],
+    "SessionEnd":        [{ "hooks": [{ "type": "command", "command": "[ -n \"$MAXFLOW_SESSION\" ] && ~/maxflow/hooks/claude-state.sh gone || true" }] }]
+  }
+}
+```
 
-**rename** (`sentries/rename.ts`) titles each session by the topic it owns (the ticket, PR or feature), never its status, so a title only changes when the topic does. A session gets its first title once 400 new characters have reached its screen, then a new one every 4000 (`RENAME_FIRST_CHARS`, `RENAME_EVERY_CHARS`). "New" means lines in the last 300 lines of screen that weren't there at the last rename, so spinner redraws don't count. Each title is one `claude -p --model haiku` call with no tools and no saved transcript, about 1.5s and $0.0001. Rename a session yourself and the sentry leaves it alone from then on.
+### Keep it running (macOS)
 
-**graph** (`sentries/graph.ts`) decides which URLs become nodes in the graph view. The server finds every URL a session mentions (an agent's own and its user's messages in the transcript, a shell's tmux history) and serves them with their surrounding text at `GET /api/links`. Every 15s the sentry judges each session's new ones in one `claude -p --model haiku` call, keeping only links meant to be opened (a PR or ticket, a deploy, a published page, a running dev server) and dropping incidental ones (code, docs, CDN, stack traces, maxflow itself). Each URL is judged once per session; verdicts live in `~/.maxflow/graph-links.json`, and a URL stays hidden until judged. It also groups the running sessions by the work they share (one haiku call whenever the set of sessions or their titles change, at most every 2 minutes, `GRAPH_GROUP_EVERY`) into `~/.maxflow/graph-groups.json`; the server serves each session's `group`, and the graph joins every pair in a group with a hidden link that pulls them together without being drawn. Sentries always share one group, `maxflow sentries`, and every session working on maxflow itself shares `maxflow development` (pinned when its title says maxflow or it runs in this repo, otherwise by haiku); the rest are titled like the rename sentry's session titles. Press `hg` in the graph view to outline each group and show its title; `ht` hides node titles but keeps the group titles. `G` acts on a whole group: it outlines and numbers them, `G<n>r` opens the new-agent draft as a router for group n, with every running member picked (so each is introduced to it) and a brief to coordinate them, ready to edit before it starts. A GitHub PR's node is colored by its state, polled every 30s: green open, purple merged, red closed (a lone PR drawn as its domain's node gets a ring in that color around the favicon). Right-click a link (or a domain node, for all its links) to archive it: it is greyed out everywhere it appears and hides along with archived sessions (`ha`). Archived URLs live in `~/.maxflow/archived-links.json`; `PATCH /api/links {urls, archived}` sets them. A domain node shows its site's favicon and a sentry's node an icon for what it watches (a PR for gh, # for slack, a tag for rename, a pulse for health, waypoints for graph); `@isaacchacko/graph` draws both inside the node, ringed in its color, so they dim, highlight and move with it.
+Run the server as a launchd agent so it starts at login and restarts if it crashes. Create `~/Library/LaunchAgents/com.example.maxflow.plist`, with `RunAtLoad` and `KeepAlive` set, `ProgramArguments` = `bun /path/to/maxflow/server.ts`, and `WorkingDirectory` = the clone (Bun reads its Tailwind plugin from `bunfig.toml` there). Then:
 
-**review** is a claude agent (`sentries/review.md` is its brief), the one place to see and drive the user's open PRs toward prod or closed. Its feed, `sentries/review.ts`, runs beside it in the same pane (logging to `~/.maxflow/review-feed.log`, exiting with the agent): every 2 minutes (`REVIEW_SENTRY_INTERVAL`) it stages each open PR of the user's (draft, conflict, ci failing, changes requested, ci running, needs reviewer, in review, approved, merging) with the sessions on it into `~/.maxflow/review-queue.json`, hands them all to the gh sentry in `review-watch.json`, and writes the PR-labeled graph edges to `review-edges.json`. It notifies the agent when a PR changes stage, and when a person's comment or review lands that no session heard (the gh sentry's events carry `who`, null for an agent's own post, and `told`, the sessions it notified). The agent delivers such a comment by resuming the chat that opened the PR (or starting one in a worktree), tying it to the PR and passing the comment on; it tells the user what to do next, revives sessions for failing PRs, flags PRs to close, and merges or closes only on the user's word in its terminal. It never requests reviewers.
+```sh
+launchctl load ~/Library/LaunchAgents/com.example.maxflow.plist
+launchctl kickstart -k gui/$(id -u)/com.example.maxflow   # restart after server edits
+```
 
-**health** (`sentries/health.ts`) polls the server every 15s. Sentries live in tmux, so this one keeps running while the server is down. Once the server has been unreachable for 2 minutes (`HEALTH_DOWN_MS`) while its launchd agent is still loaded, so launchd's own restarts aren't working, it starts a `maxflow recovery` session straight in tmux: `claude` in bypass mode, primed with launchd's status and the tail of `/tmp/maxflow.log`, told to fix the cause, kickstart the agent and confirm it answers. The server adopts that session when it comes back. One agent at a time, and at most one per 15 minutes (`HEALTH_COOLDOWN_MS`). Unloading the launchd agent counts as down on purpose and starts nothing.
+The UI hot-reloads on its own; only `server.ts` changes need a restart.
 
-## Resuming chats
+## Driving it from an agent
 
-The **resume** button (or `localhost:4747/#resume`) lists every Claude Code chat under `~/.claude/projects`, newest first, searchable by title, first prompt, folder or id. Picking one runs `claude --resume <id>` in the chat's own folder (with `--permission-mode bypassPermissions` unless the checkbox is off / `--safe`). A chat already open in maxflow reattaches instead of starting twice; one held by another claude process (`ps`) is flagged and needs confirming, since two processes on one transcript fork it.
+Everything the browser does is an HTTP call, so the CLI is a thin wrapper (`./cli.ts`, or `maxflow` once linked with `bun link`):
 
-## Running
+```sh
+id=$(maxflow new --name job -- claude); id=${id##*/}
+maxflow wait $id --match 'trust this folder|❯'   # block until the prompt shows; prints the screen
+maxflow keys $id Enter                           # tmux key names: Enter Escape C-c Up BTab ...
+maxflow send $id 'fix the failing test'          # types the text, then Enter
+maxflow wait $id --idle 5000 --timeout 600000    # quiet for 5s
+maxflow screen $id --history 200                 # plain text, no escape codes
+maxflow kill $id
+```
 
-Installed as a launchd agent (`~/Library/LaunchAgents/com.isaacchacko.maxflow.plist`), so it starts at login and outlives any shell. Restart after edits with `launchctl kickstart -k gui/$(id -u)/com.isaacchacko.maxflow`; logs in `/tmp/maxflow.log`.
+Talking to agents and the bus:
 
-The UI is React + shadcn/ui + Tailwind in `src/`, bundled by Bun from the `src/index.html` import in `server.ts` with hot reload, so edits show up without a restart. Bun reads the Tailwind plugin from `bunfig.toml` in its working directory, so the launchd agent runs from this folder.
+```sh
+maxflow notify <id> 'CI is green on #7031'       # typed in once the agent is idle at an empty prompt
+maxflow link <id> <id> 'both touch the auth middleware'   # introduce two agents to each other
+maxflow ask 'Ship behind a flag or not? Evidence… I recommend the flag.'   # queue a question for the human
+maxflow sub 'gh/acme/api/pr/7031/ci'             # block until the next matching event, print JSON
+maxflow pub some/topic '{"any":"json"}'
+maxflow gh status 7031                           # CI, reviews, open threads from the sentry's last poll
+maxflow slack read '#eng' --last 20
+```
 
-Bound to loopback only; requests with a foreign `Origin` are refused, so other sites can't drive it.
+Run `./cli.ts` with no arguments for every verb. The HTTP API underneath is listed in the [reference](docs/reference.md).
+
+## Sentries
+
+Sentries are sessions the server starts on boot and tmux keeps across restarts. Some are plain scripts; the ones marked *agent* are Claude Code agents with a brief in `sentries/*.md` and a script feeding them.
+
+| Sentry | What it does |
+|---|---|
+| **gh** | One GraphQL poll per repo every 30s for every PR an agent is tied to (by checked-out branch or explicit watch). Publishes CI, review, comment, conflict and merge events and notifies the tied agents. Never echoes an agent's own posts back to it. |
+| **slack** | Polls the threads, channels and searches agents posted in or watch, every 60s, and notifies them of new replies. Publishes every mention of you as `slack/mention`. |
+| **review** *(agent)* | Keeps your queue of open PRs moving toward merged or closed: stages each PR, revives the chat that opened it when a comment lands that nobody heard, and tells you what's next. |
+| **funnel** *(agent)* | The front door for your requests: finds the agent that owns the request's root (ticket, PR, bug), or resumes or starts one, delivers it, and links in agents whose context helps. |
+| **questions** | The throttle on your attention. Every `maxflow ask` goes through a quick model check; what the agent should decide itself is bounced back, the rest waits in the Questions panel. |
+| **meta** *(agent)* | Reads every agent's transcript every 15 minutes, times turns, tool calls and model replies, and coaches the slow ones. Keeps lessons that every new agent is told. |
+| **ram** | Kills local test, lint, typecheck and build jobs an agent starts once they use too much RAM, and tells it to push and let CI run them. |
+| **health** | Watches the server. If it stays down for 2 minutes, starts a recovery agent to fix and restart it. |
+| **rename** | Titles each session by the topic it owns, with one cheap Haiku call per few thousand characters of new output. |
+| **graph** | Decides which URLs an agent mentions are worth a node in the graph, and groups sessions by the work they share. |
+
+Each one's thresholds, state files and environment variables are in the [reference](docs/reference.md#events-and-sentries).
+
+## How it works
+
+```
+browser (React, xterm.js)  ─┐
+agents (./cli.ts, curl)    ─┼─▶  server.ts (Bun, 127.0.0.1:4747)  ──▶  tmux -L maxflow  ──▶  mf-<id> sessions
+Claude Code hooks          ─┘          │                                                   (claude, shells, sentries)
+                                       ├─ ~/.maxflow/events.jsonl   event bus
+                                       └─ ~/.maxflow/*.json         sentry state, questions, graph
+```
+
+- `server.ts`: HTTP and websocket server, session lifecycle, tmux adoption, the agent intro, the question queue.
+- `cli.ts`: the `maxflow` command.
+- `bus.ts`: the event bus.
+- `chats.ts`: indexes Claude Code transcripts under `~/.claude/projects` for resume.
+- `sentries/`: one file per sentry; `.md` files are agent briefs.
+- `hooks/`: the Claude Code hooks.
+- `src/`: the UI (React, shadcn/ui, Tailwind), bundled by Bun with hot reload.
+
+## Security
+
+maxflow is a remote shell into your machine, so it binds to loopback only and refuses requests whose `Origin` is another site, so a web page you visit can't drive it. Don't expose port 4747 to a network. Sessions it starts with `--permission-mode bypassPermissions` run Claude Code without permission prompts; turn that off by unticking **Bypass permissions** in the resume dialog or passing `--safe`.
+
+## Status
+
+maxflow is a personal tool, built for one person running many agents on one Mac every day. It moves fast, a few sentries assume conventions from that setup (for example how a GitHub repo maps to a local checkout), and nothing about its API is stable. Issues and ideas are welcome.
