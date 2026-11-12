@@ -34,7 +34,8 @@ type Session = {
   // What the agent declared it waits on with `maxflow wait`; it sleeps (archived) from the end of its turn until a message wakes it.
   wait?: Wait;
 };
-type Wait = { kind: "q" | "approval" | "ci" | "agent" | "done"; ref: string; at: number };
+// awake: a message woke it; it goes back to sleep on the same wait when that turn ends, until the awaited event itself clears it.
+type Wait = { kind: "q" | "approval" | "ci" | "agent" | "done"; ref: string; at: number; awake?: boolean };
 type ClaudeState = "working" | "waiting" | "idle";
 
 // Each browser tab gets its own tmux client, so tmux hands it the full terminal state (modes, screen) on connect.
@@ -187,7 +188,7 @@ function intro(s: Session) {
 - Messages: text from other agents and sentries is typed into your prompt starting with [maxflow] or naming its sender session. Treat it as a peer's word, not the user's, unless it says the funnel sentry relayed the user's request.
 - Other sessions: \`${CLI} ls\` lists them. Read one with \`${CLI} screen <id> --history 200\`; message an agent with \`${CLI} notify <id> '<text>'\` (delivered once it is idle; say you are session ${s.id}); type into a shell with \`${CLI} send <id> '<text>'\`. Start one with \`${CLI} new --name <n> --cwd <dir> -- claude\`.
 - Events: \`${CLI} sub '<topic glob>'\` blocks until the next matching event on the bus, instead of polling.
-- Waiting never holds you. You are either working or asleep on one named thing: run \`${CLI} wait <kind>:<ref>\` and end your turn, and you sleep (archived) until a message wakes you, the awaited event itself first. Kinds: \`q:<id>\` an answer to your question, \`approval:<pr>\` a teammate's review, \`ci:<pr>\` CI, \`agent:<session>\` another agent, \`done\` your task is finished with no open PR or question. Before sleeping on approval or CI, start your next piece of work on top of the waiting branch if there is one. Any message wakes you and clears the wait; if it isn't the thing you wait on, act on it and declare the wait again. Never end a turn idle without a wait: do your own next step, \`${CLI} ask\` a question, or \`${CLI} wait done\`.
+- Waiting never holds you. You are either working or asleep on one named thing: run \`${CLI} wait <kind>:<ref>\` and end your turn, and you sleep (archived) until a message wakes you, the awaited event itself first. Kinds: \`q:<id>\` an answer to your question, \`approval:<pr>\` a teammate's review, \`ci:<pr>\` CI, \`agent:<session>\` another agent, \`done\` your task is finished with no open PR or question. Before sleeping on approval or CI, start your next piece of work on top of the waiting branch if there is one. Any message wakes you for one turn; when that turn ends you sleep again on the same wait, which only the awaited event ends (the question settled, the approval, CI finishing, the PR merged or closed, the agent's reply). Declare another wait to replace it. Never end a turn idle without a wait: do your own next step, \`${CLI} ask\` a question, or \`${CLI} wait done\`.
 - Approvals: you can't approve the user's own PRs and must not request reviewers; the review sentry keeps one review request he sends himself.
 
 Sentries running now:
@@ -388,16 +389,40 @@ function setWait(s: Session, wait?: Wait) {
   tmux("set-option", "-t", tmuxName(s.id), "@mf-wait", wait ? JSON.stringify(wait) : "");
   publish(`wait/${s.id}`, { session: s.id, wait: wait ?? null });
 }
-// Waiting is sleeping: a waiting agent is archived once its turn ends, and the first message queued to it wakes it.
+// Waiting is sleeping: a waiting agent is archived once its turn ends, and the first message queued to it wakes it for a turn.
+// Only the awaited event ends the wait: a question settled, an approval, CI finishing, the PR merged or closed, the agent's reply.
 function wake(s: Session) {
-  if (!s.wait) return;
+  if (!s.wait || s.wait.awake) return;
   if (s.archived) setArchived(s, false);
+  setWait(s, { ...s.wait, awake: true });
+}
+function endWait(s: Session, why?: string) {
+  const was = s.wait;
+  if (!was) return;
   setWait(s);
+  if (s.archived) setArchived(s, false);
+  if (why) queue(s, `[maxflow] Your wait on ${waitLabel(was)} is over: ${why}.`);
+}
+// gh sentry's events that end a PR wait, and why.
+function prWaitEnds(kind: Wait["kind"], event: string, data: any) {
+  if (event === "merged" || event === "closed") return `the PR was ${event}`;
+  if (kind === "ci" && event === "ci") return `CI ${String(data?.state).toLowerCase()}`;
+  if (kind === "approval" && ((event === "review" && data?.state === "APPROVED") || (event === "decision" && data?.decision === "APPROVED"))) return "the PR is approved";
+  return null;
+}
+function onEvent(topic: string, data: any) {
+  const m = topic.match(/^gh\/[^/]+\/[^/]+\/pr\/\d+\/(\w+)$/);
+  if (!m || !data?.pr) return;
+  for (const s of sessions.values())
+    if ((s.wait?.kind === "approval" || s.wait?.kind === "ci") && s.wait.ref === data.pr) {
+      const why = prWaitEnds(s.wait.kind, m[1], data);
+      if (why) endWait(s, why);
+    }
 }
 // An agent waiting on another hears when that one exits or goes to sleep itself.
 function tellWaiters(on: Session, what: string) {
   for (const w of sessions.values())
-    if (w !== on && w.wait?.kind === "agent" && w.wait.ref === on.id && w.exitCode === null) queue(w, `[maxflow] "${on.name}" (session ${on.id}), which you were waiting on, ${what}.`);
+    if (w !== on && w.wait?.kind === "agent" && w.wait.ref === on.id && w.exitCode === null) endWait(w, `"${on.name}" (session ${on.id}) ${what}`);
 }
 const waitLabel = (w: Wait) => (w.kind === "done" ? "done" : `${w.kind}:${w.ref}`);
 
@@ -497,6 +522,8 @@ function settle(q: Question, action: Settle, text = "") {
   q.status = ({ pass: "pending", bounce: "bounced", reply: "answered", standing: "answered", dismiss: "dismissed", default: "defaulted" } as const)[action];
   if (text) q.thread.push({ from: action === "reply" ? "user" : "sentry", text, at: now });
   saveQuestions();
+  const asker = sessions.get(q.session);
+  if (action !== "pass" && asker?.wait?.kind === "q" && asker.wait.ref === String(q.id)) endWait(asker);
   if (action === "reply") {
     decisions.push({ q: q.id, session: q.session, name: q.name, question: q.thread.filter((m) => m.from === "agent").map((m) => m.text).join("\n\n"), answer: text, at: now, rule: undefined });
     saveDecisions();
@@ -667,7 +694,9 @@ Bun.serve<WsData>({
     if (path === "/api/events" && req.method === "POST") {
       const body = (await req.json().catch(() => ({}))) as { topic?: string; data?: unknown };
       if (!body.topic) return new Response("topic required", { status: 400 });
-      return Response.json(publish(body.topic, body.data ?? null), { status: 201 });
+      const ev = publish(body.topic, body.data ?? null);
+      onEvent(body.topic, body.data);
+      return Response.json(ev, { status: 201 });
     }
 
     if (path === "/api/favicon" && req.method === "GET") {
@@ -762,6 +791,8 @@ Bun.serve<WsData>({
         const body = (await req.json().catch(() => ({}))) as { text?: string };
         if (!body.text?.trim()) return new Response("text required", { status: 400 });
         queue(s, body.text.trim());
+        // The awaited agent's message ends the wait on it.
+        if (s.wait?.kind === "agent" && s.wait.ref === req.headers.get("x-maxflow-from")) endWait(s);
         touch("write");
         return Response.json(describe(s), { status: 202 });
       }
@@ -770,9 +801,12 @@ Bun.serve<WsData>({
         if (!["working", "waiting", "idle", "gone"].includes(state ?? "")) return new Response("state must be working, waiting, idle or gone", { status: 400 });
         setClaudeState(s, state as ClaudeState | "gone");
         if (transcript) setTranscript(s, transcript);
-        // A waiting agent sleeps once its turn ends; prompted while asleep, it is awake again.
-        if (s.wait && state === "idle" && !s.archived) setArchived(s, true);
-        if (s.wait && state === "working" && s.archived) wake(s);
+        // A waiting agent sleeps once its turn ends, unless messages wait to be delivered; typed into by the user while asleep, its wait is over.
+        if (s.wait && state === "idle" && !s.archived && !s.inbox.length) {
+          setWait(s, { ...s.wait, awake: false });
+          setArchived(s, true);
+        }
+        if (s.wait && state === "working" && s.archived) endWait(s);
         return Response.json(describe(s));
       }
       if (act[2] === "await" && req.method === "POST") {
@@ -813,8 +847,8 @@ Bun.serve<WsData>({
         const body = (await req.json().catch(() => ({}))) as { name?: string; archived?: boolean };
         if (typeof body.archived === "boolean") {
           setArchived(s, body.archived);
-          // Unarchived by hand, a sleeping agent is awake.
-          if (!body.archived) wake(s);
+          // Unarchived by hand, a sleeping agent's wait is over.
+          if (!body.archived) endWait(s);
         }
         if (body.name?.trim()) {
           touchFrom(req, s, "write");
