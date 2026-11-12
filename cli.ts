@@ -13,10 +13,12 @@ const usage = `usage:
   maxflow link <id> <id> [why...]            introduce two sessions to each other, as drawing an edge in the graph does
   maxflow sub <topic-glob> [--since SEQ] [--timeout MS] [--follow]   block for the next matching event, print it as JSON
   maxflow pub <topic> [json]
+  maxflow gh status [pr] [--json]           CI, checks, reviews, open threads from the sentry's last poll; no pr: every PR you're tied to
   maxflow gh watch <pr> [--session ID] | maxflow gh unwatch <pr> | maxflow gh ls
+  maxflow slack read <permalink | channel id | #channel | query> [--last N]   latest messages from the sentry's last poll
   maxflow slack watch <permalink | channel id | #channel | query> [--session ID] | maxflow slack unwatch <same> | maxflow slack ls
   maxflow chats [query] | maxflow resume <claude-session-id> [--safe] [--force]`;
-import { parsePr, readWatches, writeWatches } from "./sentries/gh";
+import { fetchPrs, links, parsePr, readStatus, readWatches, render, writeWatches } from "./sentries/gh";
 import * as slack from "./sentries/slack";
 const flag = (args: string[], k: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
 const positional = (args: string[], valued: string[]) => args.filter((a, i) => !a.startsWith("--") && !valued.includes(args[i - 1]));
@@ -85,6 +87,48 @@ if (verb === "ls") {
     if (events.length && !rest.includes("--follow")) break;
     if (events.length) after = String(events.at(-1).seq);
   }
+} else if (verb === "gh" && rest[0] === "status") {
+  const ref = positional(rest.slice(1), [])[0];
+  const me = process.env.MAXFLOW_SESSION;
+  const polled = readStatus();
+  const mine = ref ? [] : (await links()).filter((l) => l.session === me);
+  const onBranch = (l: { repo: string; branch?: string }) => {
+    const key = Object.keys(polled).find((k) => k.startsWith(`${l.repo}#`) && polled[k].pr.headRefName === l.branch);
+    const pr = !key && l.branch ? fetchPrs(l.repo, [], [l.branch]).byBranch.get(l.branch) : undefined;
+    return key ?? (pr && `${l.repo}#${pr.number}`);
+  };
+  const prs = ref ? [parsePr(ref, process.cwd())] : [...new Set(mine.flatMap((l) => l.pr ?? onBranch(l) ?? []))];
+  if (prs.includes(null)) console.error(`can't tell which repo ${ref} is in; use owner/repo#n or a PR url`), process.exit(1);
+  if (!prs.length) console.error("you're tied to no PR; name one"), process.exit(1);
+  for (const key of prs as string[]) {
+    let entry = polled[key];
+    // Not polled lately: ask GitHub once, and watch it so the sentry keeps it from now on.
+    if (!entry || Date.now() - entry.at > 120_000) {
+      const [repo, n] = key.split("#");
+      const pr = fetchPrs(repo, [Number(n)], []).byNumber.get(Number(n));
+      if (!pr) console.error(`${key}: not found`), process.exit(1);
+      entry = { at: Date.now(), pr };
+      if (me && pr.state === "OPEN" && !readWatches().some((w) => w.pr === key && w.sessions.includes(me)))
+        writeWatches([...readWatches().filter((w) => w.pr !== key), { pr: key, sessions: [...(readWatches().find((w) => w.pr === key)?.sessions ?? []), me] }]);
+    }
+    console.log(rest.includes("--json") ? JSON.stringify(entry.pr) : `${render(key, entry.pr, entry.at)}\n`);
+  }
+} else if (verb === "slack" && rest[0] === "read" && rest[1]) {
+  const ref = positional(rest.slice(1), ["--last"]).join(" ");
+  const target = await slack.parseTarget(ref);
+  if (!target) console.error(`no channel named ${ref}`), process.exit(1);
+  const me = process.env.MAXFLOW_SESSION;
+  let got = slack.readMessages()[target];
+  // Not polled lately: ask Slack once, and watch it so the sentry keeps it from now on.
+  if (!got || Date.now() - got.at > 180_000) {
+    got = { at: Date.now(), ...(await slack.read(target)) };
+    if (me && !slack.readWatches().some((w) => w.target === target && w.sessions.includes(me)))
+      slack.writeWatches([...slack.readWatches().filter((w) => w.target !== target), { target, sessions: [...(slack.readWatches().find((w) => w.target === target)?.sessions ?? []), me] }]);
+  }
+  const [channel, thread] = target.split("/");
+  console.log(`${got.title}  (polled ${Math.round((Date.now() - got.at) / 1000)}s ago)`);
+  for (const m of got.msgs.slice(-Number(flag(rest, "--last") ?? 20)))
+    console.log(`\n${m.who}${m.channel ? ` in ${m.channel}` : ""}  ${new Date(Number(m.ts) * 1000).toLocaleString()}  ${m.link ?? slack.permalink(channel, m.ts, thread)}\n${m.text}`);
 } else if (verb === "gh" && rest[0] === "ls") {
   for (const w of readWatches()) console.log(`${w.pr}  ${w.sessions.join(", ") || "(no session)"}`);
 } else if (verb === "gh" && (rest[0] === "watch" || rest[0] === "unwatch") && rest[1]) {

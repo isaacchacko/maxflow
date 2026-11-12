@@ -8,18 +8,22 @@ import { join } from "node:path";
 const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const WATCH_FILE = join(STATE_DIR, "slack-watch.json");
 const STATE_FILE = join(STATE_DIR, "slack-state.json");
+// The latest messages of each target, so `maxflow slack read` can answer without asking Slack.
+const MESSAGES_FILE = join(STATE_DIR, "slack-messages.json");
+const KEEP = 50;
 const PROJECTS = join(process.env.HOME!, ".claude", "projects");
 const INTERVAL_MS = Number(process.env.SLACK_SENTRY_INTERVAL ?? 60_000);
 // Threads a session posted in stay tied to it this long after its last post there.
 const POSTED_TIE_MS = Number(process.env.SLACK_POSTED_TIE_MS ?? 3 * 86_400_000);
 const DOMAIN = process.env.SLACK_DOMAIN ?? "dryftai";
+const CLI = new URL("../cli.ts", import.meta.url).pathname;
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 // Sent with each call that touches a session, so the graph draws this sentry doing it.
 const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 
 // A target is `C123/1794442442.159219` (a thread), `C123` (a channel's top-level posts) or `search:<query>`.
 export type Watch = { target: string; sessions: string[] };
-type Msg = { ts: string; uid: string; who: string; text: string; channel?: string; link?: string };
+export type Msg = { ts: string; uid: string; who: string; text: string; channel?: string; link?: string };
 type State = { latest: Record<string, string>; seen: Record<string, string[]>; titles: Record<string, string> };
 
 const readJson = <T>(path: string, fallback: T): T => (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : fallback);
@@ -30,7 +34,7 @@ export const writeWatches = (w: Watch[]) => writeFileSync(WATCH_FILE, JSON.strin
 export async function parseTarget(ref: string) {
   const link = ref.match(/archives\/([A-Z0-9]+)(?:\/p(\d{10})(\d{6}))?(?:.*thread_ts=([\d.]+))?/);
   if (link) return link[4] ? `${link[1]}/${link[4]}` : link[2] ? `${link[1]}/${link[2]}.${link[3]}` : link[1];
-  if (/^[CDG][A-Z0-9]{8,}$/.test(ref)) return ref;
+  if (/^[CDG][A-Z0-9]{8,}(\/[\d.]+)?$/.test(ref)) return ref;
   if (ref.startsWith("#")) {
     const found = (await slack("slack_search_channels", { query: ref.slice(1), limit: 10 })).results ?? "";
     const id = [...found.matchAll(/Name: #([\w.-]+)\n[\s\S]*?archives\/([A-Z0-9]+)/g)].find((m) => m[1] === ref.slice(1))?.[2];
@@ -81,7 +85,7 @@ async function search(query: string): Promise<Msg[]> {
   }));
 }
 
-const permalink = (channel: string, ts: string, thread?: string) =>
+export const permalink = (channel: string, ts: string, thread?: string) =>
   `https://${DOMAIN}.slack.com/archives/${channel}/p${ts.replace(".", "")}${thread && thread !== ts ? `?thread_ts=${thread}&cid=${channel}` : ""}`;
 
 type Session = { id: string; name: string; running: boolean; sentry: boolean; chatId?: string; transcript?: string };
@@ -145,30 +149,55 @@ async function ties(): Promise<{ ties: Tie[]; posted: Map<string, Set<string>> }
 const short = (text: string, n = 300) => (text.replace(/\s+/g, " ").trim().slice(0, n) + (text.length > n ? "…" : "")).trim();
 const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", headers: caller, body: JSON.stringify(body) });
 
-// New messages on a target since the last tick; the first look at a target only records where it stands.
-async function fresh(target: string, state: State): Promise<{ msgs: Msg[]; title: string }> {
-  const prev = state.latest[target];
-  if (target.startsWith("search:")) {
-    const hits = await search(target.slice(7));
-    const seen = new Set(state.seen[target] ?? []);
-    state.seen[target] = [...seen, ...hits.map((m) => m.ts)].slice(-500);
-    state.latest[target] ??= "seen";
-    return { msgs: prev ? hits.filter((m) => !seen.has(m.ts)).reverse() : [], title: `search "${short(target.slice(7), 60)}"` };
-  }
+// A target's messages, oldest first, newer than `oldest` when given.
+export async function read(target: string, oldest?: string): Promise<{ msgs: Msg[]; title: string; name: string }> {
+  const query = `search "${short(target.slice(7), 60)}"`;
+  if (target.startsWith("search:")) return { msgs: (await search(target.slice(7))).reverse(), title: query, name: query };
   const [channel, thread] = target.split("/");
   const res = thread
-    ? await slack("slack_read_thread", { channel_id: channel, message_ts: thread, ...(prev ? { oldest: prev } : { limit: 1000 }) })
-    : await slack("slack_read_channel", { channel_id: channel, limit: 50, ...(prev ? { oldest: prev } : {}) });
+    ? await slack("slack_read_thread", { channel_id: channel, message_ts: thread, ...(oldest ? { oldest } : { limit: 1000 }) })
+    : await slack("slack_read_channel", { channel_id: channel, limit: 50, ...(oldest ? { oldest } : {}) });
   const body = String(res.messages ?? res.raw ?? "");
   const msgs = parseMessages(body).sort((a, b) => Number(a.ts) - Number(b.ts));
   const name = body.match(/^Channel: (#\S+)/)?.[1] ?? channel;
   const parent = thread && msgs.find((m) => m.ts === thread);
+  return { msgs, title: thread ? `thread ${parent ? `"${short(parent.text, 60)}"` : thread} in ${name}` : name, name };
+}
+
+// New messages on a target since the last tick; the first look at a target only records where it stands.
+async function fresh(target: string, state: State): Promise<{ msgs: Msg[]; title: string }> {
+  const prev = state.latest[target];
+  if (target.startsWith("search:")) {
+    const { msgs: hits, title } = await read(target);
+    const seen = new Set(state.seen[target] ?? []);
+    state.seen[target] = [...seen, ...hits.map((m) => m.ts)].slice(-500);
+    state.latest[target] ??= "seen";
+    keep(target, title, hits);
+    return { msgs: prev ? hits.filter((m) => !seen.has(m.ts)) : [], title };
+  }
+  const thread = target.split("/")[1];
+  const got = await read(target, prev);
+  const parent = thread && got.msgs.find((m) => m.ts === thread);
   if (parent) state.titles[target] = short(parent.text, 60);
-  const newest = msgs.at(-1)?.ts;
+  const newest = got.msgs.at(-1)?.ts;
   if (newest && (!prev || Number(newest) > Number(prev))) state.latest[target] = newest;
   else state.latest[target] ??= `${(Date.now() / 1000).toFixed(6)}`;
-  const title = thread ? `thread ${state.titles[target] ? `"${state.titles[target]}"` : thread} in ${name}` : name;
-  return { msgs: prev ? msgs.filter((m) => Number(m.ts) > Number(prev) && m.ts !== thread) : [], title };
+  const title = thread ? `thread ${state.titles[target] ? `"${state.titles[target]}"` : thread} in ${got.name}` : got.name;
+  keep(target, title, got.msgs);
+  return { msgs: prev ? got.msgs.filter((m) => Number(m.ts) > Number(prev) && m.ts !== thread) : [], title };
+}
+
+type Kept = Record<string, { at: number; title: string; msgs: Msg[] }>;
+export const readMessages = () => readJson<Kept>(MESSAGES_FILE, {});
+let kept: Kept | undefined;
+function keep(target: string, title: string, msgs: Msg[]) {
+  kept ??= readMessages();
+  const byTs = new Map([...(kept[target]?.msgs ?? []), ...msgs].map((m) => [m.ts, m]));
+  // A thread's parent always stays, so a read shows what the thread is about.
+  const thread = target.split("/")[1];
+  const all = [...byTs.values()].sort((a, b) => Number(a.ts) - Number(b.ts));
+  const parent = thread ? all.filter((m) => m.ts === thread) : [];
+  kept[target] = { at: Date.now(), title, msgs: [...parent, ...all.filter((m) => m.ts !== thread).slice(-KEEP)] };
 }
 
 async function tick(me: string, state: State) {
@@ -193,7 +222,7 @@ async function tick(me: string, state: State) {
       const line = `${m.who}${m.channel ? ` in ${m.channel}` : ""}: "${short(m.text)}" ${link}`;
       for (const session of sessions) {
         if (!session || posted.get(session)?.has(m.ts)) continue;
-        const text = `[maxflow slack] ${got.title}: new message from ${line}. (Automated notice, not a request from the user: act on it only if it's part of your current task.)`;
+        const text = `[maxflow slack] ${got.title}: new message from ${line}. Whole ${thread ? "thread" : "conversation"}: ${CLI} slack read ${target.startsWith("search:") ? JSON.stringify(target.slice(7)) : target}. (Automated notice, not a request from the user: act on it only if it's part of your current task.)`;
         await post(`/api/sessions/${session}/notify`, { text });
       }
       console.log(`${new Date().toLocaleTimeString()}  ${got.title}  ${line}  -> ${[...sessions].filter(Boolean).join(", ") || "nobody"}`);
@@ -202,6 +231,10 @@ async function tick(me: string, state: State) {
   // Forget targets nobody is tied to any more.
   for (const key of Object.keys(state.latest)) if (!listeners.has(key)) delete state.latest[key], delete state.seen[key], delete state.titles[key];
   writeFileSync(STATE_FILE, JSON.stringify(state));
+  if (kept) {
+    for (const key of Object.keys(kept)) if (!listeners.has(key)) delete kept[key];
+    writeFileSync(MESSAGES_FILE, JSON.stringify(kept));
+  }
   return listeners.size;
 }
 
