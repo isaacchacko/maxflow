@@ -644,10 +644,13 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   );
 
   // With links, claude starts empty and gets the prompt and the introductions as one first message from its inbox.
-  const startAgent = async (prompt: string, cwd: string, jump: boolean) => {
+  const startAgent = async (prompt: string, cwd: string, jump: boolean, route: boolean) => {
     const at = draft!.world, name = draft!.name, peers = picked;
     prompt = prompt.trim();
     setDraft(null);
+    // A bare request goes to the funnel sentry, which hands it to the agent that owns it or starts one.
+    const funnel = all.find((s) => isSentry(s) && s.name === "sentry:funnel" && s.running);
+    if (route && funnel && prompt && !peers.length) return void api.notify(funnel.id, prompt);
     store.set("mf.agentCwd", cwd);
     const s = await api.agent(peers.length ? "" : prompt, cwd.trim() || "~", store.get("mf.bypass") !== "0", name ?? prompt);
     placeAt.current.set(s.id, at);
@@ -763,13 +766,16 @@ function AgentDraft({ draft, folders, peers, picked, onToggle, onStart, onCancel
   peers: Session[];
   picked: string[];
   onToggle: (id: string) => void;
-  onStart: (prompt: string, cwd: string, jump: boolean) => void;
+  onStart: (prompt: string, cwd: string, jump: boolean, route: boolean) => void;
   onCancel: () => void;
 }) {
   const [prompt, setPrompt] = useState(draft.prompt ?? "");
   const [cwd, setCwd] = useState(() => draft.cwd || store.get("mf.agentCwd") || "~");
+  const [cwdTouched, setCwdTouched] = useState(false);
+  // ↵ routes through the funnel unless the folder or peers say where the work goes; ⇧↵ always starts a new agent.
+  const start = (shift: boolean) => onStart(prompt, cwd, shift, !shift && !cwdTouched && !draft.cwd && !draft.name);
   const keys = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") (e.preventDefault(), onStart(prompt, cwd, e.shiftKey));
+    if (e.key === "Enter") (e.preventDefault(), start(e.shiftKey));
     else if (e.key === "Escape") (e.preventDefault(), onCancel());
   };
   return (
@@ -796,11 +802,11 @@ function AgentDraft({ draft, folders, peers, picked, onToggle, onStart, onCancel
           </div>
         </div>
       )}
-      <Input placeholder="folder" list="mf-folders" value={cwd} onChange={(e) => setCwd(e.target.value)} onKeyDown={keys} className="h-7 font-mono text-xs" />
+      <Input placeholder="folder" list="mf-folders" value={cwd} onChange={(e) => (setCwd(e.target.value), setCwdTouched(true))} onKeyDown={keys} className="h-7 font-mono text-xs" />
       <datalist id="mf-folders">{folders.map((f) => <option key={f} value={f} />)}</datalist>
       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-        <span><Kbd>↵</Kbd> start · <Kbd>⇧↵</Kbd> start &amp; open · <Kbd>Esc</Kbd></span>
-        <Button size="sm" className="h-6" onClick={(e) => onStart(prompt, cwd, e.shiftKey)}>Start</Button>
+        <span><Kbd>↵</Kbd> {picked.length || cwdTouched ? "start" : "route"} · <Kbd>⇧↵</Kbd> new &amp; open · <Kbd>Esc</Kbd></span>
+        <Button size="sm" className="h-6" onClick={(e) => start(e.shiftKey)}>Start</Button>
       </div>
     </div>
   );
