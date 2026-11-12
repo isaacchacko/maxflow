@@ -91,7 +91,7 @@ if (verb === "ls") {
     slack.writeWatches([...slack.readWatches().filter((w) => w.target !== found), { target: found, sessions: [...new Set([...prev, me])] }]);
   }
   await call(`/api/sessions/${me}/await`, { method: "POST", body: JSON.stringify({ kind, ref: target }) });
-  console.log(`waiting on ${kind === "done" ? "nothing: done" : `${kind}:${target}`}. End your turn now; you sleep until a message wakes you.`);
+  console.log(kind === "done" ? "done. End your turn now; you stay awake with your last reply on screen." : `waiting on ${kind}:${target}. End your turn now; you sleep until a message wakes you.`);
 } else if (verb === "wait" && rest[0]) {
   const q = new URLSearchParams(Object.entries({ idle: flag(rest, "--idle"), match: flag(rest, "--match"), timeout: flag(rest, "--timeout") }).filter(([, v]) => v) as [string, string][]);
   const r = await call(`/api/sessions/${rest[0]}/wait?${q}`);
