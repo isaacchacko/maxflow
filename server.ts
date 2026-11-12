@@ -58,6 +58,12 @@ async function tmuxAsync(...args: string[]) {
   const [out, code] = await Promise.all([new Response(p.stdout).text(), p.exited]);
   return { ok: code === 0, out };
 }
+// Unbracketed text reaches the pane in ~1KB reads, and claude can read the split as a paste it never closes, after which Enter only adds newlines.
+async function paste(target: string, text: string) {
+  const load = Bun.spawn([...TMUX, "load-buffer", "-b", target, "-"], { env: termEnv, stdin: new Blob([text]) });
+  await load.exited;
+  await tmuxAsync("paste-buffer", "-p", "-d", "-b", target, "-t", target);
+}
 
 function push(session: Session, chunk: Uint8Array) {
   session.chunks.push(chunk);
@@ -401,7 +407,7 @@ setInterval(async () => {
     if (!s.inbox.length || s.exitCode !== null || Date.now() - s.lastOutputAt < DELIVER_IDLE_MS || !atEmptyPrompt(s)) continue;
     const text = s.inbox.splice(0).join("\n");
     tmux("set-option", "-t", tmuxName(s.id), "@mf-inbox", "[]");
-    await tmuxAsync("send-keys", "-t", tmuxName(s.id), "-l", "--", text);
+    await paste(tmuxName(s.id), text);
     await Bun.sleep(150);
     await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Enter");
   }
@@ -527,7 +533,7 @@ Bun.serve<WsData>({
         const body = (await req.json().catch(() => ({}))) as { text?: string; keys?: string[]; enter?: boolean };
         if (s.exitCode !== null) return new Response("session ended", { status: 409 });
         touch("write");
-        if (body.text) await tmuxAsync("send-keys", "-t", t, "-l", "--", body.text);
+        if (body.text) await paste(t, body.text);
         if (body.keys?.length) await tmuxAsync("send-keys", "-t", t, ...body.keys);
         // A TUI like claude reads text + Enter in one burst as a paste, so the submit goes separately.
         if (body.enter) await Bun.sleep(body.text ? 150 : 0), await tmuxAsync("send-keys", "-t", t, "Enter");
