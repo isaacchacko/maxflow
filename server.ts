@@ -133,6 +133,8 @@ const SENTRIES: Record<string, string[]> = Object.fromEntries(
 const reviewSource = (f: string) => new URL(`./sentries/${f}`, import.meta.url).pathname;
 SENTRIES["sentry:review"] = ["sh", "-c",
   `"${process.execPath}" "${reviewSource("review.ts")}" >"$HOME/.maxflow/review-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("review.md")}")"`];
+// The flow sentry is a claude agent that takes the user's requests and routes each to an agent.
+SENTRIES["sentry:flow"] = ["sh", "-c", `exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("flow.md")}")"`];
 // A session is a sentry because the server started it as one, never because of its name.
 function markSentry(s: Session) {
   s.sentry = true;
@@ -142,8 +144,6 @@ function markSentry(s: Session) {
 for (const s of sessions.values())
   if (!s.sentry && s.name in SENTRIES && s.cmd.join(" ").includes(reviewSource(""))) markSentry(s);
 if (process.env.MAXFLOW_SENTRIES !== "0")
-// The flow sentry is a claude agent that takes the user's requests and routes each to an agent.
-SENTRIES["sentry:flow"] = ["sh", "-c", `exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("flow.md")}")"`];
   for (const [name, cmd] of Object.entries(SENTRIES))
     if (![...sessions.values()].some((s) => s.sentry && s.name === name && s.exitCode === null)) markSentry(createSession(name, cmd, new URL(".", import.meta.url).pathname));
 
@@ -153,8 +153,9 @@ const SENTRY_USES: Record<string, string> = {
   "sentry:gh": `It polls GitHub every 30s for the PRs tied to a session and notifies that session when CI finishes, a review or comment lands (the user's own comments included), or the PR merges, closes or conflicts. A PR whose branch is checked out in your folder, or that you declared with \`~/.claude/set-pr.sh\`, is tied to you already; tie any other with \`${CLI} gh watch <pr>\` (url, owner/repo#n or n). To block on one event instead: \`${CLI} sub 'gh/<owner>/<repo>/pr/<n>/ci'\`.`,
   "sentry:slack": `It polls Slack every minute for the threads, channels and searches tied to a session and notifies that session of each new message. A thread you posted in through the Slack connector is tied to you already, for 3 days after your last post; tie any other with \`${CLI} slack watch <permalink | channel id | #channel | search query>\`. It also publishes every mention of the user as slack/mention: block on one with \`${CLI} sub 'slack/mention'\`, or on a thread with \`${CLI} sub 'slack/<channel>/<thread ts>/reply'\`.`,
   "sentry:health": `It watches the maxflow server itself and, when it stays unreachable for 2 minutes, starts a "maxflow recovery" claude session to fix and restart it.`,
-  "sentry:graph": `It decides which URLs you mention show up as nodes beside you in the maxflow graph: only ones you meant the user to open (a PR, a deploy, a page you published, a dev server you started), not incidental ones in code or docs. Put a URL you want the user to see on its own line in your reply. It also groups sessions by the work they share, and the graph draws a group's sessions close together.`,
+  "sentry:graph": `It decides which URLs you mention show up as nodes beside you in the maxflow graph: only ones you meant the user to open (a PR, a deploy, a page you published, a dev server you started), not incidental ones in code or docs. Put a URL you want the user to see on its own line in your reply. It also groups sessions by the work they share, and the graph draws a group's sessions close together, and it names each agent's role (review, implement, conflicts) for the icon on its node.`,
   "sentry:review": `It is an agent that keeps the user's queue of open PRs moving to prod or closed, and delivers comments on them that no session heard, by reviving the chat that opened the PR. If your PR's comments reach you, that is how. Don't request reviewers yourself; the user does.`,
+  "sentry:flow": `It is an agent that takes the user's requests and routes each to the agent that should own it, starting one when none does, and links that agent to others whose context would help. A request may reach you from it, ending with a line saying so; treat it as the user's.`,
   "sentry:rename": `It titles your session in the maxflow sidebar by the topic you own. Pick your own title with \`${CLI} rename $MAXFLOW_SESSION <title>\` and it leaves you alone from then on.`,
 };
 
@@ -164,7 +165,6 @@ function touchFrom(req: Request, s: Session, kind: "read" | "write", held = fals
   const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
   if (from && from !== s) publish(`touch/${from.id}/${s.id}`, { from: from.id, to: s.id, kind, held });
 }
-  "sentry:flow": `It is an agent that takes the user's requests and routes each to the agent that should own it, starting one when none does, and links that agent to others whose context would help. A request may reach you from it, ending with a line saying so; treat it as the user's.`,
 const isAgent = (s: Session) => !!s.claude || !!s.chatId || s.cmd[0] === "claude";
 
 // Without hooks a session counts as working while it prints; hooked claude says so itself, checked against two blind spots:
@@ -273,7 +273,7 @@ function candidates(s: Session): Candidate[] {
   return l.found;
 }
 
-// A JSON file sentry:graph writes, reread whenever it changes.
+// A JSON file a sentry writes, reread whenever it changes.
 function sentryFile<T>(path: string, empty: T) {
   let mtime = 0, value = empty;
   return () => {
@@ -311,8 +311,13 @@ const ARCHIVED_LINKS = `${process.env.HOME}/.maxflow/archived-links.json`;
 const archivedLinks = new Set<string>((() => { try { return JSON.parse(readFileSync(ARCHIVED_LINKS, "utf8")) as string[]; } catch { return []; } })());
 // Its grouping of sessions by the work they share, { session: group }.
 const groups = sentryFile<Record<string, string>>(`${process.env.HOME}/.maxflow/graph-groups.json`, {});
+// Its reading of each agent's role, { session: "review" | "implement" | "conflicts" | null }.
+const roles = sentryFile<Record<string, string | null>>(`${process.env.HOME}/.maxflow/graph-roles.json`, {});
 // sentry:review's edges to the sessions on PRs waiting for a reviewer, [{ session, label }].
 const reviewEdges = sentryFile<{ session: string; label: string }[]>(`${process.env.HOME}/.maxflow/review-edges.json`, []);
+// Its board of the PRs that need the user, { updated, next, sections: [{ title, items: [{ pr, url, note }] }] }, and the queue of every open PR it reads.
+const reviewBoard = sentryFile<unknown>(`${process.env.HOME}/.maxflow/review-board.json`, null);
+const reviewQueue = sentryFile<unknown[]>(`${process.env.HOME}/.maxflow/review-queue.json`, []);
 
 // The inbox lives in tmux too, so a server restart doesn't drop a message the agent hasn't been given yet.
 function queue(s: Session, text: string) {
@@ -363,6 +368,7 @@ const describe = (s: Session, shown = links(s)) => ({
   archivedLinks: shown.filter((u) => archivedLinks.has(u)),
   prs: Object.fromEntries(shown.flatMap((u) => (prStates.has(u) ? [[u, prStates.get(u)]] : []))),
   group: groups()[s.id] ?? null,
+  role: roles()[s.id] ?? null,
   archived: !!s.archived,
   sentry: isSentry(s),
   ties: isSentry(s) && s.name === "sentry:review" ? reviewEdges() : [],
@@ -484,6 +490,8 @@ Bun.serve<WsData>({
       if (!favicons.has(host)) favicons.set(host, fetchFavicon(host));
       return (await favicons.get(host))?.clone() ?? new Response("no favicon", { status: 404 });
     }
+
+    if (path === "/api/review" && req.method === "GET") return Response.json({ board: reviewBoard(), queue: reviewQueue() });
 
     if (path === "/api/links" && req.method === "GET")
       return Response.json([...sessions.values()].filter((s) => !isSentry(s)).map((s) => ({ id: s.id, name: s.name, cwd: s.cwd, running: s.exitCode === null, candidates: candidates(s) })));

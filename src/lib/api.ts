@@ -17,11 +17,16 @@ export type Session = {
   archivedLinks: string[];
   prs: Record<string, "open" | "closed" | "merged">;
   group: string | null;
+  role: "review" | "implement" | "conflicts" | null;
   archived: boolean;
   sentry: boolean;
   // Edges a sentry draws itself, to the sessions it ties to.
   ties: { session: string; label: string }[];
 };
+
+// sentry:review's board of the PRs that need the user, and the queue of every open PR with its stage.
+export type ReviewBoard = { updated: string; next: string; sections: { title: string; items: { pr: string; url: string; note: string }[] }[] };
+export type QueuedPr = { pr: string; url: string; title: string; stage: string; created: string; updated: string; sessions: { id: string; name: string }[] };
 
 export type Chat = { id: string; title: string; prompt: string; cwd: string; mtime: number; live: boolean; session: string | null };
 
@@ -54,6 +59,7 @@ export const api = {
   archiveLinks: (urls: string[], archived: boolean) => fetch("/api/links", { method: "PATCH", body: JSON.stringify({ urls, archived }) }),
   rename: (id: string, name: string) => fetch(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
   chats: (q: string, limit = 150): Promise<Chat[]> => fetch(`/api/chats?limit=${limit}&q=${encodeURIComponent(q)}`).then((r) => r.json()),
+  review: (): Promise<{ board: ReviewBoard | null; queue: QueuedPr[] }> => fetch("/api/review").then((r) => r.json()),
   resume: (id: string, bypass: boolean, force: boolean) => fetch(`/api/chats/${id}/resume`, { method: "POST", body: JSON.stringify({ bypass, force }) }),
 };
 
