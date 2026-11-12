@@ -968,7 +968,8 @@ Bun.serve<WsData>({
         // A waiting agent sleeps once its turn ends, unless messages wait to be delivered; typed into by the user while asleep, its wait is over.
         // A done agent stays awake so the user can read its last reply and answer it; a new turn means it isn't done.
         if (s.wait?.kind === "done" && state === "working" && was !== "working") setWait(s);
-        else if (s.wait && s.wait.kind !== "done" && state === "idle" && !s.archived && !s.inbox.length) {
+        // Only a finished turn puts it back to sleep, not the idle of a claude just resumed by a wake.
+        else if (s.wait && s.wait.kind !== "done" && state === "idle" && (was === "working" || was === "waiting") && !s.archived && !s.inbox.length) {
           setWait(s, { ...s.wait, awake: false });
           setArchived(s, true);
         }
@@ -1014,8 +1015,8 @@ Bun.serve<WsData>({
         const body = (await req.json().catch(() => ({}))) as { name?: string; archived?: boolean };
         if (typeof body.archived === "boolean") {
           setArchived(s, body.archived);
-          // Unarchived by hand, a sleeping agent's wait is over.
-          if (!body.archived) endWait(s);
+          // Unarchived by hand, a sleeping agent is awake until its next turn ends; only the awaited event ends its wait.
+          if (!body.archived) wake(s);
         }
         if (body.name?.trim()) {
           touchFrom(req, s, "write");
