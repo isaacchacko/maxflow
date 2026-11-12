@@ -10,6 +10,8 @@ const WATCH_FILE = join(STATE_DIR, "slack-watch.json");
 const STATE_FILE = join(STATE_DIR, "slack-state.json");
 // The latest messages of each target, so `maxflow slack read` can answer without asking Slack.
 const MESSAGES_FILE = join(STATE_DIR, "slack-messages.json");
+// This sentry's graph edges, one per tied session, labeled by what it watches.
+const EDGES_FILE = join(STATE_DIR, "slack-edges.json");
 const KEEP = 50;
 const PROJECTS = join(process.env.HOME!, ".claude", "projects");
 const INTERVAL_MS = Number(process.env.SLACK_SENTRY_INTERVAL ?? 60_000);
@@ -228,6 +230,12 @@ async function tick(me: string, state: State) {
       console.log(`${new Date().toLocaleTimeString()}  ${got.title}  ${line}  -> ${[...sessions].filter(Boolean).join(", ") || "nobody"}`);
     }
   }
+  const watching = new Map<string, string[]>();
+  for (const [target, sessions] of listeners) {
+    const name = target.startsWith("search:") ? `"${short(target.slice(7), 20)}"` : state.titles[target] ? `"${short(state.titles[target], 20)}"` : kept?.[target]?.title.replace(/^thread .* in /, "") ?? target.split("/")[0];
+    for (const s of sessions) if (s) (watching.get(s) ?? watching.set(s, []).get(s)!).push(name);
+  }
+  writeFileSync(EDGES_FILE, JSON.stringify([...watching].map(([session, names]) => ({ session, label: names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0] }))));
   // Forget targets nobody is tied to any more.
   for (const key of Object.keys(state.latest)) if (!listeners.has(key)) delete state.latest[key], delete state.seen[key], delete state.titles[key];
   writeFileSync(STATE_FILE, JSON.stringify(state));

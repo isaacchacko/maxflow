@@ -164,12 +164,12 @@ const SENTRY_USES: Record<string, string> = {
   "sentry:flow": `It is an agent that takes the user's requests and routes each to the agent that should own it, starting one when none does, and links that agent to others whose context would help. A request may reach you from it, ending with a line saying so; treat it as the user's.`,
   "sentry:meta": `Every 15 minutes it reads what every agent wrote since its last look and flags the ones running slow (a turn over 10 minutes, a tool call over 5, a model reply over 3, the same command run 4+ times), saying why in its pane and publishing meta/slow/<session>. If it names you, the cause it gives is worth a look.`,
   "sentry:rename": `It titles your session in the maxflow sidebar by the topic you own. Pick your own title with \`${CLI} rename $MAXFLOW_SESSION <title>\` and it leaves you alone from then on.`,
+  "sentry:ram": `Every 15s it kills any test, lint, typecheck or build job an agent runs locally once its process tree holds over 1.5% of the machine's RAM, and tells that agent to run it on the Blacksmith CI runners by pushing to its PR. Run those through CI from the start: push, then \`gh pr checks\`.`,
 };
 
 const isSentry = (s: Session) => !!s.sentry;
 // Lets the graph show one session reading or writing another; held is true while a wait is still watching.
 function touchFrom(req: Request, s: Session, kind: "read" | "write", held = false) {
-  "sentry:ram": `Every 15s it kills any test, lint, typecheck or build job an agent runs locally once its process tree holds over 1.5% of the machine's RAM, and tells that agent to run it on the Blacksmith CI runners by pushing to its PR. Run those through CI from the start: push, then \`gh pr checks\`.`,
   const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
   if (from && from !== s) publish(`touch/${from.id}/${s.id}`, { from: from.id, to: s.id, kind, held });
 }
@@ -322,7 +322,8 @@ const groups = sentryFile<Record<string, string>>(`${process.env.HOME}/.maxflow/
 // Its reading of each agent's role, { session: "review" | "implement" | "conflicts" | null }.
 const roles = sentryFile<Record<string, string | null>>(`${process.env.HOME}/.maxflow/graph-roles.json`, {});
 // sentry:review's edges to the sessions on PRs waiting for a reviewer, [{ session, label }].
-const reviewEdges = sentryFile<{ session: string; label: string }[]>(`${process.env.HOME}/.maxflow/review-edges.json`, []);
+// Each sentry's edges to the sessions it is tied to, [{ session, label }], from <name>-edges.json.
+const sentryTies = Object.fromEntries(["review", "gh", "slack"].map((n) => [`sentry:${n}`, sentryFile<{ session: string; label: string }[]>(`${process.env.HOME}/.maxflow/${n}-edges.json`, [])]));
 // Its board of the PRs that need the user, { updated, next, sections: [{ title, items: [{ pr, url, note }] }] }, and the queue of every open PR it reads.
 const reviewBoard = sentryFile<unknown>(`${process.env.HOME}/.maxflow/review-board.json`, null);
 const reviewQueue = sentryFile<unknown[]>(`${process.env.HOME}/.maxflow/review-queue.json`, []);
@@ -379,7 +380,7 @@ const describe = (s: Session, shown = links(s)) => ({
   role: roles()[s.id] ?? null,
   archived: !!s.archived,
   sentry: isSentry(s),
-  ties: isSentry(s) && s.name === "sentry:review" ? reviewEdges() : [],
+  ties: (isSentry(s) && sentryTies[s.name]?.()) || [],
 });
 
 // Plain text of the visible pane plus `history` lines above it, trailing blank lines dropped.

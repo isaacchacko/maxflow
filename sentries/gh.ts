@@ -9,6 +9,8 @@ const WATCH_FILE = join(STATE_DIR, "gh-watch.json");
 const STATE_FILE = join(STATE_DIR, "gh-state.json");
 // The last poll of each PR, whole, so `maxflow gh status` can answer without asking GitHub.
 const STATUS_FILE = join(STATE_DIR, "gh-status.json");
+// This sentry's graph edges, one per tied session, labeled by its PRs.
+const EDGES_FILE = join(STATE_DIR, "gh-edges.json");
 // The PRs sentry:review lists, with the sessions on each; watched here like explicit watches.
 export const REVIEW_WATCH_FILE = join(STATE_DIR, "review-watch.json");
 const PROJECTS = join(process.env.HOME!, ".claude", "projects");
@@ -241,6 +243,9 @@ async function tick(me: string, state: Record<string, PrState>) {
   const watches = readWatches();
   if (watches.some((w) => done.has(w.pr))) writeWatches(watches.filter((w) => !done.has(w.pr)));
   writeFileSync(STATE_FILE, JSON.stringify(state));
+  const onPrs = new Map<string, string[]>();
+  for (const [key, sessions] of listeners) for (const s of sessions) (onPrs.get(s) ?? onPrs.set(s, []).get(s)!).push(`#${key.split("#")[1]}`);
+  writeFileSync(EDGES_FILE, JSON.stringify([...onPrs].map(([session, prs]) => ({ session, label: prs.length > 2 ? `${prs.slice(0, 2).join(" ")} +${prs.length - 2}` : prs.join(" ") }))));
   writeFileSync(STATUS_FILE, JSON.stringify(Object.fromEntries([...prs].map(([key, pr]) => [key, { at: Date.now(), pr }]))));
   return prs.size;
 }
