@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, TerminalSquare } from "lucide-react";
+import { Archive, ArchiveRestore, Copy, Plus, TerminalSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Kbd } from "@/components/ui/kbd";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -131,7 +132,9 @@ export function App() {
           onRename={async (id, name) => (await api.rename(id, name), refresh())}
         />
         <main className="relative min-h-0 min-w-0">
-          <div className={cn("absolute inset-0 py-2 pl-3 pr-1", graphing && "hidden")}>{current && <Terminal key={current} id={current} handle={term} onClose={refresh} />}</div>
+          <SessionMenu s={sessions.find((s) => s.id === current)} selection={() => term.current?.selection() ?? ""} onArchive={archive} onClosed={() => term.current?.focus()}>
+            <div className={cn("absolute inset-0 py-2 pl-3 pr-1", graphing && "hidden")}>{current && <Terminal key={current} id={current} handle={term} onClose={refresh} />}</div>
+          </SessionMenu>
           <GraphView
             sessions={sessions}
             questions={questions}
@@ -161,5 +164,34 @@ export function App() {
       <ResumeDialog open={resuming} onOpenChange={setResuming} onResumed={(s) => (refresh(), open(s.id))} />
       <Toaster position="bottom-right" />
     </TooltipProvider>
+  );
+}
+
+// Right-clicking the open chat, so it can be archived or woken without finding it in the sidebar.
+function SessionMenu({ s, selection, onArchive, onClosed, children }: {
+  s: Session | undefined;
+  selection: () => string;
+  onArchive: (id: string, archived: boolean) => void;
+  onClosed: () => void;
+  children: React.ReactNode;
+}) {
+  const [copied, setCopied] = useState("");
+  if (!s || isSentry(s)) return children;
+  return (
+    <ContextMenu onOpenChange={(open) => (open ? setCopied(selection()) : onClosed())}>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent className="max-w-64">
+        <ContextMenuLabel>{s.name}</ContextMenuLabel>
+        <ContextMenuSeparator />
+        {copied && (
+          <ContextMenuItem onSelect={() => navigator.clipboard.writeText(copied)}>
+            <Copy /> Copy selection
+          </ContextMenuItem>
+        )}
+        <ContextMenuItem onSelect={() => onArchive(s.id, !s.archived)}>
+          {s.archived ? <ArchiveRestore /> : <Archive />} {s.archived ? "Unarchive" : "Archive"}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

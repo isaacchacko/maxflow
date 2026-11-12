@@ -10,7 +10,7 @@ const systemClipboard: IClipboardProvider = {
   writeText: (_selection, text) => navigator.clipboard.writeText(text),
 };
 
-export type TerminalHandle = { focus: () => void; fit: () => void };
+export type TerminalHandle = { focus: () => void; fit: () => void; selection: () => string };
 
 // What macOS terminals send for ⌘/⌥ editing keys; xterm.js leaves these to the browser.
 function macKey(e: KeyboardEvent, term: XTerm): string | (() => void) | undefined {
@@ -59,9 +59,12 @@ export function Terminal({ id, onClose, handle }: { id: string; onClose: () => v
       return false;
     });
     term.onResize(({ cols, rows }) => send({ type: "resize", cols, rows }));
+    // Right-click belongs to maxflow's session menu, so tmux never sees the press and never opens its own in-pane menu.
+    const keepRightClick = (e: MouseEvent) => e.button === 2 && e.stopPropagation();
+    for (const type of ["mousedown", "mouseup"]) el.current!.addEventListener(type, keepRightClick as EventListener, true);
     const resize = new ResizeObserver(() => el.current?.offsetParent && fit.fit());
     resize.observe(el.current!);
-    handle.current = { focus: () => term.focus(), fit: () => fit.fit() };
+    handle.current = { focus: () => term.focus(), fit: () => fit.fit(), selection: () => term.getSelection() };
     term.focus();
 
     return () => {
