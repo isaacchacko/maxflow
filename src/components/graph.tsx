@@ -50,7 +50,7 @@ const prColors = (sessions: Session[]) => new Map(sessions.flatMap((s) => Object
 // Served by maxflow from the site or Google so it is same-origin; the graph keeps a plain dot if neither loads.
 const favicon = (host: string) => `/api/favicon?host=${encodeURIComponent(host)}`;
 // A sentry's node shows what it watches, drawn in the sentry color; an agent's shows the role sentry:graph gave it.
-const SENTRY_ICONS: Record<string, LucideIcon> = { gh: GitPullRequest, slack: Hash, rename: Tag, health: HeartPulse, graph: Waypoints, review: GitPullRequestDraft, flow: Route, meta: Gauge, ram: MemoryStick, questions: MessageCircleQuestion };
+const SENTRY_ICONS: Record<string, LucideIcon> = { gh: GitPullRequest, slack: Hash, rename: Tag, health: HeartPulse, graph: Waypoints, review: GitPullRequestDraft, funnel: Route, meta: Gauge, ram: MemoryStick, questions: MessageCircleQuestion };
 const ROLE_ICONS: Record<string, LucideIcon> = { review: ScanEye, implement: Hammer, conflicts: GitMerge };
 const nodeIcon = (s: Session, color: string) => {
   const Icon = isSentry(s) ? (SENTRY_ICONS[displayName(s)] ?? Radar) : s.role && ROLE_ICONS[s.role];
