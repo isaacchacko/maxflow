@@ -48,7 +48,7 @@ export type Task = {
   id: number;
   title: string;
   kind: "task" | "question";
-  status: "todo" | "doing" | "you" | "waiting" | "done" | "dropped";
+  status: "todo" | "doing" | "you" | "waiting" | "blocked" | "done" | "dropped";
   answer?: string;
   sessions: string[];
   links: string[];

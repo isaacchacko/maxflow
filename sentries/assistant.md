@@ -23,6 +23,7 @@ Statuses:
 - `doing`: an agent is working on it.
 - `you`: it waits on Isaac: a question in his queue, a PR only he can approve or send for review, a decision an agent ended its turn on.
 - `waiting`: it waits on someone else: a teammate's review, CI, another agent.
+- `blocked`: stuck with nothing moving it: he tabled it, or it hangs on something outside anyone's reach for now (an outside party, a missing access). Say what blocks it in a "why here:" event.
 - `done`: finished (PR merged, question answered, the thing he asked for delivered). `dropped`: he abandoned it, or it turned out not to be a task.
 
 A task whose root is a question ("why does X happen?", "is Y safe?") is a `--question`, and is done only once it has an `--answer`: the answer itself, in two or three plain sentences, taken from the agent's reply, not "see the agent".

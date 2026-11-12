@@ -644,7 +644,7 @@ function settle(q: Question, action: Settle, text = "") {
 }
 
 // The user's task board, which sentry:assistant derives from what he asks and what agents do; he never writes to it himself.
-const TASK_STATUSES = ["todo", "doing", "you", "waiting", "done", "dropped"] as const;
+const TASK_STATUSES = ["todo", "doing", "you", "waiting", "blocked", "done", "dropped"] as const;
 type Task = {
   id: number;
   title: string;

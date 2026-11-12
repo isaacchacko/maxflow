@@ -10,8 +10,8 @@ import { cn } from "@/lib/utils";
 
 // Linear's status circles: an outline to start, filling as the work goes, a check when done.
 function StatusIcon({ status, className }: { status: Task["status"]; className?: string }) {
-  const color = { todo: "text-muted-foreground", doing: "text-[#f2c94c]", you: "text-sentry", waiting: "text-[#4cb782]", done: "text-[#5e6ad2]", dropped: "text-muted-foreground" }[status];
-  const fill = { todo: 0, doing: 0.5, you: 0.75, waiting: 0.75, done: 1, dropped: 0 }[status];
+  const color = { todo: "text-muted-foreground", doing: "text-[#f2c94c]", you: "text-sentry", waiting: "text-[#4cb782]", blocked: "text-[#eb5757]", done: "text-[#5e6ad2]", dropped: "text-muted-foreground" }[status];
+  const fill = { todo: 0, doing: 0.5, you: 0.75, waiting: 0.75, blocked: 0.25, done: 1, dropped: 0 }[status];
   // A pie wedge from 12 o'clock, clockwise, covering `fill` of the inner circle.
   const end = 2 * Math.PI * fill;
   const wedge = `M7 7 L7 3.5 A3.5 3.5 0 ${fill > 0.5 ? 1 : 0} 1 ${7 + 3.5 * Math.sin(end)} ${7 - 3.5 * Math.cos(end)} Z`;
@@ -37,6 +37,7 @@ const COLUMNS: { status: Task["status"]; title: string }[] = [
   { status: "doing", title: "In Progress" },
   { status: "you", title: "Needs You" },
   { status: "waiting", title: "Waiting on Others" },
+  { status: "blocked", title: "Blocked" },
   { status: "done", title: "Done" },
 ];
 const DONE_SHOWN = 20;
@@ -150,7 +151,7 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
         <Button variant="ghost" size="icon" className="size-7" title="Close (⌘K)" onClick={onClose}><X /></Button>
       </div>
       <div className="flex min-h-0 flex-1">
-        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[repeat(6,minmax(15rem,1fr))] gap-3 overflow-x-auto p-3">
+        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[repeat(7,minmax(15rem,1fr))] gap-3 overflow-x-auto p-3">
           {columns.map((c, col) => {
             const count = c.all.length + (c.status === "you" && unreviewed.length ? 1 : 0);
             return (

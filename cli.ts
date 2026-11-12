@@ -15,7 +15,7 @@ const usage = `usage:
                                              --default: your recommendation for a reversible step, which you go ahead with if he hasn't answered in 3h
   maxflow questions [--all]                  the user's question queue
   maxflow tasks [--all]                      the user's task board, with each task's timeline; --all adds done and dropped ones
-  maxflow task new <title...> | maxflow task <id> [--title T] [--status todo|doing|you|waiting|done|dropped] [--question] [--answer A]
+  maxflow task new <title...> | maxflow task <id> [--title T] [--status todo|doing|you|waiting|blocked|done|dropped] [--question] [--answer A]
                                              [--session ID] [--link URL] [--event TEXT] [--at TIME]   sentry:assistant's edits to the board
   maxflow link <id> <id> [why...]            introduce two sessions to each other, as drawing an edge in the graph does
   maxflow sub <topic-glob> [--since SEQ] [--timeout MS] [--follow]   block for the next matching event, print it as JSON
