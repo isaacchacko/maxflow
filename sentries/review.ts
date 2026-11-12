@@ -58,20 +58,20 @@ async function tick() {
   const names = new Map(sessions.map((s) => [s.id, s.name]));
   const ties = await links();
   const on = new Map<string, string[]>();
+  const owners = new Map<string, string[]>();
   for (const pr of prs) {
     const repo = pr.repository.nameWithOwner.toLowerCase(), key = keyOf(pr);
-    const ids = new Set([
-      ...ties.filter((l) => l.session && l.repo === repo && (l.pr === key || l.branch === pr.headRefName)).map((l) => l.session),
-      ...sessions.filter((s) => s.links.some((u) => u.toLowerCase() === pr.url.toLowerCase())).map((s) => s.id),
-    ]);
-    on.set(key, [...ids].filter((id) => names.has(id)));
+    const owning = ties.filter((l) => l.session && l.repo === repo && (l.pr === key || l.branch === pr.headRefName)).map((l) => l.session);
+    const mentioning = sessions.filter((s) => s.links.some((u) => u.toLowerCase() === pr.url.toLowerCase())).map((s) => s.id);
+    owners.set(key, [...new Set(owning)].filter((id) => names.has(id)));
+    on.set(key, [...new Set([...owning, ...mentioning])].filter((id) => names.has(id)));
   }
   const queue = prs.map((pr) => ({
     pr: keyOf(pr), url: pr.url, title: pr.title, stage: stage(pr), created: pr.createdAt, updated: pr.updatedAt,
     sessions: on.get(keyOf(pr))!.map((id) => ({ id, name: names.get(id) })),
   }));
   writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
-  writeFileSync(REVIEW_WATCH_FILE, JSON.stringify(queue.map((q): Watch => ({ pr: q.pr, sessions: q.sessions.map((s) => s.id) }))));
+  writeFileSync(REVIEW_WATCH_FILE, JSON.stringify(queue.map((q): Watch => ({ pr: q.pr, sessions: owners.get(q.pr)! }))));
   writeFileSync(EDGES_FILE, JSON.stringify(queue.flatMap((q) => q.sessions.map((s) => ({ session: s.id, label: label(q.pr) })))));
 
   const next = new Map(queue.map((q) => [q.pr, q.stage]));
