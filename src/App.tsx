@@ -8,7 +8,8 @@ import { Sidebar } from "@/components/sidebar";
 import { Terminal, type TerminalHandle } from "@/components/terminal";
 import { GraphView } from "@/components/graph";
 import { ResumeDialog } from "@/components/resume-dialog";
-import { api, isSentry, store, type Session } from "@/lib/api";
+import { QuestionsPanel } from "@/components/questions";
+import { api, isSentry, store, type Question, type Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export function App() {
@@ -19,6 +20,8 @@ export function App() {
   const [graphing, setGraphing] = useState(false);
   const [hideArchived, setHideArchived] = useState(() => store.get("mf.hideArchived") === "1");
   const [resuming, setResuming] = useState(location.hash === "#resume");
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [asking, setAsking] = useState(location.hash === "#questions");
   const term = useRef<TerminalHandle | null>(null);
 
   const refresh = useCallback(() => api.sessions().then((s) => (setSessions(s), setLoaded(true))), []);
@@ -27,6 +30,15 @@ export function App() {
     const t = setInterval(refresh, 3000);
     return () => clearInterval(t);
   }, []);
+
+  const refreshQuestions = useCallback(() => api.questions().then(setQuestions, () => {}), []);
+  useEffect(() => {
+    refreshQuestions();
+    const t = setInterval(refreshQuestions, 3000);
+    return () => clearInterval(t);
+  }, []);
+  const waiting = questions.filter((q) => q.status === "pending").length;
+  useEffect(() => void (document.title = waiting ? `(${waiting}) maxflow` : "maxflow"), [waiting]);
 
   const attach = (id: string) => {
     setCurrent(id);
@@ -94,6 +106,8 @@ export function App() {
           onToggle={toggleSidebar}
           onGraph={() => setGraphing((g) => !g)}
           onResume={() => setResuming(true)}
+          questions={waiting}
+          onQuestions={() => setAsking((a) => !a)}
           onNew={newShell}
           onOpen={open}
           onKill={kill}
@@ -115,6 +129,7 @@ export function App() {
             onArchiveLinks={archiveLinks}
             onToggleArchived={toggleArchived}
           />
+          {asking && <QuestionsPanel questions={questions} onOpen={open} onSettled={refreshQuestions} onClose={() => setAsking(false)} />}
           {loaded && !sessions.length && !graphing && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-muted-foreground">
               <TerminalSquare className="size-10 opacity-40" />

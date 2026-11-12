@@ -133,7 +133,7 @@ adoptSessions();
 
 // Sentries are ordinary sessions, started once and kept by tmux across server restarts.
 const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  ["gh", "slack", "rename", "health", "graph", "meta", "ram"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
+  ["gh", "slack", "rename", "health", "graph", "meta", "ram", "questions"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
 );
 // The review sentry is a claude agent; its feed runs beside it, logging out of the way of its screen.
 const reviewSource = (f: string) => new URL(`./sentries/${f}`, import.meta.url).pathname;
@@ -163,6 +163,7 @@ const SENTRY_USES: Record<string, string> = {
   "sentry:review": `It is an agent that keeps the user's queue of open PRs moving to prod or closed, and delivers comments on them that no session heard, by reviving the chat that opened the PR. If your PR's comments reach you, that is how. Don't request reviewers yourself; the user does.`,
   "sentry:flow": `It is an agent that takes the user's requests and routes each to the agent that should own it, starting one when none does, and links that agent to others whose context would help. A request may reach you from it, ending with a line saying so; treat it as the user's.`,
   "sentry:meta": `Every 15 minutes it reads what every agent wrote since its last look and flags the ones running slow (a turn over 10 minutes, a tool call over 5, a model reply over 3, the same command run 4+ times), saying why in its pane and publishing meta/slow/<session>. If it names you, the cause it gives is worth a look.`,
+  "sentry:questions": `It is the one way to raise a question to the user. Never end your turn on a question or wait in chat for him: run \`${CLI} ask '<question>'\` and keep working on whatever doesn't hang on the answer. Make the question stand on its own: what you found, the options, and your recommendation. The sentry sends back what you should decide yourself; the rest goes into the user's queue, and his answer is typed into your prompt as a [maxflow] message. Asking again while a question is open adds to it.`,
   "sentry:rename": `It titles your session in the maxflow sidebar by the topic you own. Pick your own title with \`${CLI} rename $MAXFLOW_SESSION <title>\` and it leaves you alone from then on.`,
   "sentry:ram": `Every 15s it kills any test, lint, typecheck or build job an agent runs locally once its process tree holds over 1.5% of the machine's RAM, and tells that agent to run it on the Blacksmith CI runners by pushing to its PR. Run those through CI from the start: push, then \`gh pr checks\`.`,
 };
@@ -362,6 +363,56 @@ function introduce(to: Session, other: Session, why?: string) {
   queue(to, text);
 }
 
+// Every question an agent raises for the user. sentry:questions gates each one first; an agent holds at most one open question, and asking again adds to it.
+type Question = {
+  id: number;
+  session: string;
+  name: string;
+  status: "gating" | "pending" | "answered" | "bounced" | "dismissed";
+  at: number;
+  thread: { from: "agent" | "user" | "sentry"; text: string; at: number }[];
+};
+const QUESTIONS = `${process.env.HOME}/.maxflow/questions.json`;
+const questions: Question[] = (() => { try { return JSON.parse(readFileSync(QUESTIONS, "utf8")); } catch { return []; } })();
+const saveQuestions = () => writeFileSync(QUESTIONS, JSON.stringify(questions));
+const isOpen = (q: Question) => q.status === "gating" || q.status === "pending";
+const gateRunning = () => [...sessions.values()].some((s) => isSentry(s) && s.name === "sentry:questions" && s.exitCode === null);
+
+function ask(s: Session, text: string, re?: number) {
+  const now = Date.now();
+  const q = re ? questions.find((o) => o.id === re && o.session === s.id) : questions.find((o) => o.session === s.id && isOpen(o));
+  if (re && !q) return null;
+  if (q) {
+    q.thread.push({ from: "agent", text, at: now });
+    // A follow-up the agent sends back on purpose skips the gate.
+    if (re) (q.status = "pending"), (q.at = now);
+  }
+  const asked = q ?? { id: (questions.at(-1)?.id ?? 0) + 1, session: s.id, name: s.name, status: gateRunning() ? "gating" : "pending", at: now, thread: [{ from: "agent", text, at: now }] };
+  if (!q) questions.push(asked);
+  asked.name = s.name;
+  saveQuestions();
+  publish(`question/asked/${asked.id}`, { id: asked.id, session: s.id });
+  return asked;
+}
+
+function settle(q: Question, action: "reply" | "dismiss" | "pass" | "bounce", text = "") {
+  const s = sessions.get(q.session);
+  const now = Date.now();
+  if (action === "pass") q.status = "pending";
+  else if (action === "bounce") q.status = "bounced";
+  else q.status = action === "reply" ? "answered" : "dismissed";
+  if (text) q.thread.push({ from: action === "reply" ? "user" : "sentry", text, at: now });
+  saveQuestions();
+  publish(`question/${q.status}/${q.id}`, { id: q.id, session: q.session });
+  if (!s || s.exitCode !== null || action === "pass") return;
+  const followUp = `\`${CLI} ask --re ${q.id} '<text>'\``;
+  queue(s, action === "reply"
+    ? `[maxflow] The user answered your question q${q.id}, in his own words: "${text}"\nAct on it. If you need to answer back, ${followUp}; otherwise just continue.`
+    : action === "bounce"
+      ? `[maxflow] The question sentry sent q${q.id} back without showing the user: ${text}\nDecide it yourself and carry on. If you are sure only the user can decide it, ${followUp} puts it in his queue.`
+      : `[maxflow] The user closed your question q${q.id} without answering. Go with your recommendation and carry on.`);
+}
+
 // A claude's TUI redraws nonstop, so for an agent its last transcript write is what counts as activity.
 function activeAt(s: Session) {
   if (s.transcript) {
@@ -518,6 +569,28 @@ Bun.serve<WsData>({
     }
 
     if (path === "/api/review" && req.method === "GET") return Response.json({ board: reviewBoard(), queue: reviewQueue() });
+
+    if (path === "/api/questions" && req.method === "GET") return Response.json(questions.slice(-200));
+    if (path === "/api/questions" && req.method === "POST") {
+      const body = (await req.json().catch(() => ({}))) as { session?: string; text?: string; re?: number };
+      const s = sessions.get(body.session ?? req.headers.get("x-maxflow-from") ?? "");
+      if (!s) return new Response("ask from inside a maxflow session ($MAXFLOW_SESSION)", { status: 400 });
+      if (!body.text?.trim()) return new Response("text required", { status: 400 });
+      const q = ask(s, body.text.trim(), body.re);
+      return q ? Response.json(q, { status: 201 }) : new Response(`no question q${body.re} of yours`, { status: 404 });
+    }
+    const questionAct = path.match(/^\/api\/questions\/(\d+)$/);
+    if (questionAct && req.method === "POST") {
+      const q = questions.find((o) => o.id === Number(questionAct[1]));
+      if (!q) return new Response("no such question", { status: 404 });
+      const body = (await req.json().catch(() => ({}))) as { action?: string; text?: string };
+      const action = body.action as "reply" | "dismiss" | "pass" | "bounce";
+      if (!["reply", "dismiss", "pass", "bounce"].includes(action)) return new Response("action must be reply, dismiss, pass or bounce", { status: 400 });
+      if ((action === "reply" || action === "bounce") && !body.text?.trim()) return new Response("text required", { status: 400 });
+      if (!isOpen(q)) return new Response(`q${q.id} is already ${q.status}`, { status: 409 });
+      settle(q, action, body.text?.trim());
+      return Response.json(q);
+    }
 
     if (path === "/api/links" && req.method === "GET")
       return Response.json([...sessions.values()].filter((s) => !isSentry(s)).map((s) => ({ id: s.id, name: s.name, cwd: s.cwd, running: s.exitCode === null, candidates: candidates(s) })));

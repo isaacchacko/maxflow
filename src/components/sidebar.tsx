@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, ArchiveRestore, History, Network, PanelLeft, Plus, X } from "lucide-react";
+import { Archive, ArchiveRestore, History, MessageCircleQuestion, Network, PanelLeft, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
@@ -116,6 +116,8 @@ type Props = {
   onToggle: () => void;
   onGraph: () => void;
   onResume: () => void;
+  questions: number;
+  onQuestions: () => void;
   onNew: () => void;
   onOpen: (id: string) => void;
   onKill: (id: string) => void;
@@ -125,7 +127,7 @@ type Props = {
   onRename: (id: string, name: string) => void;
 };
 
-export function Sidebar({ sessions, current, collapsed, graphing, onToggle, onGraph, onResume, onNew, onOpen, onKill, onArchive, hideArchived, onToggleArchived, onRename }: Props) {
+export function Sidebar({ sessions, current, collapsed, graphing, onToggle, onGraph, onResume, questions, onQuestions, onNew, onOpen, onKill, onArchive, hideArchived, onToggleArchived, onRename }: Props) {
   const byActivity = [...sessions].sort((a, b) => b.activeAt - a.activeAt);
   const agents = byActivity.filter((s) => !isSentry(s) && !s.archived), sentries = sessions.filter(isSentry);
   const archived = byActivity.filter((s) => !isSentry(s) && s.archived);
@@ -150,6 +152,12 @@ export function Sidebar({ sessions, current, collapsed, graphing, onToggle, onGr
               <Tip label="Graph view" keys="⌘G">
                 <Button variant="ghost" size="icon" className={cn("size-8 text-muted-foreground", graphing && "bg-accent text-primary")} onClick={onGraph}>
                   <Network />
+                </Button>
+              </Tip>
+              <Tip label="Questions agents asked you">
+                <Button variant="ghost" size="icon" className={cn("relative size-8 text-muted-foreground", questions > 0 && "text-sentry")} onClick={onQuestions}>
+                  <MessageCircleQuestion />
+                  {questions > 0 && <span className="absolute -top-0.5 -right-0.5 rounded-full bg-sentry px-1 font-mono text-[10px] leading-4 text-background">{questions}</span>}
                 </Button>
               </Tip>
               <Tip label="Resume a Claude chat">

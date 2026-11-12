@@ -28,6 +28,16 @@ export type Session = {
 export type ReviewBoard = { updated: string; next: string; sections: { title: string; items: { pr: string; url: string; note: string }[] }[] };
 export type QueuedPr = { pr: string; url: string; title: string; stage: string; created: string; updated: string; sessions: { id: string; name: string }[] };
 
+// A question an agent raised for the user, as the server keeps it; sentry:questions gates it before it is pending.
+export type Question = {
+  id: number;
+  session: string;
+  name: string;
+  status: "gating" | "pending" | "answered" | "bounced" | "dismissed";
+  at: number;
+  thread: { from: "agent" | "user" | "sentry"; text: string; at: number }[];
+};
+
 export type Chat = { id: string; title: string; prompt: string; cwd: string; mtime: number; live: boolean; session: string | null };
 
 export const isSentry = (s: Session) => s.sentry;
@@ -60,6 +70,8 @@ export const api = {
   rename: (id: string, name: string) => fetch(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
   chats: (q: string, limit = 150): Promise<Chat[]> => fetch(`/api/chats?limit=${limit}&q=${encodeURIComponent(q)}`).then((r) => r.json()),
   review: (): Promise<{ board: ReviewBoard | null; queue: QueuedPr[] }> => fetch("/api/review").then((r) => r.json()),
+  questions: (): Promise<Question[]> => fetch("/api/questions").then((r) => r.json()),
+  settle: (id: number, action: "reply" | "dismiss", text?: string) => fetch(`/api/questions/${id}`, { method: "POST", body: JSON.stringify({ action, text }) }),
   resume: (id: string, bypass: boolean, force: boolean) => fetch(`/api/chats/${id}/resume`, { method: "POST", body: JSON.stringify({ bypass, force }) }),
 };
 

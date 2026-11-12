@@ -10,6 +10,8 @@ const usage = `usage:
   maxflow wait <id> [--idle MS] [--match RE] [--timeout MS]   block until quiet / RE on screen / exit, print screen
   maxflow rename <id> <name...> | maxflow kill <id>
   maxflow notify <id> <text...>              deliver text once the session is idle at an empty claude prompt
+  maxflow ask <question...> [--re QID]       raise a question to the user through sentry:questions; returns at once
+  maxflow questions [--all]                  the user's question queue
   maxflow link <id> <id> [why...]            introduce two sessions to each other, as drawing an edge in the graph does
   maxflow sub <topic-glob> [--since SEQ] [--timeout MS] [--follow]   block for the next matching event, print it as JSON
   maxflow pub <topic> [json]
@@ -71,6 +73,15 @@ if (verb === "ls") {
   await call(`/api/sessions/${rest[0]}`, { method: "DELETE" });
 } else if (verb === "notify" && rest[1]) {
   await call(`/api/sessions/${rest[0]}/notify`, { method: "POST", body: JSON.stringify({ text: rest.slice(1).join(" ") }) });
+} else if (verb === "ask" && rest[0]) {
+  if (!process.env.MAXFLOW_SESSION) console.error("ask works only inside a maxflow session"), process.exit(1);
+  const re = flag(rest, "--re");
+  const q = await call("/api/questions", { method: "POST", body: JSON.stringify({ text: positional(rest, ["--re"]).join(" "), re: re ? Number(re.replace(/^q/, "")) : undefined }) });
+  console.log(`q${q.id} ${q.thread.length > 1 ? "updated" : "queued"} (${q.status}). Keep working; the answer arrives in your prompt.`);
+} else if (verb === "questions") {
+  for (const q of await call("/api/questions"))
+    if (rest.includes("--all") || q.status === "gating" || q.status === "pending")
+      console.log(`q${q.id}  ${q.status.padEnd(9)}  ${q.name} (${q.session})\n${q.thread.map((m: { from: string; text: string }) => `  ${m.from}: ${m.text}`).join("\n")}\n`);
 } else if (verb === "link" && rest[1]) {
   await call("/api/link", { method: "POST", body: JSON.stringify({ a: rest[0], b: rest[1], why: rest.slice(2).join(" ") || undefined }) });
 } else if (verb === "pub" && rest[0]) {
