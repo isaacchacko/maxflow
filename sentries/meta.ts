@@ -2,6 +2,7 @@
 // meta sentry: every 15 minutes reads the part of each live agent's transcript it hasn't read yet, times its turns,
 // tool calls and model replies, and asks claude why the ones over a threshold are slow.
 import { existsSync, openSync, readSync, closeSync, statSync, readFileSync, writeFileSync } from "node:fs";
+import { cpus, loadavg } from "node:os";
 import { join } from "node:path";
 
 const STATE_DIR = join(process.env.HOME!, ".maxflow");
@@ -15,11 +16,11 @@ const REPEATS = Number(process.env.META_REPEATS ?? 4);
 const MODEL = process.env.META_MODEL ?? "sonnet";
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 
-const SYSTEM = `You watch coding agents for slowness. Each input item is one agent's activity over the last window: its title, timed turns, total time in tools and in model replies with its tool call count, its slowest tool calls, its slowest model replies, commands it repeated, and anything still running. Decide for each whether it is genuinely slow (stuck, looping, polling with sleeps, waiting on something that will never come, running a needlessly heavy command, an API that is slow to answer) or legitimately busy (a long build, CI it was told to wait on, a big honest task). Reply with only a JSON array, one object per item: {"id": "<id>", "slow": true|false, "why": "<one sentence naming the cause>", "fix": "<one sentence: what would speed it up, or empty>"}.`;
+const SYSTEM = `You watch coding agents for slowness. Each input item is one agent's activity over the last window: its title, timed turns, total time in tools and in model replies with its tool call count, its slowest tool calls, its slowest model replies, a model request still unanswered, commands it repeated, and anything still running. The first line is the machine's load; a load far above its core count slows every agent at once, so name it as the cause when trivial commands are slow. Decide for each whether it is genuinely slow (stuck, looping, polling with sleeps, waiting on something that will never come, running a needlessly heavy command, an API that is slow to answer) or legitimately busy (a long build, CI it was told to wait on, a big honest task). Reply with only a JSON array, one object per item: {"id": "<id>", "slow": true|false, "why": "<one sentence naming the cause>", "fix": "<one sentence: what would speed it up, or empty>"}.`;
 
 type Session = { id: string; name: string; running: boolean; sentry: boolean; agent: boolean; status: string; transcript?: string };
 type Open = { name: string; what: string; at: number };
-type Mark = { offset: number; tools: Record<string, Open>; turnAt?: number };
+type Mark = { offset: number; tools: Record<string, Open>; turnAt?: number; askedAt?: number };
 type Digest = {
   id: string;
   title: string;
@@ -30,6 +31,7 @@ type Digest = {
   openTurnMs?: number;
   slowTools: { tool: string; what: string; ms: number; running?: boolean }[];
   slowReplies: number[];
+  waitingOnModelMs?: number;
   repeated: { what: string; times: number }[];
 };
 
@@ -49,12 +51,15 @@ function delta(path: string, mark: Mark) {
   return buf.subarray(0, end).toString("utf8").split("\n").filter(Boolean);
 }
 
-const short = (input: any) => String(input?.command ?? input?.description ?? input?.file_path ?? input?.pattern ?? input?.url ?? JSON.stringify(input ?? "")).replace(/\s+/g, " ").slice(0, 160);
+// Head and tail both, since a chain like "sed -i ... && <test suite>" hides its heavy part at the end.
+function short(input: any) {
+  const text = String(input?.command ?? input?.description ?? input?.file_path ?? input?.pattern ?? input?.url ?? JSON.stringify(input ?? "")).replace(/\s+/g, " ");
+  return text.length <= 400 ? text : `${text.slice(0, 220)} … ${text.slice(-160)}`;
+}
 
 function digest(s: Session, mark: Mark, lines: string[], now: number): Digest {
   const d: Digest = { id: s.id, title: s.name, turns: [], toolCalls: 0, toolMs: 0, modelMs: 0, slowTools: [], slowReplies: [], repeated: [] };
   const counts = new Map<string, number>();
-  let askedAt: number | undefined;
   for (const line of lines) {
     let e: any;
     try {
@@ -70,13 +75,13 @@ function digest(s: Session, mark: Mark, lines: string[], now: number): Digest {
       if (mark.turnAt !== undefined && recent) d.turns.push(at - mark.turnAt);
       mark.turnAt = undefined;
     } else if (e.type === "api-request" && e.querySource === "repl_main_thread") {
-      askedAt = at;
+      mark.askedAt = at;
     } else if (e.type === "assistant" && !e.isSidechain) {
-      if (askedAt !== undefined && recent) {
-        d.modelMs += at - askedAt;
-        if (at - askedAt >= SLOW_MODEL_MS) d.slowReplies.push(at - askedAt);
+      if (mark.askedAt !== undefined && recent) {
+        d.modelMs += at - mark.askedAt;
+        if (at - mark.askedAt >= SLOW_MODEL_MS) d.slowReplies.push(at - mark.askedAt);
       }
-      askedAt = undefined;
+      mark.askedAt = undefined;
       for (const c of e.message?.content ?? [])
         if (c.type === "tool_use") {
           const what = short(c.input);
@@ -96,19 +101,21 @@ function digest(s: Session, mark: Mark, lines: string[], now: number): Digest {
     }
   }
   // Only a working agent is still on its turn; an idle one with leftovers was interrupted, and a waiting one waits on the user.
-  if (s.status !== "working") mark.tools = {}, (mark.turnAt = undefined);
+  if (s.status !== "working") mark.tools = {}, (mark.turnAt = mark.askedAt = undefined);
   for (const t of Object.values(mark.tools)) if (now - t.at >= SLOW_TOOL_MS) d.slowTools.push({ tool: t.name, what: t.what, ms: now - t.at, running: true });
   if (mark.turnAt) d.openTurnMs = now - mark.turnAt;
+  if (mark.askedAt) d.waitingOnModelMs = now - mark.askedAt;
   d.repeated = [...counts].filter(([, n]) => n >= REPEATS).map(([what, times]) => ({ what, times }));
   return d;
 }
 
 const isSlow = (d: Digest) =>
-  d.turns.some((ms) => ms >= SLOW_TURN_MS) || (d.openTurnMs ?? 0) >= SLOW_TURN_MS || d.slowTools.length > 0 || d.slowReplies.length > 0 || d.repeated.length > 0;
+  d.turns.some((ms) => ms >= SLOW_TURN_MS) || (d.openTurnMs ?? 0) >= SLOW_TURN_MS || d.slowTools.length > 0 || d.slowReplies.length > 0 || (d.waitingOnModelMs ?? 0) >= SLOW_MODEL_MS || d.repeated.length > 0;
 
 async function judge(digests: Digest[]) {
   const min = (ms: number) => `${(ms / 60_000).toFixed(1)}m`;
-  const input = JSON.stringify(
+  const machine = `Machine: ${cpus().length} cores, load average ${loadavg().map((n) => n.toFixed(1)).join(" ")} (1/5/15 min).`;
+  const agents = JSON.stringify(
     digests.map((d) => ({
       ...d,
       turns: d.turns.map(min),
@@ -116,10 +123,13 @@ async function judge(digests: Digest[]) {
       modelMs: min(d.modelMs),
       openTurnMs: undefined,
       runningTurn: d.openTurnMs ? min(d.openTurnMs) : undefined,
+      waitingOnModelMs: undefined,
+      waitingOnModelFor: d.waitingOnModelMs ? min(d.waitingOnModelMs) : undefined,
       slowTools: d.slowTools.map((t) => ({ ...t, ms: undefined, took: min(t.ms) })),
       slowReplies: d.slowReplies.map(min),
     })),
   );
+  const input = `${machine}\n${agents}`;
   const proc = Bun.spawn(
     ["claude", "-p", "--model", MODEL, "--no-session-persistence", "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--system-prompt", SYSTEM],
     { cwd: STATE_DIR, stdin: new Blob([input]), stdout: "pipe", stderr: "pipe" },
