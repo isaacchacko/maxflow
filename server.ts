@@ -127,7 +127,7 @@ adoptSessions();
 
 // Sentries are ordinary sessions, started once and kept by tmux across server restarts.
 const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  ["gh", "slack", "rename", "health", "graph"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
+  ["gh", "slack", "rename", "health", "graph", "meta"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
 );
 // The review sentry is a claude agent; its feed runs beside it, logging out of the way of its screen.
 const reviewSource = (f: string) => new URL(`./sentries/${f}`, import.meta.url).pathname;
@@ -156,6 +156,7 @@ const SENTRY_USES: Record<string, string> = {
   "sentry:graph": `It decides which URLs you mention show up as nodes beside you in the maxflow graph: only ones you meant the user to open (a PR, a deploy, a page you published, a dev server you started), not incidental ones in code or docs. Put a URL you want the user to see on its own line in your reply. It also groups sessions by the work they share, and the graph draws a group's sessions close together, and it names each agent's role (review, implement, conflicts) for the icon on its node.`,
   "sentry:review": `It is an agent that keeps the user's queue of open PRs moving to prod or closed, and delivers comments on them that no session heard, by reviving the chat that opened the PR. If your PR's comments reach you, that is how. Don't request reviewers yourself; the user does.`,
   "sentry:flow": `It is an agent that takes the user's requests and routes each to the agent that should own it, starting one when none does, and links that agent to others whose context would help. A request may reach you from it, ending with a line saying so; treat it as the user's.`,
+  "sentry:meta": `Every 15 minutes it reads what every agent wrote since its last look and flags the ones running slow (a turn over 10 minutes, a tool call over 5, a model reply over 3, the same command run 4+ times), saying why in its pane and publishing meta/slow/<session>. If it names you, the cause it gives is worth a look.`,
   "sentry:rename": `It titles your session in the maxflow sidebar by the topic you own. Pick your own title with \`${CLI} rename $MAXFLOW_SESSION <title>\` and it leaves you alone from then on.`,
 };
 
