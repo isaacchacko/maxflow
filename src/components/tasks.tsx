@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { ExternalLink, MessageCircleQuestion, SquareKanban, X } from "lucide-react";
+import { ChevronRight, ExternalLink, GitPullRequest, MessageCircleQuestion, SquareKanban, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
-import { ago, type Session, type Task } from "@/lib/api";
+import { ago, type QueuedPr, type Session, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const COLUMNS: { status: Task["status"]; title: string }[] = [
@@ -17,8 +18,10 @@ const COLUMNS: { status: Task["status"]; title: string }[] = [
 const DONE_SHOWN = 20;
 
 // The user's task board, which sentry:assistant derives from his prompts and the agents' work; he reads it, never edits it.
-export function TasksBoard({ tasks, sessions, onOpen, onClose }: { tasks: Task[]; sessions: Session[]; onOpen: (id: string) => void; onClose: () => void }) {
+export function TasksBoard({ tasks, prs, sessions, onOpen, onClose }: { tasks: Task[]; prs: QueuedPr[]; sessions: Session[]; onOpen: (id: string) => void; onClose: () => void }) {
   const [shown, setShown] = useState<number | null>(null);
+  // The review sentry's queue stages a green PR with no reviewer yet as "needs reviewer": only the user sends it for approval.
+  const unreviewed = prs.filter((p) => p.stage === "needs reviewer").sort((a, b) => a.created.localeCompare(b.created));
   const task = tasks.find((t) => t.id === shown);
   const assistant = sessions.find((s) => s.sentry && s.name === "sentry:assistant");
   return (
@@ -37,13 +40,15 @@ export function TasksBoard({ tasks, sessions, onOpen, onClose }: { tasks: Task[]
         {COLUMNS.map((c) => {
           const column = tasks.filter((t) => t.status === c.status).sort((a, b) => b.updated - a.updated);
           const cards = c.status === "done" ? column.slice(0, DONE_SHOWN) : column;
+          const count = column.length + (c.status === "you" && unreviewed.length ? 1 : 0);
           return (
             <section key={c.status} className="flex min-h-0 flex-col rounded-lg bg-muted/40">
-              <h3 className={cn("flex items-baseline gap-2 px-2.5 pt-2 pb-1.5 font-medium", c.status === "you" && column.length ? "text-sentry" : "text-muted-foreground")}>
+              <h3 className={cn("flex items-baseline gap-2 px-2.5 pt-2 pb-1.5 font-medium", c.status === "you" && count ? "text-sentry" : "text-muted-foreground")}>
                 {c.title}
-                <span className="font-normal">{column.length}</span>
+                <span className="font-normal">{count}</span>
               </h3>
               <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-1.5 pb-1.5">
+                {c.status === "you" && unreviewed.length > 0 && <UnreviewedPrs prs={unreviewed} />}
                 {cards.map((t) => (
                   <button key={t.id} type="button" onClick={() => setShown(t.id)} className="flex flex-col gap-1 rounded-md border bg-card p-2 text-left hover:border-ring">
                     <span className="flex items-start gap-1.5 text-sm text-foreground">
@@ -63,11 +68,34 @@ export function TasksBoard({ tasks, sessions, onOpen, onClose }: { tasks: Task[]
           );
         })}
       </div>
-      {!tasks.length && <p className="absolute inset-x-0 top-1/2 text-center text-muted-foreground">No tasks yet. The assistant adds them as you ask agents for things.</p>}
+      {!tasks.length && !unreviewed.length && <p className="absolute inset-x-0 top-1/2 text-center text-muted-foreground">No tasks yet. The assistant adds them as you ask agents for things.</p>}
       <Dialog open={!!task} onOpenChange={(o) => !o && setShown(null)}>
         {task && <TaskDetail task={task} sessions={sessions} onOpen={(id) => (setShown(null), onClose(), onOpen(id))} />}
       </Dialog>
     </div>
+  );
+}
+
+function UnreviewedPrs({ prs }: { prs: QueuedPr[] }) {
+  return (
+    <Collapsible className="group rounded-md border bg-card">
+      <CollapsibleTrigger className="flex w-full items-start gap-1.5 p-2 text-left text-sm text-foreground hover:text-foreground/80">
+        <ChevronRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
+        <span>{prs.length === 1 ? "1 PR needs" : `${prs.length} PRs need`} you to pick a reviewer</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="flex flex-col gap-0.5 border-t p-1">
+        {prs.map((p) => (
+          <a key={p.pr} href={p.url} target="_blank" rel="noreferrer" className="flex flex-col gap-0.5 rounded px-1.5 py-1 hover:bg-muted">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <GitPullRequest className="size-3 shrink-0" />
+              <span className="font-mono">{p.pr.replace(/^[^/]+\//, "")}</span>
+              <span className="ml-auto">{ago(Date.parse(p.created))}</span>
+            </span>
+            <span className="line-clamp-2 text-foreground">{p.title}</span>
+          </a>
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
