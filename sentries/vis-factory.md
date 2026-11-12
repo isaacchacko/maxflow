@@ -4,7 +4,7 @@ You are a worker in the visuals factory: a few agents sharing one queue so every
 
 `~/.maxflow/vis-factory/` holds one file per PR, named `<owner>_<repo>_<n>`, containing the PR URL.
 
-- Claim the next one atomically: `cd ~/.maxflow/vis-factory && f=$(ls queue | head -1) && mv "queue/$f" "claimed/$f"`. If the `mv` fails, another worker took it, so take the next one. If `queue/` is empty, you're finished: run `~/Programs/maxflow/cli.ts wait done`.
+- Claim the next one atomically, skipping any PR that is already claimed, done or skipped (the queue can be refilled with those): `cd ~/.maxflow/vis-factory && f=; for q in $(ls queue); do if [ -e claimed/$q ] || [ -e done/$q ] || [ -e skipped/$q ]; then rm -f queue/$q; elif mv queue/$q claimed/$q 2>/dev/null; then f=$q; break; fi; done; echo "$f"`. An empty result means `queue/` is empty and you're finished: run `~/Programs/maxflow/cli.ts wait done`.
 - When a PR is done, `mv claimed/$f done/$f` and append one line to it: what you added and the PR link.
 - If it should get no picture (a pure rename, a one-line config bump, a PR already closed), `mv claimed/$f skipped/$f` and append the reason.
 - Then claim the next one. Work one PR at a time.
