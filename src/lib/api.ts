@@ -57,6 +57,9 @@ export type Task = {
   timeline: { at: number; text: string; session?: string }[];
 };
 
+// One of the user's own PR comments not yet resolved: a review thread still open, or a top-level comment nobody answered yet.
+export type OpenComment = { id: string; pr: string; kind: "comment" | "thread"; url: string; body: string; path?: string; at: number; title: string; replies: number };
+
 export type Chat = { id: string; title: string; prompt: string; cwd: string; mtime: number; live: boolean; session: string | null };
 
 export const isSentry = (s: Session) => s.sentry;
@@ -90,6 +93,7 @@ export const api = {
   chats: (q: string, limit = 150): Promise<Chat[]> => fetch(`/api/chats?limit=${limit}&q=${encodeURIComponent(q)}`).then((r) => r.json()),
   review: (): Promise<{ board: ReviewBoard | null; queue: QueuedPr[] }> => fetch("/api/review").then((r) => r.json()),
   questions: (): Promise<Question[]> => fetch("/api/questions").then((r) => r.json()),
+  comments: (): Promise<OpenComment[]> => fetch("/api/comments").then((r) => r.json()),
   tasks: (): Promise<Task[]> => fetch("/api/tasks").then((r) => r.json()),
   settle: (id: number, action: "reply" | "dismiss", text?: string) => fetch(`/api/questions/${id}`, { method: "POST", body: JSON.stringify({ action, text }) }),
   resume: (id: string, bypass: boolean, force: boolean) => fetch(`/api/chats/${id}/resume`, { method: "POST", body: JSON.stringify({ bypass, force }) }),

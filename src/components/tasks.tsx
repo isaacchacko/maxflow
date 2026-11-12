@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { ChevronRight, ExternalLink, GitPullRequest, MessageCircleQuestion, SquareKanban, X } from "lucide-react";
+import { ChevronRight, ExternalLink, GitPullRequest, MessageCircleQuestion, MessageSquare, SquareKanban, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
-import { ago, type QueuedPr, type Session, type Task } from "@/lib/api";
+import { ago, type OpenComment, type QueuedPr, type Session, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const COLUMNS: { status: Task["status"]; title: string }[] = [
@@ -18,7 +18,7 @@ const COLUMNS: { status: Task["status"]; title: string }[] = [
 const DONE_SHOWN = 20;
 
 // The user's task board, which sentry:assistant derives from his prompts and the agents' work; he reads it, never edits it.
-export function TasksBoard({ tasks, prs, sessions, onOpen, onClose }: { tasks: Task[]; prs: QueuedPr[]; sessions: Session[]; onOpen: (id: string) => void; onClose: () => void }) {
+export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: { tasks: Task[]; prs: QueuedPr[]; comments: OpenComment[]; sessions: Session[]; onOpen: (id: string) => void; onClose: () => void }) {
   const [shown, setShown] = useState<number | null>(null);
   // The review sentry's queue stages a green PR with no reviewer yet as "needs reviewer": only the user sends it for approval.
   const unreviewed = prs.filter((p) => p.stage === "needs reviewer").sort((a, b) => a.created.localeCompare(b.created));
@@ -36,7 +36,7 @@ export function TasksBoard({ tasks, prs, sessions, onOpen, onClose }: { tasks: T
         <span className="ml-auto text-muted-foreground"><Kbd>⌘K</Kbd></span>
         <Button variant="ghost" size="icon" className="size-7" title="Close" onClick={onClose}><X /></Button>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-5 gap-2 overflow-x-auto p-3 max-md:grid-cols-[repeat(5,16rem)]">
+      <div className="grid min-h-0 flex-1 grid-cols-6 gap-2 overflow-x-auto p-3 max-lg:grid-cols-[repeat(6,16rem)]">
         {COLUMNS.map((c) => {
           const column = tasks.filter((t) => t.status === c.status).sort((a, b) => b.updated - a.updated);
           const cards = c.status === "done" ? column.slice(0, DONE_SHOWN) : column;
@@ -67,12 +67,39 @@ export function TasksBoard({ tasks, prs, sessions, onOpen, onClose }: { tasks: T
             </section>
           );
         })}
+        <CommentsColumn comments={comments} />
       </div>
       {!tasks.length && !unreviewed.length && <p className="absolute inset-x-0 top-1/2 text-center text-muted-foreground">No tasks yet. The assistant adds them as you ask agents for things.</p>}
       <Dialog open={!!task} onOpenChange={(o) => !o && setShown(null)}>
         {task && <TaskDetail task={task} sessions={sessions} onOpen={(id) => (setShown(null), onClose(), onOpen(id))} />}
       </Dialog>
     </div>
+  );
+}
+
+// The user's PR comments still open, newest first; each links to the comment on GitHub.
+function CommentsColumn({ comments }: { comments: OpenComment[] }) {
+  return (
+    <section className="flex min-h-0 flex-col rounded-lg bg-muted/40">
+      <h3 className="flex items-baseline gap-2 px-2.5 pt-2 pb-1.5 font-medium text-muted-foreground">
+        Your open comments
+        <span className="font-normal">{comments.length}</span>
+      </h3>
+      <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-1.5 pb-1.5">
+        {comments.toSorted((a, b) => b.at - a.at).map((c) => (
+          <a key={c.id} href={c.url} target="_blank" rel="noreferrer" className="flex flex-col gap-1 rounded-md border bg-card p-2 hover:border-ring">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <MessageSquare className="size-3 shrink-0" />
+              <span className="font-mono">{c.pr.replace(/^[^/]+\//, "")}</span>
+              <span className="ml-auto">{ago(c.at)}</span>
+            </span>
+            <span className="line-clamp-4 text-sm whitespace-pre-wrap text-foreground">{c.body}</span>
+            <span className="truncate text-muted-foreground" title={c.title}>{c.path ?? c.title}</span>
+            {c.replies > 0 && <span className="text-muted-foreground">{c.replies === 1 ? "1 reply, thread still open" : `${c.replies} replies, thread still open`}</span>}
+          </a>
+        ))}
+      </div>
+    </section>
   );
 }
 

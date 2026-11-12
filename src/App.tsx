@@ -10,7 +10,7 @@ import { GraphView } from "@/components/graph";
 import { ResumeDialog } from "@/components/resume-dialog";
 import { QuestionsPanel } from "@/components/questions";
 import { TasksBoard } from "@/components/tasks";
-import { api, isSentry, store, type QueuedPr, type Question, type Session, type Task } from "@/lib/api";
+import { api, isSentry, store, type OpenComment, type QueuedPr, type Question, type Session, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export function App() {
@@ -26,6 +26,7 @@ export function App() {
   const [tasking, setTasking] = useState(location.hash === "#tasks");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [prs, setPrs] = useState<QueuedPr[]>([]);
+  const [comments, setComments] = useState<OpenComment[]>([]);
   const term = useRef<TerminalHandle | null>(null);
 
   const refresh = useCallback(() => api.sessions().then((s) => (setSessions(s), setLoaded(true))), []);
@@ -43,7 +44,7 @@ export function App() {
   }, []);
   useEffect(() => {
     if (!tasking) return;
-    const refreshTasks = () => (api.tasks().then(setTasks, () => {}), api.review().then((r) => setPrs(r.queue), () => {}));
+    const refreshTasks = () => (api.tasks().then(setTasks, () => {}), api.review().then((r) => setPrs(r.queue), () => {}), api.comments().then(setComments, () => {}));
     refreshTasks();
     const t = setInterval(refreshTasks, 3000);
     return () => clearInterval(t);
@@ -144,7 +145,7 @@ export function App() {
             onArchiveLinks={archiveLinks}
             onToggleArchived={toggleArchived}
           />
-          {tasking && <TasksBoard tasks={tasks} prs={prs} sessions={sessions} onOpen={open} onClose={() => setTasking(false)} />}
+          {tasking && <TasksBoard tasks={tasks} prs={prs} comments={comments} sessions={sessions} onOpen={open} onClose={() => setTasking(false)} />}
           {asking && <QuestionsPanel questions={questions} onOpen={open} onSettled={refreshQuestions} onClose={() => setAsking(false)} />}
           {loaded && !sessions.length && !graphing && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-muted-foreground">

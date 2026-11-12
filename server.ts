@@ -470,12 +470,51 @@ function prWaitEnds(kind: Wait["kind"], event: string, data: any) {
 function onEvent(topic: string, data: any) {
   const m = topic.match(/^gh\/[^/]+\/[^/]+\/pr\/\d+\/(\w+)$/);
   if (!m || !data?.pr) return;
+  recordUserComment(m[1], data, Date.now());
   for (const s of sessions.values())
     if ((s.wait?.kind === "approval" || s.wait?.kind === "ci") && s.wait.ref === data.pr) {
       const why = prWaitEnds(s.wait.kind, m[1], data);
       if (why) endWait(s, why);
     }
 }
+// The user's own PR comments, which the board shows until they're resolved. The gh sentry's `who` tells his comments from the ones
+// agents post as him; the bus keeps only its last few thousand events, so the comments are kept here, seeded from it on boot.
+type UserComment = { id: string; pr: string; kind: "comment" | "thread"; url: string; body: string; path?: string; at: number };
+const USER_COMMENTS = `${process.env.HOME}/.maxflow/user-comments.json`;
+const userComments: UserComment[] = (() => { try { return JSON.parse(readFileSync(USER_COMMENTS, "utf8")); } catch { return []; } })();
+const seedUserComments = !userComments.length;
+function recordUserComment(kind: string, data: any, at: number) {
+  if ((kind !== "comment" && kind !== "thread") || !data.who?.startsWith("the user") || userComments.some((c) => c.id === data.id)) return;
+  userComments.push({ id: data.id, pr: data.pr, kind, url: data.url, body: data.body, path: data.path, at });
+  writeFileSync(USER_COMMENTS, JSON.stringify(userComments));
+}
+// The bus holds only its tail in memory, so the first boot reads the whole log once for his earlier comments.
+if (seedUserComments)
+  try {
+    for (const line of readFileSync(`${process.env.HOME}/.maxflow/events.jsonl`, "utf8").split("\n"))
+      if (line.includes('"who":"the user')) {
+        const e = JSON.parse(line);
+        recordUserComment(e.topic.split("/").at(-1), e.data, e.at);
+      }
+  } catch {}
+// Open while its PR is: a thread comment until the thread is resolved, a top-level one until someone comments after it.
+function openUserComments() {
+  return userComments.flatMap((c) => {
+    const pr = ghStatus()[c.pr]?.pr;
+    if (pr?.state !== "OPEN") return [];
+    if (c.kind === "thread") {
+      const thread = pr.reviewThreads.nodes.find((t) => t.comments.nodes.some((o) => o.id === c.id));
+      if (!thread || thread.isResolved) return [];
+      const replies = thread.comments.nodes.length - 1 - thread.comments.nodes.findIndex((o) => o.id === c.id);
+      return [{ ...c, title: pr.title, replies }];
+    }
+    // CI bots post plans and reports after anything, so only a person's or an agent's comment counts as an answer.
+    const i = pr.comments.nodes.findIndex((o) => o.id === c.id);
+    const answered = pr.comments.nodes.slice(i + 1).some((o) => !/bot\b|\[bot\]|^github-actions$/i.test(o.author?.login ?? ""));
+    return i >= 0 && !answered ? [{ ...c, title: pr.title, replies: 0 }] : [];
+  });
+}
+
 // An agent waiting on another hears when that one exits or goes to sleep itself.
 function tellWaiters(on: Session, what: string) {
   for (const w of sessions.values())
@@ -484,7 +523,9 @@ function tellWaiters(on: Session, what: string) {
 const waitLabel = (w: Wait) => (w.kind === "done" ? "done" : `${w.kind}:${w.ref}`);
 
 // The open PRs gh sentry ties each session to, from its edges and its last poll.
-const ghStatus = sentryFile<Record<string, { pr: { state: string } }>>(`${process.env.HOME}/.maxflow/gh-status.json`, {});
+type GhComment = { id: string; author: { login: string } | null };
+type GhPr = { state: string; title: string; comments: { nodes: GhComment[] }; reviewThreads: { nodes: { isResolved: boolean; comments: { nodes: GhComment[] } }[] } };
+const ghStatus = sentryFile<Record<string, { pr: GhPr }>>(`${process.env.HOME}/.maxflow/gh-status.json`, {});
 const openPrs = (s: Session) => (sentryTies["sentry:gh"]().find((t) => t.session === s.id)?.prs ?? []).filter((k) => ghStatus()[k]?.pr.state === "OPEN");
 
 function declareWait(s: Session, kind: string, ref: string): string | null {
@@ -839,6 +880,7 @@ Bun.serve<WsData>({
     }
 
     if (path === "/api/tasks" && req.method === "GET") return Response.json(tasks);
+    if (path === "/api/comments" && req.method === "GET") return Response.json(openUserComments());
     const task = path.match(/^\/api\/tasks(?:\/(\d+))?$/);
     if (task && req.method === "POST") {
       const t = task[1] ? tasks.find((o) => o.id === Number(task[1])) : undefined;
