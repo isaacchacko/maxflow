@@ -371,6 +371,17 @@ setInterval(async () => {
 }, 1000);
 
 // Only pages served from this server may drive it; blocks other sites from reaching localhost.
+// Favicons are served from this origin so the graph can read their pixels and plate the dark ones.
+const favicons = new Map<string, Promise<Response | null>>();
+async function fetchFavicon(host: string) {
+  const own = `${/^localhost(:|$)/.test(host) ? "http" : "https"}://${host}/favicon.ico`;
+  for (const src of [own, `https://www.google.com/s2/favicons?domain=${host}&sz=64`]) {
+    const res = await fetch(src, { signal: AbortSignal.timeout(5000) }).catch(() => null);
+    if (res?.ok && res.headers.get("content-type")?.startsWith("image/")) return new Response(await res.arrayBuffer(), { headers: { "content-type": res.headers.get("content-type")!, "cache-control": "max-age=86400" } });
+  }
+  return null;
+}
+
 function sameOrigin(req: Request) {
   const origin = req.headers.get("origin");
   if (!origin) return true;
@@ -436,6 +447,13 @@ Bun.serve<WsData>({
       const body = (await req.json().catch(() => ({}))) as { topic?: string; data?: unknown };
       if (!body.topic) return new Response("topic required", { status: 400 });
       return Response.json(publish(body.topic, body.data ?? null), { status: 201 });
+    }
+
+    if (path === "/api/favicon" && req.method === "GET") {
+      const host = url.searchParams.get("host") ?? "";
+      if (!/^[\w.-]+(:\d+)?$/.test(host)) return new Response("bad host", { status: 400 });
+      if (!favicons.has(host)) favicons.set(host, fetchFavicon(host));
+      return (await favicons.get(host))?.clone() ?? new Response("no favicon", { status: 404 });
     }
 
     if (path === "/api/links" && req.method === "GET")

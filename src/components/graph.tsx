@@ -47,8 +47,8 @@ function hubsOf(sessions: Session[]) {
 }
 // A PR's node is colored by whether it is open, closed or merged.
 const prColors = (sessions: Session[]) => new Map(sessions.flatMap((s) => Object.entries(s.prs)).map(([u, state]) => [u, css(`--pr-${state}`)]));
-// The site's own /favicon.ico, then Google's favicon service; the graph keeps a plain dot if neither loads.
-const favicon = (host: string) => [`${/^localhost(:|$)/.test(host) ? "http" : "https"}://${host}/favicon.ico`, `https://www.google.com/s2/favicons?domain=${host}&sz=64`];
+// Served by maxflow from the site or Google so it is same-origin; the graph keeps a plain dot if neither loads.
+const favicon = (host: string) => `/api/favicon?host=${encodeURIComponent(host)}`;
 // A sentry's node shows what it watches, drawn in the sentry color.
 const SENTRY_ICONS: Record<string, LucideIcon> = { gh: GitPullRequest, slack: Hash, rename: Tag, health: HeartPulse, graph: Waypoints, review: GitPullRequestDraft };
 const sentryIcon = (s: Session, color: string) => {
