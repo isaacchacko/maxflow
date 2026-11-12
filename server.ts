@@ -122,7 +122,7 @@ adoptSessions();
 
 // Sentries are ordinary sessions, started once and kept by tmux across server restarts.
 const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  ["gh", "slack", "rename", "health", "graph"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
+  ["gh", "slack", "rename", "health", "graph", "review"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
 );
 if (process.env.MAXFLOW_SENTRIES !== "0")
   for (const [name, cmd] of Object.entries(SENTRIES))
@@ -135,6 +135,7 @@ const SENTRY_USES: Record<string, string> = {
   "sentry:slack": `It polls Slack every minute for the threads, channels and searches tied to a session and notifies that session of each new message. A thread you posted in through the Slack connector is tied to you already, for 3 days after your last post; tie any other with \`${CLI} slack watch <permalink | channel id | #channel | search query>\`. It also publishes every mention of the user as slack/mention: block on one with \`${CLI} sub 'slack/mention'\`, or on a thread with \`${CLI} sub 'slack/<channel>/<thread ts>/reply'\`.`,
   "sentry:health": `It watches the maxflow server itself and, when it stays unreachable for 2 minutes, starts a "maxflow recovery" claude session to fix and restart it.`,
   "sentry:graph": `It decides which URLs you mention show up as nodes beside you in the maxflow graph: only ones you meant the user to open (a PR, a deploy, a page you published, a dev server you started), not incidental ones in code or docs. Put a URL you want the user to see on its own line in your reply. It also groups sessions by the work they share, and the graph draws a group's sessions close together.`,
+  "sentry:review": `It lists the user's open PRs that are ready for a reviewer and have none requested yet, and links itself in the graph to the sessions working on them, so the user can pick a reviewer. Don't request reviewers yourself; the user does.`,
   "sentry:rename": `It titles your session in the maxflow sidebar by the topic you own. Pick your own title with \`${CLI} rename $MAXFLOW_SESSION <title>\` and it leaves you alone from then on.`,
 };
 
@@ -285,6 +286,8 @@ const ARCHIVED_LINKS = `${process.env.HOME}/.maxflow/archived-links.json`;
 const archivedLinks = new Set<string>((() => { try { return JSON.parse(readFileSync(ARCHIVED_LINKS, "utf8")) as string[]; } catch { return []; } })());
 // Its grouping of sessions by the work they share, { session: group }.
 const groups = sentryFile<Record<string, string>>(`${process.env.HOME}/.maxflow/graph-groups.json`, {});
+// sentry:review's edges to the sessions on PRs waiting for a reviewer, [{ session, label }].
+const reviewEdges = sentryFile<{ session: string; label: string }[]>(`${process.env.HOME}/.maxflow/review-edges.json`, []);
 
 // An edge drawn in the graph: tell each agent end who is on the other side and how to reach it.
 function introduce(to: Session, other: Session, why?: string) {
@@ -330,6 +333,7 @@ const describe = (s: Session, shown = links(s)) => ({
   prs: Object.fromEntries(shown.flatMap((u) => (prStates.has(u) ? [[u, prStates.get(u)]] : []))),
   group: groups()[s.id] ?? null,
   archived: !!s.archived,
+  ties: s.name === "sentry:review" ? reviewEdges() : [],
 });
 
 // Plain text of the visible pane plus `history` lines above it, trailing blank lines dropped.

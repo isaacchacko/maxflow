@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { GraphRenderer } from "@isaacchacko/graph";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Archive, Bot, ChevronDown, ChevronUp, GitPullRequest, Hash, HeartPulse, Link2, Radar, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
+import { Archive, Bot, ChevronDown, ChevronUp, GitPullRequest, GitPullRequestDraft, Hash, HeartPulse, Link2, Radar, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
@@ -50,7 +50,7 @@ const prColors = (sessions: Session[]) => new Map(sessions.flatMap((s) => Object
 // The site's own /favicon.ico, then Google's favicon service; the graph keeps a plain dot if neither loads.
 const favicon = (host: string) => [`${/^localhost(:|$)/.test(host) ? "http" : "https"}://${host}/favicon.ico`, `https://www.google.com/s2/favicons?domain=${host}&sz=64`];
 // A sentry's node shows what it watches, drawn in the sentry color.
-const SENTRY_ICONS: Record<string, LucideIcon> = { gh: GitPullRequest, slack: Hash, rename: Tag, health: HeartPulse, graph: Waypoints };
+const SENTRY_ICONS: Record<string, LucideIcon> = { gh: GitPullRequest, slack: Hash, rename: Tag, health: HeartPulse, graph: Waypoints, review: GitPullRequestDraft };
 const sentryIcon = (s: Session, color: string) => {
   const Icon = SENTRY_ICONS[displayName(s)] ?? Radar;
   return `data:image/svg+xml,${encodeURIComponent(renderToStaticMarkup(<Icon color={color} size={48} strokeWidth={2.25} />))}`;
@@ -250,6 +250,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
       ],
       links: [
         ...edges.filter((e) => shown.has(e.source) && shown.has(e.target)).map((e) => ({ source: e.source, target: e.target, label: e.label })),
+        ...sessions.flatMap((s) => (s.ties ?? []).filter((t) => shown.has(t.session)).map((t) => ({ source: s.id, target: t.session, label: t.label }))),
         ...groupPulls(sessions),
         ...(showUrls ? sessions.flatMap((s) => [...new Set(s.links.map((u) => hubOf(s, u)))].map((hub) => ({ source: s.id, target: hub, length: 0.6 }))) : []),
         ...children.map((id) => ({ source: id.slice(URL_NODE.length, id.lastIndexOf(" ")), target: id, length: 0.4 })),
