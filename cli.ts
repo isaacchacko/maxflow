@@ -4,13 +4,13 @@ const [verb, ...rest] = process.argv.slice(2);
 const usage = `usage:
   maxflow ls
   maxflow new [--name N] [--cwd DIR] [-- cmd ...]
-  maxflow send <id> <text...> [--no-enter]   type text, then Enter
+  maxflow send <id> <text...> [--no-enter] [--isaac]   type text, then Enter; --isaac: the funnel relaying Isaac's own request
   maxflow keys <id> <key...>                 tmux key names: Enter Escape C-c Up BTab ...
   maxflow screen <id> [--history N]          print the screen as plain text
   maxflow wait <id> [--idle MS] [--match RE] [--timeout MS]   block until quiet / RE on screen / exit, print screen
   maxflow wait q:<id> | approval:<pr> | ci:<pr> | agent:<id> | done   declare what you wait on; you sleep from your turn's end until a message wakes you
   maxflow rename <id> <name...> | maxflow kill <id>
-  maxflow notify <id> <text...>              deliver text once the session is idle at an empty claude prompt
+  maxflow notify <id> <text...> [--isaac]    deliver text once the session is idle at an empty claude prompt; --isaac as for send
   maxflow ask <question...> [--re QID] [--default REC]   raise a question to the user through sentry:questions; returns at once.
                                              --default: your recommendation for a reversible step, which you go ahead with if he hasn't answered in 3h
   maxflow questions [--all]                  the user's question queue
@@ -61,7 +61,7 @@ if (verb === "ls") {
   await create({ name: flag(flags, "--name"), cwd: flag(flags, "--cwd") ?? process.cwd(), cmd: dash === -1 ? undefined : rest.slice(dash + 1) });
 } else if (verb === "send" && rest[1]) {
   const [id, ...words] = positional(rest, []);
-  await call(`/api/sessions/${id}/input`, { method: "POST", body: JSON.stringify({ text: words.join(" "), enter: !rest.includes("--no-enter") }) });
+  await call(`/api/sessions/${id}/input`, { method: "POST", body: JSON.stringify({ text: words.join(" "), enter: !rest.includes("--no-enter"), isaac: rest.includes("--isaac") }) });
 } else if (verb === "keys" && rest[1]) {
   await call(`/api/sessions/${rest[0]}/input`, { method: "POST", body: JSON.stringify({ keys: rest.slice(1) }) });
 } else if (verb === "screen" && rest[0]) {
@@ -92,7 +92,8 @@ if (verb === "ls") {
 } else if (verb === "kill" && rest[0]) {
   await call(`/api/sessions/${rest[0]}`, { method: "DELETE" });
 } else if (verb === "notify" && rest[1]) {
-  await call(`/api/sessions/${rest[0]}/notify`, { method: "POST", body: JSON.stringify({ text: rest.slice(1).join(" ") }) });
+  const [id, ...words] = positional(rest, []);
+  await call(`/api/sessions/${id}/notify`, { method: "POST", body: JSON.stringify({ text: words.join(" "), isaac: rest.includes("--isaac") }) });
 } else if (verb === "ask" && rest[0]) {
   if (!process.env.MAXFLOW_SESSION) console.error("ask works only inside a maxflow session"), process.exit(1);
   const re = flag(rest, "--re");
