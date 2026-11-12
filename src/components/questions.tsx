@@ -64,6 +64,7 @@ function Pending({ q, onOpen, onSettled }: { q: Question; onOpen: (id: string) =
       {q.thread.map((m, i) => (
         <p key={i} className={cn("text-sm whitespace-pre-wrap", m.from === "agent" ? "text-foreground" : "border-l-2 pl-2 text-muted-foreground")}>{m.text}</p>
       ))}
+      {q.default && <p className="text-muted-foreground">If unanswered, it goes ahead with: <span className="text-foreground">{q.default}</span></p>}
       <textarea
         value={reply}
         onChange={(e) => setReply(e.target.value)}

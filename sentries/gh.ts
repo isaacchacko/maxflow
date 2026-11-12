@@ -244,8 +244,9 @@ async function tick(me: string, state: Record<string, PrState>) {
   if (watches.some((w) => done.has(w.pr))) writeWatches(watches.filter((w) => !done.has(w.pr)));
   writeFileSync(STATE_FILE, JSON.stringify(state));
   const onPrs = new Map<string, string[]>();
-  for (const [key, sessions] of listeners) for (const s of sessions) (onPrs.get(s) ?? onPrs.set(s, []).get(s)!).push(`#${key.split("#")[1]}`);
-  writeFileSync(EDGES_FILE, JSON.stringify([...onPrs].map(([session, prs]) => ({ session, label: prs.length > 2 ? `${prs.slice(0, 2).join(" ")} +${prs.length - 2}` : prs.join(" ") }))));
+  for (const [key, sessions] of listeners) for (const s of sessions) (onPrs.get(s) ?? onPrs.set(s, []).get(s)!).push(key);
+  const label = (prs: string[]) => prs.map((k) => `#${k.split("#")[1]}`);
+  writeFileSync(EDGES_FILE, JSON.stringify([...onPrs].map(([session, prs]) => ({ session, prs, label: prs.length > 2 ? `${label(prs).slice(0, 2).join(" ")} +${prs.length - 2}` : label(prs).join(" ") }))));
   writeFileSync(STATUS_FILE, JSON.stringify(Object.fromEntries([...prs].map(([key, pr]) => [key, { at: Date.now(), pr }]))));
   return prs.size;
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // meta sentry's feed: runs beside the meta agent (sentries/meta.md) in its pane. Every 15 minutes it reads the part of each live
 // agent's transcript it hasn't read yet, times its turns, tool calls and model replies, and notifies the agent of the ones over a
-// threshold, with the full digests in meta-flagged.json. Exits with the agent.
+// threshold, with the full digests in meta-flagged.json. It also reports agents sitting idle without having declared what they wait on
+// (`maxflow wait`), once per idle stretch, with the last thing each said. Exits with the agent.
 import { existsSync, openSync, readSync, closeSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import { join } from "node:path";
@@ -14,11 +15,17 @@ const SLOW_TURN_MS = Number(process.env.META_SLOW_TURN_MS ?? 10 * 60_000);
 const SLOW_TOOL_MS = Number(process.env.META_SLOW_TOOL_MS ?? 5 * 60_000);
 const SLOW_MODEL_MS = Number(process.env.META_SLOW_MODEL_MS ?? 3 * 60_000);
 const REPEATS = Number(process.env.META_REPEATS ?? 4);
+const IDLE_MS = Number(process.env.META_IDLE_MS ?? 10 * 60_000);
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 
-type Session = { id: string; name: string; running: boolean; sentry: boolean; agent: boolean; status: string; transcript?: string };
+type Session = {
+  id: string; name: string; running: boolean; sentry: boolean; agent: boolean; status: string; transcript?: string;
+  archived: boolean; activeAt: number; pending: number; wait: { kind: string; ref: string; at: number } | null;
+};
 type Open = { name: string; what: string; at: number };
-type Mark = { offset: number; tools: Record<string, Open>; turnAt?: number; askedAt?: number };
+// idleAt: the activeAt of the idle stretch already reported, so each stretch is reported once.
+type Mark = { offset: number; tools: Record<string, Open>; turnAt?: number; askedAt?: number; idleAt?: number };
+type Idle = { id: string; title: string; idleMs: number; lastText: string };
 type Digest = {
   id: string;
   title: string;
@@ -111,6 +118,24 @@ function digest(s: Session, mark: Mark, lines: string[], now: number): Digest {
   return d;
 }
 
+// The last text the agent wrote, from the transcript's tail: what it ended its turn on.
+function lastText(path: string) {
+  const size = statSync(path).size;
+  const buf = Buffer.alloc(Math.min(size, 400_000));
+  const fd = openSync(path, "r");
+  readSync(fd, buf, 0, buf.length, size - buf.length);
+  closeSync(fd);
+  for (const line of buf.toString("utf8").split("\n").reverse()) {
+    if (!line.includes('"assistant"')) continue;
+    try {
+      const e = JSON.parse(line);
+      const text = e.type === "assistant" && !e.isSidechain ? (e.message?.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n").trim() : "";
+      if (text) return text.length > 600 ? `…${text.slice(-600)}` : text;
+    } catch {}
+  }
+  return "";
+}
+
 const isSlow = (d: Digest) =>
   d.turns.some((ms) => ms >= SLOW_TURN_MS) || (d.openTurnMs ?? 0) >= SLOW_TURN_MS || d.slowTools.length > 0 || d.slowReplies.length > 0 || (d.waitingOnModelMs ?? 0) >= SLOW_MODEL_MS || d.repeated.length > 0;
 
@@ -120,19 +145,25 @@ async function tick() {
   const live = new Set(sessions.map((s) => s.transcript!));
   for (const path of Object.keys(marks)) if (!live.has(path)) delete marks[path];
   const flagged: Digest[] = [];
+  const idle: Idle[] = [];
   for (const s of sessions) {
     if (!existsSync(s.transcript!)) continue;
     // A transcript seen for the first time is read from its last 2MB; only lines inside the window count anyway.
     const mark = (marks[s.transcript!] ??= { offset: Math.max(0, statSync(s.transcript!).size - 2_000_000), tools: {} });
     const d = digest(s, mark, delta(s.transcript!, mark), now);
     if (isSlow(d)) flagged.push(d);
+    // An agent is working or asleep on a declared wait; idle at its prompt with neither, nothing will wake it.
+    if (s.status === "idle" && !s.archived && !s.wait && !s.pending && now - s.activeAt >= IDLE_MS && mark.idleAt !== s.activeAt) {
+      mark.idleAt = s.activeAt;
+      idle.push({ id: s.id, title: s.name, idleMs: now - s.activeAt, lastText: lastText(s.transcript!) });
+    }
   }
   since = now;
   writeFileSync(STATE_FILE, JSON.stringify(marks));
   const stamp = new Date(now).toLocaleTimeString();
-  console.log(`${stamp}  ${sessions.length} agents read, ${flagged.length} over a threshold`);
-  if (!flagged.length) return;
-  writeFileSync(FLAGGED_FILE, JSON.stringify({ at: now, read: sessions.length, flagged }, null, 2));
+  console.log(`${stamp}  ${sessions.length} agents read, ${flagged.length} over a threshold, ${idle.length} idle without a wait`);
+  if (!flagged.length && !idle.length) return;
+  writeFileSync(FLAGGED_FILE, JSON.stringify({ at: now, read: sessions.length, flagged, idle }, null, 2));
   const min = (ms: number) => `${(ms / 60_000).toFixed(0)}m`;
   const line = (d: Digest) =>
     [
@@ -147,7 +178,11 @@ async function tick() {
       .filter(Boolean)
       .join("; ");
   const machine = `${cpus().length} cores, load ${loadavg().map((n) => n.toFixed(1)).join(" ")}`;
-  await notify(`${flagged.length} of ${sessions.length} agents over a threshold in the last window (${machine}); digests in ${FLAGGED_FILE}:\n${flagged.map((d) => `- ${line(d)}`).join("\n")}`);
+  const slow = flagged.length ? `${flagged.length} of ${sessions.length} agents over a threshold in the last window (${machine}); digests in ${FLAGGED_FILE}:\n${flagged.map((d) => `- ${line(d)}`).join("\n")}` : "";
+  const waitless = idle.length
+    ? `${idle.length} agents idle with no declared wait (nothing will wake them); each one's last words:\n${idle.map((i) => `- ${i.id} (${i.title}) idle ${min(i.idleMs)}: ${JSON.stringify(i.lastText.replace(/\s+/g, " "))}`).join("\n")}`
+    : "";
+  await notify([slow, waitless].filter(Boolean).join("\n\n"));
 }
 
 console.log(`meta sentry: every ${INTERVAL_MS / 60_000}m reads each agent's new transcript lines; slow is a turn over ${SLOW_TURN_MS / 60_000}m, a tool over ${SLOW_TOOL_MS / 60_000}m, a reply over ${SLOW_MODEL_MS / 60_000}m, or a command run ${REPEATS}+ times`);

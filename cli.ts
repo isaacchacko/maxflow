@@ -8,9 +8,11 @@ const usage = `usage:
   maxflow keys <id> <key...>                 tmux key names: Enter Escape C-c Up BTab ...
   maxflow screen <id> [--history N]          print the screen as plain text
   maxflow wait <id> [--idle MS] [--match RE] [--timeout MS]   block until quiet / RE on screen / exit, print screen
+  maxflow wait q:<id> | approval:<pr> | ci:<pr> | agent:<id> | done   declare what you wait on; you sleep from your turn's end until a message wakes you
   maxflow rename <id> <name...> | maxflow kill <id>
   maxflow notify <id> <text...>              deliver text once the session is idle at an empty claude prompt
-  maxflow ask <question...> [--re QID]       raise a question to the user through sentry:questions; returns at once
+  maxflow ask <question...> [--re QID] [--default REC]   raise a question to the user through sentry:questions; returns at once.
+                                             --default: your recommendation for a reversible step, which you go ahead with if he hasn't answered in 3h
   maxflow questions [--all]                  the user's question queue
   maxflow link <id> <id> [why...]            introduce two sessions to each other, as drawing an edge in the graph does
   maxflow sub <topic-glob> [--since SEQ] [--timeout MS] [--follow]   block for the next matching event, print it as JSON
@@ -61,6 +63,21 @@ if (verb === "ls") {
   await call(`/api/sessions/${rest[0]}/input`, { method: "POST", body: JSON.stringify({ keys: rest.slice(1) }) });
 } else if (verb === "screen" && rest[0]) {
   console.log((await call(`/api/sessions/${rest[0]}/screen?history=${flag(rest, "--history") ?? 0}`)).screen);
+} else if (verb === "wait" && /^(q|approval|ci|agent):.|^done$/.test(rest[0] ?? "")) {
+  const me = process.env.MAXFLOW_SESSION;
+  if (!me) console.error("wait works only inside a maxflow session"), process.exit(1);
+  const [kind, ...ref] = rest[0].split(":");
+  let target = ref.join(":");
+  // A PR wait ties the session to the PR, so gh sentry's notice of the review or CI is what wakes it.
+  if (kind === "approval" || kind === "ci") {
+    const pr = parsePr(target, process.cwd());
+    if (!pr) console.error(`can't tell which repo ${target} is in; use owner/repo#n or a PR url`), process.exit(1);
+    target = pr;
+    const prev = readWatches().find((w) => w.pr === pr)?.sessions ?? [];
+    writeWatches([...readWatches().filter((w) => w.pr !== pr), { pr, sessions: [...new Set([...prev, me])] }]);
+  }
+  await call(`/api/sessions/${me}/await`, { method: "POST", body: JSON.stringify({ kind, ref: target }) });
+  console.log(`waiting on ${kind === "done" ? "nothing: done" : `${kind}:${target}`}. End your turn now; you sleep until a message wakes you.`);
 } else if (verb === "wait" && rest[0]) {
   const q = new URLSearchParams(Object.entries({ idle: flag(rest, "--idle"), match: flag(rest, "--match"), timeout: flag(rest, "--timeout") }).filter(([, v]) => v) as [string, string][]);
   const r = await call(`/api/sessions/${rest[0]}/wait?${q}`);
@@ -76,8 +93,8 @@ if (verb === "ls") {
 } else if (verb === "ask" && rest[0]) {
   if (!process.env.MAXFLOW_SESSION) console.error("ask works only inside a maxflow session"), process.exit(1);
   const re = flag(rest, "--re");
-  const q = await call("/api/questions", { method: "POST", body: JSON.stringify({ text: positional(rest, ["--re"]).join(" "), re: re ? Number(re.replace(/^q/, "")) : undefined }) });
-  console.log(`q${q.id} ${q.thread.length > 1 ? "updated" : "queued"} (${q.status}). Keep working; the answer arrives in your prompt.`);
+  const q = await call("/api/questions", { method: "POST", body: JSON.stringify({ text: positional(rest, ["--re", "--default"]).join(" "), re: re ? Number(re.replace(/^q/, "")) : undefined, default: flag(rest, "--default") }) });
+  console.log(`q${q.id} ${q.thread.length > 1 ? "updated" : "queued"} (${q.status}). Keep working; the answer arrives in your prompt. Once nothing is left that doesn't hang on it, run \`maxflow wait q:${q.id}\` and end your turn.`);
 } else if (verb === "questions") {
   for (const q of await call("/api/questions"))
     if (rest.includes("--all") || q.status === "gating" || q.status === "pending")

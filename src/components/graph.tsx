@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { GraphRenderer } from "@isaacchacko/graph";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Archive, Bot, ChevronDown, ChevronUp, ExternalLink, GitMerge, GitPullRequest, GitPullRequestDraft, Gauge, Hammer, Hash, HeartPulse, Link2, MemoryStick, MessageCircleQuestion, Radar, Route, ScanEye, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
+import { Archive, Bot, ChevronDown, ChevronUp, Copy, ExternalLink, GitMerge, GitPullRequest, GitPullRequestDraft, Gauge, Hammer, Hash, HeartPulse, Link2, MemoryStick, MessageCircleQuestion, Radar, Route, ScanEye, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
@@ -61,6 +61,10 @@ const nodeIcon = (s: Session, color: string) => {
 const QUEUE_NODE = "pr-queue";
 const isReviewSentry = (s: Session) => isSentry(s) && s.name === "sentry:review";
 const boardCount = (b: ReviewBoard) => b.sections.reduce((n, s) => n + s.items.length, 0);
+// What a sleeping agent waits on, as it declared it with `maxflow wait`.
+const WAIT_NAMES: Record<string, string> = { q: "the user's answer", approval: "approval", ci: "CI", agent: "an agent", done: "done" };
+const waitLabel = (w: NonNullable<Session["wait"]>) => (w.kind === "done" ? "done" : `${w.kind}:${w.kind === "approval" || w.kind === "ci" ? `#${w.ref.split("#")[1]}` : w.ref}`);
+
 const countIcon = (n: number, color: string) =>
   `data:image/svg+xml,${encodeURIComponent(renderToStaticMarkup(
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><text x="24" y="25" textAnchor="middle" dominantBaseline="central" fill={color} fontFamily="Inter, ui-sans-serif, system-ui, sans-serif" fontWeight={700} fontSize={n > 99 ? 20 : n > 9 ? 28 : 34}>{n}</text></svg>,
@@ -348,7 +352,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
         ...sessions.map((s) => {
           const at = placeAt.current.get(s.id);
           placeAt.current.delete(s.id);
-          return { id: s.id, label: showTitles ? s.name : "", color: sessionColor(s), icon: nodeIcon(s, sessionColor(s)), size: (s.agent || isSentry(s) ? 2.4 : 1.8) * (isBusy(s) || isWaiting(s) ? 1.6 : 1), ...at };
+          return { id: s.id, label: showTitles ? `${s.name}${s.wait ? ` · ⏸ ${waitLabel(s.wait)}` : ""}` : "", color: sessionColor(s), icon: nodeIcon(s, sessionColor(s)), size: (s.agent || isSentry(s) ? 2.4 : 1.8) * (isBusy(s) || isWaiting(s) ? 1.6 : 1), ...at };
         }),
         ...children.map((id) => ({ id, label: "", color: archivedUrls.has(urlOfNode(id)) ? ARCHIVED : (prs.get(urlOfNode(id)) ?? css("--url")), size: 1 })),
         ...[...hubs].map(([hub, urls]) => ({ id: hub, label: showTitles ? hostOfHub(hub) : "", color: allArchived(urls) ? ARCHIVED : (urls.length === 1 && prs.get(urls[0])) || css("--url"), icon: favicon(hostOfHub(hub)), size: 3 })),
@@ -689,6 +693,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
         <Button variant="outline" size="sm" className={cn("bg-card shadow-sm", hideArchived && "text-muted-foreground")} title="Right-click a node or link to archive or unarchive it" onClick={onToggleArchived}>
           <Archive /> {hideArchived ? "Show archived" : "Hide archived"} <Kbd className="ml-1">ha</Kbd>
         </Button>
+        <WaitCounts sessions={all} />
         {mode === "edit" && <span className="text-xs text-muted-foreground">drag node → node and say why · click an edge to relabel · right-click to delete</span>}
       </div>
       {pendingKeys && (
@@ -835,6 +840,19 @@ function FindBar({ query, onQuery, count, at, onStep, onClose }: {
   );
 }
 
+// The bottleneck as a count: how many agents sleep on each kind of wait, the user's answers and approvals first.
+function WaitCounts({ sessions }: { sessions: Session[] }) {
+  const asleep = sessions.filter((s) => s.running && s.wait);
+  if (!asleep.length) return null;
+  const byKind = Map.groupBy(asleep, (s): string => s.wait!.kind);
+  const kinds = Object.keys(WAIT_NAMES).filter((k) => byKind.has(k));
+  return (
+    <span className="rounded-md border bg-card px-2 py-1 text-xs text-muted-foreground shadow-sm" title={asleep.map((s) => `${s.name}: ${waitLabel(s.wait!)}`).join("\n")}>
+      asleep on {kinds.map((k) => `${byKind.get(k)!.length} ${WAIT_NAMES[k]}`).join(" · ")}
+    </span>
+  );
+}
+
 // Stages of an open PR, nearest prod first, as sentries/review.ts names them.
 const STAGES = ["merging", "approved", "needs reviewer", "in review", "ci running", "changes requested", "ci failing", "conflict", "draft"];
 const stageRank = (stage: string) => (STAGES.includes(stage) ? STAGES.indexOf(stage) : STAGES.length);
@@ -851,6 +869,16 @@ function QueuePanel({ board, queue, onOpen, onClose }: { board: ReviewBoard; que
         <Button variant="ghost" size="icon" className="ml-auto size-7" title="Close (Esc)" onClick={onClose}><X /></Button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
+        {board.request && (
+          <section className="flex flex-col gap-1.5 rounded-md border p-2.5">
+            <div className="flex items-center gap-2">
+              <h3 className="font-medium text-foreground">Review request</h3>
+              <span className="text-muted-foreground">paste to a teammate</span>
+              <Button variant="outline" size="sm" className="ml-auto h-6" onClick={() => navigator.clipboard.writeText(board.request!)}><Copy /> Copy</Button>
+            </div>
+            <pre className="max-h-40 overflow-y-auto font-sans whitespace-pre-wrap text-muted-foreground">{board.request}</pre>
+          </section>
+        )}
         {board.next && <p className="rounded-md border border-sentry/40 bg-sentry/10 p-2.5 text-sm text-foreground">{board.next}</p>}
         {board.sections.map((section) => (
           <section key={section.title} className="flex flex-col gap-1">
@@ -939,6 +967,7 @@ function NodeCard({ s, ref }: { s: Session; ref: React.RefObject<HTMLDivElement 
   const rows: [string, string][] = [
     ["status", `${!s.running ? `exited ${s.exitCode ?? "?"}` : isBusy(s) ? "working" : isWaiting(s) ? "waiting on you" : `idle ${ago(s.lastOutputAt)}`}${s.archived ? " · archived" : ""}`],
     ["kind", kindOf(s)],
+    ...(s.wait ? [["waits on", `${waitLabel(s.wait)}, since ${ago(s.wait.at)} ago`] as [string, string]] : []),
     ...(s.group ? [["group", s.group] as [string, string]] : []),
     ["command", s.cmd.join(" ")],
     ["folder", home(s.cwd)],

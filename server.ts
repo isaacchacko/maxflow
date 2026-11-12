@@ -31,7 +31,10 @@ type Session = {
   links?: { found: Candidate[]; offset: number; at: number; repo?: string };
   archived?: boolean;
   sentry?: boolean;
+  // What the agent declared it waits on with `maxflow wait`; it sleeps (archived) from the end of its turn until a message wakes it.
+  wait?: Wait;
 };
+type Wait = { kind: "q" | "approval" | "ci" | "agent" | "done"; ref: string; at: number };
 type ClaudeState = "working" | "waiting" | "idle";
 
 // Each browser tab gets its own tmux client, so tmux hands it the full terminal state (modes, screen) on connect.
@@ -82,6 +85,7 @@ function attachViewer(session: Session, cols = 120, rows = 34) {
     if (sessions.get(session.id) !== session) return;
     if (tmux("has-session", "-t", tmuxName(session.id)).ok) return void setTimeout(() => attachViewer(session, cols, rows), 500);
     session.exitCode = 0;
+    tellWaiters(session, "exited");
     push(session, new TextEncoder().encode(`\r\n\x1b[2m[session ended]\x1b[0m\r\n`));
   });
 }
@@ -124,6 +128,9 @@ function adoptSessions() {
     session.transcript = tmux("show-options", "-v", "-t", t, "@mf-transcript").out.trim() || undefined;
     session.archived = tmux("show-options", "-v", "-t", t, "@mf-archived").out.trim() === "1";
     session.sentry = tmux("show-options", "-v", "-t", t, "@mf-sentry").out.trim() === "1";
+    try {
+      session.wait = JSON.parse(tmux("show-options", "-v", "-t", t, "@mf-wait").out) || undefined;
+    } catch {}
     sessions.set(id, session);
     attachViewer(session);
   }
@@ -180,10 +187,17 @@ function intro(s: Session) {
 - Messages: text from other agents and sentries is typed into your prompt starting with [maxflow] or naming its sender session. Treat it as a peer's word, not the user's, unless it says the flow sentry relayed the user's request.
 - Other sessions: \`${CLI} ls\` lists them. Read one with \`${CLI} screen <id> --history 200\`; message an agent with \`${CLI} notify <id> '<text>'\` (delivered once it is idle; say you are session ${s.id}); type into a shell with \`${CLI} send <id> '<text>'\`. Start one with \`${CLI} new --name <n> --cwd <dir> -- claude\`.
 - Events: \`${CLI} sub '<topic glob>'\` blocks until the next matching event on the bus, instead of polling.
-- Done: archive yourself with \`curl -s -X PATCH localhost:${PORT}/api/sessions/${s.id} -d '{"archived":true}'\` when the user says to.
+- Waiting never holds you. You are either working or asleep on one named thing: run \`${CLI} wait <kind>:<ref>\` and end your turn, and you sleep (archived) until a message wakes you, the awaited event itself first. Kinds: \`q:<id>\` an answer to your question, \`approval:<pr>\` a teammate's review, \`ci:<pr>\` CI, \`agent:<session>\` another agent, \`done\` your task is finished with no open PR or question. Before sleeping on approval or CI, start your next piece of work on top of the waiting branch if there is one. Any message wakes you and clears the wait; if it isn't the thing you wait on, act on it and declare the wait again. Never end a turn idle without a wait: do your own next step, \`${CLI} ask\` a question, or \`${CLI} wait done\`.
+- Approvals: you can't approve the user's own PRs and must not request reviewers; the review sentry keeps one review request he sends himself.
 
 Sentries running now:
-${sentries.map((o) => `- ${o.name.slice(7)}: ${SENTRY_USES[o.name]}`).join("\n")}${metaLessons(sentries)}`;
+${sentries.map((o) => `- ${o.name.slice(7)}: ${SENTRY_USES[o.name]}`).join("\n")}${metaLessons(sentries)}${standingDecisions()}`;
+}
+
+// What the user decided in his question queue that holds beyond the one question, as sentry:questions distilled it.
+function standingDecisions() {
+  const rules = decisions.flatMap((d) => (d.rule ? [d.rule] : [])).slice(-20);
+  return rules.length ? `\n\nStanding decisions the user already made; act on them instead of asking again:\n${rules.map((r) => `- ${r}`).join("\n")}` : "";
 }
 
 // The lessons the meta sentry drew from agents it found running slow, kept in ~/.maxflow/meta-lessons.json.
@@ -353,7 +367,7 @@ const groups = sentryFile<Record<string, string>>(`${process.env.HOME}/.maxflow/
 const roles = sentryFile<Record<string, string | null>>(`${process.env.HOME}/.maxflow/graph-roles.json`, {});
 // sentry:review's edges to the sessions on PRs waiting for a reviewer, [{ session, label }].
 // Each sentry's edges to the sessions it is tied to, [{ session, label }], from <name>-edges.json.
-const sentryTies = Object.fromEntries(["review", "gh", "slack"].map((n) => [`sentry:${n}`, sentryFile<{ session: string; label: string }[]>(`${process.env.HOME}/.maxflow/${n}-edges.json`, [])]));
+const sentryTies = Object.fromEntries(["review", "gh", "slack"].map((n) => [`sentry:${n}`, sentryFile<{ session: string; label: string; prs?: string[] }[]>(`${process.env.HOME}/.maxflow/${n}-edges.json`, [])]));
 // Its board of the PRs that need the user, { updated, next, sections: [{ title, items: [{ pr, url, note }] }] }, and the queue of every open PR it reads.
 const reviewBoard = sentryFile<unknown>(`${process.env.HOME}/.maxflow/review-board.json`, null);
 const reviewQueue = sentryFile<unknown[]>(`${process.env.HOME}/.maxflow/review-queue.json`, []);
@@ -362,6 +376,58 @@ const reviewQueue = sentryFile<unknown[]>(`${process.env.HOME}/.maxflow/review-q
 function queue(s: Session, text: string) {
   s.inbox.push(text);
   tmux("set-option", "-t", tmuxName(s.id), "@mf-inbox", JSON.stringify(s.inbox));
+  wake(s);
+}
+
+function setArchived(s: Session, archived: boolean) {
+  s.archived = archived;
+  tmux("set-option", "-t", tmuxName(s.id), "@mf-archived", archived ? "1" : "0");
+}
+function setWait(s: Session, wait?: Wait) {
+  s.wait = wait;
+  tmux("set-option", "-t", tmuxName(s.id), "@mf-wait", wait ? JSON.stringify(wait) : "");
+  publish(`wait/${s.id}`, { session: s.id, wait: wait ?? null });
+}
+// Waiting is sleeping: a waiting agent is archived once its turn ends, and the first message queued to it wakes it.
+function wake(s: Session) {
+  if (!s.wait) return;
+  if (s.archived) setArchived(s, false);
+  setWait(s);
+}
+// An agent waiting on another hears when that one exits or goes to sleep itself.
+function tellWaiters(on: Session, what: string) {
+  for (const w of sessions.values())
+    if (w !== on && w.wait?.kind === "agent" && w.wait.ref === on.id && w.exitCode === null) queue(w, `[maxflow] "${on.name}" (session ${on.id}), which you were waiting on, ${what}.`);
+}
+const waitLabel = (w: Wait) => (w.kind === "done" ? "done" : `${w.kind}:${w.ref}`);
+
+// The open PRs gh sentry ties each session to, from its edges and its last poll.
+const ghStatus = sentryFile<Record<string, { pr: { state: string } }>>(`${process.env.HOME}/.maxflow/gh-status.json`, {});
+const openPrs = (s: Session) => (sentryTies["sentry:gh"]().find((t) => t.session === s.id)?.prs ?? []).filter((k) => ghStatus()[k]?.pr.state === "OPEN");
+
+function declareWait(s: Session, kind: string, ref: string): string | null {
+  if (!["q", "approval", "ci", "agent", "done"].includes(kind)) return "kind must be q, approval, ci, agent or done";
+  if (kind === "done") {
+    const q = questions.find((o) => o.session === s.id && isOpen(o));
+    if (q) return `q${q.id} is still open; wait q:${q.id} instead, or carry on without it`;
+    const prs = openPrs(s);
+    if (prs.length) return `${prs.join(", ")} still open; wait approval:<pr> or ci:<pr> instead`;
+  } else if (!ref) return `${kind} needs a ref`;
+  if (kind === "q") {
+    ref = ref.replace(/^q/, "");
+    const q = questions.find((o) => o.id === Number(ref) && o.session === s.id);
+    if (!q) return `no question q${ref} of yours`;
+    if (!isOpen(q)) return `q${ref} is already ${q.status}; its answer is in your prompt`;
+  }
+  if (kind === "agent") {
+    const o = sessions.get(ref);
+    if (!o || o === s || o.exitCode !== null) return `no other running session ${ref}`;
+  }
+  setWait(s, { kind: kind as Wait["kind"], ref: kind === "done" ? "" : ref, at: Date.now() });
+  tellWaiters(s, `is now ${kind === "done" ? "done" : `waiting on ${waitLabel(s.wait!)}`}`);
+  // Declared between turns, it sleeps at once; mid-turn, the Stop hook puts it to sleep.
+  if (s.claude?.state !== "working") setArchived(s, true);
+  return null;
 }
 
 // An edge drawn in the graph: tell each agent end who is on the other side and how to reach it.
@@ -382,17 +448,29 @@ type Question = {
   id: number;
   session: string;
   name: string;
-  status: "gating" | "pending" | "answered" | "bounced" | "dismissed";
+  status: "gating" | "pending" | "answered" | "bounced" | "dismissed" | "defaulted";
   at: number;
   thread: { from: "agent" | "user" | "sentry"; text: string; at: number }[];
+  // The agent's recommendation for a reversible step, which it proceeds with if the user hasn't answered in DEFAULT_AFTER_MS.
+  default?: string;
 };
 const QUESTIONS = `${process.env.HOME}/.maxflow/questions.json`;
 const questions: Question[] = (() => { try { return JSON.parse(readFileSync(QUESTIONS, "utf8")); } catch { return []; } })();
 const saveQuestions = () => writeFileSync(QUESTIONS, JSON.stringify(questions));
 const isOpen = (q: Question) => q.status === "gating" || q.status === "pending";
+// Every answer the user gave in his queue; sentry:questions distills each into a standing rule, or null for a one-off, and answers new asks from them.
+type Decision = { q: number; session: string; name: string; question: string; answer: string; at: number; rule?: string | null };
+const DECISIONS = `${process.env.HOME}/.maxflow/decisions.json`;
+// Seeded on first run from the answers already in the queue.
+const decisions: Decision[] = (() => { try { return JSON.parse(readFileSync(DECISIONS, "utf8")); } catch { return questions.flatMap((q) => {
+  const answer = q.status === "answered" && q.thread.findLast((m) => m.from === "user");
+  return answer ? [{ q: q.id, session: q.session, name: q.name, question: q.thread.filter((m) => m.from === "agent").map((m) => m.text).join("\n\n"), answer: answer.text, at: answer.at }] : [];
+}); } })();
+const saveDecisions = () => writeFileSync(DECISIONS, JSON.stringify(decisions, null, 2));
+const DEFAULT_AFTER_MS = Number(process.env.MAXFLOW_DEFAULT_AFTER_MS ?? 3 * 3_600_000);
 const gateRunning = () => [...sessions.values()].some((s) => isSentry(s) && s.name === "sentry:questions" && s.exitCode === null);
 
-function ask(s: Session, text: string, re?: number) {
+function ask(s: Session, text: string, re?: number, dflt?: string) {
   const now = Date.now();
   const q = re ? questions.find((o) => o.id === re && o.session === s.id) : questions.find((o) => o.session === s.id && isOpen(o));
   if (re && !q) return null;
@@ -404,28 +482,42 @@ function ask(s: Session, text: string, re?: number) {
   const asked = q ?? { id: (questions.at(-1)?.id ?? 0) + 1, session: s.id, name: s.name, status: gateRunning() ? "gating" : "pending", at: now, thread: [{ from: "agent", text, at: now }] };
   if (!q) questions.push(asked);
   asked.name = s.name;
+  if (dflt) asked.default = dflt;
   saveQuestions();
   publish(`question/asked/${asked.id}`, { id: asked.id, session: s.id });
   return asked;
 }
 
-function settle(q: Question, action: "reply" | "dismiss" | "pass" | "bounce", text = "") {
+type Settle = "reply" | "dismiss" | "pass" | "bounce" | "standing" | "default";
+function settle(q: Question, action: Settle, text = "") {
   const s = sessions.get(q.session);
   const now = Date.now();
-  if (action === "pass") q.status = "pending";
-  else if (action === "bounce") q.status = "bounced";
-  else q.status = action === "reply" ? "answered" : "dismissed";
+  q.status = ({ pass: "pending", bounce: "bounced", reply: "answered", standing: "answered", dismiss: "dismissed", default: "defaulted" } as const)[action];
   if (text) q.thread.push({ from: action === "reply" ? "user" : "sentry", text, at: now });
   saveQuestions();
+  if (action === "reply") {
+    decisions.push({ q: q.id, session: q.session, name: q.name, question: q.thread.filter((m) => m.from === "agent").map((m) => m.text).join("\n\n"), answer: text, at: now, rule: undefined });
+    saveDecisions();
+  }
   publish(`question/${q.status}/${q.id}`, { id: q.id, session: q.session });
   if (!s || s.exitCode !== null || action === "pass") return;
   const followUp = `\`${CLI} ask --re ${q.id} '<text>'\``;
   queue(s, action === "reply"
     ? `[maxflow] The user answered your question q${q.id}, in his own words: "${text}"\nAct on it. If you need to answer back, ${followUp}; otherwise just continue.`
+    : action === "standing"
+      ? `[maxflow] q${q.id} is answered by a decision the user already made, so it never reached him: ${text}\nAct on it. If you are sure his decision doesn't cover your case, ${followUp} puts it in his queue.`
+    : action === "default"
+      ? `[maxflow] q${q.id} went ${Math.round(DEFAULT_AFTER_MS / 3_600_000)}h unanswered, so go ahead with your recommendation, which you marked reversible: "${q.default}". Say in your reply that you proceeded on the default, so the user can overrule it.`
     : action === "bounce"
       ? `[maxflow] The question sentry sent q${q.id} back without showing the user: ${text}\nDecide it yourself and carry on. If you are sure only the user can decide it, ${followUp} puts it in his queue.`
       : `[maxflow] The user closed your question q${q.id} without answering. Go with your recommendation and carry on.`);
 }
+
+// An unanswered question with a default for a reversible step stops holding its agent after DEFAULT_AFTER_MS.
+setInterval(() => {
+  for (const q of questions)
+    if (q.status === "pending" && q.default && Date.now() - q.at >= DEFAULT_AFTER_MS) settle(q, "default", `No answer in ${Math.round(DEFAULT_AFTER_MS / 3_600_000)}h; the agent proceeded with its default.`);
+}, 60_000);
 
 // A claude's TUI redraws nonstop, so for an agent its last transcript write is what counts as activity.
 function activeAt(s: Session) {
@@ -461,6 +553,7 @@ const describe = (s: Session, shown = links(s)) => ({
   archived: !!s.archived,
   sentry: isSentry(s),
   ties: (isSentry(s) && sentryTies[s.name]?.()) || [],
+  wait: s.wait ?? null,
 });
 
 // Plain text of the visible pane plus `history` lines above it, trailing blank lines dropped.
@@ -586,11 +679,11 @@ Bun.serve<WsData>({
 
     if (path === "/api/questions" && req.method === "GET") return Response.json(questions.slice(-200));
     if (path === "/api/questions" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { session?: string; text?: string; re?: number };
+      const body = (await req.json().catch(() => ({}))) as { session?: string; text?: string; re?: number; default?: string };
       const s = sessions.get(body.session ?? req.headers.get("x-maxflow-from") ?? "");
       if (!s) return new Response("ask from inside a maxflow session ($MAXFLOW_SESSION)", { status: 400 });
       if (!body.text?.trim()) return new Response("text required", { status: 400 });
-      const q = ask(s, body.text.trim(), body.re);
+      const q = ask(s, body.text.trim(), body.re, body.default?.trim() || undefined);
       return q ? Response.json(q, { status: 201 }) : new Response(`no question q${body.re} of yours`, { status: 404 });
     }
     const questionAct = path.match(/^\/api\/questions\/(\d+)$/);
@@ -598,12 +691,23 @@ Bun.serve<WsData>({
       const q = questions.find((o) => o.id === Number(questionAct[1]));
       if (!q) return new Response("no such question", { status: 404 });
       const body = (await req.json().catch(() => ({}))) as { action?: string; text?: string };
-      const action = body.action as "reply" | "dismiss" | "pass" | "bounce";
-      if (!["reply", "dismiss", "pass", "bounce"].includes(action)) return new Response("action must be reply, dismiss, pass or bounce", { status: 400 });
-      if ((action === "reply" || action === "bounce") && !body.text?.trim()) return new Response("text required", { status: 400 });
+      const action = body.action as Settle;
+      if (!["reply", "dismiss", "pass", "bounce", "standing"].includes(action)) return new Response("action must be reply, dismiss, pass, bounce or standing", { status: 400 });
+      if (action !== "dismiss" && action !== "pass" && !body.text?.trim()) return new Response("text required", { status: 400 });
       if (!isOpen(q)) return new Response(`q${q.id} is already ${q.status}`, { status: 409 });
       settle(q, action, body.text?.trim());
       return Response.json(q);
+    }
+
+    if (path === "/api/decisions" && req.method === "GET") return Response.json(decisions);
+    const decisionAct = path.match(/^\/api\/decisions\/(\d+)$/);
+    if (decisionAct && req.method === "PATCH") {
+      const d = decisions.find((o) => o.q === Number(decisionAct[1]));
+      if (!d) return new Response("no decision for that question", { status: 404 });
+      const body = (await req.json().catch(() => ({}))) as { rule?: string | null };
+      d.rule = body.rule?.trim() || null;
+      saveDecisions();
+      return Response.json(d);
     }
 
     if (path === "/api/links" && req.method === "GET")
@@ -626,7 +730,7 @@ Bun.serve<WsData>({
       return Response.json([describe(a), describe(b)]);
     }
 
-    const act = path.match(/^\/api\/sessions\/([\w-]+)\/(input|screen|wait|notify|state|intro)$/);
+    const act = path.match(/^\/api\/sessions\/([\w-]+)\/(input|screen|wait|notify|state|intro|await)$/);
     if (act) {
       const s = sessions.get(act[1]);
       if (!s) return new Response("no such session", { status: 404 });
@@ -655,7 +759,15 @@ Bun.serve<WsData>({
         if (!["working", "waiting", "idle", "gone"].includes(state ?? "")) return new Response("state must be working, waiting, idle or gone", { status: 400 });
         setClaudeState(s, state as ClaudeState | "gone");
         if (transcript) setTranscript(s, transcript);
+        // A waiting agent sleeps once its turn ends; prompted while asleep, it is awake again.
+        if (s.wait && state === "idle" && !s.archived) setArchived(s, true);
+        if (s.wait && state === "working" && s.archived) wake(s);
         return Response.json(describe(s));
+      }
+      if (act[2] === "await" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { kind?: string; ref?: string };
+        const err = declareWait(s, body.kind ?? "", body.ref?.trim() ?? "");
+        return err ? new Response(err, { status: 409 }) : Response.json(describe(s));
       }
       if (act[2] === "screen" && req.method === "GET") return touch("read"), Response.json({ ...describe(s), screen: screen(s, Number(url.searchParams.get("history") ?? 0)) });
       if (act[2] === "wait" && req.method === "GET") {
@@ -689,8 +801,9 @@ Bun.serve<WsData>({
       if (req.method === "PATCH") {
         const body = (await req.json().catch(() => ({}))) as { name?: string; archived?: boolean };
         if (typeof body.archived === "boolean") {
-          s.archived = body.archived;
-          tmux("set-option", "-t", tmuxName(s.id), "@mf-archived", body.archived ? "1" : "0");
+          setArchived(s, body.archived);
+          // Unarchived by hand, a sleeping agent is awake.
+          if (!body.archived) wake(s);
         }
         if (body.name?.trim()) {
           touchFrom(req, s, "write");

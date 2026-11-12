@@ -22,10 +22,13 @@ export type Session = {
   sentry: boolean;
   // Edges a sentry draws itself, to the sessions it ties to.
   ties: { session: string; label: string }[];
+  // What the agent declared it waits on; it sleeps (archived) until a message wakes it.
+  wait: { kind: "q" | "approval" | "ci" | "agent" | "done"; ref: string; at: number } | null;
 };
 
 // sentry:review's board of the PRs that need the user, and the queue of every open PR with its stage.
-export type ReviewBoard = { updated: string; next: string; sections: { title: string; items: { pr: string; url: string; note: string }[] }[] };
+// request: the paste-ready review-request message the user sends teammates himself.
+export type ReviewBoard = { updated: string; next: string; request?: string; sections: { title: string; items: { pr: string; url: string; note: string }[] }[] };
 export type QueuedPr = { pr: string; url: string; title: string; stage: string; created: string; updated: string; sessions: { id: string; name: string }[] };
 
 // A question an agent raised for the user, as the server keeps it; sentry:questions gates it before it is pending.
@@ -33,9 +36,11 @@ export type Question = {
   id: number;
   session: string;
   name: string;
-  status: "gating" | "pending" | "answered" | "bounced" | "dismissed";
+  status: "gating" | "pending" | "answered" | "bounced" | "dismissed" | "defaulted";
   at: number;
   thread: { from: "agent" | "user" | "sentry"; text: string; at: number }[];
+  // The agent's recommendation for a reversible step, which it goes ahead with if he hasn't answered in time.
+  default?: string;
 };
 
 export type Chat = { id: string; title: string; prompt: string; cwd: string; mtime: number; live: boolean; session: string | null };
