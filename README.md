@@ -30,7 +30,7 @@ id=$(./cli.ts new --name job -- claude); id=${id##*/}
 
 ## What agents are told
 
-Every session's shell carries `MAXFLOW_SESSION=<id>`. A `SessionStart` hook in `~/.claude/settings.json` runs `hooks/claude-intro.sh` whenever claude starts, resumes, clears or compacts with that variable set, and puts `GET /api/sessions/:id/intro` into its context: what maxflow is, the agent's own id and name, how to rename, message other sessions, subscribe to events and archive itself, and what each running sentry does for it (the same text the graph's sentry edges send). Edit `intro()` in `server.ts` to change it.
+Every session's shell carries `MAXFLOW_SESSION=<id>`. A `SessionStart` hook in `~/.claude/settings.json` runs `hooks/claude-intro.sh` whenever claude starts, resumes, clears or compacts with that variable set, and puts `GET /api/sessions/:id/intro` into its context: what maxflow is, the agent's own id and name, how to rename, message other sessions, subscribe to events and wait (`cli.ts wait <kind>:<ref>` to sleep on one thing, `wait done` when finished; never archive itself), and what each running sentry does for it (the same text the graph's sentry edges send). Edit `intro()` in `server.ts` to change it.
 
 ## Events and sentries
 
