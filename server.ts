@@ -265,23 +265,31 @@ function sentryFile<T>(path: string, empty: T) {
 }
 // Its verdicts, { session: { url: keep } }; a URL it has not judged yet stays hidden.
 const verdicts = sentryFile<Record<string, Record<string, boolean>>>(VERDICTS, {});
-const links = (s: Session) => candidates(s).filter((c) => verdicts()[s.id]?.[c.url]).map((c) => c.url);
-// Whether each PR shown in the graph is open, closed or merged; one GraphQL request per repo, off the event loop.
+const judged = (s: Session) => candidates(s).filter((c) => verdicts()[s.id]?.[c.url]).map((c) => c.url);
+// A PR GitHub says doesn't exist, usually a bare #n resolved against the wrong repo, is never shown.
+const links = (s: Session) => judged(s).filter((u) => prStates.get(u) !== "missing");
+// Whether each PR shown in the graph is open, closed, merged or missing; one GraphQL request per repo, off the event loop.
 const PR_URL_RE = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)$/;
 const prStates = new Map<string, string>();
 async function refreshPrStates() {
-  const shown = [...new Set([...sessions.values()].flatMap((s) => links(s)))];
+  const shown = [...new Set([...sessions.values()].flatMap((s) => judged(s)))];
   const byRepo = Map.groupBy(shown.map((u) => u.match(PR_URL_RE)).filter((m) => m !== null), (m) => m[1]);
   for (const [repo, prs] of byRepo) {
     const [owner, name] = repo.split("/");
     const q = `query { r: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${prs.map((m) => `p${m[2]}: pullRequest(number: ${m[2]}) { state }`).join(" ")} } }`;
     const p = Bun.spawn(["gh", "api", "graphql", "-f", `query=${q}`], { stdout: "pipe", stderr: "ignore" });
     const out = await new Response(p.stdout).text();
-    let r: Record<string, { state: string } | null> = {};
+    let res: { data?: { r?: Record<string, { state: string } | null> | null }; errors?: { type?: string; path?: string[] }[] } = {};
     try {
-      r = JSON.parse(out).data?.r ?? {};
+      res = JSON.parse(out);
     } catch {}
-    for (const m of prs) if (r[`p${m[2]}`]) prStates.set(m[0], r[`p${m[2]}`]!.state.toLowerCase());
+    // Only GitHub's NOT_FOUND makes a PR missing, on the repo or on that PR; a gh or network failure changes nothing.
+    const notFound = new Set((res.errors ?? []).filter((e) => e.type === "NOT_FOUND").map((e) => e.path?.join(".")));
+    for (const m of prs) {
+      const pr = res.data?.r?.[`p${m[2]}`];
+      if (pr) prStates.set(m[0], pr.state.toLowerCase());
+      else if (notFound.has("r") || notFound.has(`r.p${m[2]}`)) prStates.set(m[0], "missing");
+    }
   }
 }
 setInterval(() => refreshPrStates().catch(() => {}), 30_000);
