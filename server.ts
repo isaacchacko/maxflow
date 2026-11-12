@@ -122,8 +122,12 @@ adoptSessions();
 
 // Sentries are ordinary sessions, started once and kept by tmux across server restarts.
 const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  ["gh", "slack", "rename", "health", "graph", "review"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
+  ["gh", "slack", "rename", "health", "graph"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
 );
+// The review sentry is a claude agent; its feed runs beside it, logging out of the way of its screen.
+const reviewSource = (f: string) => new URL(`./sentries/${f}`, import.meta.url).pathname;
+SENTRIES["sentry:review"] = ["sh", "-c",
+  `"${process.execPath}" "${reviewSource("review.ts")}" >"$HOME/.maxflow/review-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("review.md")}")"`];
 if (process.env.MAXFLOW_SENTRIES !== "0")
   for (const [name, cmd] of Object.entries(SENTRIES))
     if (![...sessions.values()].some((s) => s.name === name && s.exitCode === null)) createSession(name, cmd, new URL(".", import.meta.url).pathname);
@@ -135,7 +139,7 @@ const SENTRY_USES: Record<string, string> = {
   "sentry:slack": `It polls Slack every minute for the threads, channels and searches tied to a session and notifies that session of each new message. A thread you posted in through the Slack connector is tied to you already, for 3 days after your last post; tie any other with \`${CLI} slack watch <permalink | channel id | #channel | search query>\`. It also publishes every mention of the user as slack/mention: block on one with \`${CLI} sub 'slack/mention'\`, or on a thread with \`${CLI} sub 'slack/<channel>/<thread ts>/reply'\`.`,
   "sentry:health": `It watches the maxflow server itself and, when it stays unreachable for 2 minutes, starts a "maxflow recovery" claude session to fix and restart it.`,
   "sentry:graph": `It decides which URLs you mention show up as nodes beside you in the maxflow graph: only ones you meant the user to open (a PR, a deploy, a page you published, a dev server you started), not incidental ones in code or docs. Put a URL you want the user to see on its own line in your reply. It also groups sessions by the work they share, and the graph draws a group's sessions close together.`,
-  "sentry:review": `It lists the user's open PRs that are ready for a reviewer and have none requested yet, and links itself in the graph to the sessions working on them, so the user can pick a reviewer. The gh sentry watches those PRs for you too, so you hear the user's comments on them. Don't request reviewers yourself; the user does.`,
+  "sentry:review": `It is an agent that keeps the user's queue of open PRs moving to prod or closed, and delivers comments on them that no session heard, by reviving the chat that opened the PR. If your PR's comments reach you, that is how. Don't request reviewers yourself; the user does.`,
   "sentry:rename": `It titles your session in the maxflow sidebar by the topic you own. Pick your own title with \`${CLI} rename $MAXFLOW_SESSION <title>\` and it leaves you alone from then on.`,
 };
 

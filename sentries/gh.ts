@@ -133,6 +133,7 @@ const short = (text: string, n = 300) => (text.replace(/\s+/g, " ").trim().slice
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE"]);
 
 // Compares a PR to what the last tick saw. Returns [kind, data, line for the agent or null to only publish].
+// A review or comment's `who` is null for an agent's own post.
 function diff(pr: Pr, prev: PrState | undefined, me: string, byAgent: (body: string) => boolean): [string, unknown, string | null][] {
   const rollup = pr.commits.nodes[0]?.commit.statusCheckRollup;
   const changes: [string, unknown, string | null][] = [];
@@ -155,18 +156,18 @@ function diff(pr: Pr, prev: PrState | undefined, me: string, byAgent: (body: str
   for (const r of pr.reviews.nodes)
     if (!seen.has(r.id) && r.state !== "PENDING") {
       const who = r.author?.login === me && !r.body.trim() ? null : tell(r.author?.login, r.body);
-      changes.push(["review", { id: r.id, author: r.author?.login, state: r.state, body: r.body }, who && `review from ${who}: ${r.state.toLowerCase().replace("_", " ")}${r.body ? ` "${short(r.body)}"` : ""}`]);
+      changes.push(["review", { id: r.id, author: r.author?.login, state: r.state, body: r.body, who }, who && `review from ${who}: ${r.state.toLowerCase().replace("_", " ")}${r.body ? ` "${short(r.body)}"` : ""}`]);
     }
   for (const c of pr.comments.nodes)
     if (!seen.has(c.id)) {
       const who = tell(c.author?.login, c.body);
-      changes.push(["comment", { id: c.id, author: c.author?.login, body: c.body, url: c.url }, who && `comment from ${who}: "${short(c.body)}" ${c.url}`]);
+      changes.push(["comment", { id: c.id, author: c.author?.login, body: c.body, url: c.url, who }, who && `comment from ${who}: "${short(c.body)}" ${c.url}`]);
     }
   for (const t of pr.reviewThreads.nodes)
     for (const c of t.comments.nodes)
       if (!seen.has(c.id)) {
         const who = tell(c.author?.login, c.body);
-        changes.push(["thread", { id: c.id, author: c.author?.login, path: c.path, body: c.body, url: c.url }, who && `comment from ${who} on ${c.path}: "${short(c.body)}" ${c.url}`]);
+        changes.push(["thread", { id: c.id, author: c.author?.login, path: c.path, body: c.body, url: c.url, who }, who && `comment from ${who} on ${c.path}: "${short(c.body)}" ${c.url}`]);
       }
   return changes;
 }
@@ -220,7 +221,8 @@ async function tick(me: string, state: Record<string, PrState>) {
     if (!calls && state[key] && hasOwnNew(pr, state[key], me)) calls = await agentCalls();
     const changes = diff(pr, state[key], me, byAgent);
     state[key] = snapshot(pr);
-    for (const [kind, data] of changes) await post("/api/events", { topic: `gh/${repo}/pr/${n}/${kind}`, data: { pr: key, ...(data as object) } });
+    const told = [...(listeners.get(key) ?? [])];
+    for (const [kind, data] of changes) await post("/api/events", { topic: `gh/${repo}/pr/${n}/${kind}`, data: { pr: key, told, ...(data as object) } });
     const lines = changes.flatMap(([, , line]) => (line ? [line] : []));
     if (lines.length) {
       const more = lines.length > 5 ? `; and ${lines.length - 5} more (gh pr view ${n} -R ${repo} --comments)` : "";
