@@ -133,12 +133,15 @@ adoptSessions();
 
 // Sentries are ordinary sessions, started once and kept by tmux across server restarts.
 const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  ["gh", "slack", "rename", "health", "graph", "meta", "ram", "questions"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
+  ["gh", "slack", "rename", "health", "graph", "ram", "questions"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
 );
 // The review sentry is a claude agent; its feed runs beside it, logging out of the way of its screen.
 const reviewSource = (f: string) => new URL(`./sentries/${f}`, import.meta.url).pathname;
 SENTRIES["sentry:review"] = ["sh", "-c",
   `"${process.execPath}" "${reviewSource("review.ts")}" >"$HOME/.maxflow/review-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("review.md")}")"`];
+// The meta sentry is a claude agent that watches the other agents; its feed times their transcripts beside it.
+SENTRIES["sentry:meta"] = ["sh", "-c",
+  `"${process.execPath}" "${reviewSource("meta.ts")}" >"$HOME/.maxflow/meta-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("meta.md")}")"`];
 // The flow sentry is a claude agent that takes the user's requests and routes each to an agent.
 SENTRIES["sentry:flow"] = ["sh", "-c", `exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("flow.md")}")"`];
 // A session is a sentry because the server started it as one, never because of its name.
@@ -162,7 +165,7 @@ const SENTRY_USES: Record<string, string> = {
   "sentry:graph": `It decides which URLs you mention show up as nodes beside you in the maxflow graph: only ones you meant the user to open (a PR, a deploy, a page you published, a dev server you started), not incidental ones in code or docs. Put a URL you want the user to see on its own line in your reply. It also groups sessions by the work they share, and the graph draws a group's sessions close together, and it names each agent's role (review, implement, conflicts) for the icon on its node.`,
   "sentry:review": `It is an agent that keeps the user's queue of open PRs moving to prod or closed, and delivers comments on them that no session heard, by reviving the chat that opened the PR. If your PR's comments reach you, that is how. Don't request reviewers yourself; the user does.`,
   "sentry:flow": `It is an agent that takes the user's requests and routes each to the agent that should own it, starting one when none does, and links that agent to others whose context would help. A request may reach you from it, ending with a line saying so; treat it as the user's.`,
-  "sentry:meta": `Every 15 minutes it reads what every agent wrote since its last look and flags the ones running slow (a turn over 10 minutes, a tool call over 5, a model reply over 3, the same command run 4+ times), and messages each slow one why and what to do instead, calling out a mistake it was already told about. Act on its message when it reaches you, and save it as a feedback memory if it names a habit. The lessons it has learned across agents are below.`,
+  "sentry:meta": `It is an agent that watches every agent for slowness and owns the fleet getting better: every 15 minutes it judges the ones over a threshold (a turn over 10 minutes, a tool call over 5, a model reply over 3, the same command run 4+ times) and messages each slow one why and what to do instead, calling out a mistake it was already told about. Act on its message when it reaches you, and save it as a feedback memory if it names a habit. The lessons it has learned across agents are below.`,
   "sentry:questions": `It is the one way to raise a question to the user. Never end your turn on a question or wait in chat for him: run \`${CLI} ask '<question>'\` and keep working on whatever doesn't hang on the answer. Make the question stand on its own: what you found, the options, and your recommendation. The sentry sends back what you should decide yourself; the rest goes into the user's queue, and his answer is typed into your prompt as a [maxflow] message. Asking again while a question is open adds to it.`,
   "sentry:rename": `It titles your session in the maxflow sidebar by the topic you own. Pick your own title with \`${CLI} rename $MAXFLOW_SESSION <title>\` and it leaves you alone from then on.`,
   "sentry:ram": `Every 15s it kills any test, lint, typecheck or build job an agent runs locally once its process tree holds over 1.5% of the machine's RAM, and tells that agent to run it on the Blacksmith CI runners by pushing to its PR. Run those through CI from the start: push, then \`gh pr checks\`.`,
