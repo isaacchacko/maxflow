@@ -25,22 +25,29 @@
     #list li:hover { background: #1a1e24; }
     #list li.active { background: #1d2229; border-left-color: var(--accent); }
     #list li.ended .name { color: var(--dim); }
-    #list .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-    #list .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    #list .name[contenteditable=true] { outline: 1px solid var(--accent); text-overflow: clip; cursor: text; }
-    #list .meta { color: var(--dim); font-size: 11px; display: flex; gap: 8px; }
-    #list .meta .cwd { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
-    #list .meta .busy { color: #3fb950; }
-    #list .meta .code { color: #f85149; }
+    :is(#list, #sentries) .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    :is(#list, #sentries) .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    :is(#list, #sentries) .name[contenteditable=true] { outline: 1px solid var(--accent); text-overflow: clip; cursor: text; }
+    :is(#list, #sentries) .meta { color: var(--dim); font-size: 11px; display: flex; gap: 8px; }
+    :is(#list, #sentries) .meta .cwd { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+    :is(#list, #sentries) .meta .busy { color: #3fb950; }
+    :is(#list, #sentries) .meta .code { color: #f85149; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; flex: none; }
     .dot.busy { animation: pulse 1s ease-in-out infinite; }
     .dot.dead { background: var(--dim); }
     @keyframes pulse { 50% { opacity: .25; } }
+    #sentryBox { margin-top: auto; border-top: 1px solid var(--line); padding: 6px; }
+    #sentryBox h6 { margin: 4px 8px; color: var(--dim); font-size: 11px; font-weight: normal; text-transform: uppercase; letter-spacing: .08em; }
+    #sentries li { border: none; border-left: 2px solid transparent; border-radius: 4px; padding: 5px 8px; gap: 9px; }
+    #sentries li:hover { background: #1a1e24; }
+    #sentries li.active { background: #1d2229; border-left-color: #f0883e; }
+    #sentries .dot { background: #f0883e; }
+    #sentries .dot.dead { background: var(--dim); }
     .kind { color: #d2a8ff; flex: none; width: 1em; text-align: center; }
-    #list .x { color: var(--dim); border: none; padding: 0 4px; visibility: hidden; }
-    #list li:hover .x, #list li.active .x { visibility: visible; }
-    #list .x:hover { color: #f85149; }
-    body.collapsed header b, body.collapsed header .btns, body.collapsed #list .body, body.collapsed #list .x, body.collapsed #list .kind { display: none; }
+    :is(#list, #sentries) .x { color: var(--dim); border: none; padding: 0 4px; visibility: hidden; }
+    :is(#list, #sentries) li:hover .x, :is(#list, #sentries) li.active .x { visibility: visible; }
+    :is(#list, #sentries) .x:hover { color: #f85149; }
+    body.collapsed header b, body.collapsed header .btns, body.collapsed #list .body, body.collapsed #list .x, body.collapsed #list .kind, body.collapsed #sentryBox h6, body.collapsed #sentries .body, body.collapsed #sentries .x { display: none; }
     body.collapsed header { justify-content: center; padding: 10px 0; }
     body.collapsed #list li { justify-content: center; padding: 10px 0; }
     main { min-width: 0; min-height: 0; padding: 6px; }
@@ -87,6 +94,7 @@
   <aside>
     <header><button id="toggle" title="Toggle sidebar (⌘B)">☰</button><b>maxflow<span class="count" id="count"></span></b><span class="btns"><button id="graphBtn" title="Graph of agent sessions (⌘G)">◎</button><button id="resume" title="Resume a Claude chat (r)">resume</button><button id="new" title="New zsh session (⌃T)">+ new</button></span></header>
     <ul id="list"></ul>
+    <section id="sentryBox" hidden><h6>sentries</h6><ul id="sentries"></ul></section>
   </aside>
   <div id="picker" hidden>
     <div class="box">
@@ -102,9 +110,11 @@
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-clipboard@0.1.0/lib/addon-clipboard.js"></script>
   <script src="/vendor/graph-view.js"></script>
   <script>
-    const list = document.getElementById("list");
+    const list = document.getElementById("list"), sentryList = document.getElementById("sentries");
+    const isSentry = (s) => s.name.startsWith("sentry:");
     let term, fit, ws, current;
 
     // Output within this window counts as the session working right now.
@@ -116,14 +126,15 @@
       const sessions = await (await fetch("/api/sessions")).json();
       lastSessions = sessions;
       if (graph) { graph.setData(graphData(sessions)); renderTip(); }
-      document.getElementById("count").textContent = sessions.length ? String(sessions.length) : "";
-      list.replaceChildren(...sessions.map((s) => {
-        const busy = s.running && Date.now() - s.lastOutputAt < BUSY_MS;
+      const agents = sessions.filter((s) => !isSentry(s)), sentries = sessions.filter(isSentry);
+      document.getElementById("count").textContent = agents.length ? String(agents.length) : "";
+      const row = (s) => {
+        const busy = s.running && !isSentry(s) && Date.now() - s.lastOutputAt < BUSY_MS;
         const li = document.createElement("li");
         li.className = [s.id === current && "active", !s.running && "ended"].filter(Boolean).join(" ");
         li.title = `${s.name}\n${s.cmd.join(" ")}\n${s.cwd}`;
         li.innerHTML = `<span class="dot ${!s.running ? "dead" : busy ? "busy" : ""}"></span><span class="body"><span class="name"></span><span class="meta"><span class="cwd"></span><span class="when"></span></span></span><span class="kind"></span><button class="x" title="kill">×</button>`;
-        li.querySelector(".name").textContent = s.name;
+        li.querySelector(".name").textContent = isSentry(s) ? s.name.slice(7) : s.name;
         li.querySelector(".cwd").textContent = ltr(home(s.cwd));
         const when = li.querySelector(".when");
         if (!s.running) { when.textContent = `exit ${s.exitCode ?? "?"}`; when.classList.toggle("code", !!s.exitCode); }
@@ -139,16 +150,20 @@
           refresh();
         };
         return li;
-      }));
+      };
+      list.replaceChildren(...agents.map(row));
+      sentryList.replaceChildren(...sentries.map(row));
+      document.getElementById("sentryBox").hidden = !sentries.length;
       document.getElementById("empty").hidden = sessions.length > 0;
-      if (!current && sessions.length) attach((sessions.find((s) => location.pathname === `/s/${s.id}`) ?? sessions[0]).id);
+      if (!current && sessions.length) attach((sessions.find((s) => location.pathname === `/s/${s.id}`) ?? agents[0] ?? sessions[0]).id);
     }
 
     // Graph view: one node per session, linked only by edges drawn by hand, with a tooltip that follows the hovered node as the layout moves.
     const graphEl = document.getElementById("graph"), tip = document.getElementById("tip");
     let graph = null, lastSessions = [], hoverId = null, tipFrame = 0;
     const chatInfo = new Map();
-    const sessionColor = (s) => !s.running ? "#484f58" : Date.now() - s.lastOutputAt < BUSY_MS ? "#3fb950" : s.chatId ? "#d2a8ff" : "#d7dce2";
+    // Sentries poll on a timer, so they keep their own color instead of flashing busy-green.
+    const sessionColor = (s) => !s.running ? "#484f58" : isSentry(s) ? "#f0883e" : Date.now() - s.lastOutputAt < BUSY_MS ? "#3fb950" : s.chatId ? "#d2a8ff" : "#d7dce2";
 
     // Hand-drawn edges live only in this browser; an edge goes when either of its sessions does.
     const edgeKey = (a, b) => [a, b].sort().join("|");
@@ -293,7 +308,7 @@
       const row = (k, v) => rows.push(`<div class="r"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`);
       const busy = s.running && Date.now() - s.lastOutputAt < BUSY_MS;
       row("status", !s.running ? `exited ${s.exitCode ?? "?"}` : busy ? "working" : `idle ${ago(s.lastOutputAt)}`);
-      row("kind", s.chatId ? "Claude chat" : "shell");
+      row("kind", isSentry(s) ? "sentry" : s.chatId ? "Claude chat" : "shell");
       row("command", s.cmd.join(" "));
       row("folder", home(s.cwd));
       row("started", `${ago(s.createdAt)} ago`);
@@ -363,6 +378,7 @@
       fit = new FitAddon.FitAddon();
       term.loadAddon(fit);
       term.loadAddon(new WebLinksAddon.WebLinksAddon());
+      term.loadAddon(new ClipboardAddon.ClipboardAddon());
       term.open(document.getElementById("term"));
       fit.fit();
       ws = new WebSocket(`ws://${location.host}/ws/${id}`);
