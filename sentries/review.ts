@@ -16,7 +16,7 @@ const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 const agent = process.env.MAXFLOW_SESSION!;
 
 type Pr = {
-  number: number; url: string; title: string; isDraft: boolean; mergeable: string; reviewDecision: string | null; headRefName: string;
+  number: number; url: string; title: string; body: string; isDraft: boolean; mergeable: string; reviewDecision: string | null; headRefName: string;
   createdAt: string; updatedAt: string; repository: { nameWithOwner: string }; reviewRequests: { totalCount: number }; autoMergeRequest: object | null;
   commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
 };
@@ -24,7 +24,7 @@ type Event = { seq: number; topic: string; data: { pr: string; told: string[]; i
 type Session = { id: string; name: string; running: boolean; links: string[]; sentry: boolean };
 
 const QUERY = `query { search(query: "is:pr is:open author:@me archived:false", type: ISSUE, first: 100) { nodes { ... on PullRequest {
-  number url title isDraft mergeable reviewDecision headRefName createdAt updatedAt repository { nameWithOwner } reviewRequests(first: 1) { totalCount }
+  number url title body isDraft mergeable reviewDecision headRefName createdAt updatedAt repository { nameWithOwner } reviewRequests(first: 1) { totalCount }
   autoMergeRequest { enabledAt } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } } }`;
 
 function openPrs(): Pr[] {
@@ -67,7 +67,7 @@ async function tick() {
     on.set(key, [...new Set([...owning, ...mentioning])].filter((id) => names.has(id)));
   }
   const queue = prs.map((pr) => ({
-    pr: keyOf(pr), url: pr.url, title: pr.title, stage: stage(pr), created: pr.createdAt, updated: pr.updatedAt,
+    pr: keyOf(pr), url: pr.url, title: pr.title, stage: stage(pr), visual: /<img|!\[|user-attachments/.test(pr.body), created: pr.createdAt, updated: pr.updatedAt,
     sessions: on.get(keyOf(pr))!.map((id) => ({ id, name: names.get(id) })),
   }));
   writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
