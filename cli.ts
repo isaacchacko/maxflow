@@ -72,7 +72,7 @@ if (verb === "ls") {
   let after = flag(rest, "--since") ?? (await fetch(`${base}/api/events?topic=${topic}&after=now`)).headers.get("x-maxflow-seq")!;
   const deadline = Date.now() + Number(flag(rest, "--timeout") ?? Infinity);
   for (;;) {
-    const wait = Math.min(deadline - Date.now(), 3_600_000);
+    const wait = Math.min(deadline - Date.now(), 240_000);
     if (wait <= 0) console.error("[timeout]"), process.exit(2);
     const events = await call(`/api/events?topic=${topic}&after=${after}&wait=${wait}`);
     for (const e of events) console.log(JSON.stringify(e));
