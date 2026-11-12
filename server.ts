@@ -405,7 +405,7 @@ function atEmptyPrompt(s: Session) {
 const DELIVER_IDLE_MS = 4000;
 setInterval(async () => {
   for (const s of sessions.values()) {
-    if (!s.inbox.length || s.exitCode !== null || Date.now() - s.lastOutputAt < DELIVER_IDLE_MS || !atEmptyPrompt(s)) continue;
+    if (!s.inbox.length || s.exitCode !== null || Date.now() - activeAt(s) < DELIVER_IDLE_MS || !atEmptyPrompt(s)) continue;
     const text = s.inbox.splice(0).join("\n");
     tmux("set-option", "-t", tmuxName(s.id), "@mf-inbox", "[]");
     await paste(tmuxName(s.id), text);
