@@ -28,7 +28,7 @@ type Session = {
   // Reported by the Claude Code hooks in hooks/claude-state.sh; unset while no claude runs in the session.
   claude?: { state: ClaudeState; at: number };
   transcript?: string;
-  links?: { found: Candidate[]; offset: number; at: number };
+  links?: { found: Candidate[]; offset: number; at: number; repo?: string };
   archived?: boolean;
 };
 type ClaudeState = "working" | "waiting" | "idle";
@@ -193,6 +193,14 @@ const addCandidates = (list: Candidate[], found: Candidate[]) => {
   }
   list.splice(0, Math.max(0, list.length - MAX_CANDIDATES));
 };
+// The repo a session's latest command worked in (gh -R/--repo, cd, git -C), for resolving bare PR numbers when its folder is no checkout.
+const REPO_HINT_RE = /(?:--repo[ =]|-R )([\w.-]+\/[\w.-]+)|(?:\bcd |git -C )(~?\/[\w./-]+)/g;
+function repoHint(rec: any) {
+  const calls = rec.type === "assistant" && Array.isArray(rec.message?.content) ? rec.message.content.filter((b: any) => b?.type === "tool_use") : [];
+  const hints = calls.flatMap((b: any) => [...JSON.stringify(b.input ?? {}).matchAll(REPO_HINT_RE)]);
+  const m = hints.at(-1);
+  return m ? (m[1]?.toLowerCase() ?? repoFor(m[2].replace(/^~/, process.env.HOME!))) : "";
+}
 function textOf(rec: any) {
   if (rec.isMeta || rec.isSidechain || (rec.type !== "user" && rec.type !== "assistant")) return "";
   const c = rec.message?.content;
@@ -215,10 +223,11 @@ function candidates(s: Session): Candidate[] {
     if (end > 0) {
       l.offset += end;
       for (const line of buf.subarray(0, end).toString("utf8").split("\n")) {
-        if (!line.includes("http") && !line.includes("#") && !/\bPR\b/i.test(line)) continue;
+        if (!line.includes("http") && !line.includes("#") && !/\bPR\b/i.test(line) && !line.includes("tool_use")) continue;
         try {
           const rec = JSON.parse(line);
-          addCandidates(l.found, candidatesIn(textOf(rec), rec.type, repoFor(s.cwd)));
+          l.repo = repoHint(rec) || l.repo;
+          addCandidates(l.found, candidatesIn(textOf(rec), rec.type, repoFor(s.cwd) || l.repo || ""));
         } catch {}
       }
     }
