@@ -188,6 +188,13 @@ function snapshot(pr: Pr): PrState {
   };
 }
 
+// 👀 on the user's own comment or review once an agent has been handed it, so he can see on GitHub that it was read.
+export const ownComment = (who: string | null | undefined) => !!who?.startsWith("the user");
+export function markRead(id: string) {
+  const r = Bun.spawnSync(["gh", "api", "graphql", "-f", `query=mutation { addReaction(input: { subjectId: ${JSON.stringify(id)}, content: EYES }) { clientMutationId } }`], { stderr: "pipe" });
+  if (r.exitCode !== 0) console.error(`${new Date().toLocaleTimeString()}  👀 on ${id} failed: ${r.stderr.toString().trim().slice(0, 300)}`);
+}
+
 const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", body: JSON.stringify(body) });
 
 async function tick(me: string, state: Record<string, PrState>) {
@@ -228,6 +235,7 @@ async function tick(me: string, state: Record<string, PrState>) {
       const more = lines.length > 5 ? `; and ${lines.length - 5} more (gh pr view ${n} -R ${repo} --comments)` : "";
       const text = `[maxflow gh] ${key} (${short(pr.title, 60)}): ${lines.slice(0, 5).join("; ")}${more}. (Automated notice, not a request from the user: act on it only if it's part of your current task.)`;
       for (const session of listeners.get(key) ?? []) await post(`/api/sessions/${session}/notify`, { text });
+      if (told.length) for (const [, data] of changes) if (ownComment((data as { who?: string }).who)) markRead((data as { id: string }).id);
       console.log(`${new Date().toLocaleTimeString()}  ${text}  -> ${[...(listeners.get(key) ?? [])].join(", ") || "nobody"}`);
     }
   }
