@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { GraphRenderer } from "@isaacchacko/graph";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Archive, Bot, ChevronDown, ChevronUp, ExternalLink, GitMerge, GitPullRequest, GitPullRequestDraft, Gauge, Hammer, Hash, HeartPulse, Link2, Radar, Route, ScanEye, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
+import { Archive, Bot, ChevronDown, ChevronUp, ExternalLink, GitMerge, GitPullRequest, GitPullRequestDraft, Gauge, Hammer, Hash, HeartPulse, Link2, MemoryStick, Radar, Route, ScanEye, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
@@ -50,7 +50,7 @@ const prColors = (sessions: Session[]) => new Map(sessions.flatMap((s) => Object
 // Served by maxflow from the site or Google so it is same-origin; the graph keeps a plain dot if neither loads.
 const favicon = (host: string) => `/api/favicon?host=${encodeURIComponent(host)}`;
 // A sentry's node shows what it watches, drawn in the sentry color; an agent's shows the role sentry:graph gave it.
-const SENTRY_ICONS: Record<string, LucideIcon> = { gh: GitPullRequest, slack: Hash, rename: Tag, health: HeartPulse, graph: Waypoints, review: GitPullRequestDraft, flow: Route, meta: Gauge };
+const SENTRY_ICONS: Record<string, LucideIcon> = { gh: GitPullRequest, slack: Hash, rename: Tag, health: HeartPulse, graph: Waypoints, review: GitPullRequestDraft, flow: Route, meta: Gauge, ram: MemoryStick };
 const ROLE_ICONS: Record<string, LucideIcon> = { review: ScanEye, implement: Hammer, conflicts: GitMerge };
 const nodeIcon = (s: Session, color: string) => {
   const Icon = isSentry(s) ? (SENTRY_ICONS[displayName(s)] ?? Radar) : s.role && ROLE_ICONS[s.role];

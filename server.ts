@@ -127,7 +127,7 @@ adoptSessions();
 
 // Sentries are ordinary sessions, started once and kept by tmux across server restarts.
 const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  ["gh", "slack", "rename", "health", "graph", "meta"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
+  ["gh", "slack", "rename", "health", "graph", "meta", "ram"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
 );
 // The review sentry is a claude agent; its feed runs beside it, logging out of the way of its screen.
 const reviewSource = (f: string) => new URL(`./sentries/${f}`, import.meta.url).pathname;
@@ -163,6 +163,7 @@ const SENTRY_USES: Record<string, string> = {
 const isSentry = (s: Session) => !!s.sentry;
 // Lets the graph show one session reading or writing another; held is true while a wait is still watching.
 function touchFrom(req: Request, s: Session, kind: "read" | "write", held = false) {
+  "sentry:ram": `Every 15s it kills any test, lint, typecheck or build job an agent runs locally once its process tree holds over 1.5% of the machine's RAM, and tells that agent to run it on the Blacksmith CI runners by pushing to its PR. Run those through CI from the start: push, then \`gh pr checks\`.`,
   const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
   if (from && from !== s) publish(`touch/${from.id}/${s.id}`, { from: from.id, to: s.id, kind, held });
 }
