@@ -132,6 +132,8 @@ export function App() {
           <div className={cn("absolute inset-0 py-2 pl-3 pr-1", graphing && "hidden")}>{current && <Terminal key={current} id={current} handle={term} onClose={refresh} />}</div>
           <GraphView
             sessions={sessions}
+            questions={questions}
+            onQuestions={() => setAsking((a) => !a)}
             visible={graphing}
             current={current}
             hideArchived={hideArchived}

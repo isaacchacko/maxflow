@@ -29,6 +29,8 @@
   --chat: oklch(0.78 0.11 305);
   --sentry: oklch(0.75 0.14 55);
   --url: oklch(0.78 0.1 200);
+  /* What the user himself acts on: the PR queue and the needs-me node. */
+  --user: oklch(0.98 0 0);
   --waiting: oklch(0.85 0.15 95);
   --read: oklch(0.8 0.13 230);
   --write: oklch(0.84 0.16 80);
@@ -67,6 +69,7 @@
   --color-chat: var(--chat);
   --color-sentry: var(--sentry);
   --color-url: var(--url);
+  --color-user: var(--user);
   --color-waiting: var(--waiting);
 }
 
