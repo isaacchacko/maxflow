@@ -77,7 +77,9 @@ export const home = (p: string) => p.replace(/^\/Users\/[^/]+/, "~");
 export const ltr = (t: string) => `‎${t}‎`;
 
 export const api = {
-  sessions: (): Promise<Session[]> => fetch("/api/sessions").then((r) => r.json()),
+  // The health sentry answers in the server's place while it's down; reloading shows its down page.
+  sessions: (): Promise<Session[]> =>
+    fetch("/api/sessions").then((r) => (r.headers.has("x-maxflow-down") ? (location.reload(), new Promise<never>(() => {})) : r.json())),
   create: (name: string): Promise<Session> => fetch("/api/sessions", { method: "POST", body: JSON.stringify({ name }) }).then((r) => r.json()),
   agent: (prompt: string, cwd: string, bypass: boolean, name = prompt): Promise<Session> =>
     fetch("/api/sessions", {

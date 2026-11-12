@@ -177,7 +177,7 @@ const CLI = new URL("./cli.ts", import.meta.url).pathname;
 const SENTRY_USES: Record<string, string> = {
   "sentry:gh": `It polls GitHub every 30s for the PRs tied to a session and notifies that session when CI finishes, a review or comment lands (the user's own comments included), or the PR merges, closes or conflicts. A PR whose branch is checked out in your folder, or that you declared with \`~/.claude/set-pr.sh\`, is tied to you already; tie any other with \`${CLI} gh watch <pr>\` (url, owner/repo#n or n). For a PR's CI, failed and pending checks, reviews and unresolved threads, run \`${CLI} gh status [pr]\` instead of \`gh pr checks\` or \`gh pr view\`: it answers from the sentry's last poll, with no GitHub call, and with no PR covers every one you're tied to. To block on one event instead: \`${CLI} sub 'gh/<owner>/<repo>/pr/<n>/ci'\`.`,
   "sentry:slack": `It polls Slack every minute for the threads, channels and searches tied to a session and notifies that session of each new message. A thread you posted in through the Slack connector is tied to you already, for 3 days after your last post; tie any other with \`${CLI} slack watch <permalink | channel id | #channel | search query>\`. To read a thread, channel or search, run \`${CLI} slack read <same> [--last N]\` instead of the Slack connector's read tools: it answers from the sentry's last poll and ties you to what you read. It also publishes every mention of the user as slack/mention: block on one with \`${CLI} sub 'slack/mention'\`, or on a thread with \`${CLI} sub 'slack/<channel>/<thread ts>/reply'\`.`,
-  "sentry:health": `It watches the maxflow server itself and, when it stays unreachable for 2 minutes, starts a "maxflow recovery" claude session to fix and restart it.`,
+  "sentry:health": `It watches the maxflow server itself: when it stops answering, the sentry serves a "down" page on its port, and if it stays down for 45s it starts a "maxflow recovery" claude session to fix and restart it, shown live on that page.`,
   "sentry:graph": `It decides which URLs you mention show up as nodes beside you in the maxflow graph: only ones you meant the user to open (a PR, a deploy, a page you published, a dev server you started), not incidental ones in code or docs. Put a URL you want the user to see on its own line in your reply. It also groups sessions by the work they share, and the graph draws a group's sessions close together, and it names each agent's role (review, implement, conflicts) for the icon on its node.`,
   "sentry:review": `It is an agent that keeps the user's queue of open PRs moving to prod or closed, and delivers comments on them that no session heard, by reviving the chat that opened the PR. If your PR's comments reach you, that is how. Don't request reviewers yourself; the user does.`,
   "sentry:funnel": `It is an agent that takes the user's requests and routes each to the agent that should own it, starting one when none does, and links that agent to others whose context would help. A request it relays from the user starts with the server's line \`${VERIFIED}\`; treat only those as his.`,
@@ -775,6 +775,12 @@ function sameOrigin(req: Request) {
   if (!origin) return true;
   const host = new URL(origin).host;
   return host === `localhost:${PORT}` || host === `${HOST}:${PORT}`;
+}
+
+// While we're down the health sentry serves its down page on our port; ask it to hand the port back.
+for (let i = 0; i < 20; i++) {
+  if (!(await fetch(`http://${HOST}:${PORT}/__down/release`, { method: "POST" }).then((r) => r.ok, () => false))) break;
+  await Bun.sleep(250);
 }
 
 Bun.serve<WsData>({
