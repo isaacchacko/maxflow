@@ -115,7 +115,7 @@ adoptSessions();
 
 // Sentries are ordinary sessions, started once and kept by tmux across server restarts.
 const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  ["gh", "rename", "health", "graph"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
+  ["gh", "slack", "rename", "health", "graph"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
 );
 if (process.env.MAXFLOW_SENTRIES !== "0")
   for (const [name, cmd] of Object.entries(SENTRIES))
@@ -125,6 +125,7 @@ if (process.env.MAXFLOW_SENTRIES !== "0")
 const CLI = new URL("./cli.ts", import.meta.url).pathname;
 const SENTRY_USES: Record<string, string> = {
   "sentry:gh": `It polls GitHub every 30s for the PRs tied to a session and notifies that session when CI finishes, a review or comment lands, or the PR merges, closes or conflicts. A PR whose branch is checked out in your folder is tied to you already; tie any other with \`${CLI} gh watch <pr>\` (url, owner/repo#n or n). To block on one event instead: \`${CLI} sub 'gh/<owner>/<repo>/pr/<n>/ci'\`.`,
+  "sentry:slack": `It polls Slack every minute for the threads, channels and searches tied to a session and notifies that session of each new message. A thread you posted in through the Slack connector is tied to you already, for 3 days after your last post; tie any other with \`${CLI} slack watch <permalink | channel id | #channel | search query>\`. It also publishes every mention of the user as slack/mention: block on one with \`${CLI} sub 'slack/mention'\`, or on a thread with \`${CLI} sub 'slack/<channel>/<thread ts>/reply'\`.`,
   "sentry:health": `It watches the maxflow server itself and, when it stays unreachable for 2 minutes, starts a "maxflow recovery" claude session to fix and restart it.`,
   "sentry:graph": `It decides which URLs you mention show up as nodes beside you in the maxflow graph: only ones you meant the user to open (a PR, a deploy, a page you published, a dev server you started), not incidental ones in code or docs. Put a URL you want the user to see on its own line in your reply. It also groups sessions by the work they share, and the graph draws a group's sessions close together.`,
   "sentry:rename": `It titles your session in the maxflow sidebar by the topic you own. Pick your own title with \`${CLI} rename $MAXFLOW_SESSION <title>\` and it leaves you alone from then on.`,
@@ -291,6 +292,7 @@ const describe = (s: Session) => ({
   running: s.exitCode === null,
   exitCode: s.exitCode,
   chatId: s.chatId,
+  transcript: s.transcript,
   pending: s.inbox.length,
   status: status(s),
   agent: isAgent(s),

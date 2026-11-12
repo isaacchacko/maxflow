@@ -13,8 +13,10 @@ const usage = `usage:
   maxflow sub <topic-glob> [--since SEQ] [--timeout MS] [--follow]   block for the next matching event, print it as JSON
   maxflow pub <topic> [json]
   maxflow gh watch <pr> [--session ID] | maxflow gh unwatch <pr> | maxflow gh ls
+  maxflow slack watch <permalink | channel id | #channel | query> [--session ID] | maxflow slack unwatch <same> | maxflow slack ls
   maxflow chats [query] | maxflow resume <claude-session-id> [--safe] [--force]`;
 import { parsePr, readWatches, writeWatches } from "./sentries/gh";
+import * as slack from "./sentries/slack";
 const flag = (args: string[], k: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
 const positional = (args: string[], valued: string[]) => args.filter((a, i) => !a.startsWith("--") && !valued.includes(args[i - 1]));
 
@@ -88,6 +90,17 @@ if (verb === "ls") {
   if (rest[0] === "watch") watches.push({ pr, sessions: [...new Set([...prev, ...(session ? [session] : [])])] });
   writeWatches(watches);
   console.log(`${rest[0] === "watch" ? "watching" : "unwatched"} ${pr}${rest[0] === "watch" && session ? ` for session ${session}` : ""}`);
+} else if (verb === "slack" && rest[0] === "ls") {
+  for (const w of slack.readWatches()) console.log(`${w.target}  ${w.sessions.join(", ") || "(no session)"}`);
+} else if (verb === "slack" && (rest[0] === "watch" || rest[0] === "unwatch") && rest[1]) {
+  const target = await slack.parseTarget(positional(rest.slice(1), ["--session"]).join(" "));
+  if (!target) console.error(`no channel named ${rest[1]}`), process.exit(1);
+  const session = flag(rest, "--session") ?? process.env.MAXFLOW_SESSION;
+  const prev = slack.readWatches().find((w) => w.target === target)?.sessions ?? [];
+  const watches = slack.readWatches().filter((w) => w.target !== target);
+  if (rest[0] === "watch") watches.push({ target, sessions: [...new Set([...prev, ...(session ? [session] : [])])] });
+  slack.writeWatches(watches);
+  console.log(`${rest[0] === "watch" ? "watching" : "unwatched"} ${target}${rest[0] === "watch" && session ? ` for session ${session}` : ""}`);
 } else {
   console.log(usage);
   process.exit(1);
