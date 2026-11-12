@@ -1,11 +1,12 @@
-import { useState } from "react";
-import { ChevronRight, ExternalLink, GitPullRequest, MessageCircleQuestion, MessageSquare, SquareKanban, X } from "lucide-react";
+import { useRef, useState } from "react";
+import { Bot, ChevronRight, ExternalLink, GitPullRequest, MessageCircleQuestion, MessageSquare, SquareKanban, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
-import { ago, type OpenComment, type QueuedPr, type Session, type Task } from "@/lib/api";
+import { Terminal, type TerminalHandle } from "@/components/terminal";
+import { ago, store, type OpenComment, type QueuedPr, type Session, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const COLUMNS: { status: Task["status"]; title: string }[] = [
@@ -23,7 +24,10 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
   // The review sentry's queue stages a green PR with no reviewer yet as "needs reviewer": only the user sends it for approval.
   const unreviewed = prs.filter((p) => p.stage === "needs reviewer").sort((a, b) => a.created.localeCompare(b.created));
   const task = tasks.find((t) => t.id === shown);
-  const assistant = sessions.find((s) => s.sentry && s.name === "sentry:assistant");
+  const assistant = sessions.find((s) => s.sentry && s.name === "sentry:assistant" && s.running);
+  const [chatting, setChatting] = useState(() => store.get("mf.tasksChat") !== "0");
+  const toggleChat = () => setChatting((c) => (store.set("mf.tasksChat", c ? "0" : "1"), !c));
+  const chat = useRef<TerminalHandle | null>(null);
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-background text-xs">
       <div className="flex items-center gap-2 border-b px-3 py-2">
@@ -31,12 +35,13 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
         <span className="font-medium text-foreground">Tasks</span>
         <span className="text-muted-foreground">kept by the assistant from what you ask and what agents do</span>
         {assistant && (
-          <button type="button" className="text-muted-foreground hover:text-foreground hover:underline" onClick={() => (onClose(), onOpen(assistant.id))}>talk to it</button>
+          <Button variant={chatting ? "secondary" : "ghost"} size="sm" className="h-6" title="Ask the assistant about your tasks and asks" onClick={toggleChat}><Bot /> Ask</Button>
         )}
         <span className="ml-auto text-muted-foreground"><Kbd>⌘K</Kbd></span>
         <Button variant="ghost" size="icon" className="size-7" title="Close" onClick={onClose}><X /></Button>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-6 gap-2 overflow-x-auto p-3 max-lg:grid-cols-[repeat(6,16rem)]">
+      <div className="flex min-h-0 flex-1">
+      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[repeat(6,minmax(13rem,1fr))] gap-2 overflow-x-auto p-3">
         {COLUMNS.map((c) => {
           const column = tasks.filter((t) => t.status === c.status).sort((a, b) => b.updated - a.updated);
           const cards = c.status === "done" ? column.slice(0, DONE_SHOWN) : column;
@@ -68,6 +73,13 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
           );
         })}
         <CommentsColumn comments={comments} />
+      </div>
+      {assistant && chatting && (
+        <aside className="flex w-[32rem] max-w-[40%] shrink-0 flex-col border-l">
+          <p className="border-b px-3 py-1.5 text-muted-foreground">The assistant's own pane: ask it what's on your plate, or whether an ask was answered.</p>
+          <div className="min-h-0 flex-1 py-2 pl-3 pr-1"><Terminal key={assistant.id} id={assistant.id} handle={chat} onClose={() => {}} /></div>
+        </aside>
+      )}
       </div>
       {!tasks.length && !unreviewed.length && <p className="absolute inset-x-0 top-1/2 text-center text-muted-foreground">No tasks yet. The assistant adds them as you ask agents for things.</p>}
       <Dialog open={!!task} onOpenChange={(o) => !o && setShown(null)}>
