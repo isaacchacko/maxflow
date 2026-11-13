@@ -237,7 +237,7 @@ function TaskCard({ task: t, named, change, onSeen, waiting, selected, onClick }
       </span>
       {change && (
         <span className="flex items-center gap-1.5 whitespace-nowrap text-[#5e6ad2]" title={`${change.from ? `${statusTitle(change.from)} → ` : "New in "}${statusTitle(change.to)}`}>
-          {change.from ? <><StatusIcon status={change.from} /><ArrowRight className="size-3" /></> : "New in"}
+          {change.from ? <><StatusIcon status={change.from} /><ArrowRight className="size-3.5 text-foreground" strokeWidth={2.5} /></> : "New in"}
           <StatusIcon status={change.to} />{statusTitle(change.to)}
           <span className="text-muted-foreground">· {ago(change.at)}</span>
           <span role="button" title="Mark seen" className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground" onClick={(e) => (e.stopPropagation(), onSeen())}><Check className="size-3.5" /></span>
