@@ -97,6 +97,7 @@ export const api = {
       body: JSON.stringify({ name: name.slice(0, 40) || "claude", cwd, cmd: ["claude", ...(bypass ? ["--permission-mode", "bypassPermissions"] : []), ...(prompt ? [prompt] : [])] }),
     }).then((r) => r.json()),
   notify: (id: string, text: string) => fetch(`/api/sessions/${id}/notify`, { method: "POST", body: JSON.stringify({ text }) }),
+  upload: (image: Blob): Promise<{ path: string }> => fetch("/api/uploads", { method: "POST", headers: { "content-type": image.type }, body: image }).then((r) => r.json()),
   link: (a: string, b: string, why?: string) => fetch("/api/link", { method: "POST", body: JSON.stringify({ a, b, why }) }),
   kill: (id: string) => fetch(`/api/sessions/${id}`, { method: "DELETE" }),
   archive: (id: string, archived: boolean) => fetch(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ archived }) }),
@@ -116,3 +117,15 @@ export const store = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch {} },
 };
+
+// Images pasted into a text box are uploaded and land in its text as [image: <path>] at the cursor, so whoever gets the text can read the file.
+export function pasteImages(e: React.ClipboardEvent<HTMLInputElement | HTMLTextAreaElement>, set: (edit: (text: string) => string) => void) {
+  const images = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"));
+  if (!images.length) return;
+  e.preventDefault();
+  const { selectionStart: start, selectionEnd: end } = e.currentTarget;
+  Promise.all(images.map((f) => api.upload(f))).then((ups) => {
+    const tags = ups.map((u) => `[image: ${u.path}]`).join(" ");
+    set((text) => `${text.slice(0, start ?? text.length)}${tags}${text.slice(end ?? text.length)}`);
+  });
+}

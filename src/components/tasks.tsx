@@ -5,7 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
 import { Terminal, type TerminalHandle } from "@/components/terminal";
-import { ago, api, store, type OpenComment, type QueuedPr, type Session, type Task } from "@/lib/api";
+import { ago, api, pasteImages, store, type OpenComment, type QueuedPr, type Session, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // Linear's status circles: an outline to start, filling as the work goes, a check when done.
@@ -374,6 +374,7 @@ function TaskDetail({ task, named, assistant, onOpen }: { task: Task; named: Map
             <textarea
               value={reply}
               onChange={(e) => (setReply(e.target.value), setSent(false))}
+              onPaste={(e) => pasteImages(e, (edit) => (setReply(edit), setSent(false)))}
               onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), send())}
               rows={2}
               placeholder="Reply to the assistant about this task…"

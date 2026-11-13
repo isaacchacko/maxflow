@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ago, api, blockedLabel, displayName, home, isBusy, isSentry, isWaiting, kindOf, store, type Question, type QueuedPr, type ReviewBoard, type Session } from "@/lib/api";
+import { ago, api, blockedLabel, displayName, home, isBusy, isSentry, isWaiting, kindOf, pasteImages, store, type Question, type QueuedPr, type ReviewBoard, type Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/sidebar";
 
@@ -789,7 +789,7 @@ function AgentDraft({ draft, folders, peers, picked, onToggle, onStart, onCancel
   };
   return (
     <div className="absolute z-30 flex w-80 -translate-x-1/2 -translate-y-1/2 flex-col gap-1.5 rounded-lg border bg-popover p-2 shadow-xl" style={{ left: draft.x, top: draft.y }}>
-      <Input autoFocus data-agent-prompt placeholder="What should the agent do?" value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={keys} className="h-8" />
+      <Input autoFocus data-agent-prompt placeholder="What should the agent do?" value={prompt} onChange={(e) => setPrompt(e.target.value)} onPaste={(e) => pasteImages(e, setPrompt)} onKeyDown={keys} className="h-8" />
       {peers.length > 0 && (
         <div className="flex flex-col gap-1">
           <span className="text-[11px] text-muted-foreground">Talks to <span className="opacity-70">(click chips or nodes)</span></span>
