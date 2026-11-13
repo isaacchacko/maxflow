@@ -13,6 +13,8 @@ const STATUS_FILE = join(STATE_DIR, "gh-status.json");
 const EDGES_FILE = join(STATE_DIR, "gh-edges.json");
 // The PRs sentry:review lists, with the sessions on each; watched here like explicit watches.
 export const REVIEW_WATCH_FILE = join(STATE_DIR, "review-watch.json");
+// The PRs requesting the user's review or assigned to him, which sentry:inbox lists; watched the same way.
+export const INBOX_WATCH_FILE = join(STATE_DIR, "inbox-watch.json");
 const PROJECTS = join(process.env.HOME!, ".claude", "projects");
 const INTERVAL_MS = Number(process.env.GH_SENTRY_INTERVAL ?? 30_000);
 const CLI = new URL("../cli.ts", import.meta.url).pathname;
@@ -215,7 +217,7 @@ const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 
 
 async function tick(me: string, state: Record<string, PrState>) {
   const all = await links();
-  for (const w of readJson<Watch[]>(REVIEW_WATCH_FILE, [])) for (const session of w.sessions.length ? w.sessions : [""]) all.push({ pr: w.pr, repo: w.pr.split("#")[0], session });
+  for (const w of [...readJson<Watch[]>(REVIEW_WATCH_FILE, []), ...readJson<Watch[]>(INBOX_WATCH_FILE, [])]) for (const session of w.sessions.length ? w.sessions : [""]) all.push({ pr: w.pr, repo: w.pr.split("#")[0], session });
   const repos = new Map<string, { numbers: Set<number>; branches: Set<string> }>();
   for (const l of all) {
     const r = repos.get(l.repo) ?? repos.set(l.repo, { numbers: new Set(), branches: new Set() }).get(l.repo)!;
