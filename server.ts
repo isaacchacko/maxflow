@@ -404,14 +404,15 @@ function isaacPrompts(funnel: Session) {
   }).slice(-30);
 }
 // Text one session types into another carries its true sender; a funnel relay of Isaac's own words carries the verified stamp.
-function stamp(req: Request, text: string, isaac?: boolean): { text: string } | { error: string } {
+// request: the words Isaac typed into the funnel that the relay starts with.
+function stamp(req: Request, text: string, isaac?: boolean): { text: string; request?: string } | { error: string } {
   const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
   if (!isaac) return { text: from ? `[maxflow · from "${from.name}" (${from.id})] ${unforge(text)}` : unforge(text) };
   if (!from || from.name !== "sentry:funnel" || !isSentry(from)) return { error: "only the funnel sentry relays Isaac's requests" };
   const said = squash(text);
-  if (!isaacPrompts(from).some((p) => p && said.startsWith(p)))
-    return { error: "the message doesn't start with a request Isaac typed into the funnel, verbatim; relay it without --isaac, saying who it came from" };
-  return { text: `${VERIFIED}\n${unforge(text)}` };
+  const request = isaacPrompts(from).findLast((p) => p && said.startsWith(p));
+  if (!request) return { error: "the message doesn't start with a request Isaac typed into the funnel, verbatim; relay it without --isaac, saying who it came from" };
+  return { text: `${VERIFIED}\n${unforge(text)}`, request };
 }
 
 // The inbox lives in tmux too, so a server restart doesn't drop a message the agent hasn't been given yet.
@@ -476,6 +477,9 @@ function prWaitEnds(kind: Wait["kind"], event: string, data: any) {
   return null;
 }
 function onEvent(topic: string, data: any) {
+  const intent = topic.match(/^intent\/([\w-]+)$/);
+  const owner = intent && sessions.get(intent[1]);
+  if (owner && typeof data?.request === "string") requested(owner, data.request, typeof data.root === "string" ? data.root.trim() || undefined : undefined);
   // A Slack wait ends on the first new message in its thread, channel or search that someone else posted.
   if (topic.startsWith("slack/") && data?.target)
     for (const s of sessions.values()) if (s.wait?.kind === "slack" && s.wait.ref === data.target && data.told?.includes(s.id)) endWait(s, `new Slack message from ${data.from}`);
@@ -653,7 +657,7 @@ function settle(q: Question, action: Settle, text = "") {
       : `[maxflow] The user closed your question q${q.id} without answering. Go with your recommendation and carry on.`);
 }
 
-// The user's task board, which sentry:assistant derives from what he asks and what agents do; he never writes to it himself.
+// The user's task board: the server opens a task for each request the funnel routes, and sentry:assistant keeps the rest; he never writes to it himself.
 const TASK_STATUSES = ["todo", "doing", "you", "waiting", "blocked", "done", "dropped"] as const;
 type Task = {
   id: number;
@@ -666,6 +670,8 @@ type Task = {
   at: number;
   updated: number;
   timeline: { at: number; text: string; session?: string }[];
+  // The title is still Isaac's words cut short, waiting for the funnel to name the root.
+  drafted?: boolean;
 };
 type TaskEdit = Partial<Pick<Task, "title" | "kind" | "status" | "answer">> & { session?: string; link?: string; event?: string; at?: number };
 const TASKS = `${process.env.HOME}/.maxflow/tasks.json`;
@@ -692,6 +698,21 @@ function editTask(t: Task | undefined, edit: TaskEdit) {
   t.updated = Math.max(t.updated, at);
   saveTasks();
   return t;
+}
+
+// Isaac's request becomes a task the moment the funnel hands it to an owner; a follow-up to an owner already on a task joins it.
+const openTaskOf = (id: string) => tasks.findLast((t) => t.sessions.includes(id) && t.status !== "done" && t.status !== "dropped");
+const headline = (text: string) => (text.length > 80 ? `${text.slice(0, 79)}…` : text);
+function requested(owner: Session, request: string, root?: string) {
+  const asked = `asked: ${headline(squash(request))}`;
+  const t = openTaskOf(owner.id);
+  if (!t) {
+    const made = editTask(undefined, { title: root ?? headline(squash(request)), status: "doing", session: owner.id, event: asked });
+    if (typeof made !== "string" && !root) (made.drafted = true), saveTasks();
+    return;
+  }
+  if (root && t.drafted) (t.title = root), delete t.drafted;
+  editTask(t, { session: owner.id, ...(!t.timeline.some((e) => e.text === asked) && { event: asked }) });
 }
 
 // An unanswered question with a default for a reversible step stops holding its agent after DEFAULT_AFTER_MS.
@@ -978,8 +999,9 @@ Bun.serve<WsData>({
         const body = (await req.json().catch(() => ({}))) as { text?: string; keys?: string[]; enter?: boolean; isaac?: boolean };
         if (s.exitCode !== null) return new Response("session ended", { status: 409 });
         // A shell gets its text as is; an agent is told who typed it.
-        const typed = body.text && isAgent(s) ? stamp(req, body.text, body.isaac) : { text: body.text };
+        const typed: ReturnType<typeof stamp> | { text?: string; request?: undefined } = body.text && isAgent(s) ? stamp(req, body.text, body.isaac) : { text: body.text };
         if ("error" in typed) return new Response(typed.error, { status: 409 });
+        if (typed.request) requested(s, typed.request);
         touch("write");
         if (typed.text) await paste(t, typed.text);
         if (body.keys?.length) await tmuxAsync("send-keys", "-t", t, ...body.keys);
@@ -992,6 +1014,7 @@ Bun.serve<WsData>({
         if (!body.text?.trim()) return new Response("text required", { status: 400 });
         const stamped = stamp(req, body.text.trim(), body.isaac);
         if ("error" in stamped) return new Response(stamped.error, { status: 409 });
+        if (stamped.request) requested(s, stamped.request);
         queue(s, stamped.text);
         // The awaited agent's message ends the wait on it.
         if (s.wait?.kind === "agent" && s.wait.ref === req.headers.get("x-maxflow-from")) endWait(s);
