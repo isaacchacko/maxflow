@@ -496,11 +496,12 @@ function prWaitEnds(kind: Wait["kind"], event: string, data: any) {
   return null;
 }
 // The user's own PR comment reaches the funnel as his ask, typed in unstamped like a graph double-click, so the funnel can relay it as his.
+// The sessions line is marked [maxflow] so stamp() takes only his comment as the request the funnel must relay verbatim.
 // Only the gh sentry's word that it is his is taken; with no funnel up, the sessions on the PR hear it from the server instead.
 function commentAsk(kind: string, d: any) {
   const where = kind === "review" ? `review (${String(d.state).toLowerCase().replace("_", " ")})` : d.path ? `comment on ${d.path}` : "comment";
   const on = (d.told as string[]).flatMap((id) => sessions.get(id) ?? []).map((s) => `${s.id} (${s.name})`);
-  const text = `My ${where} on PR ${d.pr}: "${String(d.body ?? "").trim()}" ${d.url ?? ""}${on.length ? `\nSessions on this PR: ${on.join(", ")}` : ""}`;
+  const text = `My ${where} on PR ${d.pr}: "${String(d.body ?? "").trim()}" ${d.url ?? ""}${on.length ? `\n[maxflow] Sessions on this PR: ${on.join(", ")}` : ""}`;
   const funnel = [...sessions.values()].find((s) => s.name === "sentry:funnel" && isSentry(s) && s.exitCode === null);
   if (funnel) queue(funnel, text);
   else for (const id of d.told as string[]) { const s = sessions.get(id); if (s) queue(s, `[maxflow · from "sentry:gh"] ${unforge(text)}`); }
