@@ -47,6 +47,7 @@ function openPrs(): Pr[] {
 }
 
 // How far a PR is from prod, as the one thing blocking it next.
+// GitHub computes mergeable lazily and answers UNKNOWN meanwhile, so tick() keeps the last stage until it knows.
 function stage(pr: Pr) {
   const ci = pr.commits.nodes[0]?.commit.statusCheckRollup?.state;
   if (pr.isDraft) return "draft";
@@ -81,7 +82,7 @@ async function tick() {
     on.set(key, [...new Set([...owning, ...mentioning])].filter((id) => names.has(id)));
   }
   const queue = prs.map((pr) => ({
-    pr: keyOf(pr), url: pr.url, title: pr.title, stage: stage(pr), visual: /<img|!\[|user-attachments/.test(pr.body),
+    pr: keyOf(pr), url: pr.url, title: pr.title, stage: (pr.mergeable === "UNKNOWN" && stages.get(keyOf(pr))) || stage(pr), visual: /<img|!\[|user-attachments/.test(pr.body),
     ui: uiOf.get(pr.id) ?? false, created: pr.createdAt, updated: pr.updatedAt,
     sessions: on.get(keyOf(pr))!.map((id) => ({ id, name: names.get(id) })),
   }));
