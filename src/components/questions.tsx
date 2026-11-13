@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { MessageCircleQuestion } from "lucide-react";
 import { ago, api, type Question } from "@/lib/api";
+import { Markdown } from "@/components/markdown";
 import { cn } from "@/lib/utils";
 
 // A question an agent is waiting on him for, as a card on the board: clicking it opens the thread.
@@ -48,7 +49,7 @@ export function QuestionThread({ q, onOpen, onSettled }: { q: Question; onOpen: 
             )}
             {m.at && <span>{ago(m.at)}</span>}
           </span>
-          <p className="whitespace-pre-wrap">{m.text}</p>
+          <Markdown text={m.text} />
         </div>
       ))}
       {q.default && <p className="text-xs text-muted-foreground">If unanswered, it goes ahead with: <span className="text-foreground">{q.default}</span></p>}

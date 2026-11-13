@@ -7,6 +7,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { QuestionRow, QuestionThread } from "@/components/questions";
 import { Terminal, type TerminalHandle } from "@/components/terminal";
 import { ago, api, pasteImages, store, type OpenComment, type Question, type QueuedPr, type Session, type Task } from "@/lib/api";
+import { inline, Markdown } from "@/components/markdown";
 import { cn } from "@/lib/utils";
 
 // Linear's status circles: an outline to start, filling as the work goes, a check when done.
@@ -350,7 +351,7 @@ function TaskDetail({ task, questions, named, assistant, onOpen, onSettled }: { 
         {task.kind === "question" && (
           <section className="rounded-md border bg-card px-4 py-3 text-sm">
             <h4 className="mb-1.5 text-xs font-medium text-muted-foreground">Answer</h4>
-            <p className={cn("whitespace-pre-wrap", !task.answer && "text-muted-foreground")}>{task.answer ?? "Not answered yet."}</p>
+            {task.answer ? <Markdown text={task.answer} /> : <p className="text-muted-foreground">Not answered yet.</p>}
           </section>
         )}
         <section className="flex flex-col gap-3">
@@ -361,7 +362,7 @@ function TaskDetail({ task, questions, named, assistant, onOpen, onSettled }: { 
                 {i < task.timeline.length - 1 && <span className="absolute top-4 bottom-0 left-[6px] w-px bg-border" />}
                 <span className="mt-1 size-[13px] shrink-0 rounded-full border-2 border-border bg-background" />
                 <span className="min-w-0 flex-1 whitespace-pre-wrap">
-                  {e.text}
+                  {inline(e.text)}
                   {e.session && (
                     <button type="button" className="ml-1.5 text-muted-foreground hover:text-foreground hover:underline" onClick={() => onOpen(e.session!)}>· {named.get(e.session) ?? e.session}</button>
                   )}
