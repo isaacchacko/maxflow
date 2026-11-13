@@ -206,11 +206,11 @@ function snapshot(pr: Pr, prev?: PrState): PrState {
   };
 }
 
-// 👀 on the user's own comment or review once an agent has been handed it, so he can see on GitHub that it was read.
+// 👀 on the user's own comment or review once the funnel has been handed it, so he can see on GitHub that it was read.
 export const ownComment = (who: string | null | undefined) => !!who?.startsWith("the user");
-export function markRead(id: string) {
-  const r = Bun.spawnSync(["gh", "api", "graphql", "-f", `query=mutation { addReaction(input: { subjectId: ${JSON.stringify(id)}, content: EYES }) { clientMutationId } }`], { stderr: "pipe" });
-  if (r.exitCode !== 0) console.error(`${new Date().toLocaleTimeString()}  👀 on ${id} failed: ${r.stderr.toString().trim().slice(0, 300)}`);
+export async function markRead(id: string) {
+  const p = Bun.spawn(["gh", "api", "graphql", "-f", `query=mutation { addReaction(input: { subjectId: ${JSON.stringify(id)}, content: EYES }) { clientMutationId } }`], { stdout: "ignore", stderr: "pipe" });
+  if ((await p.exited) !== 0) console.error(`${new Date().toLocaleTimeString()}  👀 on ${id} failed: ${(await new Response(p.stderr).text()).trim().slice(0, 300)}`);
 }
 
 const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", headers: caller, body: JSON.stringify(body) });
@@ -248,12 +248,12 @@ async function tick(me: string, state: Record<string, PrState>) {
     state[key] = snapshot(pr, state[key]);
     const told = [...(listeners.get(key) ?? [])];
     for (const [kind, data] of changes) await post("/api/events", { topic: `gh/${repo}/pr/${n}/${kind}`, data: { pr: key, told, ...(data as object) } });
-    const lines = changes.flatMap(([, , line]) => (line ? [line] : []));
+    // The user's own comments go to the funnel as his asks, from the server; telling the PR's sessions too would deliver them twice.
+    const lines = changes.flatMap(([, data, line]) => (line && !ownComment((data as { who?: string }).who) ? [line] : []));
     if (lines.length) {
       const more = lines.length > 5 ? `; and ${lines.length - 5} more` : "";
       const text = `[maxflow gh] ${key} (${short(pr.title, 60)}): ${lines.slice(0, 5).join("; ")}${more}. Full status: ${CLI} gh status ${key}. (Automated notice, not a request from the user: act on it only if it's part of your current task.)`;
       for (const session of listeners.get(key) ?? []) await post(`/api/sessions/${session}/notify`, { text });
-      if (told.length) for (const [, data] of changes) if (ownComment((data as { who?: string }).who)) markRead((data as { id: string }).id);
       console.log(`${new Date().toLocaleTimeString()}  ${text}  -> ${[...(listeners.get(key) ?? [])].join(", ") || "nobody"}`);
     }
   }
