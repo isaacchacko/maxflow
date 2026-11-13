@@ -24,7 +24,7 @@ type Pr = {
   commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
 };
 type Event = { seq: number; topic: string; data: { pr: string; told: string[]; id?: string; who?: string | null; author?: string; state?: string; body?: string; url?: string; path?: string } };
-type Session = { id: string; name: string; running: boolean; links: string[]; sentry: boolean; pending: number };
+type Session = { id: string; name: string; running: boolean; links: string[]; sentry: boolean; pending: number; status: string; blocked: object | null };
 
 const QUERY = `query { search(query: "is:pr is:open author:@me archived:false", type: ISSUE, first: 100) { nodes { ... on PullRequest {
  id number url title body isDraft mergeable reviewDecision headRefName createdAt updatedAt repository { nameWithOwner } reviewRequests(first: 1) { totalCount }
@@ -98,10 +98,11 @@ let titles = new Map<string, string>();
 
 // Landing: every poll, an approved PR is pushed toward merged without waiting for anyone to notice it.
 const LANDING = "Approved, not merged (the feed is landing these)";
-const ESCALATE_MS = 30 * 60_000, UNREACHABLE_MS = 5 * 60_000;
+const ESCALATE_MS = 30 * 60_000, STUCK_IDLE_MS = 60_000;
 const NEVER_MERGE = /never[- ]merge|do not merge|don'?t merge|not for merge|^one-off/i;
 const landingLog = new Map<string, string[]>();
-const pendingSince = new Map<string, number>();
+const blocked = new Set<string>();
+const idleHoldingSince = new Map<string, number>();
 const woken = new Set<string>();
 const escalated = new Set<string>();
 
@@ -118,7 +119,8 @@ function logAction(key: string, what: string) {
   console.log(`${new Date().toLocaleTimeString()}  ${key}  ${what}`);
 }
 
-const unreachable = (id: string) => Date.now() - (pendingSince.get(id) ?? Date.now()) > UNREACHABLE_MS;
+// An idle agent at an empty prompt gets its messages within seconds, so one still holding them a minute later is stuck; a working one gets them when its turn ends.
+const unreachable = (id: string) => blocked.has(id) || Date.now() - (idleHoldingSince.get(id) ?? Date.now()) > STUCK_IDLE_MS;
 
 // Hands a fix only a person or agent can make (a conflict, a branch GitHub won't update) to the PR's owner, or to the review agent when nobody reachable owns it.
 async function wake(pr: Pr, owners: string[], problem: string) {
@@ -157,7 +159,12 @@ async function land(pr: Pr, owners: string[]) {
 
 // The landing section sits first on the board, rewritten every poll, with each PR's recent actions and why it's escalated.
 async function landAll(prs: Pr[], ties: Link[], sessions: Session[]) {
-  for (const s of sessions) if (!s.pending) pendingSince.delete(s.id); else if (!pendingSince.has(s.id)) pendingSince.set(s.id, Date.now());
+  blocked.clear();
+  for (const s of sessions) {
+    if (s.blocked) blocked.add(s.id);
+    if (!(s.pending && s.status === "idle")) idleHoldingSince.delete(s.id);
+    else if (!idleHoldingSince.has(s.id)) idleHoldingSince.set(s.id, Date.now());
+  }
   const live = new Set(sessions.map((s) => s.id));
   const items = [];
   for (const pr of approvedPrs(prs)) {
@@ -171,7 +178,7 @@ async function landAll(prs: Pr[], ties: Link[], sessions: Session[]) {
     const approvedAt = Math.max(...pr.latestReviews.nodes.filter((r) => r.state === "APPROVED").map((r) => Date.parse(r.submittedAt)), 0);
     const why = [
       approvedAt && Date.now() - approvedAt > ESCALATE_MS ? `approved ${Math.round((Date.now() - approvedAt) / 60_000)} min ago and still open (GitHub: ${pr.mergeStateStatus.toLowerCase()}${pr.autoMergeRequest ? ", auto-merge armed" : ""})` : "",
-      own.length && own.every(unreachable) ? `owner ${own.join(", ")} hasn't taken a message in 5+ min` : "",
+      own.length && own.every(unreachable) ? `owner ${own.join(", ")} isn't taking messages` : "",
     ].filter(Boolean).join("; ");
     if (why && !escalated.has(key)) {
       escalated.add(key);
