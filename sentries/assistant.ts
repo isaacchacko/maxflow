@@ -86,8 +86,9 @@ function lastReply(lines: string[]) {
 }
 
 // The events that move a task: a question raised or settled, an agent starting or ending a wait, the funnel routing one of the user's
-// requests, the server settling a task's column from its agents' waits, and a PR's milestones.
-const MOVES = /^(question\/\w+\/\d+|wait\/\w+|intent\/\w+|task\/\d+|gh\/.+\/pr\/\d+\/(opened|merged|closed|review|ci|decision))$/;
+// requests, the server settling a task's column from its agents' waits, the inbox sentry putting a Slack message or PR on the
+// board, and a PR's milestones.
+const MOVES = /^(question\/\w+\/\d+|wait\/\w+|intent\/\w+|inbox\/\w+|task\/\d+|gh\/.+\/pr\/\d+\/(opened|merged|closed|review|ci|decision))$/;
 // What can't wait for the next digest: something the user asked, a question to or from him, the funnel routing his request.
 const URGENT = /^(question|intent)\//;
 

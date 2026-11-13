@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 // slack sentry: one poller for every Slack thread, channel or search any maxflow session cares about. Publishes new messages as
 // slack/<channel>/<thread ts>/reply, slack/<channel>/message and slack/search events, notifies the tied sessions, and publishes
-// every mention of the user as slack/mention for anyone to `sub`.
+// every mention of the user as slack/mention, every DM to him as slack/dm and every post of his own as slack/own for anyone to `sub`.
+// A thread he posts in himself (not through an agent) is tied to nobody for a while, so its replies are published even with no session
+// on it; sentries/inbox.ts takes what no session heard.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -17,6 +19,9 @@ const PROJECTS = join(process.env.HOME!, ".claude", "projects");
 const INTERVAL_MS = Number(process.env.SLACK_SENTRY_INTERVAL ?? 60_000);
 // Threads a session posted in stay tied to it this long after its last post there.
 const POSTED_TIE_MS = Number(process.env.SLACK_POSTED_TIE_MS ?? 3 * 86_400_000);
+// Threads the user posts in himself stay watched this long, read at most every OWN_READ_MS so they don't stretch the tick.
+const OWN_TIE_MS = Number(process.env.SLACK_OWN_TIE_MS ?? 2 * 86_400_000);
+const OWN_READ_MS = Number(process.env.SLACK_OWN_READ_MS ?? 5 * 60_000);
 const DOMAIN = process.env.SLACK_DOMAIN ?? "dryftai";
 const CLI = new URL("../cli.ts", import.meta.url).pathname;
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
@@ -25,8 +30,9 @@ const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 
 // A target is `C123/1794442442.159219` (a thread), `C123` (a channel's top-level posts) or `search:<query>`.
 export type Watch = { target: string; sessions: string[] };
-export type Msg = { ts: string; uid: string; who: string; text: string; channel?: string; link?: string };
-type State = { latest: Record<string, string>; seen: Record<string, string[]>; titles: Record<string, string> };
+export type Msg = { ts: string; uid: string; who: string; text: string; channel?: string; link?: string; bot?: boolean };
+// own: the threads the user posted in himself, with when he last did; readAt: when each was last read; bots: authors search marked [BOT].
+type State = { latest: Record<string, string>; seen: Record<string, string[]>; titles: Record<string, string>; own: Record<string, number>; readAt: Record<string, number>; bots: string[] };
 
 const readJson = <T>(path: string, fallback: T): T => (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : fallback);
 export const readWatches = () => readJson<Watch[]>(WATCH_FILE, []);
@@ -74,16 +80,17 @@ function parseMessages(body: string): Msg[] {
   }));
 }
 
-const RESULT = /Channel: (\S+) \(ID: (\w+)\)\n[\s\S]*?From: (.*?) \(ID: (\w+)\)[^\n]*\n[\s\S]*?Message_ts: ([\d.]+)\nPermalink: \[link\]\(([^)]+)\)\nText: \n([\s\S]*?)(?=\nContext before:|\n---|$)/g;
+const RESULT = /Channel: (\S+) \(ID: (\w+)\)\n[\s\S]*?From: (.*?) \(ID: (\w+)\)([^\n]*)\n[\s\S]*?Message_ts: ([\d.]+)\nPermalink: \[link\]\(([^)]+)\)\nText: \n([\s\S]*?)(?=\nContext before:|\n---|$)/g;
 async function search(query: string): Promise<Msg[]> {
   const res = await slack("slack_search_public_and_private", { query, sort: "timestamp", limit: 20 });
   return [...String(res.results ?? "").matchAll(RESULT)].map((m) => ({
     channel: m[1] === "DM" ? "a DM" : m[1],
     uid: m[4],
     who: m[3].replace(/\s*<[^>]*>$/, "").trim(),
-    ts: m[5],
-    link: m[6],
-    text: m[7].trim(),
+    bot: m[5].includes("[BOT]"),
+    ts: m[6],
+    link: m[7],
+    text: m[8].trim(),
   }));
 }
 
@@ -202,12 +209,25 @@ function keep(target: string, title: string, msgs: Msg[]) {
   kept[target] = { at: Date.now(), title, msgs: [...parent, ...all.filter((m) => m.ts !== thread).slice(-KEEP)] };
 }
 
+// The searches every tick makes for the user, whoever else is tied to them, and the topic each publishes.
+const own = (me: string) => ({ [`search:<@${me}>`]: "slack/mention", [`search:to:<@${me}>`]: "slack/dm", [`search:from:<@${me}>`]: "slack/own" });
+// The thread a search hit sits in, as a target.
+const threadOf = (link: string) => link.match(/archives\/(\w+)\/p(\d{10})(\d{6})(?:\?thread_ts=([\d.]+))?/)?.slice(1);
+const targetOf = (link: string) => { const t = threadOf(link); return t && `${t[0]}/${t[3] ?? `${t[1]}.${t[2]}`}`; };
+
 async function tick(me: string, state: State) {
   const { ties: all, posted } = await ties();
   const listeners = new Map<string, Set<string>>();
   for (const t of all) (listeners.get(t.target) ?? listeners.set(t.target, new Set()).get(t.target)!).add(t.session);
-  if (me) listeners.set(`search:<@${me}>`, listeners.get(`search:<@${me}>`) ?? new Set());
+  const searches = me ? own(me) : {};
+  for (const target of Object.keys(searches)) listeners.set(target, listeners.get(target) ?? new Set());
+  for (const [target, at] of Object.entries(state.own)) if (Date.now() - at < OWN_TIE_MS) listeners.set(target, listeners.get(target) ?? new Set());
+  const byAgent = new Set([...posted.values()].flatMap((s) => [...s]));
+  const bots = new Set(state.bots);
   for (const [target, sessions] of listeners) {
+    // A thread only the user's own post ties is read every OWN_READ_MS, not every tick.
+    if (state.own[target] && ![...sessions].some(Boolean) && Date.now() - (state.readAt[target] ?? 0) < OWN_READ_MS) continue;
+    state.readAt[target] = Date.now();
     let got;
     try {
       got = await fresh(target, state);
@@ -218,10 +238,15 @@ async function tick(me: string, state: State) {
     const [channel, thread] = target.split("/");
     for (const m of got.msgs) {
       const link = m.link ?? permalink(channel, m.ts, thread);
-      const topic = target === `search:<@${me}>` ? "slack/mention" : target.startsWith("search:") ? "slack/search" : thread ? `slack/${channel}/${thread}/reply` : `slack/${channel}/message`;
+      const topic = searches[target] ?? (target.startsWith("search:") ? "slack/search" : thread ? `slack/${channel}/${thread}/reply` : `slack/${channel}/message`);
+      if (m.bot) bots.add(m.uid);
+      const agent = byAgent.has(m.ts);
+      // What the user posts himself ties its thread to nobody, so replies there are published for sentries/inbox.ts.
+      const at = target === `search:from:<@${me}>` && !agent && m.link && targetOf(m.link);
+      if (at) state.own[at] = Date.now();
       // A session isn't told about what it posted itself.
       const told = [...sessions].filter((session) => session && !posted.get(session)?.has(m.ts));
-      await post("/api/events", { topic, data: { target, ts: m.ts, from: m.who, user: m.uid, text: m.text, link, told } });
+      await post("/api/events", { topic, data: { target, thread: m.link ? targetOf(m.link) : thread ? target : undefined, ts: m.ts, from: m.who, user: m.uid, text: m.text, link, told, bot: bots.has(m.uid), agent, where: m.channel ?? got.title } });
       const line = `${m.who}${m.channel ? ` in ${m.channel}` : ""}: "${short(m.text)}" ${link}`;
       for (const session of told) {
         const text = `[maxflow slack] ${got.title}: new message from ${line}. Whole ${thread ? "thread" : "conversation"}: ${CLI} slack read ${target.startsWith("search:") ? JSON.stringify(target.slice(7)) : target}. (Automated notice, not a request from the user: act on it only if it's part of your current task.)`;
@@ -238,6 +263,9 @@ async function tick(me: string, state: State) {
   writeFileSync(EDGES_FILE, JSON.stringify([...watching].map(([session, names]) => ({ session, label: names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0] }))));
   // Forget targets nobody is tied to any more.
   for (const key of Object.keys(state.latest)) if (!listeners.has(key)) delete state.latest[key], delete state.seen[key], delete state.titles[key];
+  for (const key of Object.keys(state.own)) if (!listeners.has(key)) delete state.own[key], delete state.readAt[key];
+  for (const key of Object.keys(state.readAt)) if (!listeners.has(key)) delete state.readAt[key];
+  state.bots = [...bots];
   writeFileSync(STATE_FILE, JSON.stringify(state));
   if (kept) {
     for (const key of Object.keys(kept)) if (!listeners.has(key)) delete kept[key];
@@ -248,7 +276,7 @@ async function tick(me: string, state: State) {
 
 if (import.meta.main) {
   const me = (await slack("slack_read_user_profile", {}).catch(() => ({}))).result?.match(/User ID: (\w+)/)?.[1] ?? "";
-  const state = { latest: {}, seen: {}, titles: {}, ...readJson<Partial<State>>(STATE_FILE, {}) } as State;
+  const state = { latest: {}, seen: {}, titles: {}, own: {}, readAt: {}, bots: [], ...readJson<Partial<State>>(STATE_FILE, {}) } as State;
   console.log(`slack sentry as ${me || "?"}, every ${INTERVAL_MS / 1000}s`);
   for (;;) {
     try {
