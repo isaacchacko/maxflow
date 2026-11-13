@@ -32,7 +32,7 @@ const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 export type Watch = { target: string; sessions: string[] };
 export type Msg = { ts: string; uid: string; who: string; text: string; channel?: string; link?: string; bot?: boolean };
 // own: the threads the user posted in himself, with when he last did; readAt: when each was last read; bots: authors search marked [BOT].
-type State = { latest: Record<string, string>; seen: Record<string, string[]>; titles: Record<string, string>; own: Record<string, number>; readAt: Record<string, number>; bots: string[] };
+type State = { latest: Record<string, string>; seen: Record<string, string[]>; titles: Record<string, string>; own: Record<string, number>; readAt: Record<string, number>; bots: string[]; ownSeeded?: boolean };
 
 const readJson = <T>(path: string, fallback: T): T => (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : fallback);
 export const readWatches = () => readJson<Watch[]>(WATCH_FILE, []);
@@ -234,6 +234,14 @@ async function tick(me: string, state: State) {
     } catch (e) {
       console.error(`${new Date().toLocaleTimeString()}  ${target}: ${e}`);
       continue;
+    }
+    // The first look at his own posts ties the threads he posted in lately, which a first look would otherwise only record.
+    if (!state.ownSeeded && target === `search:from:<@${me}>`) {
+      state.ownSeeded = true;
+      for (const m of kept?.[target]?.msgs ?? []) {
+        const at = !byAgent.has(m.ts) && m.link && targetOf(m.link);
+        if (at && Date.now() - Number(m.ts) * 1000 < OWN_TIE_MS) state.own[at] = Math.max(state.own[at] ?? 0, Number(m.ts) * 1000);
+      }
     }
     const [channel, thread] = target.split("/");
     for (const m of got.msgs) {
