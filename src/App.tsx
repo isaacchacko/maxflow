@@ -11,7 +11,7 @@ import { GraphView } from "@/components/graph";
 import { ResumeDialog } from "@/components/resume-dialog";
 import { QuestionsPanel } from "@/components/questions";
 import { TasksBoard } from "@/components/tasks";
-import { api, isSentry, store, type OpenComment, type QueuedPr, type Question, type Session, type Task } from "@/lib/api";
+import { api, isSentry, store, type OpenComment, type QueuedPr, type Question, type Session, type Task, type View } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export function App() {
@@ -19,12 +19,14 @@ export function App() {
   const [loaded, setLoaded] = useState(false);
   const [current, setCurrent] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(() => store.get("mf.collapsed") === "1");
-  const [graphing, setGraphing] = useState(false);
+  const [view, setView] = useState<View>(location.hash === "#tasks" ? "tasks" : "agent");
+  const graphing = view === "graph", tasking = view === "tasks";
+  // ⌘G and ⌘K flip between their view and the agent view; the three never stack.
+  const flip = (v: View) => setView((cur) => (cur === v ? "agent" : v));
   const [hideArchived, setHideArchived] = useState(() => store.get("mf.hideArchived") === "1");
   const [resuming, setResuming] = useState(location.hash === "#resume");
   const [questions, setQuestions] = useState<Question[]>([]);
   const [asking, setAsking] = useState(location.hash === "#questions");
-  const [tasking, setTasking] = useState(location.hash === "#tasks");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [prs, setPrs] = useState<QueuedPr[]>([]);
   const [comments, setComments] = useState<OpenComment[]>([]);
@@ -58,7 +60,7 @@ export function App() {
     setCurrent(id);
     history.replaceState(null, "", `/s/${id}`);
   };
-  const open = (id: string) => (setGraphing(false), attach(id), requestAnimationFrame(() => term.current?.focus()));
+  const open = (id: string) => (setView("agent"), attach(id), requestAnimationFrame(() => term.current?.focus()));
 
   // Pick a session on first load: the one in the URL, else the first agent.
   useEffect(() => {
@@ -98,9 +100,9 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const plain = !e.altKey && !e.shiftKey;
-      if (e.metaKey && !e.ctrlKey && plain && e.key === "g") setGraphing((g) => !g);
+      if (e.metaKey && !e.ctrlKey && plain && e.key === "g") flip("graph");
       else if (e.metaKey && !e.ctrlKey && !e.altKey && e.key === "b") toggleSidebar();
-      else if (e.metaKey && !e.ctrlKey && plain && e.key === "k") setTasking((t) => !t);
+      else if (e.metaKey && !e.ctrlKey && plain && e.key === "k") flip("tasks");
       else if (e.ctrlKey && !e.metaKey && plain && e.key === "t") newShell();
       else return;
       e.preventDefault();
@@ -117,9 +119,9 @@ export function App() {
           sessions={sessions}
           current={current}
           collapsed={collapsed}
-          graphing={graphing}
+          view={view}
           onToggle={toggleSidebar}
-          onGraph={() => setGraphing((g) => !g)}
+          onView={setView}
           onResume={() => setResuming(true)}
           questions={waiting}
           onQuestions={() => setAsking((a) => !a)}
@@ -148,9 +150,9 @@ export function App() {
             onArchiveLinks={archiveLinks}
             onToggleArchived={toggleArchived}
           />
-          {tasking && <TasksBoard tasks={tasks} prs={prs} comments={comments} sessions={sessions} onOpen={open} onClose={() => setTasking(false)} />}
+          {tasking && <TasksBoard tasks={tasks} prs={prs} comments={comments} sessions={sessions} onOpen={open} onClose={() => setView("agent")} />}
           {asking && <QuestionsPanel questions={questions} onOpen={open} onSettled={refreshQuestions} onClose={() => setAsking(false)} />}
-          {loaded && !sessions.length && !graphing && (
+          {loaded && !sessions.length && view === "agent" && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-muted-foreground">
               <TerminalSquare className="size-10 opacity-40" />
               <p className="text-sm">No sessions yet.</p>

@@ -44,6 +44,9 @@ export type Question = {
 };
 
 // A task on the user's board, which sentry:assistant derives from his prompts and moves as agents work.
+// The main pane shows exactly one of these.
+export type View = "agent" | "graph" | "tasks";
+
 export type Task = {
   id: number;
   title: string;
