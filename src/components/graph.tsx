@@ -66,7 +66,6 @@ const needsUser = (s: Session, questions: Question[]) => questions.some((q) => q
 const isReviewSentry = (s: Session) => isSentry(s) && s.name === "sentry:review";
 const boardCount = (b: ReviewBoard) => b.sections.reduce((n, s) => n + s.items.length, 0);
 // What a sleeping agent waits on, as it declared it with `maxflow wait`.
-const WAIT_NAMES: Record<string, string> = { q: "the user's answer", approval: "approval", ci: "CI", agent: "an agent", slack: "Slack", done: "done" };
 const waitLabel = (w: NonNullable<Session["wait"]>) => (w.kind === "done" ? "done" : `${w.kind}:${w.kind === "approval" || w.kind === "ci" ? `#${w.ref.split("#")[1]}` : w.ref}`);
 
 const countIcon = (n: number, color: string) =>
@@ -707,7 +706,6 @@ export function GraphView({ sessions: all, questions, onQuestions, visible, curr
         <Button variant="outline" size="sm" className={cn("bg-card shadow-sm", hideArchived && "text-muted-foreground")} title="Right-click a node or link to archive or unarchive it" onClick={onToggleArchived}>
           <Archive /> {hideArchived ? "Show archived" : "Hide archived"} <Kbd className="ml-1">ha</Kbd>
         </Button>
-        <WaitCounts sessions={all} />
         {mode === "edit" && <span className="text-xs text-muted-foreground">drag node → node and say why · click an edge to relabel · right-click to delete</span>}
       </div>
       {pendingKeys && (
@@ -854,19 +852,6 @@ function FindBar({ query, onQuery, count, at, onStep, onClose }: {
       <Button variant="ghost" size="icon" className="size-7" title="Next match (↵)" disabled={!count} onClick={() => onStep(1)}><ChevronDown /></Button>
       <Button variant="ghost" size="icon" className="size-7" title="Close (Esc)" onClick={onClose}><X /></Button>
     </div>
-  );
-}
-
-// The bottleneck as a count: how many agents sleep on each kind of wait, the user's answers and approvals first.
-function WaitCounts({ sessions }: { sessions: Session[] }) {
-  const asleep = sessions.filter((s) => s.running && s.wait);
-  if (!asleep.length) return null;
-  const byKind = Map.groupBy(asleep, (s): string => s.wait!.kind);
-  const kinds = Object.keys(WAIT_NAMES).filter((k) => byKind.has(k));
-  return (
-    <span className="rounded-md border bg-card px-2 py-1 text-xs text-muted-foreground shadow-sm" title={asleep.map((s) => `${s.name}: ${waitLabel(s.wait!)}`).join("\n")}>
-      asleep on {kinds.map((k) => `${byKind.get(k)!.length} ${WAIT_NAMES[k]}`).join(" · ")}
-    </span>
   );
 }
 
