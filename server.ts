@@ -74,6 +74,11 @@ async function tmuxAsync(...args: string[]) {
   const [out, code] = await Promise.all([new Response(p.stdout).text(), p.exited]);
   return { ok: code === 0, out };
 }
+// Options are only read back when a server adopts its sessions, so writes needn't block: they run in order, off the event loop.
+let optionWrites = Promise.resolve();
+function setOption(id: string, key: string, value: string) {
+  optionWrites = optionWrites.then(() => tmuxAsync("set-option", "-t", tmuxName(id), key, value)).then(() => {}, () => {});
+}
 // Unbracketed text reaches the pane in ~1KB reads, and claude can read the split as a paste it never closes, after which Enter only adds newlines.
 async function paste(target: string, text: string) {
   const load = Bun.spawn([...TMUX, "load-buffer", "-b", target, "-"], { env: termEnv, stdin: new Blob([text]) });
@@ -110,41 +115,36 @@ function createSession(name: string, cmd: string[], cwd: string, chatId?: string
   const created = tmux("new-session", "-d", "-s", t, "-x", String(cols), "-y", String(rows), "-c", cwd, "-e", `MAXFLOW_SESSION=${id}`, "--", ...cmd);
   if (!created.ok) throw new Error(`tmux new-session failed for ${cmd.join(" ")}`);
   const meta = { name, cmd, cwd, chatId, createdAt: session.createdAt };
-  tmux("set-option", "-t", t, "@mf", JSON.stringify(meta));
+  setOption(id, "@mf", JSON.stringify(meta));
   sessions.set(id, session);
   attachViewer(session, cols, rows);
   return session;
 }
 
 // Pick up sessions that outlived a previous server, seeding scrollback from tmux's history.
+// One display-message reads every option a session keeps, so adopting costs two tmux calls per session instead of ten.
+const ADOPT_FIELDS = ["history_size", "@mf", "@mf-inbox", "@mf-claude", "@mf-transcript", "@mf-archived", "@mf-asleep", "@mf-sentry", "@mf-wait"];
 function adoptSessions() {
   for (const t of tmux("list-sessions", "-F", "#{session_name}").out.split("\n")) {
     if (!t.startsWith("mf-")) continue;
     const id = t.slice(3);
-    let meta;
-    try {
-      meta = JSON.parse(tmux("show-options", "-v", "-t", t, "@mf").out);
-    } catch {
-      meta = { name: t, cmd: [], cwd: "", createdAt: Date.now() };
-    }
-    const session = { id, ...meta, chunks: [], bytes: 0, clients: new Set(), exitCode: null, inbox: [] } as unknown as Session;
-    try {
-      session.inbox = JSON.parse(tmux("show-options", "-v", "-t", t, "@mf-inbox").out);
-    } catch {}
-    const hasHistory = Number(tmux("display-message", "-p", "-t", t, "#{history_size}").out) > 0;
-    const history = hasHistory ? tmux("capture-pane", "-p", "-e", "-J", "-t", t, "-S", "-", "-E", "-1").out : "";
+    const f = Object.fromEntries(tmux("display-message", "-p", "-t", t, ADOPT_FIELDS.map((k) => `#{${k}}`).join("\x1f")).out.replace(/\n$/, "").split("\x1f").map((v, i) => [ADOPT_FIELDS[i], v]));
+    const json = (v: string | undefined) => {
+      try {
+        return JSON.parse(v ?? "") || undefined;
+      } catch {}
+    };
+    const meta = json(f["@mf"]) ?? { name: t, cmd: [], cwd: "", createdAt: Date.now() };
+    const session = { id, ...meta, chunks: [], bytes: 0, clients: new Set(), exitCode: null, inbox: json(f["@mf-inbox"]) ?? [] } as unknown as Session;
+    const history = Number(f.history_size) > 0 ? tmux("capture-pane", "-p", "-e", "-J", "-t", t, "-S", "-", "-E", "-1").out : "";
     if (history.trim()) push(session, new TextEncoder().encode(history.replace(/\n/g, "\r\n")));
     session.lastOutputAt = session.createdAt;
-    try {
-      session.claude = JSON.parse(tmux("show-options", "-v", "-t", t, "@mf-claude").out);
-    } catch {}
-    session.transcript = tmux("show-options", "-v", "-t", t, "@mf-transcript").out.trim() || undefined;
-    session.archived = tmux("show-options", "-v", "-t", t, "@mf-archived").out.trim() === "1";
-    session.asleep = tmux("show-options", "-v", "-t", t, "@mf-asleep").out.trim() || undefined;
-    session.sentry = tmux("show-options", "-v", "-t", t, "@mf-sentry").out.trim() === "1";
-    try {
-      session.wait = JSON.parse(tmux("show-options", "-v", "-t", t, "@mf-wait").out) || undefined;
-    } catch {}
+    session.claude = json(f["@mf-claude"]);
+    session.transcript = f["@mf-transcript"]?.trim() || undefined;
+    session.archived = f["@mf-archived"]?.trim() === "1";
+    session.asleep = f["@mf-asleep"]?.trim() || undefined;
+    session.sentry = f["@mf-sentry"]?.trim() === "1";
+    session.wait = json(f["@mf-wait"]);
     sessions.set(id, session);
     attachViewer(session);
   }
@@ -171,7 +171,7 @@ SENTRIES["sentry:funnel"] = ["sh", "-c", `exec claude --permission-mode bypassPe
 // A session is a sentry because the server started it as one, never because of its name.
 function markSentry(s: Session) {
   s.sentry = true;
-  tmux("set-option", "-t", tmuxName(s.id), "@mf-sentry", "1");
+  setOption(s.id, "@mf-sentry", "1");
 }
 // Sentries started before the flag existed: exactly a sentry's name, running a script from sentries/.
 for (const s of sessions.values())
@@ -259,14 +259,14 @@ function status(s: Session) {
 
 function setClaudeState(s: Session, state: ClaudeState | "gone") {
   s.claude = state === "gone" ? undefined : { state, at: Date.now() };
-  tmux("set-option", "-t", tmuxName(s.id), "@mf-claude", s.claude ? JSON.stringify(s.claude) : "");
+  setOption(s.id, "@mf-claude", s.claude ? JSON.stringify(s.claude) : "");
 }
 
 function setTranscript(s: Session, path: string) {
   if (!path.endsWith(".jsonl") || path === s.transcript) return;
   s.transcript = path;
   s.links = undefined;
-  tmux("set-option", "-t", tmuxName(s.id), "@mf-transcript", path);
+  setOption(s.id, "@mf-transcript", path);
 }
 
 // Candidate URLs a session has mentioned, PRs named by number included, oldest first, each with who wrote it and the text around it, for sentry:graph to judge.
@@ -435,7 +435,7 @@ function stamp(req: Request, text: string, isaac?: boolean): { text: string; req
 // The inbox lives in tmux too, so a server restart doesn't drop a message the agent hasn't been given yet.
 function queue(s: Session, text: string) {
   s.inbox.push(text);
-  tmux("set-option", "-t", tmuxName(s.id), "@mf-inbox", JSON.stringify(s.inbox));
+  setOption(s.id, "@mf-inbox", JSON.stringify(s.inbox));
   wake(s);
   // An agent archived by hand has no wait to wake it, but a message still needs a live claude to land in.
   if (s.archived && !s.wait) setArchived(s, false);
@@ -443,7 +443,7 @@ function queue(s: Session, text: string) {
 
 function setArchived(s: Session, archived: boolean) {
   s.archived = archived;
-  tmux("set-option", "-t", tmuxName(s.id), "@mf-archived", archived ? "1" : "0");
+  setOption(s.id, "@mf-archived", archived ? "1" : "0");
   if (archived) stopAgent(s);
   else resumeAgent(s);
 }
@@ -457,7 +457,7 @@ function stopAgent(s: Session) {
   writeFileSync(screen, tmux("capture-pane", "-p", "-e", "-J", "-t", tmuxName(s.id)).out.trimEnd() + "\x1b[0m\n");
   if (!tmux("respawn-pane", "-k", "-t", tmuxName(s.id), "--", "sh", "-c", `cat '${screen}'; rm -f '${screen}'; echo '${note}'; exec tail -f /dev/null`).ok) return;
   s.asleep = chat;
-  tmux("set-option", "-t", tmuxName(s.id), "@mf-asleep", chat);
+  setOption(s.id, "@mf-asleep", chat);
   setClaudeState(s, "gone");
 }
 function resumeAgent(s: Session) {
@@ -465,11 +465,11 @@ function resumeAgent(s: Session) {
   const bypass = s.cmd.some((a) => a.includes("bypassPermissions")) ? ["--permission-mode", "bypassPermissions"] : [];
   if (!tmux("respawn-pane", "-k", "-t", tmuxName(s.id), "-c", s.cwd, "-e", `MAXFLOW_SESSION=${s.id}`, "--", "claude", "--resume", s.asleep, ...bypass).ok) return;
   s.asleep = undefined;
-  tmux("set-option", "-t", tmuxName(s.id), "@mf-asleep", "");
+  setOption(s.id, "@mf-asleep", "");
 }
 function setWait(s: Session, wait?: Wait) {
   s.wait = wait;
-  tmux("set-option", "-t", tmuxName(s.id), "@mf-wait", wait ? JSON.stringify(wait) : "");
+  setOption(s.id, "@mf-wait", wait ? JSON.stringify(wait) : "");
   publish(`wait/${s.id}`, { session: s.id, wait: wait ?? null });
 }
 // Waiting is sleeping: a waiting agent is archived once its turn ends, and the first message queued to it wakes it for a turn.
@@ -875,7 +875,7 @@ async function deliver(s: Session) {
   }
   s.blockedSince = s.draft = undefined;
   const text = s.inbox.splice(0).join("\n");
-  tmux("set-option", "-t", tmuxName(s.id), "@mf-inbox", "[]");
+  setOption(s.id, "@mf-inbox", "[]");
   s.peerTurnAt = text.includes(VERIFIED) ? undefined : Date.now();
   s.pastedAt = Date.now();
   s.enterRetries = 0;
@@ -1169,7 +1169,7 @@ Bun.serve<WsData>({
         if (body.name?.trim()) {
           touchFrom(req, s, "write");
           s.name = body.name.trim().slice(0, 80);
-          tmux("set-option", "-t", tmuxName(s.id), "@mf", JSON.stringify({ name: s.name, cmd: s.cmd, cwd: s.cwd, chatId: s.chatId, createdAt: s.createdAt }));
+          setOption(s.id, "@mf", JSON.stringify({ name: s.name, cmd: s.cmd, cwd: s.cwd, chatId: s.chatId, createdAt: s.createdAt }));
         }
       }
       return Response.json(describe(s));
