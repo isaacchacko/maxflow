@@ -45,13 +45,15 @@ type State = {
   flagged: string[];
   // Each kind of bot alert about him: how often it came since its last note, and when that note was.
   alerts: Record<string, { count: number; noted: number }>;
+  // The Slack messages behind open reply tasks, by ts, checked until he reacts to one or posts after it in its thread or DM.
+  open: Record<string, string>;
   reruns: string[];
   batch: Routed[];
   prsAt: number;
   stallAt: number;
 };
 const state: State = {
-  seq: 0, tasks: {}, prs: {}, questions: {}, answered: {}, seen: [], flagged: [], alerts: {}, reruns: [], batch: [], prsAt: 0, stallAt: 0,
+  seq: 0, tasks: {}, prs: {}, questions: {}, answered: {}, seen: [], flagged: [], alerts: {}, open: {}, reruns: [], batch: [], prsAt: 0, stallAt: 0,
   ...(existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {}),
 };
 const save = () => writeFileSync(STATE_FILE, JSON.stringify(state));
@@ -143,10 +145,13 @@ async function onSlack(topic: string, d: any, me: string) {
   const line = `${d.from} in ${where}: "${short(d.text, 200)}" ${d.link}`;
   const owner = kind === "reply" || kind === "mention" ? await toOwner(key, line) : null;
   const link = key.startsWith("http") ? key : slackLink(key);
+  // He reacted before this sentry saw it: he has it.
+  if (!key.startsWith("http") && reactedBy(key.split("/")[0], d.ts, me)) return log(`skipped ${d.link}: the user already reacted`);
   const task = await onBoard(key, link, `${d.from}${kind === "dm" ? " (DM)" : ""}: "${short(d.text, 120)}"${owner ? `; handed to ${owner}, the chat that posted there` : ""}`, {
     title: `Reply to ${d.from} in ${where}: "${short(d.text, 50)}"`,
     status: "you",
   });
+  if (task) state.open[d.ts] = key;
   if (/\?/.test(d.text)) state.questions[d.ts] = { key, at: Number(d.ts) * 1000, who: d.from, text: d.text, link: d.link };
   // A mention or DM nobody owns goes to the funnel, which decides whether an agent can move it forward; thread replies stay on the board.
   if (!owner && task && kind !== "reply") state.batch.push({ task, who: d.from, where, text: short(d.text, 200), link: d.link });
@@ -170,7 +175,34 @@ async function onBotAlert(d: any) {
   if (task && !open) state.batch.push({ task, who: d.from, where, text: short(String(d.text).replace(/<[^>]*>/g, ""), 200) + (url ? ` ${url}` : ""), link: d.link });
 }
 
+// Whether the user put an emoji reaction on a message.
+function reactedBy(channel: string, ts: string, me: string) {
+  const out = run(["mcp", "--json", "--timeout", "60", "call", "claude.ai/slack", "slack_get_reactions", JSON.stringify({ channel_id: channel, message_ts: ts })]);
+  return !!me && out.includes(`(${me})`);
+}
+
+// A reply task is done once he has reacted to its message or posted after it in its thread or DM.
+const HANDLED_MS = Number(process.env.INBOX_HANDLED_MS ?? 2 * 60_000);
+async function handled(me: string) {
+  const byKey = new Map<string, string[]>();
+  for (const [ts, key] of Object.entries(state.open)) byKey.set(key, [...(byKey.get(key) ?? []), ts]);
+  const tasks = await getTasks();
+  for (const [key, stamps] of byKey) {
+    if (!OPEN(tasks.find((t) => t.id === state.tasks[key]))) { for (const ts of stamps) delete state.open[ts]; continue; }
+    const replied = stamps.some((ts) => (state.answered[key] ?? 0) > Number(ts));
+    const reacted = !replied && stamps.some((ts) => reactedBy(key.split("/")[0], ts, me));
+    if (!replied && !reacted) continue;
+    await closeTask(key, replied ? "you replied in the thread" : "you reacted to the message");
+    for (const ts of stamps) delete state.open[ts];
+    for (const [ts, q] of Object.entries(state.questions)) if (q.key === key) delete state.questions[ts];
+    log(`closed ${key}: ${replied ? "replied" : "reacted"}`);
+  }
+}
+
 async function flushBatch() {
+  // What he handled in the meantime isn't routed.
+  const tasks = await getTasks();
+  state.batch = state.batch.filter((i) => OPEN(tasks.find((t) => t.id === i.task)));
   if (!state.batch.length) return;
   const funnel = (await sessions()).find((s) => s.sentry && s.name === "sentry:funnel" && s.running);
   if (!funnel) return;
@@ -333,9 +365,12 @@ if (import.meta.main) {
   while (!(await fetch(`${base}/api/sessions`).then((r) => r.ok, () => false))) await Bun.sleep(2_000);
   if (!state.seq) state.seq = Number((await fetch(`${base}/api/events?topic=none&after=now`)).headers.get("x-maxflow-seq") ?? 0);
   log(`inbox sentry as ${ghMe || "?"} / ${me || "?"}`);
-  let batchSince = 0;
+  let batchSince = 0, handledAt = 0;
+  // Reply tasks opened before reactions were checked: watch their thread's first message.
+  for (const [key, id] of Object.entries(state.tasks)) if (/^[CDG]\w+\/[\d.]+$/.test(key) && !Object.values(state.open).includes(key) && id) state.open[key.split("/")[1]] = key;
   for (;;) {
     try {
+      if (Date.now() - handledAt >= HANDLED_MS) (await handled(me), (handledAt = Date.now()));
       if (Date.now() - state.prsAt >= PRS_MS) await refreshPrs(ghMe);
       if (Date.now() - state.stallAt >= STALL_MS) await stalls();
       const events = (await (await fetch(`${base}/api/events?topic=**&after=${state.seq}&wait=60000`)).json()) as { seq: number; topic: string; data: any }[];
