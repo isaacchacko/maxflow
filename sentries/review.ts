@@ -2,13 +2,14 @@
 // review sentry's feed: runs beside the review agent (sentries/review.md) in its pane. It stages every open PR of the user's into
 // review-queue.json, has the gh sentry watch them all, and notifies the agent when a PR changes stage or a person's comment
 // reaches no session. Exits with the agent.
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { links, markRead, ownComment, REVIEW_WATCH_FILE, type Watch } from "./gh";
+import { type Link, links, markRead, ownComment, REVIEW_WATCH_FILE, type Watch } from "./gh";
 
 const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const EDGES_FILE = join(STATE_DIR, "review-edges.json");
 const QUEUE_FILE = join(STATE_DIR, "review-queue.json");
+const BOARD_FILE = join(STATE_DIR, "review-board.json");
 const INTERVAL_MS = Number(process.env.REVIEW_SENTRY_INTERVAL ?? 120_000);
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 // Sent with each call that touches a session, so the graph draws this sentry doing it.
@@ -16,16 +17,45 @@ const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 const agent = process.env.MAXFLOW_SESSION!;
 
 type Pr = {
-  number: number; url: string; title: string; body: string; isDraft: boolean; mergeable: string; reviewDecision: string | null; headRefName: string;
-  createdAt: string; updatedAt: string; repository: { nameWithOwner: string }; reviewRequests: { totalCount: number }; id: string; autoMergeRequest: object | null;
+  number: number; url: string; title: string; body: string; isDraft: boolean; mergeable: string; reviewDecision: string | null; headRefName: string; headRefOid: string;
+  createdAt: string; updatedAt: string; repository: { nameWithOwner: string; defaultBranchRef: { name: string } }; reviewRequests: { totalCount: number }; id: string;
+  autoMergeRequest: object | null; mergeStateStatus: string; baseRefName: string; baseRef: { associatedPullRequests: { totalCount: number } } | null;
+  latestReviews: { nodes: { state: string; submittedAt: string }[] };
   commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
 };
 type Event = { seq: number; topic: string; data: { pr: string; told: string[]; id?: string; who?: string | null; author?: string; state?: string; body?: string; url?: string; path?: string } };
-type Session = { id: string; name: string; running: boolean; links: string[]; sentry: boolean };
+type Session = { id: string; name: string; running: boolean; links: string[]; sentry: boolean; pending: number };
 
 const QUERY = `query { search(query: "is:pr is:open author:@me archived:false", type: ISSUE, first: 100) { nodes { ... on PullRequest {
  id number url title body isDraft mergeable reviewDecision headRefName createdAt updatedAt repository { nameWithOwner } reviewRequests(first: 1) { totalCount }
   autoMergeRequest { enabledAt } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } } }`;
+// What landing needs, fetched only for approved PRs: in the search it pushes the query past GitHub's 10s limit.
+const LANDING_FIELDS = `id number url title body isDraft mergeable reviewDecision headRefName headRefOid mergeStateStatus baseRefName
+  repository { nameWithOwner defaultBranchRef { name } } autoMergeRequest { enabledAt } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+  baseRef { associatedPullRequests(states: MERGED, first: 1) { totalCount } } latestReviews(first: 20) { nodes { state submittedAt } }`;
+
+// Approved PRs to land: the user's own, plus every PR the gh sentry polls for a live session (a QA bot's PR an agent drives, say).
+function approvedPrs(mine: Pr[]): Pr[] {
+  const ghState = join(STATE_DIR, "gh-state.json");
+  const polled = existsSync(ghState) ? Object.entries(JSON.parse(readFileSync(ghState, "utf8")) as Record<string, { state: string; decision: string }>) : [];
+  const keys = new Set([
+    ...mine.filter((pr) => pr.reviewDecision === "APPROVED").map(keyOf),
+    ...polled.filter(([, p]) => p.state === "OPEN" && p.decision === "APPROVED").map(([key]) => key),
+  ]);
+  const byRepo = Map.groupBy([...keys], (key) => key.split("#")[0]);
+  const prs: Pr[] = [];
+  for (const [repo, ks] of byRepo) {
+    const [owner, name] = repo.split("/");
+    const parts = ks.map((k) => `n${k.split("#")[1]}: pullRequest(number: ${k.split("#")[1]}) { ${LANDING_FIELDS} }`).join("\n");
+    const r = Bun.spawnSync(["gh", "api", "graphql", "-f", `query=query { r: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${parts} } }`], { stderr: "pipe" });
+    if (r.exitCode !== 0) {
+      console.error(`${new Date().toLocaleTimeString()}  landing lookup failed for ${repo}: ${r.stderr.toString().trim().split("\n")[0]}`);
+      continue;
+    }
+    prs.push(...(Object.values(JSON.parse(r.stdout.toString()).data.r ?? {}) as (Pr | null)[]).filter((pr): pr is Pr => !!pr));
+  }
+  return prs.filter((pr) => pr.reviewDecision === "APPROVED" && !pr.isDraft && !NEVER_MERGE.test(pr.title) && !NEVER_MERGE.test(pr.body));
+}
 
 // Whether a PR changes frontend UI, by node id. Looked up once per PR in its own query: files in the search pushes it past GitHub's 10s limit.
 const uiOf = new Map<string, boolean>();
@@ -66,6 +96,97 @@ const notify = (text: string) => fetch(`${base}/api/sessions/${agent}/notify`, {
 let stages = new Map<string, string>();
 let titles = new Map<string, string>();
 
+// Landing: every poll, an approved PR is pushed toward merged without waiting for anyone to notice it.
+const LANDING = "Approved, not merged (the feed is landing these)";
+const ESCALATE_MS = 30 * 60_000, UNREACHABLE_MS = 5 * 60_000;
+const NEVER_MERGE = /never[- ]merge|do not merge|don'?t merge|not for merge|^one-off/i;
+const landingLog = new Map<string, string[]>();
+const pendingSince = new Map<string, number>();
+const woken = new Set<string>();
+const escalated = new Set<string>();
+
+function gh(args: string[]) {
+  const r = Bun.spawnSync(["gh", ...args], { stderr: "pipe", stdout: "pipe" });
+  return { ok: r.exitCode === 0, err: r.stderr.toString().trim().split("\n")[0] };
+}
+
+function logAction(key: string, what: string) {
+  const log = landingLog.get(key) ?? landingLog.set(key, []).get(key)!;
+  if (log[0]?.endsWith(` ${what}`)) return;
+  log.unshift(`${new Date().toTimeString().slice(0, 5)} ${what}`);
+  log.splice(4);
+  console.log(`${new Date().toLocaleTimeString()}  ${key}  ${what}`);
+}
+
+const unreachable = (id: string) => Date.now() - (pendingSince.get(id) ?? Date.now()) > UNREACHABLE_MS;
+
+// Hands a fix only a person or agent can make (a conflict, a branch GitHub won't update) to the PR's owner, or to the review agent when nobody reachable owns it.
+async function wake(pr: Pr, owners: string[], problem: string) {
+  const key = keyOf(pr), tag = `${key} ${problem} ${pr.headRefOid}`;
+  if (woken.has(tag)) return;
+  woken.add(tag);
+  const reachable = owners.filter((id) => !unreachable(id));
+  const fix = `merge ${pr.repository.defaultBranchRef.name} into ${pr.headRefName}, resolve, and push; auto-merge takes it from there`;
+  for (const id of reachable)
+    await fetch(`${base}/api/sessions/${id}/notify`, { method: "POST", headers: caller, body: JSON.stringify({ text: `[maxflow review] ${label(key)} is approved but ${problem}: ${fix}. ${pr.url}` }) });
+  if (reachable.length) return logAction(key, `asked ${reachable.join(", ")} to fix: ${problem}`);
+  await notify(`${label(key)} is approved but ${problem}, and no reachable session owns it: revive its chat or start a resolver to ${fix}. ${pr.url}`);
+  logAction(key, `no reachable owner; asked the review agent for a resolver (${problem})`);
+}
+
+async function land(pr: Pr, owners: string[]) {
+  const key = keyOf(pr), repo = pr.repository.nameWithOwner, n = String(pr.number), main = pr.repository.defaultBranchRef.name;
+  const ci = pr.commits.nodes[0]?.commit.statusCheckRollup?.state;
+  if (pr.baseRefName !== main && (!pr.baseRef || pr.baseRef.associatedPullRequests.totalCount)) {
+    const r = gh(["pr", "edit", n, "-R", repo, "--base", main]);
+    return logAction(key, r.ok ? `retargeted onto ${main}: its base ${pr.baseRefName} was merged` : `retarget onto ${main} failed: ${r.err}`);
+  }
+  if (pr.mergeStateStatus === "DIRTY" || pr.mergeable === "CONFLICTING") return wake(pr, owners, `conflicts with ${main}`);
+  if (pr.mergeStateStatus === "BEHIND") {
+    let r = gh(["pr", "update-branch", n, "-R", repo]);
+    // GitHub refuses when the head moved since it was read; gh reads it afresh on the retry.
+    if (!r.ok && /sha|head/i.test(r.err)) r = gh(["pr", "update-branch", n, "-R", repo]);
+    logAction(key, r.ok ? `updated the branch from ${main}` : `update-branch failed: ${r.err}`);
+    if (!r.ok) await wake(pr, owners, `behind ${main} and GitHub can't update the branch`);
+  }
+  if (ci === "FAILURE" || ci === "ERROR" || pr.autoMergeRequest) return;
+  // GitHub won't arm auto-merge on a PR that can merge right now, so that one merges directly.
+  const r = pr.mergeStateStatus === "CLEAN" ? gh(["pr", "merge", n, "-R", repo, "--squash"]) : gh(["pr", "merge", n, "-R", repo, "--auto", "--squash"]);
+  logAction(key, r.ok ? (pr.mergeStateStatus === "CLEAN" ? "merged" : "armed auto-merge") : `merge failed: ${r.err}`);
+}
+
+// The landing section sits first on the board, rewritten every poll, with each PR's recent actions and why it's escalated.
+async function landAll(prs: Pr[], ties: Link[], sessions: Session[]) {
+  for (const s of sessions) if (!s.pending) pendingSince.delete(s.id); else if (!pendingSince.has(s.id)) pendingSince.set(s.id, Date.now());
+  const live = new Set(sessions.map((s) => s.id));
+  const items = [];
+  for (const pr of approvedPrs(prs)) {
+    const key = keyOf(pr), repo = pr.repository.nameWithOwner.toLowerCase();
+    const own = [...new Set(ties.filter((l) => l.session && live.has(l.session) && l.repo === repo && (l.pr === key || l.branch === pr.headRefName)).map((l) => l.session))];
+    try {
+      await land(pr, own);
+    } catch (e) {
+      logAction(key, `landing failed: ${e}`);
+    }
+    const approvedAt = Math.max(...pr.latestReviews.nodes.filter((r) => r.state === "APPROVED").map((r) => Date.parse(r.submittedAt)), 0);
+    const why = [
+      approvedAt && Date.now() - approvedAt > ESCALATE_MS ? `approved ${Math.round((Date.now() - approvedAt) / 60_000)} min ago and still open (GitHub: ${pr.mergeStateStatus.toLowerCase()}${pr.autoMergeRequest ? ", auto-merge armed" : ""})` : "",
+      own.length && own.every(unreachable) ? `owner ${own.join(", ")} hasn't taken a message in 5+ min` : "",
+    ].filter(Boolean).join("; ");
+    if (why && !escalated.has(key)) {
+      escalated.add(key);
+      await notify(`Escalated ${label(key)}: ${why}. Last actions: ${(landingLog.get(key) ?? ["none"]).join("; ")}. ${pr.url}`);
+    }
+    if (!why) escalated.delete(key);
+    items.push({ pr: label(key), url: pr.url, note: [why && `ESCALATED: ${why}`, ...(landingLog.get(key) ?? [pr.autoMergeRequest ? "auto-merge armed" : "approved"])].filter(Boolean).join(" · "), why });
+  }
+  items.sort((a, b) => Number(!!b.why) - Number(!!a.why));
+  const board = existsSync(BOARD_FILE) ? JSON.parse(readFileSync(BOARD_FILE, "utf8")) : { sections: [] };
+  board.sections = [...(items.length ? [{ title: LANDING, items: items.map(({ why, ...item }) => item) }] : []), ...(board.sections ?? []).filter((s: { title: string }) => s.title !== LANDING)];
+  writeFileSync(`${BOARD_FILE}.tmp`, JSON.stringify(board, null, 2));
+  renameSync(`${BOARD_FILE}.tmp`, BOARD_FILE);
+}
+
 async function tick() {
   const prs = openPrs();
   lookUpUi(prs);
@@ -89,6 +210,7 @@ async function tick() {
   writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
   writeFileSync(REVIEW_WATCH_FILE, JSON.stringify(queue.map((q): Watch => ({ pr: q.pr, sessions: owners.get(q.pr)! }))));
   writeFileSync(EDGES_FILE, JSON.stringify(queue.flatMap((q) => q.sessions.map((s) => ({ session: s.id, label: label(q.pr) })))));
+  await landAll(prs, ties, sessions);
 
   const next = new Map(queue.map((q) => [q.pr, q.stage]));
   const first = !stages.size;
