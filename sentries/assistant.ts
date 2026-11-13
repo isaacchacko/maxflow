@@ -23,7 +23,7 @@ type Session = { id: string; name: string; sentry: boolean; agent: boolean; stat
 type Question = { id: number; session: string; name: string; status: string; thread: { from: string; text: string }[] };
 type Event = { seq: number; at: number; topic: string; data: any };
 type Mark = { offset: number; reply?: string };
-type Prompt = { at: string; session: string; title: string; text: string };
+type Prompt = { at: string; session: string; title: string; sentry: boolean; text: string; task?: number };
 type Reply = { session: string; title: string; status: string; wait: string | null; text: string };
 // What the next digest will carry; urgent once it holds something the user asked.
 type Pending = { prompts: Prompt[]; replies: Record<string, Reply>; events: string[]; urgent: boolean };
@@ -111,7 +111,7 @@ async function read() {
       const at = Date.parse(e.timestamp);
       // What he types in the Ask panel the assistant reads for itself.
       const words = e.type === "user" && at >= state.since && s.id !== process.env.MAXFLOW_SESSION ? usersWords(e) : null;
-      if (words) (pending.prompts.push({ at: new Date(at).toISOString(), session: s.id, title: s.name, text: clip(words, 2_000) }), (pending.urgent = true));
+      if (words) (pending.prompts.push({ at: new Date(at).toISOString(), session: s.id, title: s.name, sentry: s.sentry, text: clip(words, 2_000) }), (pending.urgent = true));
     }
     // A sentry's replies are its own bookkeeping, not work toward a task. An agent still on its turn hasn't said where it got to; its
     // reply is read once the turn ends.
@@ -125,12 +125,14 @@ async function read() {
   for (const path of Object.keys(state.marks)) if (!live.has(path)) delete state.marks[path];
 
   const fresh = await get<Event[]>(`/api/events?topic=**&after=${state.seq}`);
+  const tasks = fresh.some((e) => e.topic.startsWith("intent/")) ? await get<Task[]>("/api/tasks") : [];
   const questions = new Map((await get<Question[]>("/api/questions")).map((q) => [q.id, q]));
   for (const e of fresh.filter((e) => MOVES.test(e.topic) && e.at >= state.since)) {
     const q = e.topic.startsWith("question/") ? questions.get(e.data?.id) : undefined;
     const who = e.data?.session && `${e.data.session} (${name.get(e.data.session) ?? "?"})`;
     const what = q ? `${q.name}: ${clip(q.thread[0].text, 600)}${q.thread.length > 1 ? ` ↳ ${q.thread.at(-1)!.from}: ${clip(q.thread.at(-1)!.text, 600)}` : ""}` : clip(JSON.stringify(e.data), 600);
-    pending.events.push(`${new Date(e.at).toISOString()} ${e.topic}${who ? ` ${who}` : ""} ${what}`);
+    const made = e.topic.startsWith("intent/") && typeof e.data?.request === "string" ? askedIn(tasks, e.data.request) : undefined;
+    pending.events.push(`${new Date(e.at).toISOString()} ${e.topic}${who ? ` ${who}` : ""} ${what}${made ? ` (the server filed it as T-${made})` : ""}`);
     if (URGENT.test(e.topic)) pending.urgent = true;
   }
   state.seq = fresh.at(-1)?.seq ?? state.seq;
@@ -138,7 +140,23 @@ async function read() {
   writeFileSync(STATE_FILE, JSON.stringify(state));
 }
 
-type Task = { id: number; title: string; status: string; sessions: string[]; links: string[] };
+type Task = { id: number; title: string; status: string; sessions: string[]; links: string[]; timeline: { text: string }[] };
+
+// The server turns each of his requests the funnel relays into a task, with an "asked: <headline>" line, before or soon after the
+// prompt he typed reaches this feed. A prompt is matched to that task by the words the headline keeps of it, so the assistant adds to
+// the task instead of opening a second one.
+const askKey = (text: string) => text.replace(/<\/?pasted_content[^>]*>/g, "").replace(/\s+/g, " ").trim().replace(/…$/, "").slice(0, 60).toLowerCase();
+function askedIn(tasks: Task[], text: string) {
+  const key = askKey(text);
+  if (key.length < 12) return undefined;
+  return tasks.findLast((t) => t.status !== "dropped" && t.timeline.some((e) => {
+    if (!e.text.startsWith("asked: ")) return false;
+    const asked = askKey(e.text.slice(7));
+    return asked.length >= 12 && (key.startsWith(asked) || asked.startsWith(key));
+  }))?.id;
+}
+// How long a prompt typed into a sentry's pane (the funnel's, mostly) waits for the server to make its task before it goes out alone.
+const HOLD_MS = 3 * 60_000;
 
 // The state of every PR the open tasks link, in one GitHub query, for the board's merged counts and the server's waiting rule.
 async function lookUpPrs() {
@@ -155,18 +173,23 @@ async function lookUpPrs() {
 async function digest() {
   const now = Date.now();
   const replies = Object.values(pending.replies);
-  const { prompts, events } = pending;
+  const tasks = await get<Task[]>("/api/tasks");
+  for (const p of pending.prompts) p.task ??= askedIn(tasks, p.text);
+  const held = pending.prompts.filter((p) => p.sentry && !p.task && now - Date.parse(p.at) < HOLD_MS);
+  const prompts = pending.prompts.filter((p) => !held.includes(p));
+  const { events } = pending;
+  if (!prompts.length && !events.length && !replies.length) return;
   console.log(`${new Date(now).toLocaleTimeString()}  digest: ${prompts.length} prompts from the user, ${replies.length} replies, ${events.length} events`);
   if (prompts.length || replies.length || events.length) {
     writeFileSync(DIGEST_FILE, JSON.stringify({ at: now, prompts, replies, events }, null, 2));
     const text = [
-      prompts.length && `The user's prompts:\n${prompts.map((p) => `- ${p.at} to ${p.session} (${p.title}): ${JSON.stringify(p.text)}`).join("\n")}`,
+      prompts.length && `The user's prompts:\n${prompts.map((p) => `- ${p.at} to ${p.session} (${p.title})${p.task ? `, already task T-${p.task} (add to it, don't create another)` : ""}: ${JSON.stringify(p.text)}`).join("\n")}`,
       replies.length && `Where agents ended their turns:\n${replies.map((r) => `- ${r.session} (${r.title}) ${r.status}${r.wait ? `, waits on ${r.wait}` : ""}: ${JSON.stringify(r.text)}`).join("\n")}`,
       events.length && `Events:\n${events.map((e) => `- ${e}`).join("\n")}`,
     ].filter(Boolean).join("\n\n");
     await notify(text.length <= NOTIFY_CHARS ? text : `${text.slice(0, NOTIFY_CHARS)}\n… cut here; the whole digest is in ${DIGEST_FILE}.`);
   }
-  Object.assign(pending, { prompts: [], replies: {}, events: [], urgent: false });
+  Object.assign(pending, { prompts: held, replies: {}, events: [], urgent: held.length > 0 });
   state.digestAt = now;
   writeFileSync(STATE_FILE, JSON.stringify(state));
 }
