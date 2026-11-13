@@ -9,7 +9,7 @@
     "start": "bun server.ts"
   },
   "dependencies": {
-    "@isaacchacko/graph": "0.4.0",
+    "@isaacchacko/graph": "file:./vendor/isaacchacko-graph-0.4.1.tgz",
     "@xterm/addon-clipboard": "0.1.0",
     "@xterm/addon-fit": "0.10.0",
     "@xterm/addon-web-links": "0.11.0",
