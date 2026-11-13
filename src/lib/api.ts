@@ -58,6 +58,8 @@ export type Task = {
   at: number;
   updated: number;
   timeline: { at: number; text: string; session?: string }[];
+  // Its linked PRs whose state is known: how many merged, closed unmerged, and in all.
+  prs: { merged: number; closed: number; total: number };
 };
 
 // One of the user's own PR comments not yet resolved: a review thread still open, or a top-level comment nobody answered yet.

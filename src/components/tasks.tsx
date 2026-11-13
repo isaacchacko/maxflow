@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronRight, ExternalLink, GitPullRequest, MessageSquare, Search, SquareKanban, X } from "lucide-react";
+import { Bot, ChevronRight, ExternalLink, GitMerge, GitPullRequest, Hourglass, MessageSquare, Search, SquareKanban, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -44,6 +44,18 @@ const DONE_SHOWN = 20;
 const statusTitle = (s: Task["status"]) => COLUMNS.find((c) => c.status === s)?.title ?? "Dropped";
 const taskKey = (t: Task) => `T-${t.id}`;
 const prLabel = (url: string) => url.match(/github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/)?.slice(1).join("#");
+// What a task's agents are asleep on, the longest wait first: "teammate approval on app#12345 · 3h".
+function waitingOn(t: Task, byId: Map<string, Session>) {
+  const waits = t.sessions.flatMap((id) => {
+    const s = byId.get(id);
+    return s?.wait && s.wait.kind !== "done" ? [{ s, w: s.wait }] : [];
+  }).sort((a, b) => a.w.at - b.w.at);
+  if (!waits.length) return null;
+  const { s, w } = waits[0];
+  const pr = prLabel(w.ref) ?? w.ref;
+  const what = { q: `your answer to q${w.ref}`, approval: `teammate approval on ${pr}`, ci: `CI on ${pr}`, agent: `“${byId.get(w.ref)?.name ?? w.ref}”`, slack: "a Slack reply", done: "" }[w.kind];
+  return { text: `${s.name} waits on ${what}`, at: w.at };
+}
 const initials = (name: string) => name.split(/\s+/).filter((w) => /^[a-z0-9]/i.test(w)).slice(0, 2).map((w) => w[0].toUpperCase()).join("") || "?";
 const typing = (e: KeyboardEvent) => !!(e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable=true], .xterm");
 
@@ -72,6 +84,7 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
   const [cursor, setCursor] = useState<{ col: number; row: number } | null>(null);
   const filterInput = useRef<HTMLInputElement>(null);
   const named = useMemo(() => new Map(sessions.map((s) => [s.id, s.name])), [sessions]);
+  const byId = useMemo(() => new Map(sessions.map((s) => [s.id, s])), [sessions]);
   // A search reaches everything the board knows about a card, and every word must appear somewhere in it.
   const words = filter.toLowerCase().split(/\s+/).filter(Boolean);
   const hits = (text: string) => words.every((w) => text.toLowerCase().includes(w));
@@ -164,7 +177,7 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
                 <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-1.5 pb-1.5">
                   {c.status === "you" && unreviewed.length > 0 && <UnreviewedPrs prs={unreviewed} />}
                   {c.cards.map((t, row) => (
-                    <TaskCard key={t.id} task={t} named={named} selected={selected?.id === t.id} onClick={() => (setCursor({ col, row }), setShown(t.id))} />
+                    <TaskCard key={t.id} task={t} named={named} waiting={t.status === "waiting" || t.status === "you" ? waitingOn(t, byId) : null} selected={selected?.id === t.id} onClick={() => (setCursor({ col, row }), setShown(t.id))} />
                   ))}
                   {c.all.length > c.cards.length && <p className="px-2 py-1 text-muted-foreground">{c.all.length - c.cards.length} older not shown</p>}
                 </div>
@@ -189,7 +202,7 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
   );
 }
 
-function TaskCard({ task: t, named, selected, onClick }: { task: Task; named: Map<string, string>; selected: boolean; onClick: () => void }) {
+function TaskCard({ task: t, named, waiting, selected, onClick }: { task: Task; named: Map<string, string>; waiting: { text: string; at: number } | null; selected: boolean; onClick: () => void }) {
   const prs = t.links.flatMap((url) => prLabel(url) ?? []);
   return (
     <button
@@ -207,8 +220,10 @@ function TaskCard({ task: t, named, selected, onClick }: { task: Task; named: Ma
         <span className="line-clamp-3">{t.title}</span>
       </span>
       {t.timeline.length > 0 && <span className="line-clamp-2 pl-[22px] text-muted-foreground">{t.timeline.at(-1)!.text}</span>}
+      {waiting && <span className="line-clamp-1 pl-[22px] text-[#4cb782]" title={waiting.text}><Hourglass className="mr-1 inline size-3 align-[-2px]" />{waiting.text} · {ago(waiting.at)}</span>}
       <span className="flex flex-wrap items-center gap-1 pl-[22px]">
         {t.kind === "question" && <Chip className={t.answer ? "text-[#4cb782]" : undefined}><span className="size-1.5 rounded-full bg-current" />{t.answer ? "Answered" : "Question"}</Chip>}
+        {t.prs?.total > 1 && <Chip className={t.prs.merged + t.prs.closed === t.prs.total ? "text-[#5e6ad2]" : undefined}><GitMerge className="size-3" />{t.prs.merged}/{t.prs.total} merged</Chip>}
         {prs.slice(0, 2).map((p) => <Chip key={p}><GitPullRequest className="size-3" />{p}</Chip>)}
         <span className="ml-auto text-muted-foreground">{ago(t.updated)}</span>
       </span>

@@ -537,6 +537,13 @@ const waitLabel = (w: Wait) => (w.kind === "done" ? "done" : `${w.kind}:${w.ref}
 type GhComment = { id: string; author: { login: string } | null };
 type GhPr = { state: string; title: string; comments: { nodes: GhComment[] }; reviewThreads: { nodes: { isResolved: boolean; comments: { nodes: GhComment[] } }[] } };
 const ghStatus = sentryFile<Record<string, { pr: GhPr }>>(`${process.env.HOME}/.maxflow/gh-status.json`, {});
+// The state of each PR a task links, { url: OPEN | MERGED | CLOSED }, which the assistant sentry's feed looks up on GitHub.
+const taskPrs = sentryFile<Record<string, string>>(`${process.env.HOME}/.maxflow/task-prs.json`, {});
+// How far a task's PRs got, counting only those whose state is known.
+function prProgress(t: Task) {
+  const states = t.links.flatMap((url) => taskPrs()[url] ?? []);
+  return { merged: states.filter((s) => s === "MERGED").length, closed: states.filter((s) => s === "CLOSED").length, total: states.length };
+}
 
 function declareWait(s: Session, kind: string, ref: string): string | null {
   if (!["q", "approval", "ci", "agent", "slack", "done"].includes(kind)) return "kind must be q, approval, ci, agent, slack or done";
@@ -920,7 +927,7 @@ Bun.serve<WsData>({
       return Response.json(q);
     }
 
-    if (path === "/api/tasks" && req.method === "GET") return Response.json(tasks);
+    if (path === "/api/tasks" && req.method === "GET") return Response.json(tasks.map((t) => ({ ...t, prs: prProgress(t) })));
     if (path === "/api/comments" && req.method === "GET") return Response.json(openUserComments());
     const task = path.match(/^\/api\/tasks(?:\/(\d+))?$/);
     if (task && req.method === "POST") {
