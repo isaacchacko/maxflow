@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
-import { QuestionCard } from "@/components/questions";
+import { QuestionRow, QuestionThread } from "@/components/questions";
 import { Terminal, type TerminalHandle } from "@/components/terminal";
 import { ago, api, pasteImages, store, type OpenComment, type Question, type QueuedPr, type Session, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -102,6 +102,9 @@ export function TasksBoard({ tasks, prs, comments, questions, sessions, onOpen, 
   const questionsOf = (t: Task) => pending.filter((q) => t.sessions.includes(q.session));
   const taskOf = (q: Question) => tasks.findLast((t) => t.sessions.includes(q.session) && t.status !== "done" && t.status !== "dropped");
   const task = tasks.find((t) => t.id === shown);
+  // A question no open task owns opens on its own.
+  const [askedId, setAsked] = useState<number | null>(null);
+  const asked = pending.find((q) => q.id === askedId);
   const assistant = sessions.find((s) => s.sentry && s.name === "sentry:assistant" && s.running);
   const [chatting, setChatting] = useState(() => store.get("mf.tasksChat") !== "0");
   const toggleChat = () => setChatting((c) => (store.set("mf.tasksChat", c ? "0" : "1"), !c));
@@ -133,7 +136,7 @@ export function TasksBoard({ tasks, prs, comments, questions, sessions, onOpen, 
   // Linear's keys: j/k or ↓/↑ within a column, h/l or ←/→ across, Enter opens, / filters.
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   keys.current = (e) => {
-    if (shown !== null || typing(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (shown !== null || askedId !== null || typing(e) || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "/") return void (e.preventDefault(), filterInput.current?.focus());
     if (e.key === "Enter" && selected) return void (e.preventDefault(), setShown(selected.id));
     if (e.key === "Escape") return void (cursor ? setCursor(null) : onClose());
@@ -202,7 +205,7 @@ export function TasksBoard({ tasks, prs, comments, questions, sessions, onOpen, 
                 <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-1.5 pb-1.5">
                   {c.status === "you" && pending.map((q) => {
                     const owner = taskOf(q);
-                    return <QuestionCard key={q.id} q={q} task={owner && `${taskKey(owner)} ${owner.title}`} onOpen={(id) => (onClose(), onOpen(id))} onSettled={onSettled} />;
+                    return <QuestionRow key={q.id} q={q} task={owner && `${taskKey(owner)} ${owner.title}`} onClick={() => (owner ? setShown(owner.id) : setAsked(q.id))} />;
                   })}
                   {c.status === "you" && unreviewed.length > 0 && <UnreviewedPrs prs={unreviewed} />}
                   {c.cards.map((t, row) => (
@@ -224,6 +227,15 @@ export function TasksBoard({ tasks, prs, comments, questions, sessions, onOpen, 
       </div>
       {!!words.length && !columns.some((c) => c.all.length) && !unreviewed.length && !pending.length && <p className="absolute inset-x-0 top-1/2 text-center text-muted-foreground">No task mentions “{filter}”.</p>}
       {!tasks.length && !unreviewed.length && !pending.length && <p className="absolute inset-x-0 top-1/2 text-center text-muted-foreground">No tasks yet. The assistant adds them as you ask agents for things.</p>}
+      <Dialog open={!!asked} onOpenChange={(o) => !o && setAsked(null)}>
+        {asked && (
+          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+            <DialogTitle className="text-base">{asked.name}</DialogTitle>
+            <DialogDescription className="sr-only">An agent's question waiting on your answer</DialogDescription>
+            <QuestionThread q={asked} onOpen={(id) => (setAsked(null), onClose(), onOpen(id))} onSettled={onSettled} />
+          </DialogContent>
+        )}
+      </Dialog>
       <Dialog open={!!task} onOpenChange={(o) => !o && setShown(null)}>
         {task && <TaskDetail task={task} questions={questionsOf(task)} named={named} assistant={assistant?.id} onOpen={(id) => (setShown(null), onClose(), onOpen(id))} onSettled={onSettled} />}
       </Dialog>
@@ -354,7 +366,7 @@ function TaskDetail({ task, questions, named, assistant, onOpen, onSettled }: { 
           Tasks <ChevronRight className="size-3" /> <span className="font-mono">{taskKey(task)}</span>
         </DialogDescription>
         <DialogTitle className="text-xl leading-snug font-semibold">{task.title}</DialogTitle>
-        {questions.map((q) => <QuestionCard key={q.id} q={q} onOpen={onOpen} onSettled={onSettled} />)}
+        {questions.map((q) => <QuestionThread key={q.id} q={q} onOpen={onOpen} onSettled={onSettled} />)}
         {task.kind === "question" && (
           <section className="rounded-md border bg-card px-4 py-3 text-sm">
             <h4 className="mb-1.5 text-xs font-medium text-muted-foreground">Answer</h4>
