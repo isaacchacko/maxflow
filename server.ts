@@ -37,6 +37,9 @@ type Session = {
   wait?: Wait;
   // When the inbox last typed messages from agents or sentries (not the user's own request) into the prompt.
   peerTurnAt?: number;
+  // When the inbox last pasted into the prompt, and how many times since it pressed Enter again on a paste left unsent.
+  pastedAt?: number;
+  enterRetries?: number;
 };
 // awake: a message woke it; it goes back to sleep on the same wait when that turn ends, until the awaited event itself clears it.
 type Wait = { kind: "q" | "approval" | "ci" | "agent" | "slack" | "done"; ref: string; at: number; awake?: boolean };
@@ -736,26 +739,54 @@ function screen(s: Session, history: number) {
   return s.lastScreen ?? new TextDecoder().decode(Buffer.concat(s.chunks)).replace(/\x1b\[[\d;]*[HfABCDG]/g, "\n").replace(/\x1b(\][^\x07]*\x07|\[[\d;?<>=]*[ -/]*[@-~]|[()][\w]|.)/g, "").replace(/\n\s*\n+/g, "\n").trimEnd();
 }
 
-// True when claude sits at an empty input box: the line under the box's top border holds only `❯` and dim placeholder text.
-function atEmptyPrompt(s: Session) {
+// The text in claude's input box: from the `❯` line under the box's top border (which may carry the session's title, "──── Title ─")
+// to the box's bottom border, and whether it is only dim placeholder text.
+function inputBox(s: Session) {
   const lines = tmux("capture-pane", "-p", "-e", "-t", tmuxName(s.id)).out.split("\n");
   const plain = (l: string) => l.replace(/\x1b\[[\d;]*m/g, "");
-  const i = lines.findLastIndex((l, i) => i > 0 && plain(l).startsWith("❯") && /^─{10,}$/.test(plain(lines[i - 1]).trim()));
-  if (i < 0) return false;
-  const rest = lines[i].slice(lines[i].indexOf("❯") + 1).replace(/^[\s\u00a0]+/, "");
-  return rest.startsWith("\x1b[2m") || plain(rest).trim() === "";
+  const border = (l: string) => /^─{10,}/.test(plain(l).trim());
+  const i = lines.findLastIndex((l, i) => i > 0 && plain(l).startsWith("❯") && border(lines[i - 1]));
+  if (i < 0) return null;
+  const end = lines.findIndex((l, j) => j > i && border(l));
+  const first = lines[i].slice(lines[i].indexOf("❯") + 1).replace(/^[\s\u00a0]+/, "");
+  const text = lines.slice(i, end < 0 ? undefined : end).map(plain).join("\n").replace(/^❯/, "").trim();
+  return { text, placeholder: first.startsWith("\x1b[2m") };
+}
+const atEmptyPrompt = (s: Session) => {
+  const box = inputBox(s);
+  return !!box && (box.placeholder || box.text === "");
+};
+// A message the inbox pasted whose Enter was lost (it landed while claude was still taking the paste in) sits in the box unsent,
+// and keeps every later message from being delivered. It starts with the server's stamp, or is shown collapsed if it was long.
+const ENTER_RETRIES = 3, PASTE_SEEN_MS = 10 * 60_000;
+function unsent(s: Session) {
+  const box = inputBox(s);
+  if (!box || box.placeholder) return false;
+  return box.text.startsWith("[maxflow") || (/^\[Pasted text #\d+/.test(box.text) && Date.now() - (s.pastedAt ?? 0) < PASTE_SEEN_MS);
 }
 
 // Notifications wait until the agent is idle at its prompt, so they never land mid-turn or in a permission dialog.
 const DELIVER_IDLE_MS = 4000;
 setInterval(async () => {
   for (const s of sessions.values()) {
-    if (!s.inbox.length || s.exitCode !== null || Date.now() - activeAt(s) < DELIVER_IDLE_MS || !atEmptyPrompt(s)) continue;
+    if (s.exitCode !== null || Date.now() - activeAt(s) < DELIVER_IDLE_MS) continue;
+    // Only sessions with a message pending or a recent paste are read, so idle ones cost no capture each second.
+    const recent = Date.now() - (s.pastedAt ?? 0) < PASTE_SEEN_MS;
+    if ((s.inbox.length || recent) && (s.enterRetries ?? 0) < ENTER_RETRIES && unsent(s)) {
+      s.enterRetries = (s.enterRetries ?? 0) + 1;
+      if (s.peerTurnAt) s.peerTurnAt = Date.now();
+      await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Enter");
+      continue;
+    }
+    if (!s.inbox.length || !atEmptyPrompt(s)) continue;
     const text = s.inbox.splice(0).join("\n");
     tmux("set-option", "-t", tmuxName(s.id), "@mf-inbox", "[]");
     s.peerTurnAt = text.includes(VERIFIED) ? undefined : Date.now();
+    s.pastedAt = Date.now();
+    s.enterRetries = 0;
     await paste(tmuxName(s.id), text);
-    await Bun.sleep(150);
+    // A longer paste takes claude longer to take in before Enter submits it.
+    await Bun.sleep(150 + Math.min(1500, text.length / 5));
     await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Enter");
   }
 }, 1000);
