@@ -195,6 +195,14 @@ async function digest() {
 }
 
 console.log(`assistant sentry: reads every ${READ_MS / 1000}s; a digest within a minute of anything the user asked, else every ${INTERVAL_MS / 60_000}m`);
+// One feed at a time: a newer one (restarted by hand to load new code) replaces the one running.
+const PID_FILE = join(STATE_DIR, "assistant-feed.pid");
+try {
+  const old = readFileSync(PID_FILE, "utf8").trim();
+  // Only if that pid is still a feed, not a process that reused it.
+  if (Bun.spawnSync(["ps", "-p", old, "-o", "command="]).stdout.toString().includes("sentries/assistant.ts")) process.kill(Number(old));
+} catch {}
+writeFileSync(PID_FILE, String(process.pid));
 // Started with the server, so wait for it to answer before the first read.
 while (!(await fetch(`${base}/api/sessions`).then((r) => r.ok, () => false))) await Bun.sleep(2_000);
 let lookedUp = 0;
@@ -207,5 +215,6 @@ for (;;) {
     console.error(`${new Date().toLocaleTimeString()}  read failed:`, e);
   }
   await Bun.sleep(READ_MS);
-  if (process.ppid === 1) process.exit(0);
+  // Exits with the assistant's pane, or once a newer feed took over.
+  if (process.ppid === 1 || readFileSync(PID_FILE, "utf8") !== String(process.pid)) process.exit(0);
 }
