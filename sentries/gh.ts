@@ -190,10 +190,13 @@ function hasOwnNew(pr: Pr, prev: PrState, me: string) {
   return [...pr.reviews.nodes, ...pr.comments.nodes, ...pr.reviewThreads.nodes.flatMap((t) => t.comments.nodes)].some((c) => !seen.has(c.id) && c.author?.login === me);
 }
 
-function snapshot(pr: Pr): PrState {
+// ci keeps the last finished result announced, so a rollup that dips back to pending on the same head (a re-run, a late check) and lands
+// on the same result isn't announced again.
+function snapshot(pr: Pr, prev?: PrState): PrState {
+  const ci = pr.commits.nodes[0]?.commit.statusCheckRollup?.state ?? "";
   return {
     head: pr.headRefOid,
-    ci: `${pr.headRefOid}:${pr.commits.nodes[0]?.commit.statusCheckRollup?.state ?? ""}`,
+    ci: ci === "SUCCESS" || FAILED.has(ci) ? `${pr.headRefOid}:${ci}` : (prev?.ci ?? ""),
     state: pr.state,
     mergeable: pr.mergeable,
     decision: pr.reviewDecision ?? "",
@@ -240,7 +243,7 @@ async function tick(me: string, state: Record<string, PrState>) {
     const [repo, n] = key.split("#");
     if (!calls && state[key] && hasOwnNew(pr, state[key], me)) calls = await agentCalls();
     const changes = diff(pr, state[key], me, byAgent);
-    state[key] = snapshot(pr);
+    state[key] = snapshot(pr, state[key]);
     const told = [...(listeners.get(key) ?? [])];
     for (const [kind, data] of changes) await post("/api/events", { topic: `gh/${repo}/pr/${n}/${kind}`, data: { pr: key, told, ...(data as object) } });
     const lines = changes.flatMap(([, , line]) => (line ? [line] : []));
