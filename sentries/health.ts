@@ -100,8 +100,9 @@ let page: ReturnType<typeof Bun.serve> | null = null;
 let releasedAt = 0;
 let buildBrokenSince: number | null = null;
 let buildCheckedAt = 0;
+let lastAgentAt = -COOLDOWN_MS;
+const canStartAgent = () => !(agent && run([...TMUX, "has-session", "-t", agent.tmux]).ok) && Date.now() - lastAgentAt >= COOLDOWN_MS;
 // A server asking for the port back is alive and booting (adopting every tmux session takes ~20s), so the agent's clock restarts.
-const canStartAgent = () => !agent || (!run([...TMUX, "has-session", "-t", agent.tmux]).ok && Date.now() - agent.at >= COOLDOWN_MS);
 const agentDueAt = () => downSince && Math.max(downSince, releasedAt) + DOWN_MS;
 
 function state() {
@@ -110,7 +111,7 @@ function state() {
   return {
     down: true,
     downSince,
-    agentDueAt: agentDueAt(),
+    agentDueAt: downSince && Math.max(agentDueAt()!, lastAgentAt + COOLDOWN_MS),
     agent: agent && run([...TMUX, "has-session", "-t", agent.tmux]).ok ? { id: agent.id, at: agent.at } : null,
     launchd: { runs: field("runs"), lastExit: field("last exit code") },
     log: run(["tail", "-n", "40", LOG]).out,
@@ -187,11 +188,14 @@ for (;;) {
         if (await buildOk()) {
           if (buildBrokenSince) console.log(`${stamp()}  build fixed after ${Math.round((Date.now() - buildBrokenSince) / 1000)}s`);
           buildBrokenSince = null;
+          // An agent belongs to the outage it was started for; its session stays open in the sidebar, but the next outage gets its own.
+          agent = null;
         } else {
           if (!buildBrokenSince) console.log(`${stamp()}  frontend build broken`);
           buildBrokenSince ??= Date.now();
           if (Date.now() - buildBrokenSince >= BUILD_DOWN_MS && canStartAgent()) {
             agent = startAgent(buildTask(buildBrokenSince));
+            lastAgentAt = agent.at;
             console.log(`${stamp()}  build broken ${Math.round((Date.now() - buildBrokenSince) / 1000)}s, started recovery agent in ${agent.tmux}`);
             await acceptTrust(agent.tmux);
           }
@@ -206,6 +210,7 @@ for (;;) {
       if (!page && health === "refused" && Date.now() - downSince >= PAGE_AFTER_MS && Date.now() - releasedAt >= RELEASE_GRACE_MS) openPage();
       if (Date.now() >= agentDueAt()! && canStartAgent()) {
         agent = startAgent(downTask(downSince));
+        lastAgentAt = agent.at;
         console.log(`${stamp()}  down ${Math.round((Date.now() - downSince) / 1000)}s, started recovery agent in ${agent.tmux}`);
         await acceptTrust(agent.tmux);
       }
