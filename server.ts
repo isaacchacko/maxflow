@@ -240,6 +240,7 @@ const isAgent = (s: Session) => !!s.claude || !!s.chatId || !!s.asleep || s.cmd[
 for (const s of sessions.values()) if (s.archived) stopAgent(s);
 // Drafts cleared out of the way before a restart still go back once their turn ends.
 const DRAFTS = `${process.env.HOME}/.maxflow/drafts`;
+const UPLOADS = `${process.env.HOME}/.maxflow/uploads`;
 for (const s of sessions.values()) if (existsSync(`${DRAFTS}/${s.id}.txt`)) s.savedDraft = readFileSync(`${DRAFTS}/${s.id}.txt`, "utf8");
 
 // Without hooks a session counts as working while it prints; hooked claude says so itself, checked against two blind spots:
@@ -1051,6 +1052,15 @@ Bun.serve<WsData>({
       return new Response(null, { status: 204 });
     }
 
+    // A pasted image is kept as a file, so the text it's pasted into carries a path the receiving agent can read.
+    if (path === "/api/uploads" && req.method === "POST") {
+      const ext = req.headers.get("content-type")?.match(/^image\/(png|jpeg|gif|webp)$/)?.[1];
+      if (!ext) return new Response("png, jpeg, gif or webp image required", { status: 415 });
+      mkdirSync(UPLOADS, { recursive: true });
+      const file = `${UPLOADS}/${new Date().toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID().slice(0, 8)}.${ext === "jpeg" ? "jpg" : ext}`;
+      await Bun.write(file, await req.arrayBuffer());
+      return Response.json({ path: file });
+    }
     if (path === "/api/link" && req.method === "POST") {
       const body = (await req.json().catch(() => ({}))) as { a?: string; b?: string; why?: string };
       const a = sessions.get(body.a ?? ""), b = sessions.get(body.b ?? "");
