@@ -776,9 +776,9 @@ function screen(s: Session, history: number) {
 }
 
 // The text in claude's input box: from the `❯` line under the box's top border (which may carry the session's title, "──── Title ─")
-// to the box's bottom border, and whether it is only dim placeholder text.
-function inputBox(s: Session) {
-  const lines = tmux("capture-pane", "-p", "-e", "-t", tmuxName(s.id)).out.split("\n");
+// to the box's bottom border, and whether it is only dim placeholder text. Read without blocking, since a capture can take seconds under swap.
+async function inputBox(s: Session) {
+  const lines = (await tmuxAsync("capture-pane", "-p", "-e", "-t", tmuxName(s.id))).out.split("\n");
   const plain = (l: string) => l.replace(/\x1b\[[\d;]*m/g, "");
   const border = (l: string) => /^─{10,}/.test(plain(l).trim());
   const i = lines.findLastIndex((l, i) => i > 0 && plain(l).startsWith("❯") && border(lines[i - 1]));
@@ -786,46 +786,50 @@ function inputBox(s: Session) {
   const end = lines.findIndex((l, j) => j > i && border(l));
   const first = lines[i].slice(lines[i].indexOf("❯") + 1).replace(/^[\s\u00a0]+/, "");
   const text = lines.slice(i, end < 0 ? undefined : end).map(plain).join("\n").replace(/^❯/, "").trim();
-  return { text, placeholder: first.startsWith("\x1b[2m") };
+  return { text, empty: first.startsWith("\x1b[2m") || text === "" };
 }
-const atEmptyPrompt = (s: Session) => {
-  const box = inputBox(s);
-  return !!box && (box.placeholder || box.text === "");
-};
 // A message the inbox pasted whose Enter was lost (it landed while claude was still taking the paste in) sits in the box unsent,
 // and keeps every later message from being delivered. It starts with the server's stamp, or is shown collapsed if it was long.
 const ENTER_RETRIES = 3, PASTE_SEEN_MS = 10 * 60_000;
-function unsent(s: Session) {
-  const box = inputBox(s);
-  if (!box || box.placeholder) return false;
-  return box.text.startsWith("[maxflow") || (/^\[Pasted text #\d+/.test(box.text) && Date.now() - (s.pastedAt ?? 0) < PASTE_SEEN_MS);
-}
+const unsent = (s: Session, box: { text: string; empty: boolean }) =>
+  !box.empty && (box.text.startsWith("[maxflow") || (/^\[Pasted text #\d+/.test(box.text) && Date.now() - (s.pastedAt ?? 0) < PASTE_SEEN_MS));
 
 // Notifications wait until the agent is idle at its prompt, so they never land mid-turn or in a permission dialog.
+// A pass awaits tmux, so one still running skips the next tick instead of delivering the same inbox twice.
 const DELIVER_IDLE_MS = 4000;
+let delivering = false;
 setInterval(async () => {
-  for (const s of sessions.values()) {
-    if (s.exitCode !== null || Date.now() - activeAt(s) < DELIVER_IDLE_MS) continue;
-    // Only sessions with a message pending or a recent paste are read, so idle ones cost no capture each second.
-    const recent = Date.now() - (s.pastedAt ?? 0) < PASTE_SEEN_MS;
-    if ((s.inbox.length || recent) && (s.enterRetries ?? 0) < ENTER_RETRIES && unsent(s)) {
-      s.enterRetries = (s.enterRetries ?? 0) + 1;
-      if (s.peerTurnAt) s.peerTurnAt = Date.now();
-      await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Enter");
-      continue;
-    }
-    if (!s.inbox.length || !atEmptyPrompt(s)) continue;
-    const text = s.inbox.splice(0).join("\n");
-    tmux("set-option", "-t", tmuxName(s.id), "@mf-inbox", "[]");
-    s.peerTurnAt = text.includes(VERIFIED) ? undefined : Date.now();
-    s.pastedAt = Date.now();
-    s.enterRetries = 0;
-    await paste(tmuxName(s.id), text);
-    // A longer paste takes claude longer to take in before Enter submits it.
-    await Bun.sleep(150 + Math.min(1500, text.length / 5));
-    await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Enter");
+  if (delivering) return;
+  delivering = true;
+  try {
+    for (const s of sessions.values()) await deliver(s);
+  } finally {
+    delivering = false;
   }
 }, 1000);
+async function deliver(s: Session) {
+  if (s.exitCode !== null || Date.now() - activeAt(s) < DELIVER_IDLE_MS) return;
+  // Only sessions with a message pending or a recent paste are read, so idle ones cost no capture each second.
+  if (!s.inbox.length && Date.now() - (s.pastedAt ?? 0) >= PASTE_SEEN_MS) return;
+  const box = await inputBox(s);
+  if (!box) return;
+  if ((s.enterRetries ?? 0) < ENTER_RETRIES && unsent(s, box)) {
+    s.enterRetries = (s.enterRetries ?? 0) + 1;
+    if (s.peerTurnAt) s.peerTurnAt = Date.now();
+    await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Enter");
+    return;
+  }
+  if (!s.inbox.length || !box.empty) return;
+  const text = s.inbox.splice(0).join("\n");
+  tmux("set-option", "-t", tmuxName(s.id), "@mf-inbox", "[]");
+  s.peerTurnAt = text.includes(VERIFIED) ? undefined : Date.now();
+  s.pastedAt = Date.now();
+  s.enterRetries = 0;
+  await paste(tmuxName(s.id), text);
+  // A longer paste takes claude longer to take in before Enter submits it.
+  await Bun.sleep(150 + Math.min(1500, text.length / 5));
+  await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Enter");
+}
 
 // Only pages served from this server may drive it; blocks other sites from reaching localhost.
 // Favicons are served from this origin so the graph can read their pixels and plate the dark ones.
