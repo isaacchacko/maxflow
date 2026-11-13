@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { GraphRenderer } from "@isaacchacko/graph";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Archive, Bot, ChevronDown, ChevronUp, ExternalLink, GitMerge, GitPullRequest, GitPullRequestDraft, Hammer, Hash, HeartPulse, Link2, Radar, ScanEye, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
+import { Archive, Bot, ChevronDown, ChevronUp, Copy, ExternalLink, GitMerge, GitPullRequest, GitPullRequestDraft, Gauge, Hammer, Hash, HeartPulse, Link2, MemoryStick, MessageCircleQuestion, Radar, Route, ScanEye, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ago, api, displayName, home, isBusy, isSentry, isWaiting, kindOf, store, type QueuedPr, type ReviewBoard, type Session } from "@/lib/api";
+import { ago, api, displayName, home, isBusy, isSentry, isWaiting, kindOf, store, type Question, type QueuedPr, type ReviewBoard, type Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/sidebar";
 
@@ -50,7 +50,7 @@ const prColors = (sessions: Session[]) => new Map(sessions.flatMap((s) => Object
 // Served by maxflow from the site or Google so it is same-origin; the graph keeps a plain dot if neither loads.
 const favicon = (host: string) => `/api/favicon?host=${encodeURIComponent(host)}`;
 // A sentry's node shows what it watches, drawn in the sentry color; an agent's shows the role sentry:graph gave it.
-const SENTRY_ICONS: Record<string, LucideIcon> = { gh: GitPullRequest, slack: Hash, rename: Tag, health: HeartPulse, graph: Waypoints, review: GitPullRequestDraft };
+const SENTRY_ICONS: Record<string, LucideIcon> = { gh: GitPullRequest, slack: Hash, rename: Tag, health: HeartPulse, graph: Waypoints, review: GitPullRequestDraft, funnel: Route, meta: Gauge, ram: MemoryStick, questions: MessageCircleQuestion };
 const ROLE_ICONS: Record<string, LucideIcon> = { review: ScanEye, implement: Hammer, conflicts: GitMerge };
 const nodeIcon = (s: Session, color: string) => {
   const Icon = isSentry(s) ? (SENTRY_ICONS[displayName(s)] ?? Radar) : s.role && ROLE_ICONS[s.role];
@@ -59,8 +59,15 @@ const nodeIcon = (s: Session, color: string) => {
 };
 // sentry:review's PR queue hangs off its node, drawn with how many PRs on its board need the user; clicking it opens the board.
 const QUEUE_NODE = "pr-queue";
-const isReviewSentry = (s: Session) => s.name === "sentry:review";
+// Agents that need the user hang off one node while a question of theirs is pending with him (a `wait q:` only matters once its question is); clicking it opens his questions.
+const NEEDS_NODE = "needs-me";
+const isUserNode = (id: string) => id === QUEUE_NODE || id === NEEDS_NODE;
+const needsUser = (s: Session, questions: Question[]) => questions.some((q) => q.session === s.id && q.status === "pending");
+const isReviewSentry = (s: Session) => isSentry(s) && s.name === "sentry:review";
 const boardCount = (b: ReviewBoard) => b.sections.reduce((n, s) => n + s.items.length, 0);
+// What a sleeping agent waits on, as it declared it with `maxflow wait`.
+const waitLabel = (w: NonNullable<Session["wait"]>) => (w.kind === "done" ? "done" : `${w.kind}:${w.kind === "approval" || w.kind === "ci" ? `#${w.ref.split("#")[1]}` : w.ref}`);
+
 const countIcon = (n: number, color: string) =>
   `data:image/svg+xml,${encodeURIComponent(renderToStaticMarkup(
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><text x="24" y="25" textAnchor="middle" dominantBaseline="central" fill={color} fontFamily="Inter, ui-sans-serif, system-ui, sans-serif" fontWeight={700} fontSize={n > 99 ? 20 : n > 9 ? 28 : 34}>{n}</text></svg>,
@@ -225,8 +232,10 @@ function drawTouch(ctx: CanvasRenderingContext2D, t: Touch, a: Box, b: Box, now:
 }
 
 // One node per session, linked by edges drawn by hand; drawing one asks why, then introduces the two ends with that reason, and edges live in this browser and go when either session does.
-export function GraphView({ sessions: all, visible, current, hideArchived, onOpen, onCreated, onArchive, onArchiveLinks, onToggleArchived }: {
+export function GraphView({ sessions: all, questions, onQuestions, visible, current, hideArchived, onOpen, onCreated, onArchive, onArchiveLinks, onToggleArchived }: {
   sessions: Session[];
+  questions: Question[];
+  onQuestions: () => void;
   visible: boolean;
   current: string | null;
   hideArchived: boolean;
@@ -246,7 +255,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   const [edges, setEdgesState] = useState<Edge[]>(() => { try { return JSON.parse(store.get("mf.edges") || "[]"); } catch { return []; } });
   const [mode, setMode] = useState<Mode>("select");
   const [showUrls, setShowUrls] = useState(() => store.get("mf.urls") !== "0");
-  const [expanded, setExpanded] = useState<string[]>([]);
+  const [collapsed, setCollapsed] = useState<string[]>([]);
   const [showTitles, setShowTitles] = useState(() => store.get("mf.titles") !== "0");
   const [showGroups, setShowGroups] = useState(() => store.get("mf.groups") === "1");
   const [hover, setHover] = useState<string | null>(null);
@@ -271,7 +280,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   const tip = useRef<HTMLDivElement>(null), editor = useRef<HTMLDivElement>(null), waves = useRef<HTMLCanvasElement>(null), hulls = useRef<HTMLCanvasElement>(null), cursors = useRef<HTMLCanvasElement>(null);
   const touches = useRef(new Map<string, Touch>());
   const [touched, setTouched] = useState(0);
-  const live = useRef({ edges, mode, onOpen, onArchive, onArchiveLinks, archivedUrls, onToggleArchived, newAgentHere: () => {}, toggleQueue: () => {}, toggleHub: (_hub: string) => {}, toggleUrls: () => {}, toggleGroups: () => {}, toggleTitles: () => {}, sessions, drafting: false, togglePick: (_id: string) => {}, groupChords: {} as Record<string, () => void>, groupNumbers: new Map<string, number>() });
+  const live = useRef({ edges, mode, onOpen, onQuestions, onArchive, onArchiveLinks, archivedUrls, onToggleArchived, newAgentHere: () => {}, toggleQueue: () => {}, toggleHub: (_hub: string) => {}, toggleUrls: () => {}, toggleGroups: () => {}, toggleTitles: () => {}, sessions, drafting: false, togglePick: (_id: string) => {}, groupChords: {} as Record<string, () => void>, groupNumbers: new Map<string, number>() });
 
   const setEdges = (next: Edge[]) => {
     setEdgesState(next);
@@ -287,6 +296,8 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     g.on("nodeClick", ({ id }) => {
       if (id === QUEUE_NODE) {
         if (!live.current.drafting) live.current.toggleQueue();
+      } else if (id === NEEDS_NODE) {
+        if (!live.current.drafting) live.current.onQuestions();
       } else if (isDomainNode(id) || isUrlNode(id)) {
         const urls = isDomainNode(id) ? (hubsOf(live.current.sessions).get(id) ?? []) : [urlOfNode(id)];
         if (live.current.drafting) return;
@@ -297,7 +308,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     });
     g.on("nodeContextMenu", ({ id, event }) => {
       event.preventDefault();
-      if (id === QUEUE_NODE) return;
+      if (isUserNode(id)) return;
       if (isDomainNode(id) || isUrlNode(id)) {
         const urls = isDomainNode(id) ? (hubsOf(live.current.sessions).get(id) ?? []) : [urlOfNode(id)];
         return live.current.onArchiveLinks(urls, !urls.every((u) => live.current.archivedUrls.has(u)));
@@ -307,7 +318,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     });
     g.on("connect", ({ source, target }) => {
       const { edges } = live.current;
-      if (source === target || [source, target].some((id) => id === QUEUE_NODE || isUrlNode(id) || isDomainNode(id)) || edges.some((e) => edgeKey(e.source, e.target) === edgeKey(source, target))) return;
+      if (source === target || [source, target].some((id) => isUserNode(id) || isUrlNode(id) || isDomainNode(id)) || edges.some((e) => edgeKey(e.source, e.target) === edgeKey(source, target))) return;
       const edge = { source, target, label: "" };
       setEdges([...edges, edge]);
       unsent.current = edge;
@@ -342,17 +353,19 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     if (all.length && kept.length !== edges.length) return setEdges(kept);
     const hubs = showUrls ? hubsOf(sessions) : new Map<string, string[]>();
     const reviewer = review.board && sessions.find(isReviewSentry);
-    const children = [...hubs].filter(([hub, urls]) => urls.length > 1 && expanded.includes(hub)).flatMap(([hub, urls]) => urls.map((u) => urlNode(hub, u)));
+    const needy = sessions.filter((s) => needsUser(s, questions));
+    const children = [...hubs].filter(([hub, urls]) => urls.length > 1 && !collapsed.includes(hub)).flatMap(([hub, urls]) => urls.map((u) => urlNode(hub, u)));
     g.setData({
       nodes: [
         ...sessions.map((s) => {
           const at = placeAt.current.get(s.id);
           placeAt.current.delete(s.id);
-          return { id: s.id, label: showTitles ? s.name : "", color: sessionColor(s), icon: nodeIcon(s, sessionColor(s)), size: (s.agent || isSentry(s) ? 2.4 : 1.8) * (isBusy(s) || isWaiting(s) ? 1.6 : 1), ...at };
+          return { id: s.id, label: showTitles ? `${s.name}${s.wait ? ` · ⏸ ${waitLabel(s.wait)}` : ""}` : "", color: sessionColor(s), icon: nodeIcon(s, sessionColor(s)), size: (s.agent || isSentry(s) ? 2.4 : 1.8) * (isBusy(s) || isWaiting(s) ? 1.6 : 1), ...at };
         }),
         ...children.map((id) => ({ id, label: "", color: archivedUrls.has(urlOfNode(id)) ? ARCHIVED : (prs.get(urlOfNode(id)) ?? css("--url")), size: 1 })),
         ...[...hubs].map(([hub, urls]) => ({ id: hub, label: showTitles ? hostOfHub(hub) : "", color: allArchived(urls) ? ARCHIVED : (urls.length === 1 && prs.get(urls[0])) || css("--url"), icon: favicon(hostOfHub(hub)), size: 3 })),
-        ...(reviewer ? [{ id: QUEUE_NODE, label: showTitles ? "PR queue" : "", color: css("--sentry"), icon: countIcon(boardCount(review.board!), css("--sentry")), size: 3 }] : []),
+        ...(reviewer ? [{ id: QUEUE_NODE, label: showTitles ? "PR queue" : "", color: css("--user"), icon: countIcon(boardCount(review.board!), css("--user")), size: 3 }] : []),
+        ...(needy.length ? [{ id: NEEDS_NODE, label: showTitles ? "Needs me" : "", color: css("--user"), icon: countIcon(needy.length, css("--user")), size: 3 }] : []),
       ],
       links: [
         ...edges.filter((e) => shown.has(e.source) && shown.has(e.target)).map((e) => ({ source: e.source, target: e.target, label: e.label })),
@@ -361,10 +374,11 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
         ...(showUrls ? sessions.flatMap((s) => [...new Set(s.links.map((u) => hubOf(s, u)))].map((hub) => ({ source: s.id, target: hub, length: 0.6 }))) : []),
         ...children.map((id) => ({ source: id.slice(URL_NODE.length, id.lastIndexOf(" ")), target: id, length: 0.4 })),
         ...(reviewer ? [{ source: reviewer.id, target: QUEUE_NODE, length: 0.6 }] : []),
+        ...needy.map((s) => ({ source: s.id, target: NEEDS_NODE })),
       ],
     } as never);
     if (!fitted.current && sessions.length) (fitted.current = true), g.zoomToFit();
-  }, [all, hideArchived, edges, visible, showUrls, showTitles, expanded, review]);
+  }, [all, questions, hideArchived, edges, visible, showUrls, showTitles, collapsed, review]);
 
   useEffect(() => graph.current?.setOptions({ mode } as never), [mode, visible]);
   useEffect(() => {
@@ -512,7 +526,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
         document.querySelector<HTMLInputElement>("[data-find]")?.select();
         return;
       }
-      if (e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement).closest?.("input, [contenteditable=true]")) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable=true]")) return;
       if (e.key === "Shift") return;
       clearTimeout(chordTimer);
       if (e.key === "Escape") {
@@ -591,7 +605,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   const hoveredHub = hover && isDomainNode(hover) ? hover : null;
   const hubUrls = hoveredHub ? (hubsOf(sessions).get(hoveredHub) ?? []) : [];
   const toggleQueue = () => setShowQueue((q) => !q);
-  const toggleHub = (hub: string) => setExpanded((e) => (e.includes(hub) ? e.filter((h) => h !== hub) : [...e, hub]));
+  const toggleHub = (hub: string) => setCollapsed((e) => (e.includes(hub) ? e.filter((h) => h !== hub) : [...e, hub]));
   const newAgentHere = () => {
     const r = el.current!.getBoundingClientRect();
     setEditing(null);
@@ -613,13 +627,13 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
     store.set("mf.urls", showUrls ? "0" : "1");
     setShowUrls(!showUrls);
   };
-  live.current = { edges, mode, onOpen, onArchive, onArchiveLinks, archivedUrls, onToggleArchived, newAgentHere, toggleQueue, toggleHub, toggleUrls, toggleGroups, toggleTitles, sessions, drafting: !!draft, togglePick, groupChords, groupNumbers };
+  live.current = { edges, mode, onOpen, onQuestions, onArchive, onArchiveLinks, archivedUrls, onToggleArchived, newAgentHere, toggleQueue, toggleHub, toggleUrls, toggleGroups, toggleTitles, sessions, drafting: !!draft, togglePick, groupChords, groupNumbers };
   useEffect(() => { if (!draft) setPicked([]); }, [draft]);
   const needle = query?.trim().toLowerCase();
   const matches = needle
     ? [
         ...sessions.filter((s) => displayName(s).toLowerCase().includes(needle)).map((s) => s.id),
-        ...(showUrls ? [...hubsOf(sessions)].flatMap(([hub, urls]) => urls.filter((u) => u.toLowerCase().includes(needle)).map((u) => (expanded.includes(hub) && urls.length > 1 ? urlNode(hub, u) : hub))).filter((id, i, a) => a.indexOf(id) === i) : []),
+        ...(showUrls ? [...hubsOf(sessions)].flatMap(([hub, urls]) => urls.filter((u) => u.toLowerCase().includes(needle)).map((u) => (!collapsed.includes(hub) && urls.length > 1 ? urlNode(hub, u) : hub))).filter((id, i, a) => a.indexOf(id) === i) : []),
       ]
     : [];
   const matchKey = matches.join();
@@ -640,10 +654,13 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
   );
 
   // With links, claude starts empty and gets the prompt and the introductions as one first message from its inbox.
-  const startAgent = async (prompt: string, cwd: string, jump: boolean) => {
+  const startAgent = async (prompt: string, cwd: string, jump: boolean, route: boolean) => {
     const at = draft!.world, name = draft!.name, peers = picked;
     prompt = prompt.trim();
     setDraft(null);
+    // A bare request goes to the funnel sentry, which hands it to the agent that owns it or starts one.
+    const funnel = all.find((s) => isSentry(s) && s.name === "sentry:funnel" && s.running);
+    if (route && funnel && prompt && !peers.length) return void api.notify(funnel.id, prompt);
     store.set("mf.agentCwd", cwd);
     const s = await api.agent(peers.length ? "" : prompt, cwd.trim() || "~", store.get("mf.bypass") !== "0", name ?? prompt);
     placeAt.current.set(s.id, at);
@@ -746,7 +763,7 @@ export function GraphView({ sessions: all, visible, current, hideArchived, onOpe
       {hoveredUrl && !draft && <UrlCard url={hoveredUrl} from={sessions.filter((s) => s.links.includes(hoveredUrl))} archived={archivedUrls.has(hoveredUrl)} ref={tip} />}
       {hoveredHub && !draft && (hubUrls.length === 1
         ? <UrlCard url={hubUrls[0]} from={sessions.filter((s) => s.links.includes(hubUrls[0]))} archived={archivedUrls.has(hubUrls[0])} ref={tip} />
-        : <DomainCard host={hostOfHub(hoveredHub)} urls={hubUrls} archived={archivedUrls} expanded={expanded.includes(hoveredHub)} ref={tip} />)}
+        : <DomainCard host={hostOfHub(hoveredHub)} urls={hubUrls} archived={archivedUrls} expanded={!collapsed.includes(hoveredHub)} ref={tip} />)}
     </div>
   );
 }
@@ -758,13 +775,16 @@ function AgentDraft({ draft, folders, peers, picked, onToggle, onStart, onCancel
   peers: Session[];
   picked: string[];
   onToggle: (id: string) => void;
-  onStart: (prompt: string, cwd: string, jump: boolean) => void;
+  onStart: (prompt: string, cwd: string, jump: boolean, route: boolean) => void;
   onCancel: () => void;
 }) {
   const [prompt, setPrompt] = useState(draft.prompt ?? "");
   const [cwd, setCwd] = useState(() => draft.cwd || store.get("mf.agentCwd") || "~");
+  const [cwdTouched, setCwdTouched] = useState(false);
+  // ↵ routes through the funnel unless the folder or peers say where the work goes; ⇧↵ always starts a new agent.
+  const start = (shift: boolean) => onStart(prompt, cwd, shift, !shift && !cwdTouched && !draft.cwd && !draft.name);
   const keys = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") (e.preventDefault(), onStart(prompt, cwd, e.shiftKey));
+    if (e.key === "Enter") (e.preventDefault(), start(e.shiftKey));
     else if (e.key === "Escape") (e.preventDefault(), onCancel());
   };
   return (
@@ -791,11 +811,11 @@ function AgentDraft({ draft, folders, peers, picked, onToggle, onStart, onCancel
           </div>
         </div>
       )}
-      <Input placeholder="folder" list="mf-folders" value={cwd} onChange={(e) => setCwd(e.target.value)} onKeyDown={keys} className="h-7 font-mono text-xs" />
+      <Input placeholder="folder" list="mf-folders" value={cwd} onChange={(e) => (setCwd(e.target.value), setCwdTouched(true))} onKeyDown={keys} className="h-7 font-mono text-xs" />
       <datalist id="mf-folders">{folders.map((f) => <option key={f} value={f} />)}</datalist>
       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-        <span><Kbd>↵</Kbd> start · <Kbd>⇧↵</Kbd> start &amp; open · <Kbd>Esc</Kbd></span>
-        <Button size="sm" className="h-6" onClick={(e) => onStart(prompt, cwd, e.shiftKey)}>Start</Button>
+        <span><Kbd>↵</Kbd> {picked.length || cwdTouched ? "start" : "route"} · <Kbd>⇧↵</Kbd> new &amp; open · <Kbd>Esc</Kbd></span>
+        <Button size="sm" className="h-6" onClick={(e) => start(e.shiftKey)}>Start</Button>
       </div>
     </div>
   );
@@ -845,12 +865,22 @@ function QueuePanel({ board, queue, onOpen, onClose }: { board: ReviewBoard; que
   return (
     <div className="absolute top-14 right-3 bottom-3 z-20 flex w-[26rem] max-w-[calc(100%-1.5rem)] flex-col rounded-lg border bg-popover text-xs shadow-xl">
       <div className="flex items-center gap-2 border-b px-3 py-2">
-        <GitPullRequestDraft className="size-4 text-sentry" />
+        <GitPullRequestDraft className="size-4 text-user" />
         <span className="font-medium text-foreground">PR queue</span>
         <span className="text-muted-foreground">updated {ago(Date.parse(board.updated))} ago</span>
         <Button variant="ghost" size="icon" className="ml-auto size-7" title="Close (Esc)" onClick={onClose}><X /></Button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
+        {board.request && (
+          <section className="flex flex-col gap-1.5 rounded-md border p-2.5">
+            <div className="flex items-center gap-2">
+              <h3 className="font-medium text-foreground">Review request</h3>
+              <span className="text-muted-foreground">paste to a teammate</span>
+              <Button variant="outline" size="sm" className="ml-auto h-6" onClick={() => navigator.clipboard.writeText(board.request!)}><Copy /> Copy</Button>
+            </div>
+            <pre className="max-h-40 overflow-y-auto font-sans whitespace-pre-wrap text-muted-foreground">{board.request}</pre>
+          </section>
+        )}
         {board.next && <p className="rounded-md border border-sentry/40 bg-sentry/10 p-2.5 text-sm text-foreground">{board.next}</p>}
         {board.sections.map((section) => (
           <section key={section.title} className="flex flex-col gap-1">
@@ -939,6 +969,7 @@ function NodeCard({ s, ref }: { s: Session; ref: React.RefObject<HTMLDivElement 
   const rows: [string, string][] = [
     ["status", `${!s.running ? `exited ${s.exitCode ?? "?"}` : isBusy(s) ? "working" : isWaiting(s) ? "waiting on you" : `idle ${ago(s.lastOutputAt)}`}${s.archived ? " · archived" : ""}`],
     ["kind", kindOf(s)],
+    ...(s.wait ? [["waits on", `${waitLabel(s.wait)}, since ${ago(s.wait.at)} ago`] as [string, string]] : []),
     ...(s.group ? [["group", s.group] as [string, string]] : []),
     ["command", s.cmd.join(" ")],
     ["folder", home(s.cwd)],

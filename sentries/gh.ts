@@ -7,11 +7,18 @@ import { join } from "node:path";
 const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const WATCH_FILE = join(STATE_DIR, "gh-watch.json");
 const STATE_FILE = join(STATE_DIR, "gh-state.json");
+// The last poll of each PR, whole, so `maxflow gh status` can answer without asking GitHub.
+const STATUS_FILE = join(STATE_DIR, "gh-status.json");
+// This sentry's graph edges, one per tied session, labeled by its PRs.
+const EDGES_FILE = join(STATE_DIR, "gh-edges.json");
 // The PRs sentry:review lists, with the sessions on each; watched here like explicit watches.
 export const REVIEW_WATCH_FILE = join(STATE_DIR, "review-watch.json");
 const PROJECTS = join(process.env.HOME!, ".claude", "projects");
 const INTERVAL_MS = Number(process.env.GH_SENTRY_INTERVAL ?? 30_000);
+const CLI = new URL("../cli.ts", import.meta.url).pathname;
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
+// Sent with each call that touches a session, so the graph draws this sentry doing it.
+const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 
 export type Watch = { pr: string; sessions: string[] };
 type PrState = { head: string; ci: string; state: string; mergeable: string; decision: string; seen: string[] };
@@ -40,39 +47,45 @@ export function parsePr(ref: string, cwd: string) {
   return repo ? `${repo}#${bare![1]}` : null;
 }
 
-const FIELDS = `number url title state createdAt mergeable reviewDecision headRefOid
+const FIELDS = `number url title state createdAt mergeable reviewDecision headRefOid headRefName
   commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
     __typename ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
   reviews(last: 30) { nodes { id state body author { login } } }
   comments(last: 30) { nodes { id body url author { login } } }
-  reviewThreads(last: 50) { nodes { comments(last: 10) { nodes { id body path url author { login } } } } }`;
+  reviewThreads(last: 50) { nodes { isResolved comments(last: 10) { nodes { id body path url author { login } } } } }`;
 
 type Pr = {
-  number: number; url: string; title: string; state: string; createdAt: string; mergeable: string; reviewDecision: string | null; headRefOid: string;
+  number: number; url: string; title: string; state: string; createdAt: string; mergeable: string; reviewDecision: string | null; headRefOid: string; headRefName: string;
   commits: { nodes: { commit: { statusCheckRollup: { state: string; contexts: { nodes: { __typename: string; name?: string; conclusion?: string; context?: string; state?: string }[] } } | null } }[] };
   reviews: { nodes: { id: string; state: string; body: string; author: { login: string } | null }[] };
   comments: { nodes: { id: string; body: string; url: string; author: { login: string } | null }[] };
-  reviewThreads: { nodes: { comments: { nodes: { id: string; body: string; path: string; url: string; author: { login: string } | null }[] } }[] };
+  reviewThreads: { nodes: { isResolved: boolean; comments: { nodes: { id: string; body: string; path: string; url: string; author: { login: string } | null }[] } }[] };
 };
 
-// One GraphQL request per repo, covering the PRs watched by number and the ones found by branch.
-function fetchPrs(repo: string, numbers: number[], branches: string[]) {
+// A repo's PRs watched by number and found by branch, asked 20 at a time: one query for ~80 runs into GitHub's 10s GraphQL timeout and comes back empty.
+const CHUNK = 20;
+export function fetchPrs(repo: string, numbers: number[], branches: string[]) {
   const [owner, name] = repo.split("/");
   const parts = [
     ...numbers.map((n) => `n${n}: pullRequest(number: ${n}) { ...F }`),
     ...branches.map((b, i) => `b${i}: pullRequests(headRefName: ${JSON.stringify(b)}, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { ...F } }`),
   ];
-  const q = `query { r: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${parts.join("\n")} } }\nfragment F on PullRequest { ${FIELDS} }`;
-  const out = run(["gh", "api", "graphql", "-f", `query=${q}`]);
-  if (!out) return { byNumber: new Map<number, Pr>(), byBranch: new Map<string, Pr>() };
-  const r = JSON.parse(out).data.r as Record<string, any>;
+  const r: Record<string, any> = {};
+  for (let i = 0; i < parts.length; i += CHUNK) {
+    const q = `query { r: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${parts.slice(i, i + CHUNK).join("\n")} } }\nfragment F on PullRequest { ${FIELDS} }`;
+    const res = Bun.spawnSync(["gh", "api", "graphql", "-f", `query=${q}`], { stderr: "pipe" });
+    const out = res.stdout.toString();
+    if (res.exitCode !== 0) console.error(`${new Date().toLocaleTimeString()}  ${repo}: graphql failed for ${parts.length > CHUNK ? `chunk ${i / CHUNK + 1}` : "its PRs"}: ${res.stderr.toString().trim().slice(0, 300)}`);
+    // One PR number that doesn't resolve makes gh exit 1, but the rest of the chunk's data still comes back.
+    try { Object.assign(r, JSON.parse(out).data?.r ?? {}); } catch {}
+  }
   return {
     byNumber: new Map(numbers.flatMap((n) => (r[`n${n}`] ? [[n, r[`n${n}`] as Pr]] : []))),
     byBranch: new Map(branches.flatMap((b, i) => (r[`b${i}`]?.nodes[0] ? [[b, r[`b${i}`].nodes[0] as Pr]] : []))),
   };
 }
 
-type Link = { pr?: string; repo: string; branch?: string; session: string };
+export type Link = { pr?: string; repo: string; branch?: string; session: string };
 
 // The repo for a bare PR number declared outside a checkout: the one whose PR of that number the session mentioned last, else the one it mentions most.
 function linkedRepo(urls: string[], ref: string) {
@@ -84,8 +97,8 @@ function linkedRepo(urls: string[], ref: string) {
 
 // Which PR each live session is on: explicit watches, the branch checked out in its cwd, and set-pr.sh declarations.
 export async function links(): Promise<Link[]> {
-  const sessions = (await (await fetch(`${base}/api/sessions`)).json()) as { id: string; name: string; cwd: string; running: boolean; chatId?: string; transcript?: string; links?: string[] }[];
-  const live = sessions.filter((s) => s.running && !s.name.startsWith("sentry:"));
+  const sessions = (await (await fetch(`${base}/api/sessions`)).json()) as { id: string; name: string; cwd: string; running: boolean; sentry: boolean; chatId?: string; transcript?: string; links?: string[] }[];
+  const live = sessions.filter((s) => s.running && !s.sentry);
   const found: Link[] = [];
   for (const w of readWatches()) for (const session of w.sessions.length ? w.sessions : [""]) found.push({ pr: w.pr, repo: w.pr.split("#")[0], session });
   for (const s of live) {
@@ -108,9 +121,9 @@ export async function links(): Promise<Link[]> {
 // The agents post as the gh user too, so a comment by that user is the user's own only when no agent's tool call carries its text.
 const scanned = new Map<string, { offset: number; calls: string[] }>();
 async function agentCalls() {
-  const sessions = (await (await fetch(`${base}/api/sessions`)).json()) as { name: string; chatId?: string; transcript?: string }[];
+  const sessions = (await (await fetch(`${base}/api/sessions`)).json()) as { name: string; sentry: boolean; chatId?: string; transcript?: string }[];
   const calls: string[] = [];
-  for (const s of sessions.filter((s) => !s.name.startsWith("sentry:"))) {
+  for (const s of sessions.filter((s) => !s.sentry)) {
     const path = s.transcript ?? (s.chatId ? [...new Bun.Glob(`*/${s.chatId}.jsonl`).scanSync(PROJECTS)].map((f) => join(PROJECTS, f))[0] : undefined);
     if (!path || !existsSync(path)) continue;
     const memo = scanned.get(path) ?? scanned.set(path, { offset: 0, calls: [] }).get(path)!;
@@ -177,10 +190,13 @@ function hasOwnNew(pr: Pr, prev: PrState, me: string) {
   return [...pr.reviews.nodes, ...pr.comments.nodes, ...pr.reviewThreads.nodes.flatMap((t) => t.comments.nodes)].some((c) => !seen.has(c.id) && c.author?.login === me);
 }
 
-function snapshot(pr: Pr): PrState {
+// ci keeps the last finished result announced, so a rollup that dips back to pending on the same head (a re-run, a late check) and lands
+// on the same result isn't announced again.
+function snapshot(pr: Pr, prev?: PrState): PrState {
+  const ci = pr.commits.nodes[0]?.commit.statusCheckRollup?.state ?? "";
   return {
     head: pr.headRefOid,
-    ci: `${pr.headRefOid}:${pr.commits.nodes[0]?.commit.statusCheckRollup?.state ?? ""}`,
+    ci: ci === "SUCCESS" || FAILED.has(ci) ? `${pr.headRefOid}:${ci}` : (prev?.ci ?? ""),
     state: pr.state,
     mergeable: pr.mergeable,
     decision: pr.reviewDecision ?? "",
@@ -195,7 +211,7 @@ export function markRead(id: string) {
   if (r.exitCode !== 0) console.error(`${new Date().toLocaleTimeString()}  👀 on ${id} failed: ${r.stderr.toString().trim().slice(0, 300)}`);
 }
 
-const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", body: JSON.stringify(body) });
+const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", headers: caller, body: JSON.stringify(body) });
 
 async function tick(me: string, state: Record<string, PrState>) {
   const all = await links();
@@ -227,13 +243,13 @@ async function tick(me: string, state: Record<string, PrState>) {
     const [repo, n] = key.split("#");
     if (!calls && state[key] && hasOwnNew(pr, state[key], me)) calls = await agentCalls();
     const changes = diff(pr, state[key], me, byAgent);
-    state[key] = snapshot(pr);
+    state[key] = snapshot(pr, state[key]);
     const told = [...(listeners.get(key) ?? [])];
     for (const [kind, data] of changes) await post("/api/events", { topic: `gh/${repo}/pr/${n}/${kind}`, data: { pr: key, told, ...(data as object) } });
     const lines = changes.flatMap(([, , line]) => (line ? [line] : []));
     if (lines.length) {
-      const more = lines.length > 5 ? `; and ${lines.length - 5} more (gh pr view ${n} -R ${repo} --comments)` : "";
-      const text = `[maxflow gh] ${key} (${short(pr.title, 60)}): ${lines.slice(0, 5).join("; ")}${more}. (Automated notice, not a request from the user: act on it only if it's part of your current task.)`;
+      const more = lines.length > 5 ? `; and ${lines.length - 5} more` : "";
+      const text = `[maxflow gh] ${key} (${short(pr.title, 60)}): ${lines.slice(0, 5).join("; ")}${more}. Full status: ${CLI} gh status ${key}. (Automated notice, not a request from the user: act on it only if it's part of your current task.)`;
       for (const session of listeners.get(key) ?? []) await post(`/api/sessions/${session}/notify`, { text });
       if (told.length) for (const [, data] of changes) if (ownComment((data as { who?: string }).who)) markRead((data as { id: string }).id);
       console.log(`${new Date().toLocaleTimeString()}  ${text}  -> ${[...(listeners.get(key) ?? [])].join(", ") || "nobody"}`);
@@ -244,7 +260,35 @@ async function tick(me: string, state: Record<string, PrState>) {
   const watches = readWatches();
   if (watches.some((w) => done.has(w.pr))) writeWatches(watches.filter((w) => !done.has(w.pr)));
   writeFileSync(STATE_FILE, JSON.stringify(state));
+  const onPrs = new Map<string, string[]>();
+  for (const [key, sessions] of listeners) for (const s of sessions) (onPrs.get(s) ?? onPrs.set(s, []).get(s)!).push(key);
+  const label = (prs: string[]) => prs.map((k) => `#${k.split("#")[1]}`);
+  writeFileSync(EDGES_FILE, JSON.stringify([...onPrs].map(([session, prs]) => ({ session, prs, label: prs.length > 2 ? `${label(prs).slice(0, 2).join(" ")} +${prs.length - 2}` : label(prs).join(" ") }))));
+  writeFileSync(STATUS_FILE, JSON.stringify(Object.fromEntries([...prs].map(([key, pr]) => [key, { at: Date.now(), pr }]))));
   return prs.size;
+}
+
+export const readStatus = () => readJson<Record<string, { at: number; pr: Pr }>>(STATUS_FILE, {});
+
+// What an agent would otherwise run gh pr view / gh pr checks for, as plain text.
+export function render(key: string, pr: Pr, at: number) {
+  const rollup = pr.commits.nodes[0]?.commit.statusCheckRollup;
+  const checks = rollup?.contexts.nodes.map((c) => ({ name: c.name ?? c.context!, result: c.conclusion ?? c.state ?? "PENDING" })) ?? [];
+  const failed = checks.filter((c) => FAILED.has(c.result)).map((c) => c.name);
+  const pending = checks.filter((c) => !c.result || ["PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS"].includes(c.result)).map((c) => c.name);
+  const latest = new Map(pr.reviews.nodes.filter((r) => r.state !== "COMMENTED" && r.state !== "PENDING").map((r) => [r.author?.login ?? "?", r.state.toLowerCase().replace("_", " ")]));
+  const open = pr.reviewThreads.nodes.filter((t) => !t.isResolved && t.comments.nodes.length);
+  return [
+    `${key}  ${pr.state.toLowerCase()} · ${pr.mergeable.toLowerCase()} · ${(pr.reviewDecision ?? "no review decision").toLowerCase().replace(/_/g, " ")}  (polled ${Math.round((Date.now() - at) / 1000)}s ago)`,
+    `${pr.title}  ${pr.url}`,
+    `CI ${rollup?.state ?? "none"} on ${pr.headRefOid.slice(0, 7)}: ${checks.length - failed.length - pending.length} passed, ${failed.length} failed, ${pending.length} pending`,
+    ...(failed.length ? [`  failed: ${failed.join(", ")}`] : []),
+    ...(pending.length ? [`  pending: ${pending.join(", ")}`] : []),
+    `reviews: ${[...latest].map(([who, state]) => `${who} ${state}`).join("; ") || "none"}`,
+    `unresolved threads: ${open.length}`,
+    ...open.map((t) => { const c = t.comments.nodes.at(-1)!; return `  ${c.path}  ${c.author?.login}: "${short(c.body, 200)}" ${c.url}`; }),
+    ...(pr.comments.nodes.length ? ["latest comments:", ...pr.comments.nodes.slice(-3).map((c) => `  ${c.author?.login}: "${short(c.body, 200)}" ${c.url}`)] : []),
+  ].join("\n");
 }
 
 if (import.meta.main) {

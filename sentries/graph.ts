@@ -36,7 +36,7 @@ const ROLE_SYSTEM = `You name the role of each of an engineer's Claude agent ses
 Pick null when unsure. Reply with only JSON: {"<session id>": "<role>" | null, ...}, covering every session.`;
 
 type Chat = { prompt: string; session: string | null };
-type Session = { id: string; name: string; cmd: string[]; cwd: string; running: boolean; agent: boolean; links: string[]; group: string | null };
+type Session = { id: string; name: string; cmd: string[]; cwd: string; running: boolean; agent: boolean; links: string[]; group: string | null; sentry: boolean };
 type Candidate = { url: string; role: string; context: string };
 type Entry = { id: string; name: string; cwd: string; running: boolean; candidates: Candidate[] };
 
@@ -78,7 +78,7 @@ async function regroup() {
   if (key === groupedKey || Date.now() - groupedAt < GROUP_EVERY_MS) return;
   groupedAt = Date.now();
   // Sentries always form one group of their own; only the rest need judging.
-  const sentries = running.filter((s) => s.name.startsWith("sentry:")), sessions = running.filter((s) => !sentries.includes(s));
+  const sentries = running.filter((s) => s.sentry), sessions = running.filter((s) => !sentries.includes(s));
   const fixed = Object.fromEntries(sentries.map((s) => [s.id, SENTRY_GROUP]));
   for (const s of sessions) if (/maxflow/i.test(s.name) || s.cwd.startsWith(MAXFLOW_DIR)) fixed[s.id] = MAXFLOW_GROUP;
   if (sessions.length < 2) return void ((groupedKey = key), save(GROUPS_FILE, (groups = { ...Object.fromEntries(sessions.map((s) => [s.id, s.name])), ...fixed })));
@@ -94,7 +94,7 @@ async function regroup() {
 }
 
 async function assignRoles() {
-  const agents = ((await (await fetch(`${base}/api/sessions`)).json()) as Session[]).filter((s) => s.running && s.agent && !s.name.startsWith("sentry:"));
+  const agents = ((await (await fetch(`${base}/api/sessions`)).json()) as Session[]).filter((s) => s.running && s.agent && !s.sentry);
   const stale = agents.filter((s) => rolesJudged[s.id] !== s.name);
   const gone = Object.keys(roles).filter((id) => !agents.some((s) => s.id === id));
   if (!stale.length && !gone.length) return;

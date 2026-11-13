@@ -11,19 +11,34 @@ const EDGES_FILE = join(STATE_DIR, "review-edges.json");
 const QUEUE_FILE = join(STATE_DIR, "review-queue.json");
 const INTERVAL_MS = Number(process.env.REVIEW_SENTRY_INTERVAL ?? 120_000);
 const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
+// Sent with each call that touches a session, so the graph draws this sentry doing it.
+const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 const agent = process.env.MAXFLOW_SESSION!;
 
 type Pr = {
-  number: number; url: string; title: string; isDraft: boolean; mergeable: string; reviewDecision: string | null; headRefName: string;
-  createdAt: string; updatedAt: string; repository: { nameWithOwner: string }; reviewRequests: { totalCount: number }; autoMergeRequest: object | null;
+  number: number; url: string; title: string; body: string; isDraft: boolean; mergeable: string; reviewDecision: string | null; headRefName: string;
+  createdAt: string; updatedAt: string; repository: { nameWithOwner: string }; reviewRequests: { totalCount: number }; id: string; autoMergeRequest: object | null;
   commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
 };
 type Event = { seq: number; topic: string; data: { pr: string; told: string[]; id?: string; who?: string | null; author?: string; state?: string; body?: string; url?: string; path?: string } };
-type Session = { id: string; name: string; running: boolean; links: string[] };
+type Session = { id: string; name: string; running: boolean; links: string[]; sentry: boolean };
 
 const QUERY = `query { search(query: "is:pr is:open author:@me archived:false", type: ISSUE, first: 100) { nodes { ... on PullRequest {
-  number url title isDraft mergeable reviewDecision headRefName createdAt updatedAt repository { nameWithOwner } reviewRequests(first: 1) { totalCount }
+ id number url title body isDraft mergeable reviewDecision headRefName createdAt updatedAt repository { nameWithOwner } reviewRequests(first: 1) { totalCount }
   autoMergeRequest { enabledAt } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } } }`;
+
+// Whether a PR changes frontend UI, by node id. Looked up once per PR in its own query: files in the search pushes it past GitHub's 10s limit.
+const uiOf = new Map<string, boolean>();
+function lookUpUi(prs: Pr[]) {
+  const ids = prs.map((pr) => pr.id).filter((id) => !uiOf.has(id));
+  for (let i = 0; i < ids.length; i += 25) {
+    const q = `query { nodes(ids: ${JSON.stringify(ids.slice(i, i + 25))}) { ... on PullRequest { id files(first: 100) { nodes { path } } } } }`;
+    const r = Bun.spawnSync(["gh", "api", "graphql", "-f", `query=${q}`], { stderr: "pipe" });
+    if (r.exitCode !== 0) continue;
+    for (const n of JSON.parse(r.stdout.toString()).data.nodes as { id: string; files: { nodes: { path: string }[] } | null }[])
+      uiOf.set(n.id, !!n.files?.nodes.some((f) => /frontend\/.*\.(tsx|css)$/.test(f.path) && !/\.(test|stories)\.tsx$/.test(f.path)));
+  }
+}
 
 function openPrs(): Pr[] {
   const r = Bun.spawnSync(["gh", "api", "graphql", "-f", `query=${QUERY}`], { stderr: "pipe" });
@@ -32,6 +47,7 @@ function openPrs(): Pr[] {
 }
 
 // How far a PR is from prod, as the one thing blocking it next.
+// GitHub computes mergeable lazily and answers UNKNOWN meanwhile, so tick() keeps the last stage until it knows.
 function stage(pr: Pr) {
   const ci = pr.commits.nodes[0]?.commit.statusCheckRollup?.state;
   if (pr.isDraft) return "draft";
@@ -45,31 +61,33 @@ function stage(pr: Pr) {
 
 const keyOf = (pr: Pr) => `${pr.repository.nameWithOwner}#${pr.number}`.toLowerCase();
 const label = (key: string) => key.split("/")[1];
-const notify = (text: string) => fetch(`${base}/api/sessions/${agent}/notify`, { method: "POST", body: JSON.stringify({ text: `[maxflow review] ${text}` }) });
+const notify = (text: string) => fetch(`${base}/api/sessions/${agent}/notify`, { method: "POST", headers: caller, body: JSON.stringify({ text: `[maxflow review] ${text}` }) });
 
 let stages = new Map<string, string>();
 let titles = new Map<string, string>();
 
 async function tick() {
   const prs = openPrs();
-  const sessions = ((await (await fetch(`${base}/api/sessions`)).json()) as Session[]).filter((s) => s.running && !s.name.startsWith("sentry:"));
+  lookUpUi(prs);
+  const sessions = ((await (await fetch(`${base}/api/sessions`)).json()) as Session[]).filter((s) => s.running && !s.sentry);
   const names = new Map(sessions.map((s) => [s.id, s.name]));
   const ties = await links();
   const on = new Map<string, string[]>();
+  const owners = new Map<string, string[]>();
   for (const pr of prs) {
     const repo = pr.repository.nameWithOwner.toLowerCase(), key = keyOf(pr);
-    const ids = new Set([
-      ...ties.filter((l) => l.session && l.repo === repo && (l.pr === key || l.branch === pr.headRefName)).map((l) => l.session),
-      ...sessions.filter((s) => s.links.some((u) => u.toLowerCase() === pr.url.toLowerCase())).map((s) => s.id),
-    ]);
-    on.set(key, [...ids].filter((id) => names.has(id)));
+    const owning = ties.filter((l) => l.session && l.repo === repo && (l.pr === key || l.branch === pr.headRefName)).map((l) => l.session);
+    const mentioning = sessions.filter((s) => s.links.some((u) => u.toLowerCase() === pr.url.toLowerCase())).map((s) => s.id);
+    owners.set(key, [...new Set(owning)].filter((id) => names.has(id)));
+    on.set(key, [...new Set([...owning, ...mentioning])].filter((id) => names.has(id)));
   }
   const queue = prs.map((pr) => ({
-    pr: keyOf(pr), url: pr.url, title: pr.title, stage: stage(pr), created: pr.createdAt, updated: pr.updatedAt,
+    pr: keyOf(pr), url: pr.url, title: pr.title, stage: (pr.mergeable === "UNKNOWN" && stages.get(keyOf(pr))) || stage(pr), visual: /<img|!\[|user-attachments/.test(pr.body),
+    ui: uiOf.get(pr.id) ?? false, created: pr.createdAt, updated: pr.updatedAt,
     sessions: on.get(keyOf(pr))!.map((id) => ({ id, name: names.get(id) })),
   }));
   writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
-  writeFileSync(REVIEW_WATCH_FILE, JSON.stringify(queue.map((q): Watch => ({ pr: q.pr, sessions: q.sessions.map((s) => s.id) }))));
+  writeFileSync(REVIEW_WATCH_FILE, JSON.stringify(queue.map((q): Watch => ({ pr: q.pr, sessions: owners.get(q.pr)! }))));
   writeFileSync(EDGES_FILE, JSON.stringify(queue.flatMap((q) => q.sessions.map((s) => ({ session: s.id, label: label(q.pr) })))));
 
   const next = new Map(queue.map((q) => [q.pr, q.stage]));

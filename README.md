@@ -133,7 +133,8 @@ Sentries are sessions the server starts on boot and tmux keeps across restarts. 
 | **questions** | The throttle on your attention. Every `maxflow ask` goes through a quick model check; what the agent should decide itself is bounced back, the rest waits in the Questions panel. |
 | **meta** *(agent)* | Reads every agent's transcript every 15 minutes, times turns, tool calls and model replies, and coaches the slow ones. Keeps lessons that every new agent is told. |
 | **ram** | Kills local test, lint, typecheck and build jobs an agent starts once they use too much RAM, and tells it to push and let CI run them. |
-| **health** | Watches the server. If it stays down for 2 minutes, starts a recovery agent to fix and restart it. |
+| **assistant** *(agent)* | Keeps your task board (⌘K): derives each task from what you ask for and moves it through todo, doing, waiting on you, waiting on others, and done, as the agents work. |
+| **health** | Watches the server. Within seconds of it going down, serves a "down" page on its port; if it stays down for 45 seconds, starts a recovery agent to fix and restart it. |
 | **rename** | Titles each session by the topic it owns, with one cheap Haiku call per few thousand characters of new output. |
 | **graph** | Decides which URLs an agent mentions are worth a node in the graph, and groups sessions by the work they share. |
 

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, ArchiveRestore, History, Network, PanelLeft, Plus, X } from "lucide-react";
+import { Archive, ArchiveRestore, History, MessageCircleQuestion, Network, PanelLeft, Plus, SquareKanban, TerminalSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { displayName, isBusy, isSentry, isWaiting, kindOf, type Session } from "@/lib/api";
+import { displayName, isBusy, isSentry, isWaiting, kindOf, type Session, type View } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 function Tip({ label, keys, side = "bottom", children }: { label: string; keys?: string; side?: "bottom" | "right"; children: React.ReactNode }) {
@@ -112,10 +113,12 @@ type Props = {
   sessions: Session[];
   current: string | null;
   collapsed: boolean;
-  graphing: boolean;
+  view: View;
   onToggle: () => void;
-  onGraph: () => void;
+  onView: (v: View) => void;
   onResume: () => void;
+  questions: number;
+  onQuestions: () => void;
   onNew: () => void;
   onOpen: (id: string) => void;
   onKill: (id: string) => void;
@@ -125,7 +128,13 @@ type Props = {
   onRename: (id: string, name: string) => void;
 };
 
-export function Sidebar({ sessions, current, collapsed, graphing, onToggle, onGraph, onResume, onNew, onOpen, onKill, onArchive, hideArchived, onToggleArchived, onRename }: Props) {
+const VIEWS = [
+  { view: "agent", label: "Agent", keys: undefined, Icon: TerminalSquare },
+  { view: "graph", label: "Graph", keys: "⌘G", Icon: Network },
+  { view: "tasks", label: "Board", keys: "⌘K", Icon: SquareKanban },
+] as const;
+
+export function Sidebar({ sessions, current, collapsed, view, onToggle, onView, onResume, questions, onQuestions, onNew, onOpen, onKill, onArchive, hideArchived, onToggleArchived, onRename }: Props) {
   const byActivity = [...sessions].sort((a, b) => b.activeAt - a.activeAt);
   const agents = byActivity.filter((s) => !isSentry(s) && !s.archived), sentries = sessions.filter(isSentry);
   const archived = byActivity.filter((s) => !isSentry(s) && s.archived);
@@ -147,9 +156,10 @@ export function Sidebar({ sessions, current, collapsed, graphing, onToggle, onGr
             <span className="ml-1 text-sm font-semibold tracking-tight">maxflow</span>
             {agents.length > 0 && <Badge variant="secondary" className="h-5 px-1.5 font-mono text-[11px]">{agents.length}</Badge>}
             <div className="ml-auto flex items-center gap-0.5">
-              <Tip label="Graph view" keys="⌘G">
-                <Button variant="ghost" size="icon" className={cn("size-8 text-muted-foreground", graphing && "bg-accent text-primary")} onClick={onGraph}>
-                  <Network />
+              <Tip label="Questions agents asked you">
+                <Button variant="ghost" size="icon" className={cn("relative size-8 text-muted-foreground", questions > 0 && "text-sentry")} onClick={onQuestions}>
+                  <MessageCircleQuestion />
+                  {questions > 0 && <span className="absolute -top-0.5 -right-0.5 rounded-full bg-sentry px-1 font-mono text-[10px] leading-4 text-background">{questions}</span>}
                 </Button>
               </Tip>
               <Tip label="Resume a Claude chat">
@@ -166,6 +176,24 @@ export function Sidebar({ sessions, current, collapsed, graphing, onToggle, onGr
           </>
         )}
       </header>
+      <ToggleGroup
+        type="single"
+        size="sm"
+        variant="outline"
+        spacing={collapsed ? 1 : 0}
+        value={view}
+        onValueChange={(v) => v && onView(v as View)}
+        className={cn("mx-2 mt-2 shrink-0", collapsed ? "flex-col self-center" : "w-auto")}
+      >
+        {VIEWS.map(({ view: v, label, keys, Icon }) => (
+          <Tip key={v} label={`${label} view`} keys={keys} side={collapsed ? "right" : "bottom"}>
+            <ToggleGroupItem value={v} aria-label={label} className={cn("text-muted-foreground aria-checked:bg-accent aria-checked:text-foreground", collapsed ? "size-8 px-0" : "flex-1 text-xs")}>
+              <Icon />
+              {!collapsed && label}
+            </ToggleGroupItem>
+          </Tip>
+        ))}
+      </ToggleGroup>
       <ScrollArea className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
         <div className="flex flex-col gap-0.5 p-1.5">{rows(agents)}</div>
         {archived.length > 0 && (
