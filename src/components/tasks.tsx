@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Bell, Bot, Check, ChevronRight, ExternalLink, GitMerge, GitPullRequest, Hourglass, MessageSquare, Search, SquareKanban, X } from "lucide-react";
+import { Bot, ChevronRight, ExternalLink, GitMerge, GitPullRequest, Hourglass, MessageSquare, Search, SquareKanban, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -82,11 +82,6 @@ function Chip({ children, className }: { children: React.ReactNode; className?: 
 // The user's task board, which sentry:assistant derives from his prompts and the agents' work; he reads it, never edits it.
 export function TasksBoard({ tasks, prs, comments, questions, sessions, onOpen, onSettled, onClose }: { tasks: Task[]; prs: QueuedPr[]; comments: OpenComment[]; questions: Question[]; sessions: Session[]; onOpen: (id: string) => void; onSettled: () => void; onClose: () => void }) {
   const [shown, setShown] = useState<number | null>(null);
-  // Changes he saw on this page before the next poll brings the server's seen marks back.
-  const [seenHere, setSeenHere] = useState<Record<number, number>>({});
-  const see = (ids: number[]) => (setSeenHere((m) => ({ ...m, ...Object.fromEntries(ids.map((id) => [id, Date.now()])) })), api.seen(ids));
-  const unseen = (t: Task) => !!t.change && t.change.at > Math.max(t.seen ?? 0, seenHere[t.id] ?? 0);
-  useEffect(() => void (shown !== null && see([shown])), [shown]);
   const [filter, setFilter] = useState("");
   const [cursor, setCursor] = useState<{ col: number; row: number } | null>(null);
   const filterInput = useRef<HTMLInputElement>(null);
@@ -122,15 +117,10 @@ export function TasksBoard({ tasks, prs, comments, questions, sessions, onOpen, 
     const names = (links: string[] = []) => links.some((l) => prKey(l) === pr);
     return ranked.find((t) => names(t.links)) ?? ranked.find((t) => t.sessions.some((id) => names(byId.get(id)?.links)));
   };
-  // Updated holds every task created or moved since he last saw it, newest first, beside its place in its own column.
-  const updated = tasks.filter((t) => unseen(t) && matches(t)).sort((a, b) => b.change!.at - a.change!.at);
-  const columns = [
-    { status: "updated" as const, title: "Updated", all: updated, cards: updated },
-    ...COLUMNS.map((c) => {
-      const all = tasks.filter((t) => inColumn(t, c.status) && matches(t)).sort((a, b) => b.updated - a.updated);
-      return { ...c, all, cards: c.status === "done" && !words.length ? all.slice(0, DONE_SHOWN) : all };
-    }),
-  ];
+  const columns = COLUMNS.map((c) => {
+    const all = tasks.filter((t) => inColumn(t, c.status) && matches(t)).sort((a, b) => b.updated - a.updated);
+    return { ...c, all, cards: c.status === "done" && !words.length ? all.slice(0, DONE_SHOWN) : all };
+  });
   const selected = cursor && columns[cursor.col]?.cards[cursor.row];
 
   // Linear's keys: j/k or ↓/↑ within a column, h/l or ←/→ across, Enter opens, / filters.
@@ -190,18 +180,15 @@ export function TasksBoard({ tasks, prs, comments, questions, sessions, onOpen, 
         <Button variant="ghost" size="icon" className="size-7" title="Close (⌘K)" onClick={onClose}><X /></Button>
       </div>
       <div className="flex min-h-0 flex-1">
-        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[repeat(8,minmax(15rem,1fr))] gap-3 overflow-x-auto p-3">
+        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[repeat(7,minmax(15rem,1fr))] gap-3 overflow-x-auto p-3">
           {columns.map((c, col) => {
             const count = c.all.length + (c.status === "you" ? pending.length + (unreviewed.length ? 1 : 0) : 0);
             return (
               <section key={c.status} className="flex min-h-0 flex-col rounded-lg bg-card/40">
                 <h3 className="flex h-9 shrink-0 items-center gap-2 px-2.5 text-[13px] font-medium text-foreground">
-                  {c.status === "updated" ? <Bell className="size-3.5 text-[#5e6ad2]" /> : <StatusIcon status={c.status} />}
+                  <StatusIcon status={c.status} />
                   {c.title}
                   <span className="font-normal text-muted-foreground">{count}</span>
-                  {c.status === "updated" && c.cards.length > 0 && (
-                    <button type="button" className="ml-auto text-xs font-normal text-muted-foreground hover:text-foreground" onClick={() => see(c.cards.map((t) => t.id))}>Mark all seen</button>
-                  )}
                 </h3>
                 <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-1.5 pb-1.5">
                   {c.status === "you" && pending.map((q) => {
@@ -210,7 +197,7 @@ export function TasksBoard({ tasks, prs, comments, questions, sessions, onOpen, 
                   })}
                   {c.status === "you" && unreviewed.length > 0 && <UnreviewedPrs prs={unreviewed} />}
                   {c.cards.map((t, row) => (
-                    <TaskCard key={t.id} task={t} named={named} change={c.status === "updated" ? t.change : undefined} onSeen={() => see([t.id])} waiting={t.status === "waiting" || t.status === "you" ? waitingOn(t, byId) : null} selected={selected?.id === t.id} onClick={() => (setCursor({ col, row }), setShown(t.id))} />
+                    <TaskCard key={t.id} task={t} named={named} waiting={t.status === "waiting" || t.status === "you" ? waitingOn(t, byId) : null} selected={selected?.id === t.id} onClick={() => (setCursor({ col, row }), setShown(t.id))} />
                   ))}
                   {c.all.length > c.cards.length && <p className="px-2 py-1 text-muted-foreground">{c.all.length - c.cards.length} older not shown</p>}
                 </div>
@@ -244,7 +231,7 @@ export function TasksBoard({ tasks, prs, comments, questions, sessions, onOpen, 
   );
 }
 
-function TaskCard({ task: t, named, change, onSeen, waiting, selected, onClick }: { task: Task; named: Map<string, string>; change?: Task["change"]; onSeen: () => void; waiting: { text: string; at: number } | null; selected: boolean; onClick: () => void }) {
+function TaskCard({ task: t, named, waiting, selected, onClick }: { task: Task; named: Map<string, string>; waiting: { text: string; at: number } | null; selected: boolean; onClick: () => void }) {
   const prs = t.links.flatMap((url) => prLabel(url) ?? []);
   return (
     <button
@@ -257,14 +244,6 @@ function TaskCard({ task: t, named, change, onSeen, waiting, selected, onClick }
         <span className="font-mono text-[11px]">{taskKey(t)}</span>
         <Avatars ids={t.sessions} named={named} />
       </span>
-      {change && (
-        <span className="flex items-center gap-1.5 whitespace-nowrap text-[#5e6ad2]" title={`${change.from ? `${statusTitle(change.from)} → ` : "New in "}${statusTitle(change.to)}`}>
-          {change.from ? <><StatusIcon status={change.from} /><ArrowRight className="size-3.5 text-foreground" strokeWidth={2.5} /></> : "New in"}
-          <StatusIcon status={change.to} />{statusTitle(change.to)}
-          <span className="text-muted-foreground">· {ago(change.at)}</span>
-          <span role="button" title="Mark seen" className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground" onClick={(e) => (e.stopPropagation(), onSeen())}><Check className="size-3.5" /></span>
-        </span>
-      )}
       <span className="flex items-start gap-2 text-[13px] leading-snug font-medium text-foreground">
         <StatusIcon status={t.status} className="mt-[3px]" />
         <span className="line-clamp-3">{t.title}</span>
