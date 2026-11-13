@@ -21,10 +21,11 @@ const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 type Session = {
   id: string; name: string; running: boolean; sentry: boolean; agent: boolean; status: string; transcript?: string;
   archived: boolean; activeAt: number; pending: number; wait: { kind: string; ref: string; at: number } | null;
+  blocked: { count: number; since: number } | null;
 };
 type Open = { name: string; what: string; at: number };
-// idleAt: the activeAt of the idle stretch already reported, so each stretch is reported once.
-type Mark = { offset: number; tools: Record<string, Open>; turnAt?: number; askedAt?: number; idleAt?: number };
+// idleAt: the activeAt of the idle stretch already reported, so each stretch is reported once; blockedAt likewise for messages stuck behind a draft.
+type Mark = { offset: number; tools: Record<string, Open>; turnAt?: number; askedAt?: number; idleAt?: number; blockedAt?: number };
 type Idle = { id: string; title: string; idleMs: number; lastText: string };
 type Digest = {
   id: string;
@@ -149,6 +150,7 @@ async function tick() {
   for (const path of Object.keys(marks)) if (!live.has(path)) delete marks[path];
   const flagged: Digest[] = [];
   const idle: Idle[] = [];
+  const blocked: { id: string; title: string; count: number; ms: number }[] = [];
   for (const s of sessions) {
     if (!existsSync(s.transcript!)) continue;
     // A transcript seen for the first time is read from its last 2MB; only lines inside the window count anyway.
@@ -160,13 +162,17 @@ async function tick() {
       mark.idleAt = s.activeAt;
       idle.push({ id: s.id, title: s.name, idleMs: now - s.activeAt, lastText: lastText(s.transcript!) });
     }
+    if (s.blocked && mark.blockedAt !== s.blocked.since) {
+      mark.blockedAt = s.blocked.since;
+      blocked.push({ id: s.id, title: s.name, count: s.blocked.count, ms: now - s.blocked.since });
+    }
   }
   since = now;
   writeFileSync(STATE_FILE, JSON.stringify(marks));
   const stamp = new Date(now).toLocaleTimeString();
-  console.log(`${stamp}  ${sessions.length} agents read, ${flagged.length} over a threshold, ${idle.length} idle without a wait`);
-  if (!flagged.length && !idle.length) return;
-  writeFileSync(FLAGGED_FILE, JSON.stringify({ at: now, read: sessions.length, flagged, idle }, null, 2));
+  console.log(`${stamp}  ${sessions.length} agents read, ${flagged.length} over a threshold, ${idle.length} idle without a wait, ${blocked.length} with messages behind a draft`);
+  if (!flagged.length && !idle.length && !blocked.length) return;
+  writeFileSync(FLAGGED_FILE, JSON.stringify({ at: now, read: sessions.length, flagged, idle, blocked }, null, 2));
   const min = (ms: number) => `${(ms / 60_000).toFixed(0)}m`;
   const line = (d: Digest) =>
     [
@@ -185,7 +191,10 @@ async function tick() {
   const waitless = idle.length
     ? `${idle.length} agents idle with no declared wait (nothing will wake them); each one's last words:\n${idle.map((i) => `- ${i.id} (${i.title}) idle ${min(i.idleMs)}: ${JSON.stringify(i.lastText.replace(/\s+/g, " "))}`).join("\n")}`
     : "";
-  await notify([slow, waitless].filter(Boolean).join("\n\n"));
+  const stuck = blocked.length
+    ? `${blocked.length} agents with messages queued behind a draft the user left in their prompt (the server clears an unchanged draft after 5m, 1m for his own request, and types it back):\n${blocked.map((b) => `- ${b.id} (${b.title}): ${b.count} waiting for ${min(b.ms)}`).join("\n")}`
+    : "";
+  await notify([slow, waitless, stuck].filter(Boolean).join("\n\n"));
 }
 
 console.log(`meta sentry: every ${INTERVAL_MS / 60_000}m reads each agent's new transcript lines; slow is a turn over ${SLOW_TURN_MS / 60_000}m, a tool over ${SLOW_TOOL_MS / 60_000}m, a reply over ${SLOW_MODEL_MS / 60_000}m, or a command run ${REPEATS}+ times`);

@@ -1,5 +1,5 @@
 import type { ServerWebSocket, Subprocess } from "bun";
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { repoOf } from "./sentries/gh";
@@ -40,6 +40,11 @@ type Session = {
   // When the inbox last pasted into the prompt, and how many times since it pressed Enter again on a paste left unsent.
   pastedAt?: number;
   enterRetries?: number;
+  // A draft the user left in the prompt while messages waited: what it says and since when, when messages first queued behind it,
+  // and the draft cleared out of the way to deliver them, to be typed back once that turn ends (also kept in ~/.maxflow/drafts).
+  draft?: { text: string; since: number };
+  blockedSince?: number;
+  savedDraft?: string;
 };
 // awake: a message woke it; it goes back to sleep on the same wait when that turn ends, until the awaited event itself clears it.
 type Wait = { kind: "q" | "approval" | "ci" | "agent" | "slack" | "done"; ref: string; at: number; awake?: boolean };
@@ -233,6 +238,9 @@ function touchFrom(req: Request, s: Session, kind: "read" | "write", held = fals
 }
 const isAgent = (s: Session) => !!s.claude || !!s.chatId || !!s.asleep || s.cmd[0] === "claude";
 for (const s of sessions.values()) if (s.archived) stopAgent(s);
+// Drafts cleared out of the way before a restart still go back once their turn ends.
+const DRAFTS = `${process.env.HOME}/.maxflow/drafts`;
+for (const s of sessions.values()) if (existsSync(`${DRAFTS}/${s.id}.txt`)) s.savedDraft = readFileSync(`${DRAFTS}/${s.id}.txt`, "utf8");
 
 // Without hooks a session counts as working while it prints; hooked claude says so itself, checked against two blind spots:
 // an Esc interrupt fires no hook (the spinner animates nonstop while working, so silence means it stopped),
@@ -776,6 +784,7 @@ const describe = (s: Session, shown = links(s)) => ({
   sentry: isSentry(s),
   ties: (isSentry(s) && (s.name === "sentry:questions" ? questionTies() : sentryTies[s.name]?.())) || [],
   wait: s.wait ?? null,
+  blocked: s.inbox.length && s.blockedSince && Date.now() - s.blockedSince >= BLOCKED_SHOWN_MS ? { count: s.inbox.length, since: s.blockedSince } : null,
 });
 
 // Plain text of the visible pane plus `history` lines above it, trailing blank lines dropped.
@@ -799,11 +808,29 @@ async function inputBox(s: Session) {
   const text = lines.slice(i, end < 0 ? undefined : end).map(plain).join("\n").replace(/^❯/, "").trim();
   return { text, empty: first.startsWith("\x1b[2m") || text === "" };
 }
+// The draft as typed, near enough: claude indents each line after the first by two spaces (a wrapped line comes back as two).
+const draftOf = (text: string) => text.split("\n").map((l) => l.replace(/^ {2}/, "")).join("\n");
 // A message the inbox pasted whose Enter was lost (it landed while claude was still taking the paste in) sits in the box unsent,
 // and keeps every later message from being delivered. It starts with the server's stamp, or is shown collapsed if it was long.
 const ENTER_RETRIES = 3, PASTE_SEEN_MS = 10 * 60_000;
 const unsent = (s: Session, box: { text: string; empty: boolean }) =>
   !box.empty && (box.text.startsWith("[maxflow") || (/^\[Pasted text #\d+/.test(box.text) && Date.now() - (s.pastedAt ?? 0) < PASTE_SEEN_MS));
+// Messages behind the user's own draft show as blocked after 2 minutes. A draft unchanged for 5 (1 for his own request relayed by
+// the funnel) is cleared with Ctrl+C, which empties a non-empty prompt, the messages go in, and the draft is typed back without Enter
+// once that turn ends.
+const BLOCKED_SHOWN_MS = 2 * 60_000, DRAFT_IDLE_MS = 5 * 60_000, DRAFT_IDLE_ISAAC_MS = 60_000;
+function saveDraft(s: Session, draft: string | undefined) {
+  s.savedDraft = draft;
+  if (draft) mkdirSync(DRAFTS, { recursive: true }), writeFileSync(`${DRAFTS}/${s.id}.txt`, draft);
+  else rmSync(`${DRAFTS}/${s.id}.txt`, { force: true });
+}
+// A message stuck behind a draft, and how long the draft has sat unchanged; true once it has waited long enough to clear.
+function behindDraft(s: Session, draft: string) {
+  const now = Date.now();
+  s.blockedSince ??= now;
+  if (s.draft?.text !== draft) s.draft = { text: draft, since: now };
+  return now - s.draft.since >= (s.inbox.some((m) => m.includes(VERIFIED)) ? DRAFT_IDLE_ISAAC_MS : DRAFT_IDLE_MS);
+}
 
 // Notifications wait until the agent is idle at its prompt, so they never land mid-turn or in a permission dialog.
 // A pass awaits tmux, so one still running skips the next tick instead of delivering the same inbox twice.
@@ -821,7 +848,7 @@ setInterval(async () => {
 async function deliver(s: Session) {
   if (s.exitCode !== null || Date.now() - activeAt(s) < DELIVER_IDLE_MS) return;
   // Only sessions with a message pending or a recent paste are read, so idle ones cost no capture each second.
-  if (!s.inbox.length && Date.now() - (s.pastedAt ?? 0) >= PASTE_SEEN_MS) return;
+  if (!s.inbox.length && !s.savedDraft && Date.now() - (s.pastedAt ?? 0) >= PASTE_SEEN_MS) return;
   const box = await inputBox(s);
   if (!box) return;
   if ((s.enterRetries ?? 0) < ENTER_RETRIES && unsent(s, box)) {
@@ -830,7 +857,22 @@ async function deliver(s: Session) {
     await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Enter");
     return;
   }
-  if (!s.inbox.length || !box.empty) return;
+  // The turn our messages started has ended: the user's draft goes back where he left it, unsubmitted.
+  if (s.savedDraft && !s.inbox.length && box.empty && s.claude?.state === "idle" && s.claude.at > (s.pastedAt ?? 0)) {
+    await paste(tmuxName(s.id), s.savedDraft);
+    return saveDraft(s, undefined);
+  }
+  if (!s.inbox.length) return void (s.blockedSince = s.draft = undefined);
+  if (!box.empty) {
+    // Our own message whose Enter retries ran out is no draft of his to clear.
+    if (box.text.startsWith("[maxflow") || !behindDraft(s, draftOf(box.text))) return;
+    const draft = draftOf(box.text);
+    await tmuxAsync("send-keys", "-t", tmuxName(s.id), "C-c");
+    await Bun.sleep(300);
+    if (!(await inputBox(s))?.empty) return;
+    saveDraft(s, s.savedDraft ? `${s.savedDraft}\n${draft}` : draft);
+  }
+  s.blockedSince = s.draft = undefined;
   const text = s.inbox.splice(0).join("\n");
   tmux("set-option", "-t", tmuxName(s.id), "@mf-inbox", "[]");
   s.peerTurnAt = text.includes(VERIFIED) ? undefined : Date.now();

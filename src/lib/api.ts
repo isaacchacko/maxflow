@@ -24,7 +24,10 @@ export type Session = {
   ties: { session: string; label: string }[];
   // What the agent declared it waits on; it sleeps (archived) until a message wakes it.
   wait: { kind: "q" | "approval" | "ci" | "agent" | "slack" | "done"; ref: string; at: number } | null;
+  // Messages that have waited 2+ minutes behind a draft the user left in its prompt; the server clears the draft after 5 unchanged.
+  blocked: { count: number; since: number } | null;
 };
+export const blockedLabel = (b: NonNullable<Session["blocked"]>) => `${b.count} message${b.count === 1 ? "" : "s"} waiting behind your draft`;
 
 // sentry:review's board of the PRs that need the user, and the queue of every open PR with its stage.
 // request: the paste-ready review-request message the user sends teammates himself.

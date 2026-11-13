@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ago, api, displayName, home, isBusy, isSentry, isWaiting, kindOf, store, type Question, type QueuedPr, type ReviewBoard, type Session } from "@/lib/api";
+import { ago, api, blockedLabel, displayName, home, isBusy, isSentry, isWaiting, kindOf, store, type Question, type QueuedPr, type ReviewBoard, type Session } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/sidebar";
 
@@ -360,7 +360,7 @@ export function GraphView({ sessions: all, questions, onQuestions, visible, curr
         ...sessions.map((s) => {
           const at = placeAt.current.get(s.id);
           placeAt.current.delete(s.id);
-          return { id: s.id, label: showTitles ? `${s.name}${s.wait ? ` · ⏸ ${waitLabel(s.wait)}` : ""}` : "", color: sessionColor(s), icon: nodeIcon(s, sessionColor(s)), size: (s.agent || isSentry(s) ? 2.4 : 1.8) * (isBusy(s) || isWaiting(s) ? 1.6 : 1), ...at };
+          return { id: s.id, label: showTitles ? `${s.name}${s.wait ? ` · ⏸ ${waitLabel(s.wait)}` : ""}${s.blocked ? ` · ✉ ${blockedLabel(s.blocked)}` : ""}` : "", color: sessionColor(s), icon: nodeIcon(s, sessionColor(s)), size: (s.agent || isSentry(s) ? 2.4 : 1.8) * (isBusy(s) || isWaiting(s) ? 1.6 : 1), ...at };
         }),
         ...children.map((id) => ({ id, label: "", color: archivedUrls.has(urlOfNode(id)) ? ARCHIVED : (prs.get(urlOfNode(id)) ?? css("--url")), size: 1 })),
         ...[...hubs].map(([hub, urls]) => ({ id: hub, label: showTitles ? hostOfHub(hub) : "", color: allArchived(urls) ? ARCHIVED : (urls.length === 1 && prs.get(urls[0])) || css("--url"), icon: favicon(hostOfHub(hub)), size: 3 })),
@@ -970,6 +970,7 @@ function NodeCard({ s, ref }: { s: Session; ref: React.RefObject<HTMLDivElement 
     ["status", `${!s.running ? `exited ${s.exitCode ?? "?"}` : isBusy(s) ? "working" : isWaiting(s) ? "waiting on you" : `idle ${ago(s.lastOutputAt)}`}${s.archived ? " · archived" : ""}`],
     ["kind", kindOf(s)],
     ...(s.wait ? [["waits on", `${waitLabel(s.wait)}, since ${ago(s.wait.at)} ago`] as [string, string]] : []),
+    ...(s.blocked ? [["blocked", `${blockedLabel(s.blocked)}, for ${ago(s.blocked.since)}`] as [string, string]] : []),
     ...(s.group ? [["group", s.group] as [string, string]] : []),
     ["command", s.cmd.join(" ")],
     ["folder", home(s.cwd)],

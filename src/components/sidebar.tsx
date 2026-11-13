@@ -6,7 +6,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { displayName, isBusy, isSentry, isWaiting, kindOf, type Session, type View } from "@/lib/api";
+import { blockedLabel, displayName, isBusy, isSentry, isWaiting, kindOf, type Session, type View } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 function Tip({ label, keys, side = "bottom", children }: { label: string; keys?: string; side?: "bottom" | "right"; children: React.ReactNode }) {
@@ -68,7 +68,7 @@ function Row({ s, active, collapsed, onOpen, onKill, onArchive, onRename }: {
     <div
       onClick={onOpen}
       title={`${s.name}\n${s.cmd.join(" ")}\n${s.cwd}`}
-      className={cn("group relative flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-2.5 hover:bg-accent/60", active && "bg-accent")}
+      className={cn("group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 hover:bg-accent/60", s.blocked ? "py-1" : "h-8", active && "bg-accent")}
     >
       <StatusDot s={s} />
       <div className="min-w-0 flex-1">
@@ -84,6 +84,11 @@ function Row({ s, active, collapsed, onOpen, onKill, onArchive, onRename }: {
         ) : (
           <div onDoubleClick={(e) => (e.stopPropagation(), setEditing(true))} className={cn("truncate text-sm", (!s.running || s.archived) && "text-muted-foreground")}>
             {displayName(s)}
+          </div>
+        )}
+        {!editing && s.blocked && (
+          <div className="truncate text-xs text-amber-600 dark:text-amber-400" title="Send or clear the draft in its prompt; it is cleared and typed back for you after 5 unchanged minutes">
+            {blockedLabel(s.blocked)}
           </div>
         )}
       </div>
