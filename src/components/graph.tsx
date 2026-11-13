@@ -59,7 +59,7 @@ const nodeIcon = (s: Session, color: string) => {
 };
 // sentry:review's PR queue hangs off its node, drawn with how many PRs on its board need the user; clicking it opens the board.
 const QUEUE_NODE = "pr-queue";
-// Agents that need the user hang off one node while a question of theirs is pending with him (a `wait q:` only matters once its question is); clicking it opens his questions.
+// Agents that need the user hang off one node while a question of theirs is pending with him (a `wait q:` only matters once its question is); clicking it opens the board, where he answers them.
 const NEEDS_NODE = "needs-me";
 const isUserNode = (id: string) => id === QUEUE_NODE || id === NEEDS_NODE;
 const needsUser = (s: Session, questions: Question[]) => questions.some((q) => q.session === s.id && q.status === "pending");

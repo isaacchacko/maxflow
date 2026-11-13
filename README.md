@@ -23,7 +23,7 @@ Running five or ten coding agents at once breaks down in boring ways: terminals 
 - **Sessions that never die.** Every session is a real PTY inside a private tmux server, so it survives closing the tab and restarting maxflow. On boot the server adopts and reattaches every one.
 - **Everything is an HTTP call.** The browser and agents use the same API, so an agent can start another agent, type into it, wait for its prompt and read its screen with a one-line CLI.
 - **Push, not poll.** An event bus plus sentries turn "is CI done yet?" into a message that lands in the agent's prompt when CI is done.
-- **One queue for your attention.** Agents raise questions through `maxflow ask`; a gate bounces the ones they should decide themselves, and the rest wait for you in one panel.
+- **One queue for your attention.** Agents raise questions through `maxflow ask`; a gate bounces the ones they should decide themselves, and the rest wait for you on the board.
 - **A picture of the work.** The graph view draws sessions, the PRs, tickets and pages they touch, and which sentries are watching them, grouped by the work they share.
 
 ## Features
@@ -130,7 +130,7 @@ Sentries are sessions the server starts on boot and tmux keeps across restarts. 
 | **slack** | Polls the threads, channels and searches agents posted in or watch, every 60s, and notifies them of new replies. Publishes every mention of you as `slack/mention`. |
 | **review** *(agent)* | Keeps your queue of open PRs moving toward merged or closed: stages each PR, revives the chat that opened it when a comment lands that nobody heard, and tells you what's next. |
 | **funnel** *(agent)* | The front door for your requests: finds the agent that owns the request's root (ticket, PR, bug), or resumes or starts one, delivers it, and links in agents whose context helps. |
-| **questions** | The throttle on your attention. Every `maxflow ask` goes through a quick model check; what the agent should decide itself is bounced back, the rest waits in the Questions panel. |
+| **questions** | The throttle on your attention. Every `maxflow ask` goes through a quick model check; what the agent should decide itself is bounced back, the rest waits on the board, in Needs You and on the task its agent works on. |
 | **meta** *(agent)* | Reads every agent's transcript every 15 minutes, times turns, tool calls and model replies, and coaches the slow ones. Keeps lessons that every new agent is told. |
 | **ram** | Kills local test, lint, typecheck and build jobs an agent starts once they use too much RAM, and tells it to push and let CI run them. |
 | **assistant** *(agent)* | Keeps your task board (⌘K): derives each task from what you ask for and moves it through todo, doing, waiting on you, waiting on others, and done, as the agents work. |

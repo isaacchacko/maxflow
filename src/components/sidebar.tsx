@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, ArchiveRestore, History, MessageCircleQuestion, Network, PanelLeft, Plus, SquareKanban, TerminalSquare, X } from "lucide-react";
+import { Archive, ArchiveRestore, History, Network, PanelLeft, Plus, SquareKanban, TerminalSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Kbd } from "@/components/ui/kbd";
@@ -123,7 +123,6 @@ type Props = {
   onView: (v: View) => void;
   onResume: () => void;
   questions: number;
-  onQuestions: () => void;
   onNew: () => void;
   onOpen: (id: string) => void;
   onKill: (id: string) => void;
@@ -139,7 +138,7 @@ const VIEWS = [
   { view: "tasks", label: "Board", keys: "⌘K", Icon: SquareKanban },
 ] as const;
 
-export function Sidebar({ sessions, current, collapsed, view, onToggle, onView, onResume, questions, onQuestions, onNew, onOpen, onKill, onArchive, hideArchived, onToggleArchived, onRename }: Props) {
+export function Sidebar({ sessions, current, collapsed, view, onToggle, onView, onResume, questions, onNew, onOpen, onKill, onArchive, hideArchived, onToggleArchived, onRename }: Props) {
   const byActivity = [...sessions].sort((a, b) => b.activeAt - a.activeAt);
   const agents = byActivity.filter((s) => !isSentry(s) && !s.archived), sentries = sessions.filter(isSentry);
   const archived = byActivity.filter((s) => !isSentry(s) && s.archived);
@@ -161,12 +160,6 @@ export function Sidebar({ sessions, current, collapsed, view, onToggle, onView, 
             <span className="ml-1 text-sm font-semibold tracking-tight">maxflow</span>
             {agents.length > 0 && <Badge variant="secondary" className="h-5 px-1.5 font-mono text-[11px]">{agents.length}</Badge>}
             <div className="ml-auto flex items-center gap-0.5">
-              <Tip label="Questions agents asked you">
-                <Button variant="ghost" size="icon" className={cn("relative size-8 text-muted-foreground", questions > 0 && "text-sentry")} onClick={onQuestions}>
-                  <MessageCircleQuestion />
-                  {questions > 0 && <span className="absolute -top-0.5 -right-0.5 rounded-full bg-sentry px-1 font-mono text-[10px] leading-4 text-background">{questions}</span>}
-                </Button>
-              </Tip>
               <Tip label="Resume a Claude chat">
                 <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={onResume}>
                   <History />
@@ -192,9 +185,11 @@ export function Sidebar({ sessions, current, collapsed, view, onToggle, onView, 
       >
         {VIEWS.map(({ view: v, label, keys, Icon }) => (
           <Tip key={v} label={`${label} view`} keys={keys} side={collapsed ? "right" : "bottom"}>
-            <ToggleGroupItem value={v} aria-label={label} className={cn("text-muted-foreground aria-checked:bg-accent aria-checked:text-foreground", collapsed ? "size-8 px-0" : "flex-1 text-xs")}>
+            <ToggleGroupItem value={v} aria-label={label} className={cn("relative text-muted-foreground aria-checked:bg-accent aria-checked:text-foreground", collapsed ? "size-8 px-0" : "flex-1 text-xs")}>
               <Icon />
               {!collapsed && label}
+              {/* Agents' questions are answered on the board, so it carries their count. */}
+              {v === "tasks" && questions > 0 && <span className="absolute -top-1 -right-1 rounded-full bg-sentry px-1 font-mono text-[10px] leading-4 text-background">{questions}</span>}
             </ToggleGroupItem>
           </Tip>
         ))}

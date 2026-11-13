@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
+import { QuestionCard } from "@/components/questions";
 import { Terminal, type TerminalHandle } from "@/components/terminal";
-import { ago, api, pasteImages, store, type OpenComment, type QueuedPr, type Session, type Task } from "@/lib/api";
+import { ago, api, pasteImages, store, type OpenComment, type Question, type QueuedPr, type Session, type Task } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // Linear's status circles: an outline to start, filling as the work goes, a check when done.
@@ -79,7 +80,7 @@ function Chip({ children, className }: { children: React.ReactNode; className?: 
 }
 
 // The user's task board, which sentry:assistant derives from his prompts and the agents' work; he reads it, never edits it.
-export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: { tasks: Task[]; prs: QueuedPr[]; comments: OpenComment[]; sessions: Session[]; onOpen: (id: string) => void; onClose: () => void }) {
+export function TasksBoard({ tasks, prs, comments, questions, sessions, onOpen, onSettled, onClose }: { tasks: Task[]; prs: QueuedPr[]; comments: OpenComment[]; questions: Question[]; sessions: Session[]; onOpen: (id: string) => void; onSettled: () => void; onClose: () => void }) {
   const [shown, setShown] = useState<number | null>(null);
   // Changes he saw on this page before the next poll brings the server's seen marks back.
   const [seenHere, setSeenHere] = useState<Record<number, number>>({});
@@ -96,6 +97,10 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
   const hits = (text: string) => words.every((w) => text.toLowerCase().includes(w));
   // The review sentry's queue stages a green PR with no reviewer yet as "needs reviewer": only the user sends it for approval.
   const unreviewed = prs.filter((p) => p.stage === "needs reviewer" && hits(`${p.pr} ${p.title}`)).sort((a, b) => a.created.localeCompare(b.created));
+  // Agents' questions wait on him in Needs You, oldest first, and in the dialog of the task their agent works on.
+  const pending = questions.filter((q) => q.status === "pending" && hits(q.thread.map((m) => m.text).join(" ") + q.name));
+  const questionsOf = (t: Task) => pending.filter((q) => t.sessions.includes(q.session));
+  const taskOf = (q: Question) => tasks.findLast((t) => t.sessions.includes(q.session) && t.status !== "done" && t.status !== "dropped");
   const task = tasks.find((t) => t.id === shown);
   const assistant = sessions.find((s) => s.sentry && s.name === "sentry:assistant" && s.running);
   const [chatting, setChatting] = useState(() => store.get("mf.tasksChat") !== "0");
@@ -183,7 +188,7 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
       <div className="flex min-h-0 flex-1">
         <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[repeat(8,minmax(15rem,1fr))] gap-3 overflow-x-auto p-3">
           {columns.map((c, col) => {
-            const count = c.all.length + (c.status === "you" && unreviewed.length ? 1 : 0);
+            const count = c.all.length + (c.status === "you" ? pending.length + (unreviewed.length ? 1 : 0) : 0);
             return (
               <section key={c.status} className="flex min-h-0 flex-col rounded-lg bg-card/40">
                 <h3 className="flex h-9 shrink-0 items-center gap-2 px-2.5 text-[13px] font-medium text-foreground">
@@ -195,6 +200,10 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
                   )}
                 </h3>
                 <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-1.5 pb-1.5">
+                  {c.status === "you" && pending.map((q) => {
+                    const owner = taskOf(q);
+                    return <QuestionCard key={q.id} q={q} task={owner && `${taskKey(owner)} ${owner.title}`} onOpen={(id) => (onClose(), onOpen(id))} onSettled={onSettled} />;
+                  })}
                   {c.status === "you" && unreviewed.length > 0 && <UnreviewedPrs prs={unreviewed} />}
                   {c.cards.map((t, row) => (
                     <TaskCard key={t.id} task={t} named={named} change={c.status === "updated" ? t.change : undefined} onSeen={() => see([t.id])} waiting={t.status === "waiting" || t.status === "you" ? waitingOn(t, byId) : null} selected={selected?.id === t.id} onClick={() => (setCursor({ col, row }), setShown(t.id))} />
@@ -213,10 +222,10 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
           </aside>
         )}
       </div>
-      {!!words.length && !columns.some((c) => c.all.length) && !unreviewed.length && <p className="absolute inset-x-0 top-1/2 text-center text-muted-foreground">No task mentions “{filter}”.</p>}
-      {!tasks.length && !unreviewed.length && <p className="absolute inset-x-0 top-1/2 text-center text-muted-foreground">No tasks yet. The assistant adds them as you ask agents for things.</p>}
+      {!!words.length && !columns.some((c) => c.all.length) && !unreviewed.length && !pending.length && <p className="absolute inset-x-0 top-1/2 text-center text-muted-foreground">No task mentions “{filter}”.</p>}
+      {!tasks.length && !unreviewed.length && !pending.length && <p className="absolute inset-x-0 top-1/2 text-center text-muted-foreground">No tasks yet. The assistant adds them as you ask agents for things.</p>}
       <Dialog open={!!task} onOpenChange={(o) => !o && setShown(null)}>
-        {task && <TaskDetail task={task} named={named} assistant={assistant?.id} onOpen={(id) => (setShown(null), onClose(), onOpen(id))} />}
+        {task && <TaskDetail task={task} questions={questionsOf(task)} named={named} assistant={assistant?.id} onOpen={(id) => (setShown(null), onClose(), onOpen(id))} onSettled={onSettled} />}
       </Dialog>
     </div>
   );
@@ -329,7 +338,7 @@ function UnreviewedPrs({ prs }: { prs: QueuedPr[] }) {
 const when = (t: number) => new Date(t).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 // Linear's issue view: the title, answer and activity on the left, the properties in a sidebar.
-function TaskDetail({ task, named, assistant, onOpen }: { task: Task; named: Map<string, string>; assistant?: string; onOpen: (id: string) => void }) {
+function TaskDetail({ task, questions, named, assistant, onOpen, onSettled }: { task: Task; questions: Question[]; named: Map<string, string>; assistant?: string; onOpen: (id: string) => void; onSettled: () => void }) {
   const [reply, setReply] = useState("");
   const [sent, setSent] = useState(false);
   const send = () => {
@@ -345,6 +354,7 @@ function TaskDetail({ task, named, assistant, onOpen }: { task: Task; named: Map
           Tasks <ChevronRight className="size-3" /> <span className="font-mono">{taskKey(task)}</span>
         </DialogDescription>
         <DialogTitle className="text-xl leading-snug font-semibold">{task.title}</DialogTitle>
+        {questions.map((q) => <QuestionCard key={q.id} q={q} onOpen={onOpen} onSettled={onSettled} />)}
         {task.kind === "question" && (
           <section className="rounded-md border bg-card px-4 py-3 text-sm">
             <h4 className="mb-1.5 text-xs font-medium text-muted-foreground">Answer</h4>
