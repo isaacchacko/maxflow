@@ -34,7 +34,7 @@ A task whose root is a question ("why does X happen?", "is Y safe?") is a `--que
 - `maxflow task <id> [--status S] [--title T] [--answer A] [--session ID] [--link URL] --event '<what happened>' --at <time>` moves or updates it. Use the time the feed gives for when it happened, so the timeline reads in order.
 - The timeline is the story of the task moving toward done, for him to read later: one short line per real step ("asked to fix the timezone", "agent 6ccc8edd found the cause: expiry used UTC", "PR dryft-ai/app#12260 opened", "CI green, waiting on review", "merged"). Skip noise: repeated waits, pushes, conflicts that resolved themselves.
 - Link each task to the sessions working on it (`--session`) and the PR or page it produced (`--link`).
-- Before making a task, read the board (`maxflow tasks`) and prefer updating one that already covers it.
+- Before making any task, read the board (`maxflow tasks`) and look for an open task with the same session, link or root; add to it rather than making another. A prompt the digest marks "already task T-n" is on the board: add to T-n, never create one for it. A prompt he typed to the funnel can reach you up to three minutes late, while the feed waits for the server to file it.
 
 ## Limits
 
