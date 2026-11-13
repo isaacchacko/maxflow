@@ -2,8 +2,8 @@
 // assistant sentry's feed: runs beside the assistant agent (sentries/assistant.md) in its pane. Every minute it reads the part of each
 // session's transcript it hasn't read yet for the user's own prompts (sentries' panes included, so what he types to the funnel counts)
 // and the reply each agent ended its turn on, and the bus for question, wait, intent and PR events. It hands the assistant a digest
-// within a minute of anything the user asked, and otherwise every 10 minutes. Between digests it moves tasks itself where the agents'
-// waits settle the status, and looks up the state of every PR the open tasks link. Exits with the agent.
+// within a minute of anything the user asked, and otherwise every 10 minutes, and looks up the state of every PR the open tasks link,
+// which the server reads to settle each task's column. Exits with the agent.
 import { existsSync, openSync, readSync, closeSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -26,16 +26,14 @@ type Mark = { offset: number; reply?: string };
 type Prompt = { at: string; session: string; title: string; text: string };
 type Reply = { session: string; title: string; status: string; wait: string | null; text: string };
 // What the next digest will carry; urgent once it holds something the user asked.
-type Pending = { prompts: Prompt[]; replies: Record<string, Reply>; events: string[]; moves: string[]; urgent: boolean };
-// auto: the status this feed last moved each task to.
-type State = { since: number; seq: number; marks: Record<string, Mark>; pending: Pending; auto: Record<string, string>; digestAt: number };
+type Pending = { prompts: Prompt[]; replies: Record<string, Reply>; events: string[]; urgent: boolean };
+type State = { since: number; seq: number; marks: Record<string, Mark>; pending: Pending; digestAt: number };
 
 const state: State = {
   since: Date.now() - BACKFILL_MS,
   seq: 0,
   marks: {},
-  pending: { prompts: [], replies: {}, events: [], moves: [], urgent: false },
-  auto: {},
+  pending: { prompts: [], replies: {}, events: [], urgent: false },
   digestAt: 0,
   ...(existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {}),
 };
@@ -88,8 +86,8 @@ function lastReply(lines: string[]) {
 }
 
 // The events that move a task: a question raised or settled, an agent starting or ending a wait, the funnel routing one of the user's
-// requests, and a PR's milestones.
-const MOVES = /^(question\/\w+\/\d+|wait\/\w+|intent\/\w+|gh\/.+\/pr\/\d+\/(opened|merged|closed|review|ci|decision))$/;
+// requests, the server settling a task's column from its agents' waits, and a PR's milestones.
+const MOVES = /^(question\/\w+\/\d+|wait\/\w+|intent\/\w+|task\/\d+|gh\/.+\/pr\/\d+\/(opened|merged|closed|review|ci|decision))$/;
 // What can't wait for the next digest: something the user asked, a question to or from him, the funnel routing his request.
 const URGENT = /^(question|intent)\//;
 
@@ -136,45 +134,12 @@ async function read() {
   }
   state.seq = fresh.at(-1)?.seq ?? state.seq;
   state.since = now;
-  await settle(all, questions);
   writeFileSync(STATE_FILE, JSON.stringify(state));
 }
 
 type Task = { id: number; title: string; status: string; sessions: string[]; links: string[] };
-const OPEN_PR = (url: string) => prStates[url] === "OPEN";
-let prStates: Record<string, string> = existsSync(PRS_FILE) ? JSON.parse(readFileSync(PRS_FILE, "utf8")) : {};
 
-// The status the agents' waits settle, with no model turn: any linked agent asleep on the user's answer puts the task on him; every
-// linked agent asleep on someone else (a teammate's approval, CI, another agent, Slack), or done with the task's PRs still open, puts
-// it on others. Anything less clear-cut is left to the assistant. Each move is made once, so the assistant can overrule it.
-async function settle(all: Session[], questions: Map<number, Question>) {
-  const byId = new Map(all.map((s) => [s.id, s]));
-  const auto = state.auto;
-  for (const t of await get<Task[]>("/api/tasks")) {
-    if (!["todo", "doing", "you", "waiting"].includes(t.status)) continue;
-    const linked = t.sessions.flatMap((id) => byId.get(id) ?? []);
-    if (!linked.length || linked.some(busy)) continue;
-    let to: string | null = null, why = "";
-    const asking = linked.find((s) => s.wait?.kind === "q" && questions.get(Number(s.wait.ref))?.status === "pending");
-    if (asking) (to = "you"), (why = `${asking.name} is asleep until you answer q${asking.wait!.ref}`);
-    else if (linked.every((s) => s.wait && (s.wait.kind !== "done" ? s.wait.kind !== "q" : t.links.some(OPEN_PR)))) {
-      const w = linked.find((s) => s.wait!.kind !== "done")?.wait;
-      to = "waiting";
-      why = w ? `every agent on it is asleep, the first on ${w.kind}:${w.ref}` : `its agents are done and ${t.links.filter(OPEN_PR).length} of its PRs are still open`;
-    }
-    if (!to) {
-      delete state.auto[t.id];
-      continue;
-    }
-    // you → waiting only undoes this feed's own move; the assistant may have put a task on the user for reasons no wait shows.
-    if (to === t.status || (t.status === "you" && auto[t.id] !== "you") || auto[t.id] === to) continue;
-    auto[t.id] = to;
-    await fetch(`${base}/api/tasks/${t.id}`, { method: "POST", headers: caller, body: JSON.stringify({ status: to, event: `why here: ${why}` }) });
-    pending.moves.push(`T-${t.id} ${t.status} → ${to}: ${why}`);
-  }
-}
-
-// The state of every PR the open tasks link, in one GitHub query, for the board's merged counts and the waiting rule above.
+// The state of every PR the open tasks link, in one GitHub query, for the board's merged counts and the server's waiting rule.
 async function lookUpPrs() {
   const tasks = await get<Task[]>("/api/tasks");
   const urls = [...new Set(tasks.filter((t) => !["done", "dropped"].includes(t.status)).flatMap((t) => t.links.filter((l) => /github\.com\/[^/]+\/[^/]+\/pull\/\d+$/.test(l))))];
@@ -183,26 +148,24 @@ async function lookUpPrs() {
   const out = Bun.spawnSync(["gh", "api", "graphql", "-f", `query=${query}`]);
   const data = JSON.parse(out.stdout.toString() || "{}").data;
   if (!data) return console.error(`PR lookup failed: ${out.stderr.toString().slice(0, 300)}`);
-  prStates = Object.fromEntries(urls.flatMap((u, i) => (data[`p${i}`]?.state ? [[u, data[`p${i}`].state]] : [])));
-  writeFileSync(PRS_FILE, JSON.stringify(prStates));
+  writeFileSync(PRS_FILE, JSON.stringify(Object.fromEntries(urls.flatMap((u, i) => (data[`p${i}`]?.state ? [[u, data[`p${i}`].state]] : [])))));
 }
 
 async function digest() {
   const now = Date.now();
   const replies = Object.values(pending.replies);
-  const { prompts, events, moves } = pending;
-  console.log(`${new Date(now).toLocaleTimeString()}  digest: ${prompts.length} prompts from the user, ${replies.length} replies, ${events.length} events, ${moves.length} moves made`);
-  if (prompts.length || replies.length || events.length || moves.length) {
-    writeFileSync(DIGEST_FILE, JSON.stringify({ at: now, prompts, replies, events, moves }, null, 2));
+  const { prompts, events } = pending;
+  console.log(`${new Date(now).toLocaleTimeString()}  digest: ${prompts.length} prompts from the user, ${replies.length} replies, ${events.length} events`);
+  if (prompts.length || replies.length || events.length) {
+    writeFileSync(DIGEST_FILE, JSON.stringify({ at: now, prompts, replies, events }, null, 2));
     const text = [
       prompts.length && `The user's prompts:\n${prompts.map((p) => `- ${p.at} to ${p.session} (${p.title}): ${JSON.stringify(p.text)}`).join("\n")}`,
       replies.length && `Where agents ended their turns:\n${replies.map((r) => `- ${r.session} (${r.title}) ${r.status}${r.wait ? `, waits on ${r.wait}` : ""}: ${JSON.stringify(r.text)}`).join("\n")}`,
       events.length && `Events:\n${events.map((e) => `- ${e}`).join("\n")}`,
-      moves.length && `Moves the feed made from agents' waits (overrule any that's wrong; it won't make the same move again):\n${moves.map((m) => `- ${m}`).join("\n")}`,
     ].filter(Boolean).join("\n\n");
     await notify(text.length <= NOTIFY_CHARS ? text : `${text.slice(0, NOTIFY_CHARS)}\n… cut here; the whole digest is in ${DIGEST_FILE}.`);
   }
-  Object.assign(pending, { prompts: [], replies: {}, events: [], moves: [], urgent: false });
+  Object.assign(pending, { prompts: [], replies: {}, events: [], urgent: false });
   state.digestAt = now;
   writeFileSync(STATE_FILE, JSON.stringify(state));
 }

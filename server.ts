@@ -471,6 +471,7 @@ function setWait(s: Session, wait?: Wait) {
   s.wait = wait;
   tmux("set-option", "-t", tmuxName(s.id), "@mf-wait", wait ? JSON.stringify(wait) : "");
   publish(`wait/${s.id}`, { session: s.id, wait: wait ?? null });
+  settleTasks();
 }
 // Waiting is sleeping: a waiting agent is archived once its turn ends, and the first message queued to it wakes it for a turn.
 // Only the awaited event ends the wait: a question settled, an approval, CI finishing, the PR merged or closed, the agent's reply, a new Slack message.
@@ -661,6 +662,7 @@ function settle(q: Question, action: Settle, text = "") {
     saveDecisions();
   }
   publish(`question/${q.status}/${q.id}`, { id: q.id, session: q.session });
+  settleTasks();
   if (!s || s.exitCode !== null || action === "pass") return;
   const followUp = `\`${CLI} ask --re ${q.id} '<text>'\``;
   queue(s, action === "reply"
@@ -693,6 +695,8 @@ type Task = {
   change?: { at: number; from: (typeof TASK_STATUSES)[number] | null; to: (typeof TASK_STATUSES)[number] };
   // When he last opened it or dismissed it from the board's Updated column.
   seen?: number;
+  // The status its agents' waits last settled; a hand move sticks until they settle a different one.
+  derived?: (typeof TASK_STATUSES)[number];
 };
 type TaskEdit = Partial<Pick<Task, "title" | "kind" | "status" | "answer">> & { session?: string; link?: string; event?: string; at?: number };
 const TASKS = `${process.env.HOME}/.maxflow/tasks.json`;
@@ -742,6 +746,46 @@ function requested(owner: Session, request: string, root?: string) {
   if (root && t.drafted) (t.title = root), delete t.drafted;
   editTask(t, { session: owner.id, ...(!t.timeline.some((e) => e.text === asked) && { event: asked }) });
 }
+
+// A task's column follows the agents still on it, those whose newest task it is: on the user while one is asleep on his answer, doing
+// while one works, waiting while one is asleep on anyone else or its PRs are still open, done once all are done. A question needs its answer to be done.
+const DONE_ARCHIVE_MS = 3_600_000;
+const newestTaskOf = (id: string) => tasks.findLast((t) => t.sessions.includes(id) && t.status !== "dropped");
+function derive(t: Task): { to: Task["status"]; why: string } | null {
+  const agents = t.sessions.flatMap((id) => sessions.get(id) ?? []).filter((s) => s.exitCode === null && isAgent(s) && newestTaskOf(s.id) === t);
+  if (!agents.length) return null;
+  const asking = agents.find((s) => s.wait?.kind === "q" && questions.some((q) => q.id === Number(s.wait!.ref) && q.status === "pending"));
+  if (asking) return { to: "you", why: `${asking.name} is asleep until you answer q${asking.wait!.ref}` };
+  const working = agents.find((s) => !s.wait);
+  if (working) return { to: "doing", why: `${working.name} is working` };
+  const asleep = agents.find((s) => s.wait!.kind !== "done");
+  if (asleep) return { to: "waiting", why: `${asleep.name} waits on ${waitLabel(asleep.wait!)}` };
+  const open = t.links.filter((u) => taskPrs()[u] === "OPEN").length;
+  if (open) return { to: "waiting", why: `its agents are done and ${open === 1 ? "1 PR is" : `${open} PRs are`} still open` };
+  if (t.kind === "question" && !t.answer) return null;
+  return { to: "done", why: "every agent on it is done" };
+}
+function settleTasks() {
+  for (const t of tasks) {
+    if (t.status === "blocked" || t.status === "dropped") continue;
+    const d = derive(t);
+    if (!d || d.to === t.derived) continue;
+    t.derived = d.to;
+    if (d.to === t.status) saveTasks();
+    else editTask(t, { status: d.to, event: `${d.to === "done" ? "done" : `moved to ${d.to}`}: ${d.why}` });
+    publish(`task/${t.id}`, { id: t.id, status: t.status, why: d.why });
+  }
+  // A done task's agents sleep an hour after it finished, keeping their last screen; a message still wakes them.
+  for (const t of tasks)
+    if (t.status === "done" && Date.now() - t.updated >= DONE_ARCHIVE_MS)
+      for (const id of t.sessions) {
+        const s = sessions.get(id);
+        if (s && !s.archived && s.exitCode === null && s.wait?.kind === "done" && newestTaskOf(id) === t) setArchived(s, true);
+      }
+}
+// Tasks from before the server settled columns start from what their agents settle now, so only later changes move them.
+for (const t of tasks) if (!("derived" in t)) t.derived = derive(t)?.to;
+setInterval(settleTasks, 15_000);
 
 // An unanswered question with a default for a reversible step stops holding its agent after DEFAULT_AFTER_MS.
 setInterval(() => {
