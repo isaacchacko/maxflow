@@ -680,6 +680,10 @@ type Task = {
   timeline: { at: number; text: string; session?: string }[];
   // The title is still Isaac's words cut short, waiting for the funnel to name the root.
   drafted?: boolean;
+  // Its status change Isaac hasn't seen yet: from what he last saw (null: it was created since) to what it is now.
+  change?: { at: number; from: (typeof TASK_STATUSES)[number] | null; to: (typeof TASK_STATUSES)[number] };
+  // When he last opened it or dismissed it from the board's Updated column.
+  seen?: number;
 };
 type TaskEdit = Partial<Pick<Task, "title" | "kind" | "status" | "answer">> & { session?: string; link?: string; event?: string; at?: number };
 const TASKS = `${process.env.HOME}/.maxflow/tasks.json`;
@@ -694,11 +698,18 @@ function editTask(t: Task | undefined, edit: TaskEdit) {
     if (!edit.title) return "a new task needs a title";
     t = { id: (tasks.at(-1)?.id ?? 0) + 1, title: edit.title, kind: "task", status: "todo", sessions: [], links: [], at, updated: at, timeline: [] };
     tasks.push(t);
+    t.change = { at: Date.now(), from: null, to: t.status };
   }
-  const moved = edit.status && edit.status !== t.status;
+  const from = t.status, moved = edit.status && edit.status !== t.status;
   Object.assign(t, Object.fromEntries(Object.entries({ title: edit.title, kind: edit.kind, status: edit.status, answer: edit.answer }).filter(([, v]) => v !== undefined)));
   if (edit.session && !t.sessions.includes(edit.session)) t.sessions.push(edit.session);
   if (edit.link && !t.links.includes(edit.link)) t.links.push(edit.link);
+  if (moved) {
+    // An unseen change keeps the status he last saw; one that lands back on it is no change to him.
+    const was = t.change && t.change.at > (t.seen ?? 0) ? t.change.from : from;
+    // Stamped now, not with the event's time: the assistant often logs a move after the fact, which he still hasn't seen.
+    t.change = was === t.status ? undefined : { at: Date.now(), from: was, to: t.status };
+  }
   if (edit.event || moved) {
     t.timeline.push({ at, text: edit.event ?? `moved to ${t.status}`, ...(edit.session && { session: edit.session }) });
     t.timeline.sort((a, b) => a.at - b.at);
@@ -962,6 +973,13 @@ Bun.serve<WsData>({
 
     if (path === "/api/tasks" && req.method === "GET") return Response.json(tasks.map((t) => ({ ...t, prs: prProgress(t) })));
     if (path === "/api/comments" && req.method === "GET") return Response.json(openUserComments());
+    // Isaac saw these tasks' latest changes: the ids given, or every task.
+    if (path === "/api/tasks/seen" && req.method === "POST") {
+      const ids = ((await req.json().catch(() => ({}))) as { ids?: number[] }).ids;
+      for (const t of tasks) if (!ids || ids.includes(t.id)) t.seen = Date.now();
+      saveTasks();
+      return new Response(null, { status: 204 });
+    }
     const task = path.match(/^\/api\/tasks(?:\/(\d+))?$/);
     if (task && req.method === "POST") {
       const t = task[1] ? tasks.find((o) => o.id === Number(task[1])) : undefined;

@@ -60,6 +60,8 @@ export type Task = {
   timeline: { at: number; text: string; session?: string }[];
   // Its linked PRs whose state is known: how many merged, closed unmerged, and in all.
   prs: { merged: number; closed: number; total: number };
+  change?: { at: number; from: Task["status"] | null; to: Task["status"] };
+  seen?: number;
 };
 
 // One of the user's own PR comments not yet resolved: a review thread still open, or a top-level comment nobody answered yet.
@@ -102,6 +104,7 @@ export const api = {
   questions: (): Promise<Question[]> => fetch("/api/questions").then((r) => r.json()),
   comments: (): Promise<OpenComment[]> => fetch("/api/comments").then((r) => r.json()),
   tasks: (): Promise<Task[]> => fetch("/api/tasks").then((r) => r.json()),
+  seen: (ids?: number[]) => fetch("/api/tasks/seen", { method: "POST", body: JSON.stringify({ ids }) }),
   settle: (id: number, action: "reply" | "dismiss", text?: string) => fetch(`/api/questions/${id}`, { method: "POST", body: JSON.stringify({ action, text }) }),
   resume: (id: string, bypass: boolean, force: boolean) => fetch(`/api/chats/${id}/resume`, { method: "POST", body: JSON.stringify({ bypass, force }) }),
 };
