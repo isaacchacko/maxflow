@@ -43,13 +43,15 @@ type State = {
   answered: Record<string, number>;
   seen: string[];
   flagged: string[];
+  // Each kind of bot alert about him: how often it came since its last note, and when that note was.
+  alerts: Record<string, { count: number; noted: number }>;
   reruns: string[];
   batch: Routed[];
   prsAt: number;
   stallAt: number;
 };
 const state: State = {
-  seq: 0, tasks: {}, prs: {}, questions: {}, answered: {}, seen: [], flagged: [], reruns: [], batch: [], prsAt: 0, stallAt: 0,
+  seq: 0, tasks: {}, prs: {}, questions: {}, answered: {}, seen: [], flagged: [], alerts: {}, reruns: [], batch: [], prsAt: 0, stallAt: 0,
   ...(existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {}),
 };
 const save = () => writeFileSync(STATE_FILE, JSON.stringify(state));
@@ -134,8 +136,9 @@ async function onSlack(topic: string, d: any, me: string) {
     return;
   }
   const kind = topic === "slack/mention" ? "mention" : topic === "slack/dm" ? "dm" : /^slack\/\w+\/[\d.]+\/reply$/.test(topic) ? "reply" : null;
-  if (!kind || d.told?.length || d.bot || d.agent) return;
+  if (!kind || d.told?.length || d.agent || (d.bot && kind !== "mention")) return;
   state.seen = [...state.seen, d.ts].slice(-1000);
+  if (d.bot) return onBotAlert(d);
   const where = kind === "dm" ? "a DM" : String(d.where ?? "").replace(/^thread .* in /, "") || "Slack";
   const line = `${d.from} in ${where}: "${short(d.text, 200)}" ${d.link}`;
   const owner = kind === "reply" || kind === "mention" ? await toOwner(key, line) : null;
@@ -147,6 +150,24 @@ async function onSlack(topic: string, d: any, me: string) {
   if (/\?/.test(d.text)) state.questions[d.ts] = { key, at: Number(d.ts) * 1000, who: d.from, text: d.text, link: d.link };
   // A mention or DM nobody owns goes to the funnel, which decides whether an agent can move it forward; thread replies stay on the board.
   if (!owner && task && kind !== "reply") state.batch.push({ task, who: d.from, where, text: short(d.text, 200), link: d.link });
+}
+
+// A bot's mention of him ("a run on main is red", a skipped deploy) is one task per kind of alert, however often it repeats: its text
+// without links, mentions and numbers names the kind. A repeat adds a note at most hourly; the funnel hears of a kind once per open task.
+const ALERT_NOTE_MS = 3_600_000;
+async function onBotAlert(d: any) {
+  const plain = short(String(d.text).replace(/<[^>]*>/g, "").replace(/\d+/g, "#"), 120);
+  const tag = `bot:${d.user}:${plain}`;
+  const alert = (state.alerts[tag] ??= { count: 0, noted: 0 });
+  alert.count++;
+  const open = OPEN((await getTasks()).find((t) => t.id === state.tasks[tag]));
+  if (open && Date.now() - alert.noted < ALERT_NOTE_MS) return;
+  const where = String(d.where ?? "Slack").replace(/^thread .* in /, "");
+  const url = String(d.text).match(/<(https?:[^|>]+)/)?.[1];
+  const event = open ? `${alert.count} more since the last note, latest ${url ?? d.link}` : `${d.from} in ${where}: "${short(String(d.text).replace(/<[^>]*>/g, ""), 120)}" ${url ?? ""}`;
+  const task = await onBoard(tag, d.link, event, { title: `${d.from} alert: "${short(plain, 60)}"`, status: "you" });
+  Object.assign(alert, { count: 0, noted: Date.now() });
+  if (task && !open) state.batch.push({ task, who: d.from, where, text: short(String(d.text).replace(/<[^>]*>/g, ""), 200) + (url ? ` ${url}` : ""), link: d.link });
 }
 
 async function flushBatch() {
