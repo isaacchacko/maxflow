@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronRight, ExternalLink, GitMerge, GitPullRequest, Hourglass, MessageSquare, Search, SquareKanban, X } from "lucide-react";
+import { ArrowRight, Bell, Bot, Check, ChevronRight, ExternalLink, GitMerge, GitPullRequest, Hourglass, MessageSquare, Search, SquareKanban, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -56,6 +56,7 @@ function waitingOn(t: Task, byId: Map<string, Session>) {
   const what = { q: `your answer to q${w.ref}`, approval: `teammate approval on ${pr}`, ci: `CI on ${pr}`, agent: `“${byId.get(w.ref)?.name ?? w.ref}”`, slack: "a Slack reply", done: "" }[w.kind];
   return { text: `${s.name} waits on ${what}`, at: w.at };
 }
+const prKey = (url: string) => url.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/)?.slice(1).join("#").toLowerCase();
 const initials = (name: string) => name.split(/\s+/).filter((w) => /^[a-z0-9]/i.test(w)).slice(0, 2).map((w) => w[0].toUpperCase()).join("") || "?";
 const typing = (e: KeyboardEvent) => !!(e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable=true], .xterm");
 
@@ -80,6 +81,11 @@ function Chip({ children, className }: { children: React.ReactNode; className?: 
 // The user's task board, which sentry:assistant derives from his prompts and the agents' work; he reads it, never edits it.
 export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: { tasks: Task[]; prs: QueuedPr[]; comments: OpenComment[]; sessions: Session[]; onOpen: (id: string) => void; onClose: () => void }) {
   const [shown, setShown] = useState<number | null>(null);
+  // Changes he saw on this page before the next poll brings the server's seen marks back.
+  const [seenHere, setSeenHere] = useState<Record<number, number>>({});
+  const see = (ids: number[]) => (setSeenHere((m) => ({ ...m, ...Object.fromEntries(ids.map((id) => [id, Date.now()])) })), api.seen(ids));
+  const unseen = (t: Task) => !!t.change && t.change.at > Math.max(t.seen ?? 0, seenHere[t.id] ?? 0);
+  useEffect(() => void (shown !== null && see([shown])), [shown]);
   const [filter, setFilter] = useState("");
   const [cursor, setCursor] = useState<{ col: number; row: number } | null>(null);
   const filterInput = useRef<HTMLInputElement>(null);
@@ -102,10 +108,21 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
   const matches = (t: Task) => hits(haystack(t));
   // Dropped tasks stay off the board, except in a search, where they show in Done with their dashed circle.
   const inColumn = (t: Task, status: Task["status"]) => t.status === status || (!!words.length && status === "done" && t.status === "dropped");
-  const columns = COLUMNS.map((c) => {
-    const all = tasks.filter((t) => inColumn(t, c.status) && matches(t)).sort((a, b) => b.updated - a.updated);
-    return { ...c, all, cards: c.status === "done" && !words.length ? all.slice(0, DONE_SHOWN) : all };
-  });
+  // The task that owns a PR ("owner/repo#n"): one linking it, else one whose agent mentioned it; open tasks first, then the latest.
+  const ownerOf = (pr: string) => {
+    const ranked = tasks.filter((t) => t.status !== "dropped").sort((a, b) => Number(a.status === "done") - Number(b.status === "done") || b.updated - a.updated);
+    const names = (links: string[] = []) => links.some((l) => prKey(l) === pr);
+    return ranked.find((t) => names(t.links)) ?? ranked.find((t) => t.sessions.some((id) => names(byId.get(id)?.links)));
+  };
+  // Updated holds every task created or moved since he last saw it, newest first, beside its place in its own column.
+  const updated = tasks.filter((t) => unseen(t) && matches(t)).sort((a, b) => b.change!.at - a.change!.at);
+  const columns = [
+    { status: "updated" as const, title: "Updated", all: updated, cards: updated },
+    ...COLUMNS.map((c) => {
+      const all = tasks.filter((t) => inColumn(t, c.status) && matches(t)).sort((a, b) => b.updated - a.updated);
+      return { ...c, all, cards: c.status === "done" && !words.length ? all.slice(0, DONE_SHOWN) : all };
+    }),
+  ];
   const selected = cursor && columns[cursor.col]?.cards[cursor.row];
 
   // Linear's keys: j/k or ↓/↑ within a column, h/l or ←/→ across, Enter opens, / filters.
@@ -164,27 +181,30 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
         <Button variant="ghost" size="icon" className="size-7" title="Close (⌘K)" onClick={onClose}><X /></Button>
       </div>
       <div className="flex min-h-0 flex-1">
-        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[repeat(7,minmax(15rem,1fr))] gap-3 overflow-x-auto p-3">
+        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[repeat(8,minmax(15rem,1fr))] gap-3 overflow-x-auto p-3">
           {columns.map((c, col) => {
             const count = c.all.length + (c.status === "you" && unreviewed.length ? 1 : 0);
             return (
               <section key={c.status} className="flex min-h-0 flex-col rounded-lg bg-card/40">
                 <h3 className="flex h-9 shrink-0 items-center gap-2 px-2.5 text-[13px] font-medium text-foreground">
-                  <StatusIcon status={c.status} />
+                  {c.status === "updated" ? <Bell className="size-3.5 text-[#5e6ad2]" /> : <StatusIcon status={c.status} />}
                   {c.title}
                   <span className="font-normal text-muted-foreground">{count}</span>
+                  {c.status === "updated" && c.cards.length > 0 && (
+                    <button type="button" className="ml-auto text-xs font-normal text-muted-foreground hover:text-foreground" onClick={() => see(c.cards.map((t) => t.id))}>Mark all seen</button>
+                  )}
                 </h3>
                 <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-1.5 pb-1.5">
                   {c.status === "you" && unreviewed.length > 0 && <UnreviewedPrs prs={unreviewed} />}
                   {c.cards.map((t, row) => (
-                    <TaskCard key={t.id} task={t} named={named} waiting={t.status === "waiting" || t.status === "you" ? waitingOn(t, byId) : null} selected={selected?.id === t.id} onClick={() => (setCursor({ col, row }), setShown(t.id))} />
+                    <TaskCard key={t.id} task={t} named={named} change={c.status === "updated" ? t.change : undefined} onSeen={() => see([t.id])} waiting={t.status === "waiting" || t.status === "you" ? waitingOn(t, byId) : null} selected={selected?.id === t.id} onClick={() => (setCursor({ col, row }), setShown(t.id))} />
                   ))}
                   {c.all.length > c.cards.length && <p className="px-2 py-1 text-muted-foreground">{c.all.length - c.cards.length} older not shown</p>}
                 </div>
               </section>
             );
           })}
-          <CommentsColumn comments={comments.filter((c) => hits(`${c.pr} ${c.body} ${c.title} ${c.path ?? ""}`))} />
+          <CommentsColumn comments={comments.filter((c) => hits(`${c.pr} ${c.body} ${c.title} ${c.path ?? ""}`))} ownerOf={ownerOf} onOpen={(t) => setShown(t.id)} />
         </div>
         {assistant && chatting && (
           <aside className="flex w-[32rem] max-w-[40%] shrink-0 flex-col border-l">
@@ -202,7 +222,7 @@ export function TasksBoard({ tasks, prs, comments, sessions, onOpen, onClose }: 
   );
 }
 
-function TaskCard({ task: t, named, waiting, selected, onClick }: { task: Task; named: Map<string, string>; waiting: { text: string; at: number } | null; selected: boolean; onClick: () => void }) {
+function TaskCard({ task: t, named, change, onSeen, waiting, selected, onClick }: { task: Task; named: Map<string, string>; change?: Task["change"]; onSeen: () => void; waiting: { text: string; at: number } | null; selected: boolean; onClick: () => void }) {
   const prs = t.links.flatMap((url) => prLabel(url) ?? []);
   return (
     <button
@@ -215,6 +235,14 @@ function TaskCard({ task: t, named, waiting, selected, onClick }: { task: Task; 
         <span className="font-mono text-[11px]">{taskKey(t)}</span>
         <Avatars ids={t.sessions} named={named} />
       </span>
+      {change && (
+        <span className="flex items-center gap-1.5 whitespace-nowrap text-[#5e6ad2]">
+          {change.from ? <><StatusIcon status={change.from} />{statusTitle(change.from)}<ArrowRight className="size-3" /></> : "New in"}
+          <StatusIcon status={change.to} />{statusTitle(change.to)}
+          <span className="text-muted-foreground">· {ago(change.at)}</span>
+          <span role="button" title="Mark seen" className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground" onClick={(e) => (e.stopPropagation(), onSeen())}><Check className="size-3.5" /></span>
+        </span>
+      )}
       <span className="flex items-start gap-2 text-[13px] leading-snug font-medium text-foreground">
         <StatusIcon status={t.status} className="mt-[3px]" />
         <span className="line-clamp-3">{t.title}</span>
@@ -232,7 +260,7 @@ function TaskCard({ task: t, named, waiting, selected, onClick }: { task: Task; 
 }
 
 // The user's PR comments still open, newest first; each links to the comment on GitHub.
-function CommentsColumn({ comments }: { comments: OpenComment[] }) {
+function CommentsColumn({ comments, ownerOf, onOpen }: { comments: OpenComment[]; ownerOf: (pr: string) => Task | undefined; onOpen: (t: Task) => void }) {
   return (
     <section className="flex min-h-0 flex-col rounded-lg bg-card/40">
       <h3 className="flex h-9 shrink-0 items-center gap-2 px-2.5 text-[13px] font-medium text-foreground">
@@ -241,19 +269,35 @@ function CommentsColumn({ comments }: { comments: OpenComment[] }) {
         <span className="font-normal text-muted-foreground">{comments.length}</span>
       </h3>
       <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-1.5 pb-1.5">
-        {comments.toSorted((a, b) => b.at - a.at).map((c) => (
-          <a key={c.id} href={c.url} target="_blank" rel="noreferrer" className="flex shrink-0 flex-col gap-1.5 rounded-md border bg-card px-3 pt-2.5 pb-2 shadow-xs hover:border-input">
-            <span className="flex items-center gap-1.5 text-muted-foreground">
-              <span className="font-mono text-[11px]">{c.pr.replace(/^[^/]+\//, "")}</span>
-              <span className="ml-auto">{ago(c.at)}</span>
-            </span>
-            <span className="line-clamp-4 text-[13px] leading-snug whitespace-pre-wrap text-foreground">{c.body}</span>
-            <span className="flex items-center gap-1">
-              <Chip className="max-w-full"><span className="truncate" title={c.title}>{c.path ?? c.title}</span></Chip>
-              {c.replies > 0 && <Chip>{c.replies === 1 ? "1 reply" : `${c.replies} replies`}</Chip>}
-            </span>
-          </a>
-        ))}
+        {comments.toSorted((a, b) => b.at - a.at).map((c) => {
+          // A comment opens the task taking it on, with GitHub one click aside; one no task owns opens on GitHub.
+          const owner = ownerOf(c.pr);
+          const card = "flex shrink-0 flex-col gap-1.5 rounded-md border bg-card px-3 pt-2.5 pb-2 text-left shadow-xs hover:border-input";
+          const body = (
+            <>
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <span className="font-mono text-[11px]">{c.pr.replace(/^[^/]+\//, "")}</span>
+                <span className="ml-auto">{ago(c.at)}</span>
+                {owner && (
+                  <a href={c.url} target="_blank" rel="noreferrer" title="Open the comment on GitHub" className="rounded p-0.5 hover:bg-accent hover:text-foreground" onClick={(e) => e.stopPropagation()}>
+                    <ExternalLink className="size-3.5" />
+                  </a>
+                )}
+              </span>
+              <span className="line-clamp-4 text-[13px] leading-snug whitespace-pre-wrap text-foreground">{c.body}</span>
+              <span className="flex flex-wrap items-center gap-1">
+                {owner && <Chip className="max-w-full text-foreground"><StatusIcon status={owner.status} /><span className="truncate" title={owner.title}>{taskKey(owner)} {owner.title}</span></Chip>}
+                <Chip className="max-w-full"><span className="truncate" title={c.title}>{c.path ?? c.title}</span></Chip>
+                {c.replies > 0 && <Chip>{c.replies === 1 ? "1 reply" : `${c.replies} replies`}</Chip>}
+              </span>
+            </>
+          );
+          return owner ? (
+            <div key={c.id} role="button" tabIndex={0} className={cn(card, "cursor-pointer")} onClick={() => onOpen(owner)} onKeyDown={(e) => e.key === "Enter" && onOpen(owner)}>{body}</div>
+          ) : (
+            <a key={c.id} href={c.url} target="_blank" rel="noreferrer" className={card}>{body}</a>
+          );
+        })}
       </div>
     </section>
   );
