@@ -2,7 +2,7 @@ import type { ServerWebSocket, Subprocess } from "bun";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
-import { repoOf } from "./sentries/gh";
+import { markRead, ownComment, repoOf } from "./sentries/gh";
 import app from "./src/index.html";
 
 const PORT = Number(process.env.MAXFLOW_PORT ?? 4747);
@@ -495,7 +495,18 @@ function prWaitEnds(kind: Wait["kind"], event: string, data: any) {
   if (kind === "approval" && ((event === "review" && data?.state === "APPROVED") || (event === "decision" && data?.decision === "APPROVED"))) return "the PR is approved";
   return null;
 }
-function onEvent(topic: string, data: any) {
+// The user's own PR comment reaches the funnel as his ask, typed in unstamped like a graph double-click, so the funnel can relay it as his.
+// Only the gh sentry's word that it is his is taken; with no funnel up, the sessions on the PR hear it from the server instead.
+function commentAsk(kind: string, d: any) {
+  const where = kind === "review" ? `review (${String(d.state).toLowerCase().replace("_", " ")})` : d.path ? `comment on ${d.path}` : "comment";
+  const on = (d.told as string[]).flatMap((id) => sessions.get(id) ?? []).map((s) => `${s.id} (${s.name})`);
+  const text = `My ${where} on PR ${d.pr}: "${String(d.body ?? "").trim()}" ${d.url ?? ""}${on.length ? `\nSessions on this PR: ${on.join(", ")}` : ""}`;
+  const funnel = [...sessions.values()].find((s) => s.name === "sentry:funnel" && isSentry(s) && s.exitCode === null);
+  if (funnel) queue(funnel, text);
+  else for (const id of d.told as string[]) { const s = sessions.get(id); if (s) queue(s, `[maxflow · from "sentry:gh"] ${unforge(text)}`); }
+  if (d.id) markRead(d.id);
+}
+function onEvent(topic: string, data: any, from?: Session) {
   const intent = topic.match(/^intent\/([\w-]+)$/);
   const owner = intent && sessions.get(intent[1]);
   if (owner && typeof data?.request === "string") requested(owner, data.request, typeof data.root === "string" ? data.root.trim() || undefined : undefined);
@@ -505,6 +516,7 @@ function onEvent(topic: string, data: any) {
   const m = topic.match(/^gh\/[^/]+\/[^/]+\/pr\/\d+\/(\w+)$/);
   if (!m || !data?.pr) return;
   recordUserComment(m[1], data, Date.now());
+  if (from?.name === "sentry:gh" && isSentry(from) && ["comment", "thread", "review"].includes(m[1]) && ownComment(data.who) && Array.isArray(data.told)) commentAsk(m[1], data);
   for (const s of sessions.values())
     if ((s.wait?.kind === "approval" || s.wait?.kind === "ci") && s.wait.ref === data.pr) {
       const why = prWaitEnds(s.wait.kind, m[1], data);
@@ -1015,7 +1027,7 @@ Bun.serve<WsData>({
       const body = (await req.json().catch(() => ({}))) as { topic?: string; data?: unknown };
       if (!body.topic) return new Response("topic required", { status: 400 });
       const ev = publish(body.topic, body.data ?? null);
-      onEvent(body.topic, body.data);
+      onEvent(body.topic, body.data, sessions.get(req.headers.get("x-maxflow-from") ?? ""));
       return Response.json(ev, { status: 201 });
     }
 

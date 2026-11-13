@@ -4,7 +4,7 @@
 // reaches no session. Exits with the agent.
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Link, links, markRead, ownComment, REVIEW_WATCH_FILE, type Watch } from "./gh";
+import { type Link, links, ownComment, REVIEW_WATCH_FILE, type Watch } from "./gh";
 
 const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const EDGES_FILE = join(STATE_DIR, "review-edges.json");
@@ -232,10 +232,10 @@ async function tick() {
   process.title = `review feed (${queue.length} PRs)`;
 }
 
-// A person's comment or review that no session heard about falls to the agent to deliver.
+// A person's comment or review that no session heard about falls to the agent to deliver; the user's own go to the funnel instead.
 function unheard(e: Event) {
   const d = e.data, kind = e.topic.split("/").at(-1)!;
-  if (!["comment", "review", "thread"].includes(kind) || !d.who || d.told.length || d.author?.endsWith("[bot]") || !stages.has(d.pr)) return null;
+  if (!["comment", "review", "thread"].includes(kind) || !d.who || ownComment(d.who) || d.told.length || d.author?.endsWith("[bot]") || !stages.has(d.pr)) return null;
   const what = kind === "review" ? `review (${d.state?.toLowerCase().replace("_", " ")})` : kind === "thread" ? `comment on ${d.path}` : "comment";
   return `${label(d.pr)}: ${what} from ${d.who}, heard by no session: "${(d.body ?? "").replace(/\s+/g, " ").slice(0, 500)}" ${d.url ?? ""}`;
 }
@@ -255,12 +255,7 @@ if (import.meta.main) {
       if (!events) await Bun.sleep(left);
       if (!events?.length) continue;
       after = String(events.at(-1)!.seq);
-      for (const e of events) {
-        const line = unheard(e);
-        if (!line) continue;
-        await notify(line);
-        if (ownComment(e.data.who)) markRead(e.data.id!);
-      }
+      for (const line of events.map(unheard).filter(Boolean)) await notify(line!);
     }
   }
 }
