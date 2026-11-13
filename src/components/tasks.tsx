@@ -139,7 +139,8 @@ export function TasksBoard({ tasks, prs, comments, questions, sessions, onOpen, 
     if (shown !== null || askedId !== null || typing(e) || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "/") return void (e.preventDefault(), filterInput.current?.focus());
     if (e.key === "Enter" && selected) return void (e.preventDefault(), setShown(selected.id));
-    if (e.key === "Escape") return void (cursor ? setCursor(null) : onClose());
+    // Escape only drops the selection; leaving the board is ⌘K or the view toggle.
+    if (e.key === "Escape") return void setCursor(null);
     const step = ({ j: [0, 1], ArrowDown: [0, 1], k: [0, -1], ArrowUp: [0, -1], l: [1, 0], ArrowRight: [1, 0], h: [-1, 0], ArrowLeft: [-1, 0] } as Record<string, [number, number]>)[e.key];
     if (!step) return;
     e.preventDefault();
