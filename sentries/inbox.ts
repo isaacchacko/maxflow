@@ -31,6 +31,7 @@ const MAX_AGENTS = 2;
 
 // A PR requesting his review or assigned to him. requested: when the latest review request was made; gone: when it left the search.
 type ReviewPr = { url: string; title: string; author: string; why: "review" | "assigned"; requested: number; updated: number; gone?: number; agent?: string; risk?: string };
+// at: when this sentry first saw it, which the stall clock counts from, so a backlog read late isn't flagged at once.
 type Question = { key: string; at: number; who: string; text: string; link: string };
 type Routed = { task: number; who: string; where: string; text: string; link: string };
 type State = {
@@ -152,7 +153,7 @@ async function onSlack(topic: string, d: any, me: string) {
     status: "you",
   });
   if (task) state.open[d.ts] = key;
-  if (/\?/.test(d.text)) state.questions[d.ts] = { key, at: Number(d.ts) * 1000, who: d.from, text: d.text, link: d.link };
+  if (/\?/.test(d.text)) state.questions[d.ts] = { key, at: Date.now(), who: d.from, text: d.text, link: d.link };
   // A mention or DM nobody owns goes to the funnel, which decides whether an agent can move it forward; thread replies stay on the board.
   if (!owner && task && kind !== "reply") state.batch.push({ task, who: d.from, where, text: short(d.text, 200), link: d.link });
 }
@@ -350,10 +351,16 @@ async function stalls() {
     if (now - pr.updated > IDLE_STALL_MS && flag(`${key}:idle:${pr.updated}`))
       await onBoard(key, pr.url, `no activity for ${Math.floor((now - pr.updated) / 86_400_000)} days`, { title: `Review ${key.split("/")[1]}: ${short(pr.title, 60)}` });
   }
+  // One note per thread or DM, however many of its questions went stale together, counted from when the oldest was sent.
+  const stale = new Map<string, [string, Question][]>();
   for (const [ts, q] of Object.entries(state.questions)) {
     if ((state.answered[q.key] ?? 0) > Number(ts) || now - q.at > 7 * 86_400_000) { delete state.questions[ts]; continue; }
-    if (now - q.at > QUESTION_STALL_MS && flag(`q:${ts}`))
-      await onBoard(q.key, q.link, `${q.who}'s question has gone ${Math.floor((now - q.at) / 3_600_000)}h without your answer`, { title: `Reply to ${q.who}: "${short(q.text, 50)}"`, status: "you" });
+    if (now - q.at > QUESTION_STALL_MS && flag(`q:${ts}`)) stale.set(q.key, [...(stale.get(q.key) ?? []), [ts, q]]);
+  }
+  for (const [key, qs] of stale) {
+    const [ts, q] = qs.sort((a, b) => Number(a[0]) - Number(b[0]))[0];
+    const asked = qs.length > 1 ? `${qs.length} questions from ${q.who}` : `${q.who}'s question`;
+    await onBoard(key, q.link, `${asked} still ${qs.length > 1 ? "have" : "has"} no answer from you, ${Math.floor((now - Number(ts) * 1000) / 3_600_000)}h after ${qs.length > 1 ? "the first was" : "it was"} sent`, { title: `Reply to ${q.who}: "${short(q.text, 50)}"`, status: "you" });
   }
   state.stallAt = now;
 }
