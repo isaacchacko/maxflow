@@ -6,6 +6,7 @@
 // the server adopts that session like any other once it is back.
 import type { ServerWebSocket, Subprocess } from "bun";
 import { join } from "node:path";
+import { LIVE, PORT, TMUX_SOCKET } from "../instance";
 
 const INTERVAL_MS = Number(process.env.HEALTH_INTERVAL ?? 1000);
 const PAGE_AFTER_MS = Number(process.env.HEALTH_PAGE_AFTER_MS ?? 3000);
@@ -19,11 +20,13 @@ const RELEASE_GRACE_MS = 15_000;
 const LABEL = "com.isaacchacko.maxflow";
 const LOG = "/tmp/maxflow.log";
 const DIR = join(import.meta.dir, "..");
-const TMUX = ["tmux", "-L", "maxflow", "-f", join(DIR, "tmux.conf")];
+const TMUX = ["tmux", "-L", TMUX_SOCKET, "-f", join(DIR, "tmux.conf")];
 const HOST = "127.0.0.1";
-const PORT = Number(process.env.MAXFLOW_PORT ?? 4747);
 const base = `http://localhost:${PORT}`;
 const XTERM = join(DIR, "node_modules/@xterm");
+
+// Only the live server runs under launchd, and a dev one is down whenever its developer stops it, so there is nothing to recover.
+if (!LIVE) console.log("health sentry: not the live maxflow, nothing to watch"), process.exit(0);
 
 const run = (cmd: string[]) => {
   const r = Bun.spawnSync(cmd);

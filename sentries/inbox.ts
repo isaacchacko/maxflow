@@ -7,15 +7,14 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { INBOX_WATCH_FILE, repoOf, type Watch } from "./gh";
+import { BASE as base, STATE_DIR } from "../instance";
 
-const STATE_DIR = join(homedir(), ".maxflow");
 const STATE_FILE = join(STATE_DIR, "inbox-state.json");
 const QUEUE_FILE = join(STATE_DIR, "review-queue.json");
 // Regexes of check names known to be flaky: a failure of only those is re-run once per commit.
 const FLAKY_FILE = join(STATE_DIR, "flaky-checks.json");
 const PROJECTS = join(homedir(), ".claude", "projects");
 const CLI = new URL("../cli.ts", import.meta.url).pathname;
-const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 const PRS_MS = Number(process.env.INBOX_PRS_MS ?? 5 * 60_000);
 const STALL_MS = Number(process.env.INBOX_STALL_MS ?? 15 * 60_000);

@@ -3,13 +3,13 @@
 // and tells the agent to run them on the Blacksmith CI runners through its PR instead.
 import { totalmem } from "node:os";
 import { join } from "node:path";
+import { BASE as base, TMUX_SOCKET } from "../instance";
 
 const INTERVAL_MS = Number(process.env.RAM_INTERVAL ?? 15_000);
 const MAX_PCT = Number(process.env.RAM_MAX_PCT ?? 1.5);
 const GRACE_MS = 3000;
 const DRY = process.env.RAM_DRY === "1";
-const TMUX = ["tmux", "-L", "maxflow", "-f", join(import.meta.dir, "..", "tmux.conf")];
-const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
+const TMUX = ["tmux", "-L", TMUX_SOCKET, "-f", join(import.meta.dir, "..", "tmux.conf")];
 
 // Work CI already does on every push; dev servers like storybook or vite dev are left alone.
 const CI_WORK = [

@@ -5,8 +5,8 @@
 // graph-roles.json, and the graph draws the role's icon on the agent's node.
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { BASE as base, STATE_DIR } from "../instance";
 
-const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const STATE_FILE = join(STATE_DIR, "graph-links.json");
 const INTERVAL_MS = Number(process.env.GRAPH_INTERVAL ?? 15_000);
 const GROUPS_FILE = join(STATE_DIR, "graph-groups.json");
@@ -17,7 +17,6 @@ const MODEL = process.env.GRAPH_MODEL ?? "haiku";
 const SENTRY_GROUP = "maxflow sentries";
 const MAXFLOW_GROUP = "maxflow development";
 const MAXFLOW_DIR = join(import.meta.dir, "..");
-const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 
 const SYSTEM = `You curate a graph of an engineer's terminal and Claude agent sessions. Each URL a session mentions can become a clickable node beside it, and most mentions are noise. Keep a URL only if the engineer would want to click it from the graph:
 - something the agent made or changed and is pointing them to: a PR, issue or ticket it opened, a deploy or preview, a page, doc or artifact it published, a dashboard or run it started

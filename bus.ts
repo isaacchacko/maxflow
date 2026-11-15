@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { STATE_DIR } from "./instance";
 
-export const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const LOG = join(STATE_DIR, "events.jsonl");
 const KEEP = 5000;
 

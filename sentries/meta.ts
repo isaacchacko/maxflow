@@ -6,8 +6,8 @@
 import { existsSync, openSync, readSync, closeSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import { join } from "node:path";
+import { BASE as base, STATE_DIR } from "../instance";
 
-const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const STATE_FILE = join(STATE_DIR, "meta-state.json");
 const FLAGGED_FILE = join(STATE_DIR, "meta-flagged.json");
 const INTERVAL_MS = Number(process.env.META_INTERVAL ?? 15 * 60_000);
@@ -16,7 +16,6 @@ const SLOW_TOOL_MS = Number(process.env.META_SLOW_TOOL_MS ?? 5 * 60_000);
 const SLOW_MODEL_MS = Number(process.env.META_SLOW_MODEL_MS ?? 3 * 60_000);
 const REPEATS = Number(process.env.META_REPEATS ?? 4);
 const IDLE_MS = Number(process.env.META_IDLE_MS ?? 10 * 60_000);
-const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 
 type Session = {
   id: string; name: string; running: boolean; sentry: boolean; agent: boolean; status: string; transcript?: string;

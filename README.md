@@ -58,6 +58,8 @@ Start without the sentries while you try it out:
 MAXFLOW_SENTRIES=0 bun server.ts
 ```
 
+To work on maxflow while one is running, run a branch's worktree with `./dev.sh`: a second instance on port 4748 with its own tmux socket and state dir and no sentries, which never touches the running one (see [Developing maxflow](docs/reference.md#developing-maxflow)).
+
 ### Hook it into Claude Code
 
 maxflow learns what each agent is doing (working, waiting on you, idle, gone) and briefs it on start through Claude Code hooks. Add these to `~/.claude/settings.json`, with the path pointing at your clone. Each command is a no-op outside maxflow.
