@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
-import { INSTANCE, LIVE, PORT, STATE_DIR, TMUX_SOCKET } from "./instance";
+import { BASE, INSTANCE, LIVE, PORT, STATE_DIR, TMUX_SOCKET } from "./instance";
 import app from "./src/index.html";
 
 const HOST = "127.0.0.1";
@@ -161,6 +161,10 @@ function adoptSessions() {
   }
   if (sessions.size) console.log(`adopted ${sessions.size} tmux session(s)`);
 }
+// Panes in the live maxflow carry its port, so a plain `bun server.ts` run from one would otherwise adopt and respawn the live sessions.
+// The health sentry's down page answers 503, so a server started while live is down still takes over.
+if (LIVE && (await fetch(`${BASE}/api/sessions`).then((r) => r.ok, () => false)))
+  console.error(`the live maxflow is already running on ${BASE}; run ./dev.sh for a dev instance`), process.exit(1);
 adoptSessions();
 
 // Sentries are ordinary sessions, started once and kept by tmux across server restarts.
