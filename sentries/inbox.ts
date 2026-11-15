@@ -60,6 +60,15 @@ const state: State = {
 const save = () => writeFileSync(STATE_FILE, JSON.stringify(state));
 const readJson = <T>(path: string, fallback: T): T => { try { return JSON.parse(readFileSync(path, "utf8")); } catch { return fallback; } };
 const short = (text: string, n: number) => { const t = text.replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+// Slack's markup as a reader sees it: <url|label> is its label, <@U…|Name> is @Name, <#C…|name> is #name, entities decoded.
+const names: Record<string, string> = {};
+const readable = (text: unknown) => String(text ?? "")
+  .replace(/<@(\w+)(?:\|([^>]*))?>/g, (_, id, name) => `@${name || names[id] || id}`)
+  .replace(/<#\w+(?:\|([^>]*))?>/g, (_, name) => `#${name ?? "channel"}`)
+  .replace(/<!(\w+)(?:\|[^>]*)?>/g, "@$1")
+  .replace(/<([^|>]+)\|([^>]*)>/g, "$2")
+  .replace(/<([^>]+)>/g, "$1")
+  .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 const log = (line: string) => console.log(`${new Date().toLocaleTimeString()}  ${line}`);
 const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", headers: caller, body: JSON.stringify(body) });
 const run = (cmd: string[]) => { const r = Bun.spawnSync(cmd, { stderr: "pipe" }); return r.exitCode === 0 ? r.stdout.toString().trim() : ""; };
@@ -133,6 +142,8 @@ async function toOwner(key: string, line: string) {
 async function onSlack(topic: string, d: any, me: string) {
   if (!d?.link || state.seen.includes(d.ts)) return;
   const key = keyOf(d);
+  if (d.user && d.from) names[d.user] = d.from;
+  const text = readable(d.text);
   // His own posts answer what was asked there before them, whoever typed them.
   if (topic === "slack/own" || d.user === me) {
     state.answered[key] = Math.max(state.answered[key] ?? 0, Number(d.ts));
@@ -144,40 +155,39 @@ async function onSlack(topic: string, d: any, me: string) {
   if (d.bot) {
     // A bot's bare "cc" (the Arch bot copying him into a thread in #arch_comms) asks nothing of him: Isaac said to ignore it.
     if (/^cc[.!]?$/i.test(String(d.text).replace(/<[^>]*>/g, "").trim())) return log(`skipped ${d.link}: a bot's bare cc`);
-    return onBotAlert(d);
+    return onBotAlert({ ...d, raw: d.text, text });
   }
   const where = kind === "dm" ? "a DM" : String(d.where ?? "").replace(/^thread .* in /, "") || "Slack";
-  const line = `${d.from} in ${where}: "${short(d.text, 200)}" ${d.link}`;
+  const line = `${d.from} in ${where}: "${short(text, 200)}" ${d.link}`;
   const owner = kind === "reply" || kind === "mention" ? await toOwner(key, line) : null;
   const link = key.startsWith("http") ? key : slackLink(key);
   // He reacted before this sentry saw it: he has it.
   if (!key.startsWith("http") && reactedBy(key.split("/")[0], d.ts, me)) return log(`skipped ${d.link}: the user already reacted`);
-  const task = await onBoard(key, link, `${d.from}${kind === "dm" ? " (DM)" : ""}: "${short(d.text, 120)}"${owner ? `; handed to ${owner}, the chat that posted there` : ""}`, {
-    title: `Reply to ${d.from} in ${where}: "${short(d.text, 50)}"`,
+  const task = await onBoard(key, link, `${d.from}${kind === "dm" ? " (DM)" : ""}: "${short(text, 120)}"${owner ? `; handed to ${owner}, the chat that posted there` : ""}`, {
+    title: `Reply to ${d.from} in ${where}: "${short(text, 50)}"`,
     status: "you",
   });
   if (task) state.open[d.ts] = key;
-  if (/\?/.test(d.text)) state.questions[d.ts] = { key, at: Date.now(), who: d.from, text: d.text, link: d.link };
+  if (/\?/.test(text)) state.questions[d.ts] = { key, at: Date.now(), who: d.from, text, link: d.link };
   // A mention or DM nobody owns goes to the funnel, which decides whether an agent can move it forward; thread replies stay on the board.
-  if (!owner && task && kind !== "reply") state.batch.push({ task, who: d.from, where, text: short(d.text, 200), link: d.link });
+  if (!owner && task && kind !== "reply") state.batch.push({ task, who: d.from, where, text: short(text, 200), link: d.link });
 }
 
 // A bot's mention of him ("a run on main is red", a skipped deploy) is one task per kind of alert, however often it repeats: its text
 // without links, mentions and numbers names the kind. A repeat adds a note at most hourly; the funnel hears of a kind once per open task.
 const ALERT_NOTE_MS = 3_600_000;
 async function onBotAlert(d: any) {
-  const plain = short(String(d.text).replace(/<[^>]*>/g, "").replace(/\d+/g, "#"), 120);
-  const tag = `bot:${d.user}:${plain}`;
+  const tag = `bot:${d.user}:${short(String(d.raw).replace(/<[^>]*>/g, "").replace(/\d+/g, "#"), 120)}`;
   const alert = (state.alerts[tag] ??= { count: 0, noted: 0 });
   alert.count++;
   const open = OPEN((await getTasks()).find((t) => t.id === state.tasks[tag]));
   if (open && Date.now() - alert.noted < ALERT_NOTE_MS) return;
   const where = String(d.where ?? "Slack").replace(/^thread .* in /, "");
-  const url = String(d.text).match(/<(https?:[^|>]+)/)?.[1];
-  const event = open ? `${alert.count} more since the last note, latest ${url ?? d.link}` : `${d.from} in ${where}: "${short(String(d.text).replace(/<[^>]*>/g, ""), 120)}" ${url ?? ""}`;
-  const task = await onBoard(tag, d.link, event, { title: `${d.from} alert: "${short(plain, 60)}"`, status: "you" });
+  const url = String(d.raw).match(/<(https?:[^|>]+)/)?.[1];
+  const event = open ? `${alert.count} more since the last note, latest ${url ?? d.link}` : `${d.from} in ${where}: "${short(d.text, 120)}" ${url ?? ""}`;
+  const task = await onBoard(tag, d.link, event, { title: `${d.from} alert: "${short(d.text.replace(/\d+/g, "#"), 60)}"`, status: "you" });
   Object.assign(alert, { count: 0, noted: Date.now() });
-  if (task && !open) state.batch.push({ task, who: d.from, where, text: short(String(d.text).replace(/<[^>]*>/g, ""), 200) + (url ? ` ${url}` : ""), link: d.link });
+  if (task && !open) state.batch.push({ task, who: d.from, where, text: short(d.text, 200) + (url ? ` ${url}` : ""), link: d.link });
 }
 
 // Whether the user put an emoji reaction on a message.
