@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { GraphView } from "./views/GraphView";
 import { KanbanView } from "./views/KanbanView";
 import { ThreadsView } from "./views/ThreadsView";
+import { AgentChat } from "./agent/AgentChat";
+import { AgentCursor } from "./agent/AgentCursor";
 
 const views = [
   { id: "graph", label: "Graph", key: "1", View: GraphView },
@@ -44,6 +46,7 @@ export function App() {
           {views.map(v => (
             <a
               key={v.id}
+              data-agent={`tab:${v.id}`}
               href={`#${v.id}`}
               className={`rounded px-3 py-1 text-sm ${
                 v.id === view ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-neutral-200"
@@ -58,6 +61,8 @@ export function App() {
       <main className="min-h-0 flex-1">
         <View />
       </main>
+      <AgentChat />
+      <AgentCursor />
     </div>
   );
 }

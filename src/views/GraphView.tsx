@@ -1,9 +1,10 @@
-import { statusColor, tasks } from "../mock";
+import { statusColor, type Task } from "../mock";
+import { taskStore } from "../store";
 
 const W = 260;
 const H = 64;
 
-function layout() {
+function layout(tasks: Task[]) {
   const depth = new Map<string, number>();
   const depthOf = (id: string): number => {
     if (depth.has(id)) return depth.get(id)!;
@@ -24,7 +25,8 @@ function layout() {
 }
 
 export function GraphView() {
-  const pos = layout();
+  const tasks = taskStore.use();
+  const pos = layout(tasks);
   return (
     <svg className="h-full w-full">
       {tasks.flatMap(t =>
@@ -46,7 +48,7 @@ export function GraphView() {
         const { x, y } = pos.get(t.id)!;
         return (
           <foreignObject key={t.id} x={x} y={y} width={W} height={H}>
-            <div className="flex h-full flex-col justify-center gap-1 rounded-lg border border-neutral-800 bg-neutral-900 px-3 hover:border-neutral-600">
+            <div data-agent={`node:${t.id}`} className="flex h-full flex-col justify-center gap-1 rounded-lg border border-neutral-800 bg-neutral-900 px-3 hover:border-neutral-600">
               <div className="flex items-center gap-2">
                 <span className={`size-2 shrink-0 rounded-full ${statusColor[t.status]}`} />
                 <span className="truncate text-sm">{t.title}</span>

@@ -1,12 +1,14 @@
-import { columns, statusColor, tasks } from "../mock";
+import { columns, statusColor } from "../mock";
+import { taskStore } from "../store";
 
 export function KanbanView() {
+  const tasks = taskStore.use();
   return (
     <div className="grid h-full grid-cols-4 gap-3 overflow-x-auto p-4">
       {columns.map(col => {
         const cards = tasks.filter(t => t.status === col.status);
         return (
-          <section key={col.status} className="flex min-w-56 flex-col gap-2">
+          <section key={col.status} data-agent={`column:${col.status}`} className="flex min-w-56 flex-col gap-2">
             <h2 className="flex items-center gap-2 px-1 text-sm text-neutral-400">
               <span className={`size-2 rounded-full ${statusColor[col.status]}`} />
               {col.label}
@@ -15,6 +17,7 @@ export function KanbanView() {
             {cards.map(t => (
               <article
                 key={t.id}
+                data-agent={`card:${t.id}`}
                 className="rounded-lg border border-neutral-800 bg-neutral-900 p-3 hover:border-neutral-600"
               >
                 <p className="text-sm">{t.title}</p>

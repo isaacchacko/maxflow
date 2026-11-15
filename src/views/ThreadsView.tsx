@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { statusColor, tasks, type Message } from "../mock";
+import { statusColor, type Message } from "../mock";
+import { addMessage, draftStore, taskStore } from "../store";
 
 const bubble: Record<Message["from"], string> = {
   isaac: "ml-auto bg-sky-900/60",
@@ -8,6 +9,8 @@ const bubble: Record<Message["from"], string> = {
 };
 
 export function ThreadsView() {
+  const tasks = taskStore.use();
+  const draft = draftStore.use();
   const [selectedId, setSelectedId] = useState(tasks[0]!.id);
   const selected = tasks.find(t => t.id === selectedId)!;
 
@@ -19,6 +22,7 @@ export function ThreadsView() {
           return (
             <button
               key={t.id}
+              data-agent={`thread:${t.id}`}
               onClick={() => setSelectedId(t.id)}
               className={`block w-full border-b border-neutral-900 px-4 py-3 text-left ${
                 t.id === selectedId ? "bg-neutral-900" : "hover:bg-neutral-900/50"
@@ -48,12 +52,26 @@ export function ThreadsView() {
             </div>
           ))}
         </div>
-        <footer className="border-t border-neutral-800 p-3">
+        <footer className="flex items-end gap-2 border-t border-neutral-800 p-3 pr-20">
           <textarea
+            data-agent="composer"
             rows={2}
+            value={draft.text}
+            onChange={e => draftStore.set({ text: e.target.value, from: "isaac" })}
             placeholder={`Message ${selected.agent ?? "a new agent"}…`}
             className="w-full resize-none rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-neutral-600"
           />
+          <button
+            data-agent="send"
+            onClick={() => {
+              if (!draft.text.trim()) return;
+              addMessage(selected.id, { from: draft.from, at: "now", text: draft.text.trim() });
+              draftStore.set({ text: "", from: "isaac" });
+            }}
+            className="rounded-lg bg-neutral-800 px-3 py-2 text-sm hover:bg-neutral-700"
+          >
+            Send
+          </button>
         </footer>
       </section>
     </div>

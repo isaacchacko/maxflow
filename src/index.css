@@ -2,3 +2,28 @@
 
 html, body, #root { height: 100%; }
 body { @apply bg-neutral-950 text-neutral-100 antialiased; }
+
+.agent-blink {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: agent-blink 5s infinite;
+}
+@keyframes agent-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.1); }
+}
+
+.agent-ripple {
+  position: absolute;
+  left: -14px;
+  top: -14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  border: 2px solid var(--color-violet-400);
+  animation: agent-ripple 500ms ease-out forwards;
+}
+@keyframes agent-ripple {
+  from { transform: scale(0.3); opacity: 1; }
+  to { transform: scale(1.4); opacity: 0; }
+}
