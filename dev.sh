@@ -6,8 +6,9 @@
 #   ./dev.sh reset    end them and delete its state dir
 set -e
 cd "$(dirname "$0")"
-export MAXFLOW_INSTANCE="${MAXFLOW_INSTANCE:-dev}" MAXFLOW_PORT="${MAXFLOW_PORT:-4748}" MAXFLOW_SENTRIES="${MAXFLOW_SENTRIES:-0}"
-[ "$MAXFLOW_PORT" != 4747 ] || { echo "4747 is the live maxflow's port" >&2; exit 1; }
+# Live panes carry MAXFLOW_PORT=4747, so that value means "not chosen" here rather than a request for the live port.
+[ "${MAXFLOW_PORT:-4747}" != 4747 ] || MAXFLOW_PORT=4748
+export MAXFLOW_INSTANCE="${MAXFLOW_INSTANCE:-dev}" MAXFLOW_PORT MAXFLOW_SENTRIES="${MAXFLOW_SENTRIES:-0}"
 # Started from inside a live maxflow pane, these would point at the live session.
 unset MAXFLOW_SESSION
 socket="maxflow-$MAXFLOW_INSTANCE"
