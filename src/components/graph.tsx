@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { GraphRenderer } from "@isaacchacko/graph";
 import { renderToStaticMarkup } from "react-dom/server";
+import { toast } from "sonner";
 import { Archive, Bot, ChevronDown, ChevronUp, Copy, ExternalLink, GitMerge, GitPullRequest, GitPullRequestDraft, Gauge, Hammer, Hash, HeartPulse, Link2, MemoryStick, MessageCircleQuestion, Radar, Route, ScanEye, Shapes, Tag, Trash2, Waypoints, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -654,15 +655,30 @@ export function GraphView({ sessions: all, questions, onQuestions, visible, curr
   );
 
   // With links, claude starts empty and gets the prompt and the introductions as one first message from its inbox.
+  // Either way the box closes, so a toast says where the prompt went, and a failure reopens the box with it.
   const startAgent = async (prompt: string, cwd: string, jump: boolean, route: boolean) => {
-    const at = draft!.world, name = draft!.name, peers = picked;
+    const was = draft!;
     prompt = prompt.trim();
     setDraft(null);
+    try {
+      await launch(was, prompt, cwd, jump, route);
+    } catch (e) {
+      toast.error(`Couldn't start it: ${e instanceof Error ? e.message : e}`);
+      setDraft({ ...was, prompt });
+    }
+  };
+  const launch = async ({ world: at, name }: Draft, prompt: string, cwd: string, jump: boolean, route: boolean) => {
+    const peers = picked;
     // A bare request goes to the funnel sentry, which hands it to the agent that owns it or starts one.
     const funnel = all.find((s) => isSentry(s) && s.name === "sentry:funnel" && s.running);
-    if (route && funnel && prompt && !peers.length) return void api.notify(funnel.id, prompt);
+    if (route && funnel && prompt && !peers.length) {
+      const res = await api.notify(funnel.id, prompt);
+      if (!res.ok) throw new Error(await res.text());
+      return void toast.success("Sent to the funnel, which hands it to the agent that owns it");
+    }
     store.set("mf.agentCwd", cwd);
     const s = await api.agent(peers.length ? "" : prompt, cwd.trim() || "~", store.get("mf.bypass") !== "0", name ?? prompt);
+    if (route && prompt && !peers.length) toast("The funnel isn't running, so this started a new agent");
     placeAt.current.set(s.id, at);
     if (prompt && peers.length) await api.notify(s.id, prompt);
     for (const p of peers) await api.link(s.id, p);
