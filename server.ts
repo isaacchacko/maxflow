@@ -904,6 +904,7 @@ function behindDraft(s: Session, draft: string) {
 // Notifications wait until the agent is idle at its prompt, so they never land mid-turn or in a permission dialog.
 // A pass awaits tmux, so one still running skips the next tick instead of delivering the same inbox twice.
 const DELIVER_IDLE_MS = 4000;
+const SLEEP_AFTER_STOP_MS = 3000;
 let delivering = false;
 setInterval(async () => {
   if (delivering) return;
@@ -1176,17 +1177,23 @@ Bun.serve<WsData>({
         const was = s.claude?.state;
         setClaudeState(s, state as ClaudeState | "gone");
         if (transcript) setTranscript(s, transcript);
-        // A waiting agent sleeps once its turn ends, unless messages wait to be delivered; typed into by the user while asleep, its wait is over.
+        // A waiting agent sleeps once its turn ends, unless messages wait to be delivered.
         // A done agent stays awake so the user can read its last reply and answer it. A turn the user starts means new work, so it isn't
         // done; a turn started by a peer's message is a small exchange, and the agent is still done after it unless it declares otherwise.
         if (s.wait?.kind === "done" && state === "working" && was !== "working" && Date.now() - (s.peerTurnAt ?? 0) > 10_000) setWait(s);
         // Only a finished turn puts it back to sleep, not the idle of a claude just resumed by a wake.
+        // It sleeps a moment after the Stop, not at once: a Stop hook can block the stop (the questions hook does), and the turn then goes on.
         else if (s.wait && s.wait.kind !== "done" && state === "idle" && (was === "working" || was === "waiting") && !s.archived && !s.inbox.length) {
-          setWait(s, { ...s.wait, awake: false });
-          setArchived(s, true);
+          const at = s.claude!.at;
+          setTimeout(() => {
+            if (!s.wait || s.wait.kind === "done" || s.archived || s.inbox.length || s.claude?.state !== "idle" || s.claude.at !== at) return;
+            setWait(s, { ...s.wait, awake: false });
+            setArchived(s, true);
+          }, SLEEP_AFTER_STOP_MS);
         }
         else if (state === "idle" && s.archived) stopAgent(s);
-        if (s.wait && state === "working" && s.archived) endWait(s);
+        // Still working once archived (a turn that went on anyway): it is awake on the same wait, which only the awaited event ends.
+        if (s.wait && state === "working" && s.archived) wake(s);
         return Response.json(describe(s));
       }
       if (act[2] === "await" && req.method === "POST") {
