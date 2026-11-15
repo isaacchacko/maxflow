@@ -740,17 +740,24 @@ function editTask(t: Task | undefined, edit: TaskEdit) {
 
 // Isaac's request becomes a task the moment the funnel hands it to an owner; a follow-up to an owner already on a task joins it.
 const openTaskOf = (id: string) => tasks.findLast((t) => t.sessions.includes(id) && t.status !== "done" && t.status !== "dropped");
-const headline = (text: string) => (text.length > 80 ? `${text.slice(0, 79)}…` : text);
+// Pasted images become [image: <path>] lines, which say nothing as a title.
+const headline = (text: string) => {
+  const words = squash(text.replace(/\[image: [^\]]*\]/g, "")) || "(image)";
+  return words.length > 80 ? `${words.slice(0, 79)}…` : words;
+};
+// The assistant often files his funnel prompt before the relay lands, so a task opened on the owner in the last few minutes is this request's too.
+const SAME_REQUEST_MS = 10 * 60_000;
 function requested(owner: Session, request: string, root?: string) {
-  const asked = `asked: ${headline(squash(request))}`;
-  const t = openTaskOf(owner.id);
+  const asked = `asked: ${headline(request)}`;
+  const recent = newestTaskOf(owner.id);
+  const t = openTaskOf(owner.id) ?? (recent && Date.now() - recent.at < SAME_REQUEST_MS ? recent : undefined);
   if (!t) {
-    const made = editTask(undefined, { title: root ?? headline(squash(request)), status: "doing", session: owner.id, event: asked });
+    const made = editTask(undefined, { title: root ?? headline(request), status: "doing", session: owner.id, event: asked });
     if (typeof made !== "string" && !root) (made.drafted = true), saveTasks();
     return;
   }
   if (root && t.drafted) (t.title = root), delete t.drafted;
-  editTask(t, { session: owner.id, ...(!t.timeline.some((e) => e.text === asked) && { event: asked }) });
+  editTask(t, { session: owner.id, ...(t.status === "done" && { status: "doing" }), ...(!t.timeline.some((e) => e.text === asked) && { event: asked }) });
 }
 
 // A task's column follows the agents still on it, those whose newest task it is: on the user while one is asleep on his answer, doing
@@ -762,7 +769,8 @@ function derive(t: Task): { to: Task["status"]; why: string } | null {
   if (!agents.length) return null;
   const asking = agents.find((s) => s.wait?.kind === "q" && questions.some((q) => q.id === Number(s.wait!.ref) && q.status === "pending"));
   if (asking) return { to: "you", why: `${asking.name} is asleep until you answer q${asking.wait!.ref}` };
-  const working = agents.find((s) => !s.wait);
+  // An agent with a message still to read is about to work, though its wait hasn't ended yet.
+  const working = agents.find((s) => !s.wait || s.wait.awake || s.inbox.length);
   if (working) return { to: "doing", why: `${working.name} is working` };
   const asleep = agents.find((s) => s.wait!.kind !== "done");
   if (asleep) return { to: "waiting", why: `${asleep.name} waits on ${waitLabel(asleep.wait!)}` };
