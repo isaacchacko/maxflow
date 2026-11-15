@@ -61,6 +61,9 @@ export async function click(target: string) {
   const el = await moveTo(target);
   cursorStore.set(c => ({ ...c, pressing: true, clicks: c.clicks + 1 }));
   await sleep(140);
+  for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup"]) {
+    el.dispatchEvent(new (type.startsWith("pointer") ? PointerEvent : MouseEvent)(type, { bubbles: true, button: 0 }));
+  }
   el.click();
   cursorStore.set(c => ({ ...c, pressing: false }));
   await sleep(350);
@@ -76,11 +79,10 @@ export async function drag(from: string, to: string, label: string, onDrop: () =
   await sleep(400);
 }
 
-export async function type(target: string, text: string, write: (value: string) => void) {
-  await click(target);
-  for (let i = 1; i <= text.length; i++) {
-    write(text.slice(0, i));
-    await sleep(18 + Math.random() * 40);
-  }
+export async function press(target: string) {
+  await moveTo(target);
+  cursorStore.set(c => ({ ...c, pressing: true, clicks: c.clicks + 1 }));
+  await sleep(140);
+  cursorStore.set(c => ({ ...c, pressing: false }));
   await sleep(250);
 }

@@ -1,8 +1,11 @@
-import { statusColor, type Task } from "../mock";
-import { taskStore } from "../store";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+import { statusColor, type Task } from "@/mock";
+import { taskStore } from "@/store";
 
 const W = 260;
-const H = 64;
+const H = 76;
 
 function layout(tasks: Task[]) {
   const depth = new Map<string, number>();
@@ -19,7 +22,7 @@ function layout(tasks: Task[]) {
       const col = depthOf(t.id);
       const row = rows.get(col) ?? 0;
       rows.set(col, row + 1);
-      return [t.id, { x: 40 + col * (W + 80), y: 40 + row * (H + 32) }];
+      return [t.id, { x: 40 + col * (W + 80), y: 40 + row * (H + 28) }];
     }),
   );
 }
@@ -38,7 +41,7 @@ export function GraphView() {
             <path
               key={`${dep}-${t.id}`}
               d={`M${x1},${y1} C${x1 + 40},${y1} ${x2 - 40},${y2} ${x2},${y2}`}
-              className="fill-none stroke-neutral-600"
+              className="fill-none stroke-border"
               strokeWidth={1.5}
             />
           );
@@ -48,16 +51,18 @@ export function GraphView() {
         const { x, y } = pos.get(t.id)!;
         return (
           <foreignObject key={t.id} x={x} y={y} width={W} height={H}>
-            <div data-agent={`node:${t.id}`} className="flex h-full flex-col justify-center gap-1 rounded-lg border border-neutral-800 bg-neutral-900 px-3 hover:border-neutral-600">
-              <div className="flex items-center gap-2">
-                <span className={`size-2 shrink-0 rounded-full ${statusColor[t.status]}`} />
-                <span className="truncate text-sm">{t.title}</span>
-              </div>
-              <div className="flex gap-3 pl-4 text-xs text-neutral-500">
-                {t.agent && <span>{t.agent}</span>}
-                {t.pr && <span>#{t.pr}</span>}
-              </div>
-            </div>
+            <a href={`#task/${t.id}`} data-agent={`node:${t.id}`}>
+              <Card className="h-full justify-center gap-1.5 px-3 py-0 transition-colors hover:border-ring">
+                <div className="flex items-center gap-2">
+                  <span className={cn("size-2 shrink-0 rounded-full", statusColor[t.status])} />
+                  <span className="truncate text-sm">{t.title}</span>
+                </div>
+                <div className="flex gap-1.5 pl-4">
+                  {t.agent && <Badge variant="secondary">{t.agent}</Badge>}
+                  {t.pr && <Badge variant="outline">#{t.pr}</Badge>}
+                </div>
+              </Card>
+            </a>
           </foreignObject>
         );
       })}

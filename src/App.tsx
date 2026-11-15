@@ -1,30 +1,47 @@
 import { useEffect, useState } from "react";
-import { GraphView } from "./views/GraphView";
-import { KanbanView } from "./views/KanbanView";
-import { ThreadsView } from "./views/ThreadsView";
-import { AgentChat } from "./agent/AgentChat";
-import { AgentCursor } from "./agent/AgentCursor";
+import { AgentChat } from "@/agent/AgentChat";
+import { AgentCursor } from "@/agent/AgentCursor";
+import { Kbd } from "@/components/ui/kbd";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { TaskPage } from "@/page/TaskPage";
+import { GraphView } from "@/views/GraphView";
+import { KanbanView } from "@/views/KanbanView";
 
 const views = [
   { id: "graph", label: "Graph", key: "1", View: GraphView },
   { id: "kanban", label: "Kanban", key: "2", View: KanbanView },
-  { id: "threads", label: "Threads", key: "3", View: ThreadsView },
 ] as const;
 
 type ViewId = (typeof views)[number]["id"];
+type Route = { view: ViewId; task?: string };
 
-function viewFromHash(): ViewId {
-  const id = location.hash.slice(1);
-  return views.find(v => v.id === id)?.id ?? "graph";
+function lastView(): ViewId {
+  try {
+    return (sessionStorage.getItem("view") as ViewId | null) ?? "graph";
+  } catch {
+    return "graph";
+  }
+}
+
+function routeFromHash(): Route {
+  const [first, id] = location.hash.slice(1).split("/");
+  if (first === "task" && id) return { view: lastView(), task: id };
+  const view = views.find(v => v.id === first)?.id ?? "graph";
+  try {
+    sessionStorage.setItem("view", view);
+  } catch {}
+  return { view };
 }
 
 export function App() {
-  const [view, setView] = useState<ViewId>(viewFromHash);
+  const [route, setRoute] = useState(routeFromHash);
 
   useEffect(() => {
-    const onHash = () => setView(viewFromHash());
+    const onHash = () => setRoute(routeFromHash());
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "Escape" && routeFromHash().task) location.hash = route.view;
       const match = views.find(v => v.key === e.key);
       if (match) location.hash = match.id;
     };
@@ -34,35 +51,32 @@ export function App() {
       removeEventListener("hashchange", onHash);
       removeEventListener("keydown", onKey);
     };
-  }, []);
+  }, [route.view]);
 
-  const { View } = views.find(v => v.id === view)!;
+  const { View } = views.find(v => v.id === route.view)!;
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center gap-6 border-b border-neutral-800 px-4 py-2">
-        <span className="font-semibold tracking-tight">maxflow</span>
-        <nav className="flex gap-1">
-          {views.map(v => (
-            <a
-              key={v.id}
-              data-agent={`tab:${v.id}`}
-              href={`#${v.id}`}
-              className={`rounded px-3 py-1 text-sm ${
-                v.id === view ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-neutral-200"
-              }`}
-            >
-              {v.label}
-              <kbd className="ml-2 text-xs text-neutral-600">{v.key}</kbd>
-            </a>
-          ))}
-        </nav>
-      </header>
-      <main className="min-h-0 flex-1">
-        <View />
-      </main>
-      <AgentChat />
-      <AgentCursor />
-    </div>
+    <TooltipProvider>
+      <div className="flex h-full flex-col">
+        <header className="flex items-center gap-6 border-b px-4 py-2">
+          <span className="font-semibold tracking-tight">maxflow</span>
+          <Tabs value={route.task ? "" : route.view} onValueChange={v => (location.hash = v)}>
+            <TabsList>
+              {views.map(v => (
+                <TabsTrigger key={v.id} value={v.id} data-agent={`tab:${v.id}`} className="gap-2">
+                  {v.label}
+                  <Kbd>{v.key}</Kbd>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </header>
+        <main className="min-h-0 flex-1 overflow-hidden">
+          {route.task ? <TaskPage id={route.task} back={route.view} /> : <View />}
+        </main>
+        <AgentChat />
+        <AgentCursor />
+      </div>
+    </TooltipProvider>
   );
 }

@@ -1,4 +1,10 @@
+import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { Face } from "./AgentFace";
 import { act } from "./plan";
 
@@ -9,7 +15,7 @@ export function AgentChat() {
   const [working, setWorking] = useState(false);
   const [input, setInput] = useState("");
   const [lines, setLines] = useState<Line[]>([
-    { from: "agent", text: "Hi. Tell me what to do, like \"start the close-path reconciler\" or \"move pagination to done\"." },
+    { from: "agent", text: "Tell me what to do. Try \"add a chart to pagination\", \"start the reconciler\" or \"ask isaac about overdue\"." },
   ]);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -34,46 +40,53 @@ export function AgentChat() {
   return (
     <div className="fixed right-5 bottom-5 z-40 flex flex-col items-end gap-3">
       {open && (
-        <div className="flex h-96 w-80 flex-col overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950/95 shadow-2xl backdrop-blur">
-          <header className="flex items-center gap-2 border-b border-neutral-800 px-3 py-2">
+        <Card className="h-96 w-80 gap-0 py-0 shadow-2xl animate-in fade-in slide-in-from-bottom-2">
+          <CardHeader className="flex items-center gap-2 border-b px-3 py-2 [.border-b]:pb-2">
             <Face working={working} size={24} />
-            <span className="text-sm font-medium">maxflow</span>
-            <span className="text-xs text-neutral-500">{working ? "working…" : "idle"}</span>
-            <button onClick={() => setOpen(false)} className="ml-auto text-neutral-500 hover:text-neutral-200">
-              ✕
-            </button>
-          </header>
-          <div ref={listRef} className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
+            <CardTitle className="text-sm">maxflow</CardTitle>
+            <span className="text-xs text-muted-foreground">{working ? "working…" : "idle"}</span>
+            <Button variant="ghost" size="icon" className="ml-auto size-7" onClick={() => setOpen(false)}>
+              <X />
+            </Button>
+          </CardHeader>
+          <CardContent ref={listRef} className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
             {lines.map((line, i) => (
               <p
                 key={i}
-                className={`max-w-[85%] rounded-xl px-3 py-1.5 text-sm ${
-                  line.from === "you" ? "ml-auto bg-violet-600/70" : "bg-neutral-800"
-                }`}
+                className={cn(
+                  "max-w-[85%] rounded-xl px-3 py-1.5 text-sm",
+                  line.from === "you" ? "ml-auto bg-primary text-primary-foreground" : "bg-muted",
+                )}
               >
                 {line.text}
               </p>
             ))}
-          </div>
-          <form onSubmit={send} className="border-t border-neutral-800 p-2">
-            <input
-              autoFocus
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              disabled={working}
-              placeholder={working ? "Working…" : "Ask the agent…"}
-              className="w-full rounded-lg bg-neutral-900 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 disabled:opacity-50"
-            />
-          </form>
-        </div>
+          </CardContent>
+          <CardFooter className="border-t p-2 [.border-t]:pt-2">
+            <form onSubmit={send} className="w-full">
+              <Input
+                autoFocus
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                disabled={working}
+                placeholder={working ? "Working…" : "Ask the agent…"}
+              />
+            </form>
+          </CardFooter>
+        </Card>
       )}
-      <button
-        data-agent="face"
-        onClick={() => setOpen(o => !o)}
-        className="rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95"
-      >
-        <Face working={working} />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            data-agent="face"
+            onClick={() => setOpen(o => !o)}
+            className="rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95"
+          >
+            <Face working={working} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="left">maxflow agent</TooltipContent>
+      </Tooltip>
     </div>
   );
 }

@@ -22,11 +22,11 @@ export function Face({ working, size = 48 }: { working: boolean; size?: number }
   return (
     <div ref={ref} className="relative" style={{ width: size, height: size }}>
       <div
-        className={`absolute -inset-0.5 rounded-full bg-conic from-violet-500 via-sky-400 to-violet-500 ${
+        className={`absolute -inset-0.5 rounded-full bg-conic from-agent via-sky-400 to-agent ${
           working ? "animate-spin opacity-100" : "opacity-0"
         } transition-opacity`}
       />
-      <svg viewBox="0 0 48 48" className="relative size-full rounded-full bg-neutral-900">
+      <svg viewBox="0 0 48 48" className="relative size-full rounded-full bg-card">
         <g
           style={{ transform: `translate(${dx}px, ${dy}px)`, transition: "transform 120ms ease-out" }}
           className="fill-white"

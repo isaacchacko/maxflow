@@ -13,7 +13,7 @@ export function AgentCursor() {
     >
       <span key={c.clicks} className={c.clicks ? "agent-ripple" : ""} />
       {c.ghost && (
-        <div className="absolute top-10 left-2 w-56 rotate-2 rounded-lg border border-violet-500/60 bg-neutral-900/90 p-3 text-sm shadow-2xl">
+        <div className="absolute top-10 left-2 w-56 rotate-2 rounded-lg border border-agent/60 bg-card/90 p-3 text-sm shadow-2xl">
           {c.ghost}
         </div>
       )}
@@ -24,9 +24,9 @@ export function AgentCursor() {
         className="relative drop-shadow-lg transition-transform"
         style={{ transform: c.pressing ? "scale(0.85)" : "scale(1)" }}
       >
-        <path d="M3 2l7 19 2.5-7.5L20 11z" className="fill-violet-500 stroke-white" strokeWidth={1.5} strokeLinejoin="round" />
+        <path d="M3 2l7 19 2.5-7.5L20 11z" className="fill-agent stroke-white" strokeWidth={1.5} strokeLinejoin="round" />
       </svg>
-      <span className="absolute top-5 left-5 rounded-full bg-violet-500 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-white">
+      <span className="absolute top-5 left-5 rounded-full bg-agent px-2 py-0.5 text-xs font-medium whitespace-nowrap text-white">
         maxflow
       </span>
     </div>
