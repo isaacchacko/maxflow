@@ -3,14 +3,13 @@
 // A session renamed by hand is left alone from then on.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { BASE as base, STATE_DIR } from "../instance";
 
-const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const STATE_FILE = join(STATE_DIR, "rename-state.json");
 const INTERVAL_MS = Number(process.env.RENAME_INTERVAL ?? 20_000);
 const FIRST_CHARS = Number(process.env.RENAME_FIRST_CHARS ?? 400);
 const EVERY_CHARS = Number(process.env.RENAME_EVERY_CHARS ?? 4000);
 const MODEL = process.env.RENAME_MODEL ?? "haiku";
-const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 // Sent with each call that touches a session, so the graph draws this sentry doing it.
 const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 

@@ -82,3 +82,14 @@ Installed as a launchd agent (`~/Library/LaunchAgents/com.isaacchacko.maxflow.pl
 The UI is React + shadcn/ui + Tailwind in `src/`, bundled by Bun from the `src/index.html` import in `server.ts` with hot reload, so edits show up without a restart. Bun reads the Tailwind plugin from `bunfig.toml` in its working directory, so the launchd agent runs from this folder.
 
 Bound to loopback only; requests with a foreign `Origin` are refused, so other sites can't drive it.
+
+## Developing maxflow
+
+The live maxflow serves whatever its checkout holds, with hot reload, so don't develop in that folder. Make a worktree on a branch and run it as a dev instance beside the live one:
+
+```sh
+git worktree add -b feat/my-change ~/Worktrees/maxflow-my-change origin/feat/graph-sentry
+~/Worktrees/maxflow-my-change/dev.sh        # http://localhost:4748
+```
+
+`dev.sh` sets `MAXFLOW_INSTANCE=dev`, and `instance.ts` derives everything instance-specific from it: tmux socket `maxflow-dev` instead of `maxflow`, state in `~/.maxflow-dev` instead of `~/.maxflow`, and port `MAXFLOW_PORT` (4748). Every pane gets `MAXFLOW_PORT` and `MAXFLOW_INSTANCE`, so its agents, hooks and `cli.ts` talk to the dev server. The live sessions, state and health sentry never see it. Sentries stay off (`MAXFLOW_SENTRIES=1 ./dev.sh` turns them on, but they act on real GitHub and Slack), and the health sentry never runs outside the live instance. To run a second dev instance, give it another name and port: `MAXFLOW_INSTANCE=b MAXFLOW_PORT=4749 ./dev.sh`. `./dev.sh kill` ends the dev instance's tmux sessions, and `./dev.sh reset` also deletes its state. Ship a change as a PR into `feat/graph-sentry`; the live server picks it up once its checkout pulls it.

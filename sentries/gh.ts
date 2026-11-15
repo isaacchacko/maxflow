@@ -3,8 +3,8 @@
 // events and notifies the linked sessions when CI finishes, someone reviews or comments, or the PR merges, closes or conflicts.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { BASE as base, STATE_DIR, TMUX_SOCKET } from "../instance";
 
-const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const WATCH_FILE = join(STATE_DIR, "gh-watch.json");
 const STATE_FILE = join(STATE_DIR, "gh-state.json");
 // The last poll of each PR, whole, so `maxflow gh status` can answer without asking GitHub.
@@ -18,7 +18,6 @@ export const INBOX_WATCH_FILE = join(STATE_DIR, "inbox-watch.json");
 const PROJECTS = join(process.env.HOME!, ".claude", "projects");
 const INTERVAL_MS = Number(process.env.GH_SENTRY_INTERVAL ?? 30_000);
 const CLI = new URL("../cli.ts", import.meta.url).pathname;
-const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 // Sent with each call that touches a session, so the graph draws this sentry doing it.
 const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 
@@ -104,7 +103,7 @@ export async function links(): Promise<Link[]> {
   const found: Link[] = [];
   for (const w of readWatches()) for (const session of w.sessions.length ? w.sessions : [""]) found.push({ pr: w.pr, repo: w.pr.split("#")[0], session });
   for (const s of live) {
-    const cwd = run(["tmux", "-L", "maxflow", "display-message", "-p", "-t", `mf-${s.id}`, "#{pane_current_path}"]) || s.cwd;
+    const cwd = run(["tmux", "-L", TMUX_SOCKET, "display-message", "-p", "-t", `mf-${s.id}`, "#{pane_current_path}"]) || s.cwd;
     const repo = repoOf(cwd);
     const branch = repo && run(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"]);
     if (branch && !["HEAD", "main", "master"].includes(branch)) found.push({ repo, branch, session: s.id });

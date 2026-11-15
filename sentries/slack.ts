@@ -6,8 +6,8 @@
 // on it; sentries/inbox.ts takes what no session heard.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { BASE as base, STATE_DIR } from "../instance";
 
-const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const WATCH_FILE = join(STATE_DIR, "slack-watch.json");
 const STATE_FILE = join(STATE_DIR, "slack-state.json");
 // The latest messages of each target, so `maxflow slack read` can answer without asking Slack.
@@ -24,7 +24,6 @@ const OWN_TIE_MS = Number(process.env.SLACK_OWN_TIE_MS ?? 2 * 86_400_000);
 const OWN_READ_MS = Number(process.env.SLACK_OWN_READ_MS ?? 5 * 60_000);
 const DOMAIN = process.env.SLACK_DOMAIN ?? "dryftai";
 const CLI = new URL("../cli.ts", import.meta.url).pathname;
-const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 // Sent with each call that touches a session, so the graph draws this sentry doing it.
 const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 

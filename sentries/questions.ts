@@ -5,12 +5,11 @@
 // It also distills each answer he gives into a standing rule, which every new agent's intro lists.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { BASE as base, STATE_DIR } from "../instance";
 
-const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const INTERVAL_MS = Number(process.env.QUESTIONS_INTERVAL ?? 3000);
 const MODEL = process.env.QUESTIONS_MODEL ?? "sonnet";
 const GATE = process.env.QUESTIONS_GATE !== "0";
-const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 
 type Question = { id: number; session: string; name: string; status: string; thread: { from: string; text: string }[] };

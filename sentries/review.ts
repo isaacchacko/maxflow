@@ -5,13 +5,12 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Link, links, ownComment, REVIEW_WATCH_FILE, type Watch } from "./gh";
+import { BASE as base, STATE_DIR } from "../instance";
 
-const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const EDGES_FILE = join(STATE_DIR, "review-edges.json");
 const QUEUE_FILE = join(STATE_DIR, "review-queue.json");
 const BOARD_FILE = join(STATE_DIR, "review-board.json");
 const INTERVAL_MS = Number(process.env.REVIEW_SENTRY_INTERVAL ?? 120_000);
-const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 // Sent with each call that touches a session, so the graph draws this sentry doing it.
 const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 const agent = process.env.MAXFLOW_SESSION!;

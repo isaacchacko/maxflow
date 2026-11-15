@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
+import { BASE as base } from "./instance";
 const [verb, ...rest] = process.argv.slice(2);
 const usage = `usage:
   maxflow ls

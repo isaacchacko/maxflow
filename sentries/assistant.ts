@@ -6,8 +6,8 @@
 // which the server reads to settle each task's column. Exits with the agent.
 import { existsSync, openSync, readSync, closeSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { BASE as base, STATE_DIR } from "../instance";
 
-const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const STATE_FILE = join(STATE_DIR, "assistant-state.json");
 const DIGEST_FILE = join(STATE_DIR, "assistant-digest.json");
 const PRS_FILE = join(STATE_DIR, "task-prs.json");
@@ -17,7 +17,6 @@ const INTERVAL_MS = Number(process.env.ASSISTANT_INTERVAL ?? 10 * 60_000);
 // The first read reaches back this far, so the board starts with the day's work instead of empty.
 const BACKFILL_MS = Number(process.env.ASSISTANT_BACKFILL_MS ?? 24 * 3_600_000);
 const NOTIFY_CHARS = 8_000;
-const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 
 type Session = { id: string; name: string; sentry: boolean; agent: boolean; status: string; transcript?: string; asleep?: boolean; wait: { kind: string; ref: string } | null };
 type Question = { id: number; session: string; name: string; status: string; thread: { from: string; text: string }[] };
