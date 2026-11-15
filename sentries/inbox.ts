@@ -141,7 +141,11 @@ async function onSlack(topic: string, d: any, me: string) {
   const kind = topic === "slack/mention" ? "mention" : topic === "slack/dm" ? "dm" : /^slack\/\w+\/[\d.]+\/reply$/.test(topic) ? "reply" : null;
   if (!kind || d.told?.length || d.agent || (d.bot && kind !== "mention")) return;
   state.seen = [...state.seen, d.ts].slice(-1000);
-  if (d.bot) return onBotAlert(d);
+  if (d.bot) {
+    // A bot's bare "cc" (the Arch bot copying him into a thread in #arch_comms) asks nothing of him: Isaac said to ignore it.
+    if (/^cc[.!]?$/i.test(String(d.text).replace(/<[^>]*>/g, "").trim())) return log(`skipped ${d.link}: a bot's bare cc`);
+    return onBotAlert(d);
+  }
   const where = kind === "dm" ? "a DM" : String(d.where ?? "").replace(/^thread .* in /, "") || "Slack";
   const line = `${d.from} in ${where}: "${short(d.text, 200)}" ${d.link}`;
   const owner = kind === "reply" || kind === "mention" ? await toOwner(key, line) : null;
