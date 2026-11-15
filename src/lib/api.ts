@@ -93,7 +93,7 @@ export const api = {
     fetch("/api/sessions", {
       method: "POST",
       body: JSON.stringify({ name: name.slice(0, 40) || "claude", cwd, cmd: ["claude", ...(bypass ? ["--permission-mode", "bypassPermissions"] : []), ...(prompt ? [prompt] : [])] }),
-    }).then((r) => r.json()),
+    }).then(async (r) => (r.ok ? r.json() : Promise.reject(new Error(await r.text())))),
   notify: (id: string, text: string) => fetch(`/api/sessions/${id}/notify`, { method: "POST", body: JSON.stringify({ text }) }),
   upload: (image: Blob): Promise<{ path: string }> => fetch("/api/uploads", { method: "POST", headers: { "content-type": image.type }, body: image }).then((r) => r.json()),
   link: (a: string, b: string, why?: string) => fetch("/api/link", { method: "POST", body: JSON.stringify({ a, b, why }) }),
