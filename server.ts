@@ -1,5 +1,6 @@
 import type { ServerWebSocket, Subprocess } from "bun";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
@@ -108,13 +109,21 @@ function attachViewer(session: Session, cols = 120, rows = 34) {
   });
 }
 
+// tmux rejects a command over ~16KB ("command too long"), so a long one (an agent's prompt) runs from a script that deletes itself.
+function launchable(id: string, cmd: string[]) {
+  if (cmd.join(" ").length < 8000) return cmd;
+  const script = `${tmpdir()}/maxflow-launch-${id}.sh`;
+  writeFileSync(script, `rm -f "$0"\nexec ${cmd.map((a) => `'${a.replaceAll("'", `'\\''`)}'`).join(" ")}\n`);
+  return ["sh", script];
+}
+
 function createSession(name: string, cmd: string[], cwd: string, chatId?: string, cols = 120, rows = 34): Session {
   const id = crypto.randomUUID().slice(0, 8);
   const session = { id, name, cmd, cwd, chatId, createdAt: Date.now(), lastOutputAt: Date.now(), chunks: [], bytes: 0, clients: new Set(), exitCode: null, inbox: [] } as unknown as Session;
   const t = tmuxName(id);
-  const created = tmux("new-session", "-d", "-s", t, "-x", String(cols), "-y", String(rows), "-c", cwd, "-e", `MAXFLOW_SESSION=${id}`, "--", ...cmd);
-  if (!created.ok) throw new Error(`tmux new-session failed for ${cmd.join(" ")}`);
-  const meta = { name, cmd, cwd, chatId, createdAt: session.createdAt };
+  const created = tmux("new-session", "-d", "-s", t, "-x", String(cols), "-y", String(rows), "-c", cwd, "-e", `MAXFLOW_SESSION=${id}`, "--", ...launchable(id, cmd));
+  if (!created.ok) throw new Error(`tmux new-session failed for ${cmd.join(" ").slice(0, 200)}`);
+  const meta = { name, cmd: cmd.map((a) => (a.length > 2000 ? `${a.slice(0, 2000)}…` : a)), cwd, chatId, createdAt: session.createdAt };
   setOption(id, "@mf", JSON.stringify(meta));
   sessions.set(id, session);
   attachViewer(session, cols, rows);
