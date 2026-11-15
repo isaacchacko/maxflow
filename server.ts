@@ -238,7 +238,11 @@ function touchFrom(req: Request, s: Session, kind: "read" | "write", held = fals
   if (from && from !== s) publish(`touch/${from.id}/${s.id}`, { from: from.id, to: s.id, kind, held });
 }
 const isAgent = (s: Session) => !!s.claude || !!s.chatId || !!s.asleep || s.cmd[0] === "claude";
-for (const s of sessions.values()) if (s.archived) stopAgent(s);
+// An archived agent with messages queued wakes to take them; the rest stay stopped.
+for (const s of sessions.values()) {
+  if (s.inbox.length && (s.archived || s.asleep) && !isSentry(s)) wake(s);
+  else if (s.archived) stopAgent(s);
+}
 // Drafts cleared out of the way before a restart still go back once their turn ends.
 const DRAFTS = `${process.env.HOME}/.maxflow/drafts`;
 const UPLOADS = `${process.env.HOME}/.maxflow/uploads`;
@@ -438,8 +442,6 @@ function queue(s: Session, text: string) {
   s.inbox.push(text);
   setOption(s.id, "@mf-inbox", JSON.stringify(s.inbox));
   wake(s);
-  // An agent archived by hand has no wait to wake it, but a message still needs a live claude to land in.
-  if (s.archived && !s.wait) setArchived(s, false);
 }
 
 function setArchived(s: Session, archived: boolean) {
@@ -476,10 +478,11 @@ function setWait(s: Session, wait?: Wait) {
 }
 // Waiting is sleeping: a waiting agent is archived once its turn ends, and the first message queued to it wakes it for a turn.
 // Only the awaited event ends the wait: a question settled, an approval, CI finishing, the PR merged or closed, the agent's reply, a new Slack message.
+// Any message wakes it, whatever put it to sleep (a wait, done, archived by hand): it needs a live claude to land in.
 function wake(s: Session) {
-  if (!s.wait || s.wait.awake) return;
   if (s.archived) setArchived(s, false);
-  setWait(s, { ...s.wait, awake: true });
+  else if (s.asleep) resumeAgent(s);
+  if (s.wait && !s.wait.awake) setWait(s, { ...s.wait, awake: true });
 }
 function endWait(s: Session, why?: string) {
   const was = s.wait;
@@ -894,7 +897,10 @@ setInterval(async () => {
   }
 }, 1000);
 async function deliver(s: Session) {
-  if (s.exitCode !== null || Date.now() - activeAt(s) < DELIVER_IDLE_MS) return;
+  if (s.exitCode !== null) return;
+  // A stopped claude has no prompt to deliver to, so a queued message that finds one asleep resumes it.
+  if (s.inbox.length && (s.archived || s.asleep) && !isSentry(s)) return wake(s);
+  if (Date.now() - activeAt(s) < DELIVER_IDLE_MS) return;
   // Only sessions with a message pending or a recent paste are read, so idle ones cost no capture each second.
   if (!s.inbox.length && !s.savedDraft && Date.now() - (s.pastedAt ?? 0) >= PASTE_SEEN_MS) return;
   const box = await inputBox(s);
@@ -912,8 +918,11 @@ async function deliver(s: Session) {
   }
   if (!s.inbox.length) return void (s.blockedSince = s.draft = undefined);
   if (!box.empty) {
-    // Our own message whose Enter retries ran out is no draft of his to clear.
-    if (box.text.startsWith("[maxflow") || !behindDraft(s, draftOf(box.text))) return;
+    // Our own message whose Enter retries ran out is no draft of his to clear. Nor is one holding a collapsed paste or image:
+    // the prompt shows only "[Pasted text #N +k lines]", so clearing it would lose what he pasted; it stays blocked for him.
+    const collapsed = /\[(Pasted text|Image) #\d+/.test(box.text);
+    if (collapsed) s.blockedSince ??= Date.now();
+    if (box.text.startsWith("[maxflow") || collapsed || !behindDraft(s, draftOf(box.text))) return;
     const draft = draftOf(box.text);
     await tmuxAsync("send-keys", "-t", tmuxName(s.id), "C-c");
     await Bun.sleep(300);
