@@ -6,7 +6,7 @@
 // the server adopts that session like any other once it is back.
 import type { ServerWebSocket, Subprocess } from "bun";
 import { join } from "node:path";
-import { LIVE, PORT, TMUX_SOCKET } from "../instance";
+import { BASE as base, LIVE, PORT, TMUX_SOCKET } from "../instance";
 
 const INTERVAL_MS = Number(process.env.HEALTH_INTERVAL ?? 1000);
 const PAGE_AFTER_MS = Number(process.env.HEALTH_PAGE_AFTER_MS ?? 3000);
@@ -22,7 +22,6 @@ const LOG = "/tmp/maxflow.log";
 const DIR = join(import.meta.dir, "..");
 const TMUX = ["tmux", "-L", TMUX_SOCKET, "-f", join(DIR, "tmux.conf")];
 const HOST = "127.0.0.1";
-const base = `http://localhost:${PORT}`;
 const XTERM = join(DIR, "node_modules/@xterm");
 
 // Only the live server runs under launchd, and a dev one is down whenever its developer stops it, so there is nothing to recover.
