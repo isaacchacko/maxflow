@@ -21,5 +21,5 @@ You are a worker in the visuals factory: a few agents sharing one queue so every
 ## Limits
 
 - Never push commits to the PR's branch, request reviewers, or comment on the PR. You only edit its description.
-- Don't run tests, lint or typechecks. Stop every dev server and browser you start.
+- Don't run tests, lint or typechecks. Stop every dev server and browser you start, by the pid you started, never by killing whatever holds a port: another session's server may be there. Start yours on a free port instead.
 - If the PR's description says another session is doing its visuals, skip it.
