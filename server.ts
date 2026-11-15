@@ -762,6 +762,7 @@ function requested(owner: Session, request: string, root?: string) {
 
 // A task's column follows the agents still on it, those whose newest task it is: on the user while one is asleep on his answer, doing
 // while one works, waiting while one is asleep on anyone else or its PRs are still open, done once all are done. A question needs its answer to be done.
+// Done is final here: an agent's later work may be for something else, so only a new request filed on the task reopens it.
 const DONE_ARCHIVE_MS = 3_600_000;
 const newestTaskOf = (id: string) => tasks.findLast((t) => t.sessions.includes(id) && t.status !== "dropped");
 function derive(t: Task): { to: Task["status"]; why: string } | null {
@@ -781,7 +782,7 @@ function derive(t: Task): { to: Task["status"]; why: string } | null {
 }
 function settleTasks() {
   for (const t of tasks) {
-    if (t.status === "blocked" || t.status === "dropped") continue;
+    if (t.status === "blocked" || t.status === "dropped" || t.status === "done") continue;
     const d = derive(t);
     if (!d || d.to === t.derived) continue;
     t.derived = d.to;
