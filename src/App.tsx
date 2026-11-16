@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Page } from "@/page/Page";
 import type { PageRef } from "@/store";
 import { ThreadPage } from "@/threads/ThreadPage";
+import { InboxView } from "@/views/InboxView";
 import { RoutingView } from "@/views/RoutingView";
 import { SentriesView } from "@/views/SentriesView";
 
@@ -15,6 +16,7 @@ export const views = [
   { id: "agents", label: "Agents", key: "3" },
   { id: "threads", label: "Threads", key: "4" },
   { id: "sentries", label: "Sentries", key: "5" },
+  { id: "inbox", label: "Inbox", key: "6" },
 ] as const;
 /** The first four are views of one routing canvas; the rest are pages of their own. */
 const ROUTING = 4;
@@ -88,6 +90,8 @@ export function App() {
             <ThreadPage key={detail.id} id={detail.id} back={route.view} />
           ) : detail?.kind === "page" ? (
             <Page key={detail.ref} pageRef={detail.ref} back={route.view} />
+          ) : route.view === "inbox" ? (
+            <InboxView />
           ) : snap >= ROUTING ? (
             <SentriesView />
           ) : (

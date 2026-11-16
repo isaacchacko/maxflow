@@ -13,7 +13,7 @@ bun server.ts                      # http://localhost:4949  (MAXFLOW_PORT to cha
 
 ## Objectives, routers, workers
 
-Work is organised as objectives. Each has one or more routers, claude agents that each own a scope of it and get it done through workers they start, brief and hear back from. The UI's tabs are four views of that one picture (Events, Objectives, Agents, Threads, keys 1–4) plus Sentries (5).
+Work is organised as objectives. Each has one or more routers, claude agents that each own a scope of it and get it done through workers they start, brief and hear back from. The UI's tabs are four views of that one picture (Events, Objectives, Agents, Threads, keys 1–4) plus Sentries (5) and Inbox (6): every thread, oldest unanswered ask first, answered ones dimmed below.
 
 - A router is started with `agents/router.md` appended to its system prompt and its objective and scope as its first prompt. `maxflow objective new <title> --cwd <dir>` makes an objective and its first router; "Split router" on an objective starts another with its own scope and tells the others.
 - A session a router starts (`maxflow new ... -- claude`) is its worker on its objective; one a worker starts joins the same router. "Spawn agent" on a router's page starts a blank worker and tells the router to brief it. Every pane carries its place as the tmux option `@mf-role`.
