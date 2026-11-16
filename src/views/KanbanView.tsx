@@ -12,7 +12,7 @@ export function KanbanView() {
       {columns.map(col => {
         const cards = tasks.filter(t => t.status === col.status);
         return (
-          <section key={col.status} data-agent={`column:${col.status}`} className="flex min-w-56 flex-col gap-2 rounded-xl bg-muted/30 p-2">
+          <section key={col.status} data-agent={`column:${col.status}`} className="flex min-h-0 min-w-56 flex-col gap-2 overflow-y-auto rounded-xl bg-muted/30 p-2">
             <h2 className="flex items-center gap-2 px-1 py-1 text-sm text-muted-foreground">
               <span className={cn("size-2 rounded-full", statusColor[col.status])} />
               {col.label}

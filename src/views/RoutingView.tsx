@@ -149,6 +149,34 @@ export function RoutingView() {
     } catch {}
   }, []);
 
+  const snapRef = useRef(snap);
+  snapRef.current = snap;
+
+  /** One sideways swipe moves one view; trackpad momentum after it is swallowed until the swipe goes quiet. */
+  useEffect(() => {
+    const viewport = viewportRef.current!;
+    let pushed = 0;
+    let spent = false;
+    let lastAt = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      const now = performance.now();
+      if (now - lastAt > 200) {
+        pushed = 0;
+        spent = false;
+      }
+      lastAt = now;
+      if (spent) return;
+      pushed += e.deltaX;
+      if (Math.abs(pushed) < 60) return;
+      go(snapRef.current + Math.sign(pushed));
+      spent = true;
+    };
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", onWheel);
+  }, [go]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
@@ -246,7 +274,7 @@ export function RoutingView() {
             ))}
           </TabsList>
         </Tabs>
-        <span className="text-xs text-muted-foreground">← → to pan · hover or click to trace · click a source to filter</span>
+        <span className="text-xs text-muted-foreground">swipe sideways or ← → to pan · hover or click to trace · click a source to filter</span>
       </div>
 
       <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-hidden">

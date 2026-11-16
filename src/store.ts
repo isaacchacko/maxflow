@@ -77,3 +77,15 @@ export function splitRouter(objectiveId: string, scope: string) {
   agentStore.set([...narrowed, { id, role: "router", objectiveId, scope, taskIds: [], state: "idle", doing: "Just split off, reading the objective" }]);
   return id;
 }
+
+/** Swaps in mock.local.json when the server has one: real work that stays out of the public repo. */
+export async function loadLocalMock() {
+  const res = await fetch("/mock.local.json").catch(() => undefined);
+  if (!res?.ok) return;
+  const local = await res.json().catch((e: unknown) => console.warn("mock.local.json unreadable, using built-in mock", e));
+  if (!local) return;
+  taskStore.set(local.tasks);
+  objectiveStore.set(local.objectives);
+  agentStore.set(local.agents);
+  signalStore.set(local.signals);
+}
