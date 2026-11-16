@@ -202,7 +202,7 @@ export function SearchPalette({
             value={text}
             onChange={e => setText(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder={chips.length ? "Narrow it down…" : "Search, or filter with is: from: state: status: in:"}
+            placeholder="Search"
             className="min-w-40 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
@@ -218,7 +218,7 @@ export function SearchPalette({
         )}
 
         <div ref={listRef} className="max-h-96 overflow-y-auto py-1">
-          {isActive(filter) && results.length === 0 && <p className="px-3 py-6 text-center text-sm text-muted-foreground">Nothing matches.</p>}
+          {isActive(filter) && results.length === 0 && <p className="px-3 py-6 text-center text-sm text-muted-foreground">No results</p>}
           {results.map((n, i) => {
             const Icon = (n.source && sourceIcon[n.source]) || kindIcon[n.kind];
             return (
@@ -238,12 +238,6 @@ export function SearchPalette({
           })}
         </div>
 
-        <div className="flex items-center gap-3 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
-          <span>tab completes</span>
-          <span>↵ jumps to it</span>
-          <span>esc keeps the filter</span>
-          {isActive(filter) && <span className="ml-auto">{hits(nodes, filter).length} matches</span>}
-        </div>
       </DialogContent>
     </Dialog>
   );

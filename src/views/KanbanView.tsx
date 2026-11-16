@@ -30,9 +30,6 @@ export function KanbanView() {
                           <GitPullRequest className="size-3" />#{t.pr}
                         </Badge>
                       )}
-                      {t.page.some(b => b.kind === "question") && (
-                        <Badge className="bg-amber-400/15 text-amber-400">needs you</Badge>
-                      )}
                     </div>
                   </CardContent>
                 </Card>

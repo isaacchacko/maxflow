@@ -1,4 +1,4 @@
-import { Archive, ArrowLeft, Copy, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Hash, Network, Pause, Play, Plus, User, Waypoints } from "lucide-react";
+import { Archive, ArrowLeft, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Hash, Network, Pause, Play, Plus, User, Waypoints } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,7 +62,7 @@ function Tty({ agent, lines }: { agent: Agent; lines: Line[] }) {
             )}
             {l.kind === "working" && (
               <p className="text-agent">
-                <span className="inline-block animate-spin">✻</span> {l.text}… <span className="text-muted-foreground">(esc to interrupt)</span>
+                <span className="inline-block animate-spin">✻</span> {l.text}…
               </p>
             )}
           </div>
@@ -78,11 +78,6 @@ function Tty({ agent, lines }: { agent: Agent; lines: Line[] }) {
           className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground/50"
         />
       </form>
-      <div className="flex gap-4 border-t px-4 py-1 text-[11px] text-muted-foreground">
-        <span>opus 5.5</span>
-        <span>{agent.role === "router" ? "routing" : `isaac/${agent.id}`}</span>
-        <span className="ml-auto">ctx 38%</span>
-      </div>
     </section>
   );
 }
@@ -161,8 +156,7 @@ function RouterSidebar({ router }: { router: Agent }) {
           </Row>
         )}
         <Row label="Scope">{router.scope}</Row>
-        <Row label="Model">opus 5.5</Row>
-      </Section>
+              </Section>
 
       <Separator />
 
@@ -196,7 +190,7 @@ function RouterSidebar({ router }: { router: Agent }) {
       <Separator />
 
       <Section title={`Dispatched · ${dispatched.length}`}>
-        {dispatched.length === 0 && <p className="text-xs text-muted-foreground">Nothing has reached this router yet.</p>}
+        {dispatched.length === 0 && <p className="text-xs text-muted-foreground">None</p>}
         {dispatched.slice(0, 10).map(({ signal, to }) => {
           const Icon = sourceIcon[signal.source];
           return (
@@ -217,7 +211,7 @@ function RouterSidebar({ router }: { router: Agent }) {
                     </span>
                   ))
                 ) : (
-                  <span>kept · handled by {router.id}</span>
+                  <span>kept</span>
                 )}
               </p>
             </div>
@@ -228,7 +222,7 @@ function RouterSidebar({ router }: { router: Agent }) {
       <Separator />
 
       <Section title={`Other routers on this objective · ${peers.length}`}>
-        {peers.length === 0 && <p className="text-xs text-muted-foreground">This router owns the whole objective.</p>}
+        {peers.length === 0 && <p className="text-xs text-muted-foreground">None</p>}
         {peers.map(r => (
           <a key={r.id} href={`#agent/${r.id}`} className="flex flex-col px-1 py-1 hover:bg-muted">
             <span className="flex items-center gap-1.5 font-mono text-xs">
@@ -279,7 +273,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
         {agent.role === "router" ? <Network className="size-4 text-fuchsia-400" /> : <span className={cn("size-2.5", agentStateColor[agent.state])} />}
         <h1 className="font-mono text-lg">{agent.id}</h1>
         <Badge variant="outline">{agent.role}</Badge>
-        <span className="truncate text-sm text-muted-foreground">{agent.role === "router" ? agent.scope : agent.doing}</span>
+        {agent.role === "router" && <span className="truncate text-sm text-muted-foreground">{agent.scope}</span>}
         {agent.role === "router" && (
           <span className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
             {stateOrder.map(state => {
@@ -349,8 +343,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
               </Row>
             )}
             {task && <Row label="Started">{new Date(task.start).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</Row>}
-            <Row label="Model">opus 5.5</Row>
-          </Section>
+                      </Section>
 
           <Separator />
 
@@ -361,15 +354,12 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
             {routedHere.filter(s => s.source === "slack").slice(0, 2).map(s => (
               <LinkRow key={s.id} icon={Hash} label={s.target} detail="Slack thread" href="#" />
             ))}
-            <button className="flex items-center gap-2 px-1 py-1 text-left text-sm text-muted-foreground hover:bg-muted" onClick={() => navigator.clipboard?.writeText(`maxflow attach ${agent.id}`).catch(() => {})}>
-              <Copy className="size-3.5" /> Copy attach command
-            </button>
           </Section>
 
           <Separator />
 
           <Section title={`Routed here · ${routedHere.length}`}>
-            {routedHere.length === 0 && <p className="text-xs text-muted-foreground">Nothing routed here yet.</p>}
+            {routedHere.length === 0 && <p className="text-xs text-muted-foreground">None</p>}
             {routedHere.slice(0, 8).map(s => {
               const Icon = sourceIcon[s.source];
               return (
@@ -387,7 +377,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
           <Separator />
 
           <Section title={agent.role === "router" ? "Agents" : "Alongside"}>
-            {(agent.role === "router" ? crew : siblings).length === 0 && <p className="text-xs text-muted-foreground">None.</p>}
+            {(agent.role === "router" ? crew : siblings).length === 0 && <p className="text-xs text-muted-foreground">None</p>}
             {(agent.role === "router" ? crew : siblings).map(a => (
               <a key={a.id} href={`#agent/${a.id}`} className="flex items-center gap-2 px-1 py-1 text-sm hover:bg-muted">
                 <span className={cn("size-2 shrink-0", agentStateColor[a.state])} />

@@ -409,7 +409,6 @@ export function RoutingView() {
     const id = `obj:${o.id}`;
     const own = tasks.filter(t => o.taskIds.includes(t.id));
     const status = objectiveStatus(own.map(t => t.status));
-    const vision = o.page.find(b => b.kind === "vision");
     const count = routers.filter(r => r.objectiveId === o.id).length;
     return (
       <Card {...node(id)} data-agent={`objective:${o.id}`} onClick={open(`objective/${o.id}`)} className="cursor-pointer gap-2 px-4 py-3 hover:border-ring">
@@ -418,12 +417,11 @@ export function RoutingView() {
           <span className="truncate font-medium">{o.title}</span>
           <SquareArrowOutUpRight className="ml-auto size-3.5 text-muted-foreground" />
         </div>
-        {vision?.kind === "vision" && <p className="line-clamp-2 text-xs text-muted-foreground">{vision.goal}</p>}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className={cn("size-1.5 rounded-full", statusColor[status])} />
           {status} · {own.filter(t => t.status === "done").length}/{own.length} tasks
           <Badge variant="outline" className="ml-auto text-[10px]">
-            {count === 1 ? "1 router" : `split · ${count} routers`}
+            {count} {count === 1 ? "router" : "routers"}
           </Badge>
         </div>
         {splitting === o.id ? (
@@ -433,7 +431,7 @@ export function RoutingView() {
               value={scope}
               onChange={e => setScope(e.target.value)}
               onKeyDown={e => e.key === "Escape" && setSplitting(undefined)}
-              placeholder="Subcomponent the new router owns…"
+              placeholder="Scope"
               className="h-7 text-xs"
             />
           </form>
@@ -471,7 +469,6 @@ export function RoutingView() {
           <span className="ml-auto text-xs text-muted-foreground">{crew} {crew === 1 ? "agent" : "agents"}</span>
         </div>
         <p className="text-sm">{r.scope}</p>
-        <p className="truncate text-xs text-muted-foreground">{r.doing}</p>
       </Card>
     );
   };
@@ -486,7 +483,6 @@ export function RoutingView() {
           <span className="font-mono text-xs">{w.id}</span>
           <span className="ml-auto text-xs text-muted-foreground">{w.state}</span>
         </div>
-        <p className="truncate text-xs text-muted-foreground">{w.doing}</p>
         {task && (
           <a href={`#task/${task.id}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 truncate text-xs hover:underline">
             <span className={cn("size-1.5 shrink-0 rounded-full", statusColor[task.status])} />
@@ -499,7 +495,7 @@ export function RoutingView() {
 
   const emptyCard = (r: Agent) => (
     <p className={cn("rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground transition-opacity")}>
-      No agents yet. {r.id} spawns them when work is ready.
+      No agents
     </p>
   );
 
@@ -564,13 +560,12 @@ export function RoutingView() {
         )}
         {filterHits && (
           <span className="flex items-center gap-2 text-xs text-muted-foreground">
-            {filterHits.length} {filterHits.length === 1 ? "match" : "matches"}, with their routes
+            {filterHits.length}
             <button onClick={() => setFilter({ chips: [], text: "" })} className="underline hover:text-foreground">
               clear
             </button>
           </span>
         )}
-        <span className="ml-auto text-xs text-muted-foreground">⌘F to search · swipe sideways or ← → to pan</span>
       </div>
 
       <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-hidden">
@@ -662,7 +657,7 @@ export function RoutingView() {
                   data-agent="log-composer"
                   value={draft}
                   onChange={e => setDraft(e.target.value)}
-                  placeholder="Tell the agents something…"
+                  placeholder="Message"
                   className="h-7 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
                 />
                 <kbd className="shrink-0 text-xs text-muted-foreground">↵</kbd>

@@ -14,9 +14,7 @@ export function AgentChat() {
   const [open, setOpen] = useState(false);
   const [working, setWorking] = useState(false);
   const [input, setInput] = useState("");
-  const [lines, setLines] = useState<Line[]>([
-    { from: "agent", text: "Tell me what to do. Try \"add a chart to pagination\", \"start the reconciler\" or \"ask isaac about overdue\"." },
-  ]);
+  const [lines, setLines] = useState<Line[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -69,7 +67,7 @@ export function AgentChat() {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 disabled={working}
-                placeholder={working ? "Working…" : "Ask the agent…"}
+                placeholder="Message"
               />
             </form>
           </CardFooter>

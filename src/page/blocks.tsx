@@ -121,7 +121,7 @@ function ActivityBlock({ subject }: Props<"activity">) {
             <span className="shrink-0 text-xs text-muted-foreground/60">{e.at}</span>
           </li>
         ))}
-        {subject.events.length === 0 && <li className="text-sm text-muted-foreground">Nothing yet.</li>}
+        {subject.events.length === 0 && <li className="text-sm text-muted-foreground">None</li>}
       </ol>
     </Shell>
   );
