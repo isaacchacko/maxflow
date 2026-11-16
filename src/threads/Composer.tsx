@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Rich";
@@ -19,14 +19,21 @@ export const quoteInto = (draftKey: string, markdown: string) => dispatchEvent(n
 
 const imagesIn = (files: FileList | undefined) => [...(files ?? [])].filter(f => f.type.startsWith("image/"));
 
-/** A one-line message box that also takes images pasted from the clipboard or dropped on it: each is uploaded at once, and its path is kept with the draft so a reload keeps it attached. */
+/** A message box that wraps and grows with its text, and takes images pasted from the clipboard or dropped on it: each is uploaded at once, and its path is kept with the draft so a reload keeps it attached. */
 export function Composer({ onSend, className, autoFocus, agent, draftKey }: { onSend: (text: string) => unknown; className?: string; autoFocus?: boolean; agent: string; draftKey: string }) {
   const [draft, setDraft] = usePersistentDraft(draftKey);
   const [imageDraft, setImageDraft] = usePersistentDraft(`${draftKey}:images`);
   const images = imageDraft.split("\n").filter(Boolean);
   const setImages = (paths: string[]) => setImageDraft(paths.join("\n"));
   const [quote, setQuote] = usePersistentDraft(`${draftKey}:quote`);
-  const input = useRef<HTMLInputElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+  // It grows with what he types, up to 40% of the window, then scrolls.
+  useLayoutEffect(() => {
+    const el = input.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, innerHeight * 0.4)}px`;
+  }, [draft]);
   useEffect(() => {
     const onQuote = (e: Event) => {
       const { detail } = e as CustomEvent<{ draftKey: string; markdown: string }>;
@@ -95,18 +102,21 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey }: { on
           </button>
         </div>
       )}
-      <input
+      <textarea
         ref={input}
+        rows={1}
         autoFocus={autoFocus}
         data-agent={agent}
         value={draft}
         onChange={e => setDraft(e.target.value)}
+        // Enter sends, Shift+Enter is a new line; Enter that confirms an IME composition is neither.
+        onKeyDown={e => e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (e.preventDefault(), e.currentTarget.form?.requestSubmit())}
         onPaste={e => {
           const files = imagesIn(e.clipboardData.files);
           if (files.length) e.preventDefault(), void attach(files);
         }}
         placeholder="Message"
-        className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
+        className="w-full resize-none overflow-y-auto bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60"
       />
       {error && <p className="text-xs text-destructive">{error}</p>}
     </form>

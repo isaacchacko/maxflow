@@ -136,6 +136,15 @@ function chipNamed(node: Node) {
 }
 const remarkChips = () => chipNamed;
 
+// A line break he typed (Shift+Enter) stays one, as in a chat, instead of markdown joining the lines; code keeps its own.
+function breakLines(node: Node) {
+  node.children = node.children?.flatMap(child => {
+    if (child.type !== "text") return breakLines(child), [child];
+    return child.value!.split("\n").flatMap((value, i) => (i ? [{ type: "break" }, { type: "text", value }] : [{ type: "text", value }]));
+  });
+}
+const remarkBreaks = () => breakLines;
+
 const prColor = { open: "text-emerald-400", merged: "text-violet-400", closed: "text-red-400" } as const;
 function PrChip({ repo, n }: { repo: string; n: string }) {
   const pr = prStore.use()[`${repo}#${n}`];
@@ -228,7 +237,7 @@ const keepRefs = (url: string) => (/^(ref|pr|linear):/.test(url) ? url : default
 export function Markdown({ text, className }: { text: string; className?: string }) {
   return (
     <div className={cn("break-words", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips]} components={md} urlTransform={keepRefs}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips, remarkBreaks]} components={md} urlTransform={keepRefs}>
         {asLinks(text)}
       </ReactMarkdown>
     </div>
