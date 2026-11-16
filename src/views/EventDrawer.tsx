@@ -1,5 +1,5 @@
 import { ArrowRight, Bot, Network, X } from "lucide-react";
-import { useEffect } from "react";
+import { Drawer } from "@/components/Drawer";
 import type { Signal } from "@/mock";
 import { cn } from "@/lib/utils";
 import { agentStore, pathOf, sentryStore } from "@/store";
@@ -22,7 +22,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 /** One event from the log, read in full: who sent it, what it said, and where it went. */
-export function EventDrawer({ signal, onClose }: { signal: Signal; onClose: () => void }) {
+export function EventDrawer({ signal, onClose }: { signal?: Signal; onClose: () => void }) {
+  return (
+    <Drawer open={!!signal} onClose={onClose} contentKey={signal?.id} data-agent="event-drawer" className="flex flex-col gap-4 p-5">
+      {signal && <EventDetail signal={signal} onClose={onClose} />}
+    </Drawer>
+  );
+}
+
+function EventDetail({ signal, onClose }: { signal: Signal; onClose: () => void }) {
   const agents = agentStore.use();
   const sentries = sentryStore.use();
   // Live signals carry their hops; a mock one only knows who it reached, through which objective.
@@ -31,12 +39,6 @@ export function EventDrawer({ signal, onClose }: { signal: Signal; onClose: () =
   const hopLabel = (to: string[], objective?: string) =>
     to.length === 1 && to[0] === funnel ? "sent to the funnel to route" : objective ? "sent to its objective's routers" : "sent to";
   const from = agents.find(a => a.id === signal.from);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && (e.stopImmediatePropagation(), onClose());
-    addEventListener("keydown", onKey, true);
-    return () => removeEventListener("keydown", onKey, true);
-  }, [onClose]);
 
   const agentLink = (id: string) => {
     const a = agents.find(x => x.id === id);
@@ -49,12 +51,7 @@ export function EventDrawer({ signal, onClose }: { signal: Signal; onClose: () =
   };
 
   return (
-    <div className="fixed inset-0 z-50" onClick={onClose}>
-      <aside
-        data-agent="event-drawer"
-        onClick={e => e.stopPropagation()}
-        className="absolute inset-y-0 right-0 flex w-[min(520px,100vw)] flex-col gap-4 overflow-y-auto border-l bg-background p-5 shadow-2xl animate-in slide-in-from-right"
-      >
+    <>
         <header className="flex items-center gap-3">
           <h2 className="font-mono text-sm">{signal.target}</h2>
           <span className="text-xs text-muted-foreground">{new Date(signal.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" })}</span>
@@ -98,7 +95,6 @@ export function EventDrawer({ signal, onClose }: { signal: Signal; onClose: () =
         <div className="border-t pt-4">
           <Markdown text={signal.text} className="text-sm leading-relaxed" />
         </div>
-      </aside>
-    </div>
+    </>
   );
 }

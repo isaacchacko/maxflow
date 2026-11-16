@@ -1,5 +1,5 @@
 import { Bot, ChevronLeft, ChevronRight, GitPullRequest, Hash, MessagesSquare, Network, Plus, Radar, Search, SquareArrowOutUpRight, User, Waypoints } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { routeChat } from "@/agent/route";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -180,6 +180,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
   const [draft, setDraft] = usePersistentDraft("log-composer");
   const [fresh, setFresh] = useState<string>();
   const [reading, setReading] = useState<string>();
+  const closeReading = useCallback(() => setReading(undefined), []);
   const [splitting, setSplitting] = useState<string>();
   const [scope, setScope] = useState("");
 
@@ -712,11 +713,9 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
           </section>
         </div>
       </div>
-      {reading && signals.some(x => x.id === reading) && (
-        <div onClick={e => e.stopPropagation()}>
-          <EventDrawer signal={signals.find(x => x.id === reading)!} onClose={() => setReading(undefined)} />
-        </div>
-      )}
+      <div onClick={e => e.stopPropagation()}>
+        <EventDrawer signal={signals.find(x => x.id === reading)} onClose={closeReading} />
+      </div>
       <div onClick={e => e.stopPropagation()}>
         <SearchPalette
         open={palette}
