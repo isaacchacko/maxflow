@@ -348,13 +348,9 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
   const node = (id: string) => ({ "data-node": id });
   const open = (hash: string) => () => (location.hash = hash);
 
+  // One type at a time, like a dropdown: a type shows only its events, and clicking it again shows them all.
   const toggle = (source: Source) =>
-    setShown(prev => {
-      const next = new Set(prev);
-      if (next.has(source) && next.size > 1) next.delete(source);
-      else next.add(source);
-      return next;
-    });
+    setShown(prev => (prev.size === 1 && prev.has(source) ? new Set(sentries.map(s => s.id)) : new Set([source])));
 
   function send(e: React.FormEvent) {
     e.preventDefault();
