@@ -2,7 +2,7 @@ import { ArrowLeft, ExternalLink, MessagesSquare, Network, Waypoints } from "luc
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { NOW_AT, type Thread } from "@/mock";
+import { NOW_AT } from "@/mock";
 import { agentStore, objectiveStore, postToThread, threadStore } from "@/store";
 import { Composer } from "./Composer";
 import { Author, RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
@@ -22,24 +22,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-// The router's acknowledgement: one line while Isaac's last message waits on an answer, gone when it lands.
-function Pending({ pending, names }: { pending: NonNullable<Thread["pending"]>; names: string[] }) {
-  const who = `${names.length > 1 ? "routers" : "router"} ${names.join(", ")}`;
-  if (pending.stale)
-    return (
-      <p data-agent="thread-pending" className="text-xs text-muted-foreground">
-        {who} stopped without answering · since {when(pending.since)}
-      </p>
-    );
-  return (
-    <p data-agent="thread-pending" className="flex items-center gap-2 text-xs text-agent">
-      <span className="inline-block animate-spin">✻</span>
-      <span className="animate-pulse">{pending.status ? `${names[0]}: ${pending.status}` : `${who} ${names.length > 1 ? "are" : "is"} working on a response`}…</span>
-      <span className="text-muted-foreground tabular-nums">since {when(pending.since)}</span>
-    </p>
-  );
-}
-
 export function ThreadPage({ id, back }: { id: string; back: string }) {
   const thread = threadStore.use().find(t => t.id === id);
   const agents = agentStore.use();
@@ -49,7 +31,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [thread?.messages.length, !!thread?.pending]);
+  }, [thread?.messages.length]);
 
   if (!thread) return <p className="p-6 text-muted-foreground">No thread {id}.</p>;
 
@@ -81,7 +63,6 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                 <Rich text={m.text} className="text-sm leading-relaxed" />
               </article>
             ))}
-            {thread.pending && <Pending pending={thread.pending} names={thread.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />}
           </div>
           <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => postToThread(thread.id, "isaac", text)} className="border-t px-4 py-2.5" />
         </section>
