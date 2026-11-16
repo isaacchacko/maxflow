@@ -34,7 +34,7 @@ function Tty({ agent, lines }: { agent: Agent; lines: Line[] }) {
   }
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col border bg-black/40 font-mono text-[13px] leading-relaxed">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col border bg-card font-mono text-[13px] leading-relaxed">
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {lines.map((l, i) => (
           <div key={i} className="mb-2">

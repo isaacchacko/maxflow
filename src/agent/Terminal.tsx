@@ -85,5 +85,6 @@ export function Terminal({ id, onClose = () => {}, handle }: { id: string; onClo
     };
   }, [id]);
 
-  return <div ref={el} className="size-full bg-background" />;
+  // Agents draw for a dark terminal, so it stays dark inside a light page.
+  return <div ref={el} className="dark size-full bg-background" />;
 }

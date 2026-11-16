@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AgentPage } from "@/agent/AgentPage";
 import { Capture } from "@/components/Capture";
+import { Mark } from "@/components/Mark";
 import { QuickSwitcher } from "@/components/QuickSwitcher";
 import { Viewer } from "@/threads/Viewer";
 import { Kbd } from "@/components/ui/kbd";
@@ -78,7 +79,7 @@ export function App() {
       <Viewer />
       <div className="flex h-full flex-col">
         <header className="flex items-center gap-6 border-b px-4 py-2">
-          <span className="font-semibold tracking-tight">maxflow</span>
+          <Mark />
           <Tabs value={detail ? "" : route.view} onValueChange={v => (location.hash = v)}>
             <TabsList>
               {views.map(v => (
