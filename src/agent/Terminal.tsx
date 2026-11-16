@@ -12,6 +12,15 @@ const systemClipboard: IClipboardProvider = {
 
 export type TerminalHandle = { focus: () => void; fit: () => void; selection: () => string };
 
+// xterm.js only reads hex and rgb colors, and the theme's are oklch; a pixel painted in it gives the rgb back.
+function rgb(color: string) {
+  const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true })!;
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, 1, 1);
+  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 // What macOS terminals send for ⌘/⌥ editing keys; xterm.js leaves these to the browser.
 function macKey(e: KeyboardEvent, term: XTerm): string | (() => void) | undefined {
   const only = (mod: "metaKey" | "altKey" | "ctrlKey" | "shiftKey") => (["metaKey", "altKey", "ctrlKey", "shiftKey"] as const).every((m) => e[m] === (m === mod));
@@ -20,7 +29,7 @@ function macKey(e: KeyboardEvent, term: XTerm): string | (() => void) | undefine
   if (only("shiftKey") && e.key === "Enter") return "\x1b\r";
 }
 
-export function Terminal({ id, onClose, handle }: { id: string; onClose: () => void; handle: React.RefObject<TerminalHandle | null> }) {
+export function Terminal({ id, onClose = () => {}, handle }: { id: string; onClose?: () => void; handle?: React.RefObject<TerminalHandle | null> }) {
   const el = useRef<HTMLDivElement>(null);
   const closed = useRef(onClose);
   closed.current = onClose;
@@ -33,7 +42,7 @@ export function Terminal({ id, onClose, handle }: { id: string; onClose: () => v
       cursorBlink: true,
       allowProposedApi: true,
       macOptionClickForcesSelection: true,
-      theme: { background: getComputedStyle(document.body).backgroundColor, selectionBackground: "#6cb6ff44" },
+      theme: { background: rgb(getComputedStyle(el.current!).backgroundColor), selectionBackground: "#6cb6ff44" },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -64,7 +73,7 @@ export function Terminal({ id, onClose, handle }: { id: string; onClose: () => v
     for (const type of ["mousedown", "mouseup"]) el.current!.addEventListener(type, keepRightClick as EventListener, true);
     const resize = new ResizeObserver(() => el.current?.offsetParent && fit.fit());
     resize.observe(el.current!);
-    handle.current = { focus: () => term.focus(), fit: () => fit.fit(), selection: () => term.getSelection() };
+    if (handle) handle.current = { focus: () => term.focus(), fit: () => fit.fit(), selection: () => term.getSelection() };
     term.focus();
 
     return () => {
@@ -72,9 +81,9 @@ export function Terminal({ id, onClose, handle }: { id: string; onClose: () => v
       ws.onclose = null;
       ws.close();
       term.dispose();
-      handle.current = null;
+      if (handle) handle.current = null;
     };
   }, [id]);
 
-  return <div ref={el} className="size-full" />;
+  return <div ref={el} className="size-full bg-background" />;
 }

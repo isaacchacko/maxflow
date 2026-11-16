@@ -6,6 +6,8 @@
 // the server adopts that session like any other once it is back.
 import type { ServerWebSocket, Subprocess } from "bun";
 import { join } from "node:path";
+import { BASE as base, LIVE, PORT, TMUX_SCOPE, TMUX_SOCKET } from "../instance";
+import { LABEL, LOG, loaded, restartCommand, status as serviceStatus } from "../service";
 
 const INTERVAL_MS = Number(process.env.HEALTH_INTERVAL ?? 1000);
 const PAGE_AFTER_MS = Number(process.env.HEALTH_PAGE_AFTER_MS ?? 3000);
@@ -16,20 +18,18 @@ const BUILD_EVERY_MS = 5000;
 const COOLDOWN_MS = Number(process.env.HEALTH_COOLDOWN_MS ?? 15 * 60_000);
 // After handing the port back, give the server this long to bind before covering for it again.
 const RELEASE_GRACE_MS = 15_000;
-const LABEL = "com.isaacchacko.maxflow";
-const LOG = "/tmp/maxflow.log";
 const DIR = join(import.meta.dir, "..");
-const TMUX = ["tmux", "-L", "maxflow", "-f", join(DIR, "tmux.conf")];
+const TMUX = ["tmux", "-L", TMUX_SOCKET, "-f", join(DIR, "tmux.conf")];
 const HOST = "127.0.0.1";
-const PORT = Number(process.env.MAXFLOW_PORT ?? 4747);
-const base = `http://localhost:${PORT}`;
 const XTERM = join(DIR, "node_modules/@xterm");
+
+// Only the live server runs as a service, and a dev one is down whenever its developer stops it, so there is nothing to recover.
+if (!LIVE) console.log("health sentry: not the live maxflow, nothing to watch"), process.exit(0);
 
 const run = (cmd: string[]) => {
   const r = Bun.spawnSync(cmd);
   return { ok: r.exitCode === 0, out: r.stdout.toString() + r.stderr.toString() };
 };
-const launchd = () => run(["launchctl", "print", `gui/${process.getuid!()}/${LABEL}`]);
 const stamp = () => new Date().toLocaleTimeString();
 
 // "refused" means nothing holds the port, so the down page can take it; "hung" means something holds it without answering.
@@ -37,7 +37,7 @@ async function probe(): Promise<"up" | "refused" | "hung"> {
   try {
     return (await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) })).ok ? "up" : "hung";
   } catch (e) {
-    return String((e as { code?: string }).code ?? e).includes("ConnectionRefused") ? "refused" : "hung";
+    return /ConnectionRefused|ECONNREFUSED/.test(String((e as { code?: string }).code ?? e)) ? "refused" : "hung";
   }
 }
 
@@ -53,16 +53,16 @@ async function buildOk() {
 const RULES = `Other agents edit this repo with uncommitted work in the tree: fix the breakage in place rather than reverting or stashing their changes, and don't commit. Don't kill any tmux session on the maxflow socket; they are the user's running work. When it is fixed, say in a few lines what broke and what you changed.`;
 
 function downTask(since: number) {
-  const status = launchd().out.split("\n").filter((l) => /state =|runs =|last exit|pid =/.test(l)).join("\n");
-  return `The maxflow server (${DIR}, launchd agent ${LABEL}, ${base}) has not answered since ${new Date(since).toLocaleTimeString()}, so the health sentry started you to bring it back. The user is watching you on the health sentry's "down" page, which holds the port until the server asks for it at startup.
+  const status = serviceStatus().text;
+  return `The maxflow server (${DIR}, service ${LABEL}, ${base}) has not answered since ${new Date(since).toLocaleTimeString()}, so the health sentry started you to bring it back. The user is watching you on the health sentry's "down" page, which holds the port until the server asks for it at startup.
 
-launchd says:
+The service manager says:
 ${status}
 
 Last lines of ${LOG}:
 ${run(["tail", "-n", "80", LOG]).out}
 
-Find the root cause and fix it, then restart with \`launchctl kickstart -k gui/$(id -u)/${LABEL}\` and confirm \`curl -s ${base}/api/sessions\` answers with the session list. ${RULES}`;
+Find the root cause and fix it, then restart with \`${restartCommand}\` and confirm \`curl -s ${base}/api/sessions\` answers with the session list. ${RULES}`;
 }
 
 function buildTask(since: number) {
@@ -78,7 +78,7 @@ function startAgent(prompt: string) {
   const id = crypto.randomUUID().slice(0, 8);
   const meta = { name: "maxflow recovery", cmd: ["claude"], cwd: DIR, createdAt: Date.now() };
   const t = `mf-${id}`;
-  const created = run([...TMUX, "new-session", "-d", "-s", t, "-x", "120", "-y", "34", "-c", DIR, "-e", `MAXFLOW_SESSION=${id}`, "--", "claude", "--permission-mode", "bypassPermissions", prompt]);
+  const created = run([...TMUX_SCOPE, ...TMUX, "new-session", "-d", "-s", t, "-x", "120", "-y", "34", "-c", DIR, "-e", `MAXFLOW_SESSION=${id}`, "--", "claude", "--permission-mode", "bypassPermissions", prompt]);
   if (!created.ok) throw new Error(`tmux new-session failed: ${created.out}`);
   run([...TMUX, "set-option", "-t", t, "@mf", JSON.stringify(meta)]);
   return { id, tmux: t, at: Date.now() };
@@ -100,19 +100,19 @@ let page: ReturnType<typeof Bun.serve> | null = null;
 let releasedAt = 0;
 let buildBrokenSince: number | null = null;
 let buildCheckedAt = 0;
+let lastAgentAt = -COOLDOWN_MS;
+const canStartAgent = () => !(agent && run([...TMUX, "has-session", "-t", agent.tmux]).ok) && Date.now() - lastAgentAt >= COOLDOWN_MS;
 // A server asking for the port back is alive and booting (adopting every tmux session takes ~20s), so the agent's clock restarts.
-const canStartAgent = () => !agent || (!run([...TMUX, "has-session", "-t", agent.tmux]).ok && Date.now() - agent.at >= COOLDOWN_MS);
 const agentDueAt = () => downSince && Math.max(downSince, releasedAt) + DOWN_MS;
 
 function state() {
-  const status = launchd().out;
-  const field = (k: string) => status.match(new RegExp(`^\\s*${k} = (.+)$`, "m"))?.[1];
+  const service = serviceStatus();
   return {
     down: true,
     downSince,
-    agentDueAt: agentDueAt(),
+    agentDueAt: downSince && Math.max(agentDueAt()!, lastAgentAt + COOLDOWN_MS),
     agent: agent && run([...TMUX, "has-session", "-t", agent.tmux]).ok ? { id: agent.id, at: agent.at } : null,
-    launchd: { runs: field("runs"), lastExit: field("last exit code") },
+    launchd: { runs: service.runs, lastExit: service.lastExit },
     log: run(["tail", "-n", "40", LOG]).out,
   };
 }
@@ -187,18 +187,21 @@ for (;;) {
         if (await buildOk()) {
           if (buildBrokenSince) console.log(`${stamp()}  build fixed after ${Math.round((Date.now() - buildBrokenSince) / 1000)}s`);
           buildBrokenSince = null;
+          // An agent belongs to the outage it was started for; its session stays open in the sidebar, but the next outage gets its own.
+          agent = null;
         } else {
           if (!buildBrokenSince) console.log(`${stamp()}  frontend build broken`);
           buildBrokenSince ??= Date.now();
           if (Date.now() - buildBrokenSince >= BUILD_DOWN_MS && canStartAgent()) {
             agent = startAgent(buildTask(buildBrokenSince));
+            lastAgentAt = agent.at;
             console.log(`${stamp()}  build broken ${Math.round((Date.now() - buildBrokenSince) / 1000)}s, started recovery agent in ${agent.tmux}`);
             await acceptTrust(agent.tmux);
           }
         }
       }
-    } else if (!launchd().ok) {
-      // Unloaded on purpose (launchctl bootout/unload), so it is meant to be down.
+    } else if (!loaded()) {
+      // Unloaded on purpose (launchctl bootout, systemctl disable), so it is meant to be down.
       downSince = null;
       closePage();
     } else {
@@ -206,6 +209,7 @@ for (;;) {
       if (!page && health === "refused" && Date.now() - downSince >= PAGE_AFTER_MS && Date.now() - releasedAt >= RELEASE_GRACE_MS) openPage();
       if (Date.now() >= agentDueAt()! && canStartAgent()) {
         agent = startAgent(downTask(downSince));
+        lastAgentAt = agent.at;
         console.log(`${stamp()}  down ${Math.round((Date.now() - downSince) / 1000)}s, started recovery agent in ${agent.tmux}`);
         await acceptTrust(agent.tmux);
       }

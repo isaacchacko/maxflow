@@ -47,7 +47,7 @@
 <main>
   <section class="steps">
     <div class="step done" id="s1"><div class="mark">✓</div><div>Noticed the server stopped<small id="since"></small></div></div>
-    <div class="step now" id="s2"><div class="mark"></div><div>launchd restarting it<small id="runs"></small></div></div>
+    <div class="step now" id="s2"><div class="mark"></div><div>Restarting it<small id="runs"></small></div></div>
     <div class="step" id="s3"><div class="mark"></div><div>Recovery agent<small id="due"></small></div></div>
     <div class="step" id="s4"><div class="mark"></div><div>Back online<small>this page reloads by itself</small></div></div>
     <div class="calm">Nothing to do. Most restarts finish on their own in a few seconds. If it stays down, an agent starts fixing it here, and you can type to it.</div>
@@ -64,7 +64,8 @@
 <script src="/__down/fit.js"></script>
 <script>
   const $ = (id) => document.getElementById(id);
-  const ago = (t) => { const s = Math.max(0, Math.round((Date.now() - t) / 1000)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; };
+  const span = (s) => s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`;
+  const ago = (t) => span(Math.max(0, Math.round((Date.now() - t) / 1000)));
   let last = null, termOpen = false, agentId = null;
 
   function openTerm() {
@@ -97,7 +98,7 @@
       if (!termOpen) openTerm();
     } else {
       const left = Math.max(0, Math.round((last.agentDueAt - Date.now()) / 1000));
-      $("due").textContent = left ? `starts in ${left}s if it's still down` : "starting…";
+      $("due").textContent = left ? `starts in ${span(left)} if it's still down` : "starting…";
     }
     $("log").textContent = last.log;
   }
@@ -115,7 +116,7 @@
   function comeBack() {
     $("s4").className = "step done"; $("s4").querySelector(".mark").textContent = "✓";
     $("back").style.display = "grid";
-    setTimeout(() => location.assign(agentId ? `/s/${agentId}` : location.pathname === "/__down/state" ? "/" : location.href), 1200);
+    setTimeout(() => location.assign(agentId ? `/#agent/${agentId}` : location.pathname === "/__down/state" ? "/" : location.href), 1200);
   }
 
   setInterval(render, 1000);

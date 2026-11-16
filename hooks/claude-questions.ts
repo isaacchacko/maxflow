@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
-// Claude Code hook: in maxflow a question to the user goes through `maxflow ask` and the questions sentry, never the chat.
-// PreToolUse(AskUserQuestion) denies the dialog; Stop sends back a turn that ends on a question, once.
+// Claude Code hook: in maxflow a question to the user goes through `maxflow ask` and the questions sentry, never the chat,
+// and a message to another agent through `maxflow notify`. PreToolUse(AskUserQuestion|SendMessage) denies the tool; Stop sends back a turn that ends on a question, once.
 import { readFileSync } from "node:fs";
 
 if (!process.env.MAXFLOW_SESSION) process.exit(0);
 const input = JSON.parse(await Bun.stdin.text());
-const cli = `${process.env.HOME}/Programs/maxflow/cli.ts`;
+const cli = process.env.MAXFLOW_CLI ?? new URL("../cli.ts", import.meta.url).pathname;
 const how = `run \`${cli} ask '<question>' [--default '<rec>']\`, making it stand on its own (what you found, the options, your recommendation; --default only when the step is reversible), keep working on whatever doesn't hang on the answer, then \`${cli} wait q:<id>\`; his answer is typed into your prompt as a [maxflow] message`;
 
 if (input.hook_event_name === "PreToolUse" && input.tool_name === "AskUserQuestion") {
@@ -14,6 +14,18 @@ if (input.hook_event_name === "PreToolUse" && input.tool_name === "AskUserQuesti
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
       permissionDecisionReason: `In maxflow nobody watches this dialog. Raise it with the questions sentry instead: ${how}.`,
+    },
+  }));
+  process.exit(0);
+}
+
+// One chokepoint: agents reach each other through maxflow's event log, so the user sees every message.
+if (input.hook_event_name === "PreToolUse" && input.tool_name === "SendMessage") {
+  console.log(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: `In maxflow, agents message each other through its event log: run \`${cli} notify <maxflow session id> '<text>'\` instead (\`${cli} ls\` lists the sessions). It is typed into that agent's prompt once it is idle, and its reply reaches you the same way.`,
     },
   }));
   process.exit(0);

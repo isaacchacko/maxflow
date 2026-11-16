@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
-const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
+import { BASE as base } from "./instance";
 const [verb, ...rest] = process.argv.slice(2);
 const usage = `usage:
   maxflow ls
-  maxflow new [--name N] [--cwd DIR] [-- cmd ...]
+  maxflow new [--name N] [--cwd DIR] [--role router|worker] [--objective ID] [--parent ID] [--scope S] [-- cmd ...]   from a router: its worker
   maxflow send <id> <text...> [--no-enter] [--isaac]   type text, then Enter; --isaac: the funnel relaying Isaac's own request
   maxflow keys <id> <key...>                 tmux key names: Enter Escape C-c Up BTab ...
   maxflow screen <id> [--history N]          print the screen as plain text
@@ -24,7 +24,12 @@ const usage = `usage:
   maxflow gh watch <pr> [--session ID] | maxflow gh unwatch <pr> | maxflow gh ls
   maxflow slack read <permalink | channel id | #channel | query> [--last N]   latest messages from the sentry's last poll
   maxflow slack watch <permalink | channel id | #channel | query> [--session ID] | maxflow slack unwatch <same> | maxflow slack ls
-  maxflow chats [query] | maxflow resume <claude-session-id> [--safe] [--force]`;
+  maxflow chats [query] | maxflow resume <claude-session-id> [--safe] [--force]
+  maxflow objectives | maxflow objective new <title...> [--cwd DIR] [--scope S]   an objective and its first router
+  maxflow route <signal seq> <objective id> | maxflow route <signal seq> --new <title> [--cwd DIR]   the funnel routing a signal from the event log
+  maxflow thread new <title...> [--objective ID] | maxflow thread post <thread id> <text...> | maxflow threads
+  maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
+  maxflow install                            run this checkout as the login service and add its hooks to ~/.claude/settings.json`;
 import { fetchPrs, links, parsePr, readStatus, readWatches, render, writeWatches } from "./sentries/gh";
 import * as slack from "./sentries/slack";
 const flag = (args: string[], k: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
@@ -42,14 +47,14 @@ async function call(path: string, init?: RequestInit) {
 const touchSentry = (sentry: string, kind: "read" | "write") =>
   caller && fetch(`${base}/api/touch`, { method: "POST", headers: caller, body: JSON.stringify({ sentry, kind }) }).catch(() => {});
 
-async function create(body: { name?: string; cmd?: string[]; cwd?: string }) {
-  const res = await fetch(`${base}/api/sessions`, { method: "POST", body: JSON.stringify(body) });
+async function create(body: { name?: string; cmd?: string[]; cwd?: string; role?: string; objective?: string; parent?: string; scope?: string }) {
+  const res = await fetch(`${base}/api/sessions`, { method: "POST", headers: caller, body: JSON.stringify(body) });
   const s = await res.json();
-  console.log(`${base}/s/${s.id}`);
+  console.log(`${base}/#agent/${s.id}`);
 }
 
 if (verb === "ls") {
-  for (const s of await (await fetch(`${base}/api/sessions`)).json()) console.log(`${s.id}  ${s.running ? "run " : "exit"}  ${s.name}  ${base}/s/${s.id}`);
+  for (const s of await (await fetch(`${base}/api/sessions`)).json()) console.log(`${s.id}  ${s.running ? "run " : "exit"}  ${s.name}  ${base}/#agent/${s.id}`);
 } else if (verb === "chats") {
   for (const c of await (await fetch(`${base}/api/chats?limit=30&q=${encodeURIComponent(rest.join(" "))}`)).json())
     console.log(`${c.id}  ${c.session ? "mf  " : c.live ? "live" : "    "}  ${c.title.slice(0, 60).padEnd(60)}  ${c.cwd}`);
@@ -57,11 +62,12 @@ if (verb === "ls") {
   const res = await fetch(`${base}/api/chats/${rest[0]}/resume`, { method: "POST", body: JSON.stringify({ bypass: !rest.includes("--safe"), force: rest.includes("--force") }) });
   if (res.status === 409) console.error("that chat is open in another claude process; rerun with --force to fork it"), process.exit(1);
   if (!res.ok) console.error(await res.text()), process.exit(1);
-  console.log(`${base}/s/${(await res.json()).id}`);
+  console.log(`${base}/#agent/${(await res.json()).id}`);
 } else if (verb === "new") {
   const dash = rest.indexOf("--");
   const flags = dash === -1 ? rest : rest.slice(0, dash);
-  await create({ name: flag(flags, "--name"), cwd: flag(flags, "--cwd") ?? process.cwd(), cmd: dash === -1 ? undefined : rest.slice(dash + 1) });
+  const role = flag(flags, "--role") as "router" | "worker" | undefined;
+  await create({ name: flag(flags, "--name"), cwd: flag(flags, "--cwd") ?? process.cwd(), cmd: dash === -1 ? undefined : rest.slice(dash + 1), role, objective: flag(flags, "--objective"), parent: flag(flags, "--parent"), scope: flag(flags, "--scope") });
 } else if (verb === "send" && rest[1]) {
   const [id, ...words] = positional(rest, []);
   await call(`/api/sessions/${id}/input`, { method: "POST", body: JSON.stringify({ text: words.join(" "), enter: !rest.includes("--no-enter"), isaac: rest.includes("--isaac") }) });
@@ -119,7 +125,7 @@ if (verb === "ls") {
     if (rest.includes("--all") || (t.status !== "done" && t.status !== "dropped"))
       console.log(`t${t.id}  ${t.status.padEnd(7)}  ${t.kind === "question" ? "? " : ""}${t.title}  [${t.sessions.join(" ")}]\n${t.timeline.map((e: { at: number; text: string }) => `  ${new Date(e.at).toLocaleString()}  ${e.text}`).join("\n")}${t.answer ? `\n  answer: ${t.answer}` : ""}\n`);
 } else if (verb === "task" && rest[0]) {
-  const valued = ["--title", "--status", "--answer", "--session", "--link", "--event", "--at"];
+  const valued = ["--title", "--status", "--answer", "--session", "--link", "--event", "--at", "--objective"];
   const [ref, ...words] = positional(rest, valued);
   const at = flag(rest, "--at");
   const edit = {
@@ -130,6 +136,7 @@ if (verb === "ls") {
     session: flag(rest, "--session"),
     link: flag(rest, "--link"),
     event: flag(rest, "--event"),
+    objective: flag(rest, "--objective"),
     at: at ? (/^\d+$/.test(at) ? Number(at) : Date.parse(at)) : undefined,
   };
   const t = await call(ref === "new" ? "/api/tasks" : `/api/tasks/${ref.replace(/^t/, "")}`, { method: "POST", body: JSON.stringify(edit) });
@@ -218,6 +225,31 @@ if (verb === "ls") {
   if (rest[0] === "watch") watches.push({ target, sessions: [...new Set([...prev, ...(session ? [session] : [])])] });
   slack.writeWatches(watches);
   console.log(`${rest[0] === "watch" ? "watching" : "unwatched"} ${target}${rest[0] === "watch" && session ? ` for session ${session}` : ""}`);
+} else if (verb === "objectives") {
+  for (const o of await call("/api/objectives")) if (!o.closed) console.log(`${o.id}  ${o.title}  ${o.cwd}`);
+} else if (verb === "objective" && rest[0] === "new" && rest[1]) {
+  const o = await call("/api/objectives", { method: "POST", body: JSON.stringify({ title: positional(rest.slice(1), ["--cwd", "--scope"]).join(" "), cwd: flag(rest, "--cwd") ?? process.cwd(), scope: flag(rest, "--scope") }) });
+  console.log(`objective ${o.id}, router ${o.router}  ${base}/#objective/${o.id}`);
+} else if (verb === "route" && rest[1]) {
+  const title = flag(rest, "--new");
+  const r = await call(`/api/signals/${rest[0]}/route`, { method: "POST", body: JSON.stringify(title ? { title, cwd: flag(rest, "--cwd") ?? process.cwd() } : { objective: rest[1] }) });
+  console.log(`signal ${rest[0]} → objective ${r.objective} (routers ${r.routedTo.join(", ")})`);
+} else if (verb === "threads") {
+  for (const t of await call("/api/threads")) console.log(`${t.id}  ${t.objective}  ${t.title}  (${t.messages.length} messages)`);
+} else if (verb === "thread" && rest[0] === "new" && rest[1]) {
+  const t = await call("/api/threads", { method: "POST", body: JSON.stringify({ title: positional(rest.slice(1), ["--objective"]).join(" "), objective: flag(rest, "--objective") }) });
+  console.log(t.id);
+} else if (verb === "thread" && rest[0] === "post" && rest[2]) {
+  await call(`/api/threads/${rest[1]}/messages`, { method: "POST", body: JSON.stringify({ text: rest.slice(2).join(" ") }) });
+} else if (verb === "page" && (rest[0] === "put" || rest[0] === "rm") && rest[2]) {
+  const body = rest[0] === "put" ? { ref: rest[1], block: JSON.parse(rest[2]) } : { ref: rest[1], id: rest[2] };
+  await call("/api/pages", { method: rest[0] === "put" ? "POST" : "DELETE", body: JSON.stringify(body) });
+} else if (verb === "install") {
+  const { install, LABEL, LOG } = await import("./service");
+  const r = install();
+  console.log(r.ok ? `service ${LABEL} running ${base}, logging to ${LOG}` : `service install failed:\n${r.out}`);
+  const { installHooks } = await import("./hooks/install");
+  console.log(installHooks());
 } else {
   console.log(usage);
   process.exit(1);

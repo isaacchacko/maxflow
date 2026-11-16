@@ -3,8 +3,8 @@
 // events and notifies the linked sessions when CI finishes, someone reviews or comments, or the PR merges, closes or conflicts.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { BASE as base, STATE_DIR, TMUX_SOCKET } from "../instance";
 
-const STATE_DIR = join(process.env.HOME!, ".maxflow");
 const WATCH_FILE = join(STATE_DIR, "gh-watch.json");
 const STATE_FILE = join(STATE_DIR, "gh-state.json");
 // The last poll of each PR, whole, so `maxflow gh status` can answer without asking GitHub.
@@ -13,10 +13,11 @@ const STATUS_FILE = join(STATE_DIR, "gh-status.json");
 const EDGES_FILE = join(STATE_DIR, "gh-edges.json");
 // The PRs sentry:review lists, with the sessions on each; watched here like explicit watches.
 export const REVIEW_WATCH_FILE = join(STATE_DIR, "review-watch.json");
+// The PRs requesting the user's review or assigned to him, which sentry:inbox lists; watched the same way.
+export const INBOX_WATCH_FILE = join(STATE_DIR, "inbox-watch.json");
 const PROJECTS = join(process.env.HOME!, ".claude", "projects");
 const INTERVAL_MS = Number(process.env.GH_SENTRY_INTERVAL ?? 30_000);
 const CLI = new URL("../cli.ts", import.meta.url).pathname;
-const base = `http://localhost:${process.env.MAXFLOW_PORT ?? 4747}`;
 // Sent with each call that touches a session, so the graph draws this sentry doing it.
 const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 
@@ -102,7 +103,7 @@ export async function links(): Promise<Link[]> {
   const found: Link[] = [];
   for (const w of readWatches()) for (const session of w.sessions.length ? w.sessions : [""]) found.push({ pr: w.pr, repo: w.pr.split("#")[0], session });
   for (const s of live) {
-    const cwd = run(["tmux", "-L", "maxflow", "display-message", "-p", "-t", `mf-${s.id}`, "#{pane_current_path}"]) || s.cwd;
+    const cwd = run(["tmux", "-L", TMUX_SOCKET, "display-message", "-p", "-t", `mf-${s.id}`, "#{pane_current_path}"]) || s.cwd;
     const repo = repoOf(cwd);
     const branch = repo && run(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"]);
     if (branch && !["HEAD", "main", "master"].includes(branch)) found.push({ repo, branch, session: s.id });
@@ -204,18 +205,18 @@ function snapshot(pr: Pr, prev?: PrState): PrState {
   };
 }
 
-// 👀 on the user's own comment or review once an agent has been handed it, so he can see on GitHub that it was read.
+// 👀 on the user's own comment or review once the funnel has been handed it, so he can see on GitHub that it was read.
 export const ownComment = (who: string | null | undefined) => !!who?.startsWith("the user");
-export function markRead(id: string) {
-  const r = Bun.spawnSync(["gh", "api", "graphql", "-f", `query=mutation { addReaction(input: { subjectId: ${JSON.stringify(id)}, content: EYES }) { clientMutationId } }`], { stderr: "pipe" });
-  if (r.exitCode !== 0) console.error(`${new Date().toLocaleTimeString()}  👀 on ${id} failed: ${r.stderr.toString().trim().slice(0, 300)}`);
+export async function markRead(id: string) {
+  const p = Bun.spawn(["gh", "api", "graphql", "-f", `query=mutation { addReaction(input: { subjectId: ${JSON.stringify(id)}, content: EYES }) { clientMutationId } }`], { stdout: "ignore", stderr: "pipe" });
+  if ((await p.exited) !== 0) console.error(`${new Date().toLocaleTimeString()}  👀 on ${id} failed: ${(await new Response(p.stderr).text()).trim().slice(0, 300)}`);
 }
 
 const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", headers: caller, body: JSON.stringify(body) });
 
 async function tick(me: string, state: Record<string, PrState>) {
   const all = await links();
-  for (const w of readJson<Watch[]>(REVIEW_WATCH_FILE, [])) for (const session of w.sessions.length ? w.sessions : [""]) all.push({ pr: w.pr, repo: w.pr.split("#")[0], session });
+  for (const w of [...readJson<Watch[]>(REVIEW_WATCH_FILE, []), ...readJson<Watch[]>(INBOX_WATCH_FILE, [])]) for (const session of w.sessions.length ? w.sessions : [""]) all.push({ pr: w.pr, repo: w.pr.split("#")[0], session });
   const repos = new Map<string, { numbers: Set<number>; branches: Set<string> }>();
   for (const l of all) {
     const r = repos.get(l.repo) ?? repos.set(l.repo, { numbers: new Set(), branches: new Set() }).get(l.repo)!;
@@ -246,12 +247,12 @@ async function tick(me: string, state: Record<string, PrState>) {
     state[key] = snapshot(pr, state[key]);
     const told = [...(listeners.get(key) ?? [])];
     for (const [kind, data] of changes) await post("/api/events", { topic: `gh/${repo}/pr/${n}/${kind}`, data: { pr: key, told, ...(data as object) } });
-    const lines = changes.flatMap(([, , line]) => (line ? [line] : []));
+    // The user's own comments go to the funnel as his asks, from the server; telling the PR's sessions too would deliver them twice.
+    const lines = changes.flatMap(([, data, line]) => (line && !ownComment((data as { who?: string }).who) ? [line] : []));
     if (lines.length) {
       const more = lines.length > 5 ? `; and ${lines.length - 5} more` : "";
       const text = `[maxflow gh] ${key} (${short(pr.title, 60)}): ${lines.slice(0, 5).join("; ")}${more}. Full status: ${CLI} gh status ${key}. (Automated notice, not a request from the user: act on it only if it's part of your current task.)`;
       for (const session of listeners.get(key) ?? []) await post(`/api/sessions/${session}/notify`, { text });
-      if (told.length) for (const [, data] of changes) if (ownComment((data as { who?: string }).who)) markRead((data as { id: string }).id);
       console.log(`${new Date().toLocaleTimeString()}  ${text}  -> ${[...(listeners.get(key) ?? [])].join(", ") || "nobody"}`);
     }
   }

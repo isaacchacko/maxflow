@@ -1,199 +1,100 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Archive, ArchiveRestore, Copy, Plus, TerminalSquare } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { useEffect, useState } from "react";
+import { AgentPage } from "@/agent/AgentPage";
 import { Kbd } from "@/components/ui/kbd";
-import { Toaster } from "@/components/ui/sonner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Sidebar } from "@/components/sidebar";
-import { Terminal, type TerminalHandle } from "@/components/terminal";
-import { GraphView } from "@/components/graph";
-import { ResumeDialog } from "@/components/resume-dialog";
-import { QuestionsPanel } from "@/components/questions";
-import { TasksBoard } from "@/components/tasks";
-import { api, isSentry, store, type OpenComment, type QueuedPr, type Question, type Session, type Task, type View } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { Page } from "@/page/Page";
+import type { PageRef } from "@/store";
+import { ThreadPage } from "@/threads/ThreadPage";
+import { RoutingView } from "@/views/RoutingView";
+import { SentriesView } from "@/views/SentriesView";
+
+export const views = [
+  { id: "events", label: "Events", key: "1" },
+  { id: "objectives", label: "Objectives", key: "2" },
+  { id: "agents", label: "Agents", key: "3" },
+  { id: "threads", label: "Threads", key: "4" },
+  { id: "sentries", label: "Sentries", key: "5" },
+] as const;
+/** The first four are views of one routing canvas; the rest are pages of their own. */
+const ROUTING = 4;
+
+type ViewId = (typeof views)[number]["id"];
+type Detail = { kind: "page"; ref: PageRef } | { kind: "agent" | "thread"; id: string };
+type Route = { view: ViewId; detail?: Detail };
+
+function lastView(): ViewId {
+  try {
+    const v = sessionStorage.getItem("view");
+    return views.find(x => x.id === v)?.id ?? "events";
+  } catch {
+    return "events";
+  }
+}
+
+function routeFromHash(): Route {
+  const [first, id] = location.hash.slice(1).split("/");
+  if ((first === "task" || first === "objective") && id) return { view: lastView(), detail: { kind: "page", ref: `${first}/${id}` as PageRef } };
+  if ((first === "agent" || first === "thread") && id) return { view: lastView(), detail: { kind: first, id } };
+  const view = views.find(v => v.id === first)?.id ?? lastView();
+  try {
+    sessionStorage.setItem("view", view);
+  } catch {}
+  return { view };
+}
 
 export function App() {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [current, setCurrent] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState(() => store.get("mf.collapsed") === "1");
-  const [view, setView] = useState<View>(location.hash === "#tasks" ? "tasks" : "agent");
-  const graphing = view === "graph", tasking = view === "tasks";
-  // ⌘G and ⌘K flip between their view and the agent view; the three never stack.
-  const flip = (v: View) => setView((cur) => (cur === v ? "agent" : v));
-  const [hideArchived, setHideArchived] = useState(() => store.get("mf.hideArchived") === "1");
-  const [resuming, setResuming] = useState(location.hash === "#resume");
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [asking, setAsking] = useState(location.hash === "#questions");
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [prs, setPrs] = useState<QueuedPr[]>([]);
-  const [comments, setComments] = useState<OpenComment[]>([]);
-  const term = useRef<TerminalHandle | null>(null);
-
-  const refresh = useCallback(() => api.sessions().then((s) => (setSessions(s), setLoaded(true))), []);
-  useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 3000);
-    return () => clearInterval(t);
-  }, []);
-
-  const refreshQuestions = useCallback(() => api.questions().then(setQuestions, () => {}), []);
-  useEffect(() => {
-    refreshQuestions();
-    const t = setInterval(refreshQuestions, 3000);
-    return () => clearInterval(t);
-  }, []);
-  useEffect(() => {
-    if (!tasking) return;
-    const refreshTasks = () => (api.tasks().then(setTasks, () => {}), api.review().then((r) => setPrs(r.queue), () => {}), api.comments().then(setComments, () => {}));
-    refreshTasks();
-    const t = setInterval(refreshTasks, 3000);
-    return () => clearInterval(t);
-  }, [tasking]);
-
-  const waiting = questions.filter((q) => q.status === "pending").length;
-  useEffect(() => void (document.title = waiting ? `(${waiting}) maxflow` : "maxflow"), [waiting]);
-
-  const attach = (id: string) => {
-    setCurrent(id);
-    history.replaceState(null, "", `/s/${id}`);
-  };
-  const open = (id: string) => (setView("agent"), attach(id), requestAnimationFrame(() => term.current?.focus()));
-
-  // Pick a session on first load: the one in the URL, else the first agent.
-  useEffect(() => {
-    if (current || !sessions.length) return;
-    const fromUrl = sessions.find((s) => location.pathname.endsWith(`/s/${s.id}`));
-    attach((fromUrl ?? sessions.find((s) => !isSentry(s)) ?? sessions[0]).id);
-  }, [sessions, current]);
-
-  const newShell = async () => {
-    const s = await api.create("zsh");
-    await refresh();
-    open(s.id);
-  };
-  const kill = async (id: string) => {
-    await api.kill(id);
-    if (id === current) (setCurrent(null), history.replaceState(null, "", "/"));
-    refresh();
-  };
-  const archive = async (id: string, archived: boolean) => (await api.archive(id, archived), refresh());
-  const archiveLinks = async (urls: string[], archived: boolean) => (await api.archiveLinks(urls, archived), refresh());
-  const toggleArchived = () =>
-    setHideArchived((h) => {
-      store.set("mf.hideArchived", h ? "0" : "1");
-      return !h;
-    });
-  const toggleSidebar = () =>
-    setCollapsed((c) => {
-      store.set("mf.collapsed", c ? "0" : "1");
-      return !c;
-    });
+  const [route, setRoute] = useState(routeFromHash);
 
   useEffect(() => {
-    if (!graphing && !tasking) requestAnimationFrame(() => (term.current?.fit(), term.current?.focus()));
-  }, [graphing, tasking]);
-  useEffect(() => void requestAnimationFrame(() => term.current?.fit()), [collapsed]);
-
-  useEffect(() => {
+    const onHash = () => setRoute(routeFromHash());
     const onKey = (e: KeyboardEvent) => {
-      const plain = !e.altKey && !e.shiftKey;
-      if (e.metaKey && !e.ctrlKey && plain && e.key === "g") flip("graph");
-      else if (e.metaKey && !e.ctrlKey && !e.altKey && e.key === "b") toggleSidebar();
-      else if (e.metaKey && !e.ctrlKey && plain && e.key === "k") flip("tasks");
-      else if (e.ctrlKey && !e.metaKey && plain && e.key === "t") newShell();
-      else return;
-      e.preventDefault();
-      e.stopPropagation();
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "Escape" && routeFromHash().detail) location.hash = route.view;
+      const match = views.find(v => v.key === e.key);
+      if (match) location.hash = match.id;
     };
-    addEventListener("keydown", onKey, true);
-    return () => removeEventListener("keydown", onKey, true);
-  }, []);
+    addEventListener("hashchange", onHash);
+    addEventListener("keydown", onKey);
+    return () => {
+      removeEventListener("hashchange", onHash);
+      removeEventListener("keydown", onKey);
+    };
+  }, [route.view]);
+
+  const snap = views.findIndex(v => v.id === route.view);
+  const { detail } = route;
 
   return (
-    <TooltipProvider delayDuration={400}>
-      <div className={cn("grid h-full max-sm:grid-cols-1 max-sm:grid-rows-[auto_1fr]", collapsed ? "grid-cols-[52px_1fr]" : "grid-cols-[272px_1fr]")}>
-        <Sidebar
-          sessions={sessions}
-          current={current}
-          collapsed={collapsed}
-          view={view}
-          onToggle={toggleSidebar}
-          onView={setView}
-          onResume={() => setResuming(true)}
-          questions={waiting}
-          onQuestions={() => setAsking((a) => !a)}
-          onNew={newShell}
-          onOpen={open}
-          onKill={kill}
-          onArchive={archive}
-          hideArchived={hideArchived}
-          onToggleArchived={toggleArchived}
-          onRename={async (id, name) => (await api.rename(id, name), refresh())}
-        />
-        <main className="relative min-h-0 min-w-0">
-          <SessionMenu s={sessions.find((s) => s.id === current)} selection={() => term.current?.selection() ?? ""} onArchive={archive} onClosed={() => term.current?.focus()}>
-            <div className={cn("absolute inset-0 py-2 pl-3 pr-1", graphing && "hidden")}>{current && <Terminal key={current} id={current} handle={term} onClose={refresh} />}</div>
-          </SessionMenu>
-          <GraphView
-            sessions={sessions}
-            questions={questions}
-            onQuestions={() => setAsking((a) => !a)}
-            visible={graphing}
-            current={current}
-            hideArchived={hideArchived}
-            onOpen={open}
-            onCreated={refresh}
-            onArchive={archive}
-            onArchiveLinks={archiveLinks}
-            onToggleArchived={toggleArchived}
-          />
-          {tasking && <TasksBoard tasks={tasks} prs={prs} comments={comments} sessions={sessions} onOpen={open} onClose={() => setView("agent")} />}
-          {asking && <QuestionsPanel questions={questions} onOpen={open} onSettled={refreshQuestions} onClose={() => setAsking(false)} />}
-          {loaded && !sessions.length && view === "agent" && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-muted-foreground">
-              <TerminalSquare className="size-10 opacity-40" />
-              <p className="text-sm">No sessions yet.</p>
-              <Button variant="outline" onClick={newShell}>
-                <Plus /> New shell <Kbd>⌃T</Kbd>
-              </Button>
-            </div>
+    <TooltipProvider>
+      <div className="flex h-full flex-col">
+        <header className="flex items-center gap-6 border-b px-4 py-2">
+          <span className="font-semibold tracking-tight">maxflow</span>
+          <Tabs value={detail ? "" : route.view} onValueChange={v => (location.hash = v)}>
+            <TabsList>
+              {views.map(v => (
+                <TabsTrigger key={v.id} value={v.id} data-agent={`tab:${v.id}`} className="gap-2">
+                  {v.label}
+                  <Kbd>{v.key}</Kbd>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </header>
+        <main className="min-h-0 flex-1 overflow-hidden">
+          {detail?.kind === "agent" ? (
+            <AgentPage key={detail.id} id={detail.id} back={route.view} />
+          ) : detail?.kind === "thread" ? (
+            <ThreadPage key={detail.id} id={detail.id} back={route.view} />
+          ) : detail?.kind === "page" ? (
+            <Page key={detail.ref} pageRef={detail.ref} back={route.view} />
+          ) : snap >= ROUTING ? (
+            <SentriesView />
+          ) : (
+            <RoutingView snap={snap} onSnap={n => (location.hash = views[Math.max(0, Math.min(ROUTING - 1, n))]!.id)} />
           )}
         </main>
       </div>
-      <ResumeDialog open={resuming} onOpenChange={setResuming} onResumed={(s) => (refresh(), open(s.id))} />
-      <Toaster position="bottom-right" />
     </TooltipProvider>
-  );
-}
-
-// Right-clicking the open chat, so it can be archived or woken without finding it in the sidebar.
-function SessionMenu({ s, selection, onArchive, onClosed, children }: {
-  s: Session | undefined;
-  selection: () => string;
-  onArchive: (id: string, archived: boolean) => void;
-  onClosed: () => void;
-  children: React.ReactNode;
-}) {
-  const [copied, setCopied] = useState("");
-  if (!s || isSentry(s)) return children;
-  return (
-    <ContextMenu onOpenChange={(open) => (open ? setCopied(selection()) : onClosed())}>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent className="max-w-64">
-        <ContextMenuLabel>{s.name}</ContextMenuLabel>
-        <ContextMenuSeparator />
-        {copied && (
-          <ContextMenuItem onSelect={() => navigator.clipboard.writeText(copied)}>
-            <Copy /> Copy selection
-          </ContextMenuItem>
-        )}
-        <ContextMenuItem onSelect={() => onArchive(s.id, !s.archived)}>
-          {s.archived ? <ArchiveRestore /> : <Archive />} {s.archived ? "Unarchive" : "Archive"}
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
   );
 }
