@@ -34,11 +34,11 @@ function remember(scope: string, key: string) {
   } catch {}
 }
 
-/** The keys are his only while nothing else takes them: a box he types in, an open dialog, or a shortcut with ⌘ or ⌥. */
+/** The keys are his only while nothing else takes them: a box he types in, an open dialog or menu, or a shortcut with ⌘ or ⌥. */
 function elsewhere(e: KeyboardEvent) {
   const t = e.target instanceof Element ? e.target : null;
   if (e.defaultPrevented || e.isComposing || e.metaKey || e.altKey || (e.ctrlKey && e.key !== "d" && e.key !== "u")) return true;
-  if (t?.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])") || document.querySelector('[role="dialog"]')) return true;
+  if (t?.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])") || document.querySelector('[role="dialog"], [role="menu"]')) return true;
   // Enter on a focused button or link is that control's.
   return e.key === "Enter" && !!t?.closest("a, button");
 }

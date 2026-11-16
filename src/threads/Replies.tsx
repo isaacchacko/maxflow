@@ -1,7 +1,7 @@
 import type { Thread } from "@/mock";
 import { agentStore, threadStore } from "@/store";
 import { Avatar } from "./Rich";
-import { unseenDeep } from "./seen";
+import { unseenDeep, useSeen } from "./seen";
 import { Pending } from "./ThreadPage";
 
 export function ago(at: number) {
@@ -16,6 +16,7 @@ export const repliesOf = (t: Thread) => (t.parentId ? t.messages : t.messages.sl
 export function Replies({ t }: { t: Thread }) {
   const agents = agentStore.use();
   const all = threadStore.use();
+  useSeen();
   const replies = repliesOf(t);
   const fresh = unseenDeep(t, all);
   const faces = [...new Set(replies.map(m => m.from).reverse())].slice(0, 4);

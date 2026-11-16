@@ -1,3 +1,4 @@
+import { useEffect, useReducer } from "react";
 import type { Thread } from "@/mock";
 
 // How many messages of each thread Isaac has had on screen, kept in this browser, so the inbox can count what's new.
@@ -17,6 +18,32 @@ export function markSeen(id: string, count: number) {
   try {
     if (count > (seenCount(id) ?? 0)) localStorage.setItem(key(id), String(count));
   } catch {}
+}
+
+/** Set back by hand (marked unread from a message, or read): unlike markSeen it can go down. */
+export function setSeen(id: string, count: number) {
+  try {
+    localStorage.setItem(key(id), String(count));
+  } catch {}
+  dispatchEvent(new Event("seen-change"));
+}
+
+/** Marked read: every message in the thread and the subthreads under it. */
+export function markRead(t: Thread, all: Thread[]) {
+  setSeen(t.id, t.messages.length);
+  for (const x of all.filter(x => x.parentId === t.id)) markRead(x, all);
+}
+
+/** Marked unread: its last message is new again. */
+export const markUnread = (t: Thread) => setSeen(t.id, t.messages.length - 1);
+
+/** Draws again when a thread is marked read or unread, since what he has seen lives outside the stores. */
+export function useSeen() {
+  const [, bump] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    addEventListener("seen-change", bump);
+    return () => removeEventListener("seen-change", bump);
+  }, []);
 }
 
 /** What he hasn't seen in a thread and every subthread under it, so a reply deep down shows on the inbox row. */

@@ -9,10 +9,11 @@ import { Composer, quoteInto } from "./Composer";
 import { composeOnArrival, flashMessage, goToMessage, takeCompose } from "./jump";
 import { MessageRow, when } from "./MessageRow";
 import { Replies, repliesOf } from "./Replies";
-import { markSeen } from "./seen";
+import { RowMenu, messageItems, threadItems } from "./RowMenu";
+import { markSeen, setSeen } from "./seen";
 import { RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
 import { KindMenu } from "./KindMenu";
-import { useVim, vimRow } from "./vim";
+import { useVim, vimRow, type VimActions } from "./vim";
 
 /** Escape climbs one level: a subthread goes to its parent at the message it hangs off, a top thread to the view it came from. */
 export function threadUp(id: string, view: string) {
@@ -123,7 +124,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   const keyOf = (m: { id?: string }, i: number) => m.id ?? `#${i}`;
   const keys = [...(root ? [keyOf(root, -1)] : []), ...replies.map(keyOf)];
   const byKey = (k: string) => (root && k === keyOf(root, -1) ? root : replies.find((m, i) => keyOf(m, i) === k));
-  const vim = useVim(`thread:${id}`, keys, scrollRef, "last", {
+  const actions = {
     compose: composer,
     up: () => threadUp(id, back),
     resolve: () => thread && resolveOrReopen(thread, back),
@@ -137,7 +138,8 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
       const m = byKey(k);
       if (m?.id) quoteInto(`thread:${id}`, quoted(m.text, m === root ? (thread?.parentId ?? id) : id, m.id));
     },
-  });
+  } satisfies VimActions;
+  const vim = useVim(`thread:${id}`, keys, scrollRef, "last", actions);
 
   // Landing on a message (from its subthread, or a quote's link) puts the cursor there; replying from the keyboard opens in the box.
   useEffect(() => {
@@ -167,6 +169,18 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   const ancestors: Thread[] = [];
   for (let up = all.find(t => t.id === thread.parentId); up; up = all.find(t => t.id === up!.parentId)) ancestors.unshift(up);
   const subOf = (messageId?: string) => all.find(t => t.parentId === thread.id && t.parentMessageId === messageId);
+  // Right-click on a message offers what the keys do to it. Unread from the root would be unread from nothing: it's on the inbox row.
+  const messageMenu = (m: Thread["messages"][number], k: string) => {
+    const sub = subOf(m.id);
+    const at = thread.messages.indexOf(m);
+    return messageItems(m.text, {
+      open: sub && (sub.messages.length > 0 || sub.pending) ? () => actions.open(k) : undefined,
+      reply: m.id ? () => actions.reply(k) : undefined,
+      quote: m.id ? () => actions.quote(k) : undefined,
+      unread: at >= (thread.parentId ? 0 : 1) ? () => setSeen(thread.id, at) : undefined,
+      link: m.id && `[[msg:${m === root ? (thread.parentId ?? id) : id}/${m.id}]]`,
+    });
+  };
 
   const mentioned = new Map<string, Ref>();
   for (const m of thread.messages) for (const r of refsIn(m.text)) mentioned.set(`${r.kind}:${r.id}`, r);
@@ -174,6 +188,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-hidden p-4">
+      <RowMenu agent="thread-header" items={threadItems(thread, all, { resolve: () => resolveOrReopen(thread, back) })}>
       <header className="flex items-center gap-3">
         <Button variant="ghost" size="icon" asChild data-agent="back">
           <a href={thread.parentId ? `#thread/${thread.parentId}` : `#${back}`}>
@@ -197,15 +212,18 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
           {thread.resolved ? "Reopen" : "Resolve"}
         </Button>
       </header>
+      </RowMenu>
 
       <div className="flex min-h-0 flex-1 gap-4">
         <section className="flex min-h-0 min-w-0 flex-1 flex-col border">
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {root && (
+              <RowMenu agent={`msg:${keyOf(root, -1)}`} items={messageMenu(root, keyOf(root, -1))}>
               <div data-msg={root.id} data-thread={thread.parentId ?? thread.id} {...vimRow(keyOf(root, -1))}>
                 <MessageRow from={root.from} at={root.at} text={root.text} active={vim.cursor === keyOf(root, -1)} />
                 {(resultFor(root) || running === root) && <CommandStatus threadId={thread.parentId ?? thread.id} messageId={root.id} result={resultFor(root)} />}
               </div>
+              </RowMenu>
             )}
             {selected && (
               <button
@@ -234,6 +252,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
               return (
                 <Fragment key={i}>
                 {resolvedHere && <p className="my-2 border-t pt-1 text-center text-xs text-muted-foreground">new since resolved</p>}
+                <RowMenu agent={`msg:${keyOf(m, i)}`} items={messageMenu(m, keyOf(m, i))}>
                 <div data-msg={m.id} data-thread={thread.id} {...vimRow(keyOf(m, i))} className="group/msg relative">
                   <MessageRow from={m.from} at={m.at} text={m.text} grouped={grouped} active={vim.cursor === keyOf(m, i)} className={cn(!grouped && i > 0 && "mt-2.5")}>
                     {sub && (sub.messages.length > 0 || sub.pending) && <Replies t={sub} />}
@@ -260,6 +279,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                     </button>
                   )}
                 </div>
+                </RowMenu>
                 </Fragment>
               );
             })}

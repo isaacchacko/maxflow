@@ -9,6 +9,7 @@ import { MessageRow, when } from "@/threads/MessageRow";
 import { KINDS } from "@/threads/KindMenu";
 import { ago, Replies } from "@/threads/Replies";
 import { Rich } from "@/threads/Rich";
+import { RowMenu, threadItems, type MenuItem } from "@/threads/RowMenu";
 import { useVim, vimRow } from "@/threads/vim";
 
 /** A thread asks for Isaac from the first message after his last reply; null once he has answered everything in it. */
@@ -22,11 +23,12 @@ const firstLine = (text: string) => text.replace(/!\[[^\]]*\]\([^)]*\)/g, "").tr
 const today = (at: string) => new Date(at).toDateString() === new Date().toDateString();
 
 /** A command he gave: one line, ✻ while its router works and ✓ with the result its router posted; open, it shows the exchange. */
-function CommandRow({ t, active, open, onToggle, onResolve }: { t: Thread; active: boolean; open: boolean; onToggle(): void; onResolve(): void }) {
+function CommandRow({ t, active, open, menu, onToggle, onResolve }: { t: Thread; active: boolean; open: boolean; menu: (MenuItem | false | undefined)[]; onToggle(): void; onResolve(): void }) {
   const asked = t.messages.find(m => m.from === "isaac") ?? t.messages[0];
   const result = t.done ? (t.messages.findLast(m => m.re) ?? t.messages.at(-1)) : undefined;
   const last = t.messages.at(-1)?.at ?? "";
   return (
+    <RowMenu agent={t.id} items={menu}>
     <li {...vimRow(t.id)} className="group border-b last:border-b-0">
       <div
         data-agent={`command:${t.id}`}
@@ -64,6 +66,7 @@ function CommandRow({ t, active, open, onToggle, onResolve }: { t: Thread; activ
         </div>
       )}
     </li>
+    </RowMenu>
   );
 }
 
@@ -96,11 +99,15 @@ export function InboxView() {
     if (document.visibilityState === "visible") for (const id of unshown) markAskShown(id);
   }, [unshown.join()]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // A command row opens in place; a conversation opens its thread.
+  const open = (id: string) => (commands.some(r => r.t.id === id) ? setOpened(o => (o === id ? undefined : id)) : (location.hash = `thread/${id}`));
+  const reply = (id: string) => (composeOnArrival(), (location.hash = `thread/${id}`));
+  // Right-click offers what the keys do, on the row it was clicked on.
+  const menu = (t: Thread) => threadItems(t, threads, { open: () => open(t.id), reply: () => reply(t.id), resolve: () => toggle(t) });
   const vim = useVim("inbox", [...needsYou, ...commands, ...conversations].map(r => r.t.id), scrollRef, "first", {
     compose: () => document.querySelector<HTMLElement>('[data-agent="inbox-input"]')?.focus(),
-    // A command row opens in place; a conversation opens its thread.
-    open: id => (commands.some(r => r.t.id === id) ? setOpened(o => (o === id ? undefined : id)) : (location.hash = `thread/${id}`)),
-    reply: id => (composeOnArrival(), (location.hash = `thread/${id}`)),
+    open,
+    reply,
     resolve: id => {
       const t = threads.find(x => x.id === id);
       if (t) toggle(t);
@@ -111,7 +118,8 @@ export function InboxView() {
       // A thread a router opened before writing in it shows its title as the opening message.
       const first = t.messages[0] ?? { from: t.routerIds[0] ?? t.objectiveId, at: "", text: t.title };
       return (
-        <li key={t.id} {...vimRow(t.id)} className="group relative border-b px-3 py-2 last:border-b-0">
+        <RowMenu key={t.id} agent={t.id} items={menu(t)}>
+        <li {...vimRow(t.id)} className="group relative border-b px-3 py-2 last:border-b-0">
           <button
             data-agent={`inbox-resolve:${t.id}`}
             title={t.resolved ? "Reopen" : "Resolve"}
@@ -152,6 +160,7 @@ export function InboxView() {
             </MessageRow>
           </div>
         </li>
+        </RowMenu>
       );
   };
 
@@ -179,7 +188,7 @@ export function InboxView() {
           </h2>
           <ol className="flex flex-col border empty:hidden">
             {commands.map(({ t }) => (
-              <CommandRow key={t.id} t={t} active={vim.cursor === t.id} open={opened === t.id} onToggle={() => setOpened(o => (o === t.id ? undefined : t.id))} onResolve={() => toggle(t)} />
+              <CommandRow key={t.id} t={t} active={vim.cursor === t.id} open={opened === t.id} menu={menu(t)} onToggle={() => setOpened(o => (o === t.id ? undefined : t.id))} onResolve={() => toggle(t)} />
             ))}
           </ol>
         </section>
