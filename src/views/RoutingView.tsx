@@ -19,7 +19,7 @@ const look: Record<Source, { icon: typeof User; text: string; stroke: string; ri
 const GAP = 160;
 const snaps = ["Events → Objectives", "Objectives → Routers", "Routers → Agents"];
 
-type Edge = { key: string; from: string; to: string; stroke: string; watch?: boolean };
+type Edge = { key: string; from: string; to: string; stroke: string };
 type Pos = Record<string, { l: number; r: number; y: number }>;
 type Path = ReturnType<typeof pathOf>;
 
@@ -44,14 +44,10 @@ function buildEdges(signals: Signal[], paths: Map<string, Path>, agents: Agent[]
     if (a.role === "router") edges.push({ key: `obj:${a.objectiveId}>router:${a.id}`, from: `obj:${a.objectiveId}`, to: `router:${a.id}`, stroke: "stroke-fuchsia-400" });
     else edges.push({ key: `router:${a.parent}>agent:${a.id}`, from: `router:${a.parent}`, to: `agent:${a.id}`, stroke: "stroke-agent" });
   }
-  const objectiveOf = new Map(agents.map(a => [a.id, a.objectiveId]));
-  for (const sentry of sentries)
-    for (const o of new Set(sentry.watching.flatMap(w => w.routedTo).map(id => objectiveOf.get(id)!).filter(Boolean)))
-      edges.push({ key: `src:${sentry.id}~obj:${o}`, from: `src:${sentry.id}`, to: `obj:${o}`, stroke: look[sentry.id].stroke, watch: true });
   return edges;
 }
 
-/** Light everything upstream and downstream of the focused node along the routes signals actually took. */
+/** Everything upstream and downstream of a node along the routes signals actually took. */
 function trace(focus: string, signals: Signal[], paths: Map<string, Path>, agents: Agent[]) {
   const lit = new Set<string>();
   const byId = new Map(agents.map(a => [a.id, a]));
@@ -186,8 +182,6 @@ export function RoutingView() {
   const [width, setWidth] = useState(1200);
   const [snap, setSnap] = useState(lastSnap);
   const [pos, setPos] = useState<Pos>({});
-  const [pinned, setPinned] = useState<string>();
-  const [hover, setHover] = useState<string>();
   const [shown, setShown] = useState<Set<Source>>(new Set(["isaac", "gh", "slack"]));
   const [draft, setDraft] = useState("");
   const [fresh, setFresh] = useState<string>();
@@ -325,20 +319,10 @@ export function RoutingView() {
     return () => removeEventListener("keydown", onKey);
   }, [go, snap]);
 
-  const edges = buildEdges(visible, paths, agents).filter(e => !e.watch || shown.has(e.from.slice(4) as Source));
-  const focus = hover ?? pinned;
-  const traced = focus ? trace(focus, visible, paths, agents) : undefined;
-  const dim = (id: string) => traced && !traced.nodes.has(id);
+  const edges = buildEdges(visible, paths, agents);
 
-  const node = (id: string) => ({
-    "data-node": id,
-    onMouseEnter: () => setHover(id),
-    onMouseLeave: () => setHover(undefined),
-    onClick: (e: React.MouseEvent) => {
-      e.stopPropagation();
-      setPinned(p => (p === id ? undefined : id));
-    },
-  });
+  const node = (id: string) => ({ "data-node": id });
+  const open = (hash: string) => () => (location.hash = hash);
 
   const toggle = (source: Source) =>
     setShown(prev => {
@@ -348,16 +332,12 @@ export function RoutingView() {
       return next;
     });
 
-  const pinnedAgent = pinned?.match(/^(router|agent):(.+)$/)?.[2];
-  const pinnedObjective = pinned?.startsWith("obj:") ? pinned.slice(4) : undefined;
-  const to = pinnedAgent ?? agents.find(a => a.role === "router" && a.objectiveId === pinnedObjective)?.id;
-
   function send(e: React.FormEvent) {
     e.preventDefault();
     const text = draft.trim();
     if (!text) return;
     setShown(prev => new Set([...prev, "isaac"]));
-    setFresh(routeChat(text, to));
+    setFresh(routeChat(text));
     setDraft("");
   }
 
@@ -432,13 +412,11 @@ export function RoutingView() {
     const vision = o.page.find(b => b.kind === "vision");
     const count = routers.filter(r => r.objectiveId === o.id).length;
     return (
-      <Card {...node(id)} className={cn("cursor-pointer gap-2 px-4 py-3 transition-opacity", dim(id) && "opacity-30", focus === id && "border-agent")}>
+      <Card {...node(id)} data-agent={`objective:${o.id}`} onClick={open(`objective/${o.id}`)} className="cursor-pointer gap-2 px-4 py-3 hover:border-ring">
         <div className="flex items-center gap-2">
           <Waypoints className="size-4 shrink-0 text-agent" />
           <span className="truncate font-medium">{o.title}</span>
-          <a href={`#objective/${o.id}`} data-agent={`objective:${o.id}`} onClick={e => e.stopPropagation()} className="ml-auto text-muted-foreground hover:text-foreground">
-            <SquareArrowOutUpRight className="size-3.5" />
-          </a>
+          <SquareArrowOutUpRight className="ml-auto size-3.5 text-muted-foreground" />
         </div>
         {vision?.kind === "vision" && <p className="line-clamp-2 text-xs text-muted-foreground">{vision.goal}</p>}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -480,18 +458,15 @@ export function RoutingView() {
     return (
       <Card
         {...node(id)}
+        onClick={open(`agent/${r.id}`)}
         className={cn(
-          "cursor-pointer gap-1 border-fuchsia-400/30 px-3 py-2.5 transition-opacity",
-          dim(id) && "opacity-30",
-          focus === id && "border-fuchsia-400",
+          "cursor-pointer gap-1 border-fuchsia-400/30 px-3 py-2.5 hover:border-fuchsia-400",
           fresh === r.id && "agent-edited animate-in fade-in zoom-in-95",
         )}
       >
         <div className="flex items-center gap-2">
           <Network className="size-3.5 text-fuchsia-400" />
-          <a href={`#agent/${r.id}`} onClick={e => e.stopPropagation()} className="font-mono text-xs hover:underline">
-            {r.id}
-          </a>
+          <span className="font-mono text-xs">{r.id}</span>
           <span className={cn("size-1.5 rounded-full", agentStateColor[r.state])} />
           <span className="ml-auto text-xs text-muted-foreground">{crew} {crew === 1 ? "agent" : "agents"}</span>
         </div>
@@ -505,12 +480,10 @@ export function RoutingView() {
     const id = `agent:${w.id}`;
     const task = tasks.find(t => w.taskIds.includes(t.id) && t.status !== "done") ?? tasks.find(t => t.id === w.taskIds.at(-1));
     return (
-      <Card {...node(id)} className={cn("cursor-pointer gap-1 px-3 py-2.5 transition-opacity", dim(id) && "opacity-30", focus === id && "border-agent")}>
+      <Card {...node(id)} onClick={open(`agent/${w.id}`)} className="cursor-pointer gap-1 px-3 py-2.5 hover:border-ring">
         <div className="flex items-center gap-2">
           <span className={cn("size-2 rounded-full", agentStateColor[w.state], w.state === "working" && "animate-pulse")} />
-          <a href={`#agent/${w.id}`} onClick={e => e.stopPropagation()} className="font-mono text-xs hover:underline">
-            {w.id}
-          </a>
+          <span className="font-mono text-xs">{w.id}</span>
           <span className="ml-auto text-xs text-muted-foreground">{w.state}</span>
         </div>
         <p className="truncate text-xs text-muted-foreground">{w.doing}</p>
@@ -525,14 +498,13 @@ export function RoutingView() {
   };
 
   const emptyCard = (r: Agent) => (
-    <p className={cn("rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground transition-opacity", dim(`router:${r.id}`) && "opacity-30")}>
+    <p className={cn("rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground transition-opacity")}>
       No agents yet. {r.id} spawns them when work is ready.
     </p>
   );
 
   const pick = (n: NodeMeta) => {
     setPalette(false);
-    setPinned(n.id);
     go({ event: 0, objective: 1, router: 1, agent: 2 }[n.kind]);
     setTimeout(() => {
       const el = document.querySelector<HTMLElement>(`[data-node="${n.id}"]`);
@@ -563,7 +535,7 @@ export function RoutingView() {
   };
 
   return (
-    <div className="flex h-full flex-col gap-3 p-4" onClick={() => setPinned(undefined)}>
+    <div className="flex h-full flex-col gap-3 p-4">
       <div className="flex items-center gap-4">
         <Tabs value={String(snap)} onValueChange={v => go(Number(v))}>
           <TabsList>
@@ -598,7 +570,7 @@ export function RoutingView() {
             </button>
           </span>
         )}
-        <span className="ml-auto text-xs text-muted-foreground">⌘F to search · swipe sideways or ← → to pan · hover or click to trace</span>
+        <span className="ml-auto text-xs text-muted-foreground">⌘F to search · swipe sideways or ← → to pan</span>
       </div>
 
       <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-hidden">
@@ -633,20 +605,17 @@ export function RoutingView() {
         >
           <svg className="pointer-events-none absolute inset-0 size-full overflow-visible">
             {edges.map(e => {
-              if (!e.from.startsWith("sig:") && !e.watch) return null;
-              const a = e.watch ? pos.log : pos[e.from];
+              if (!e.from.startsWith("sig:")) return null;
+              const a = pos[e.from];
               const b = pos[e.to];
               if (!a || !b) return null;
-              const on = traced?.lit.has(e.key);
-              if (e.watch && !on) return null;
               const x1 = a.r, x2 = b.l, mid = (x1 + x2) / 2;
               return (
                 <path
                   key={e.key}
                   d={`M${x1},${a.y} C${mid},${a.y} ${mid},${b.y} ${x2},${b.y}`}
-                  className={cn("fill-none transition-opacity", e.stroke, on ? "opacity-90" : traced ? "opacity-5" : "opacity-30")}
-                  strokeWidth={on ? 1.75 : 1}
-                  strokeDasharray={e.watch ? "4 4" : undefined}
+                  className={cn("fill-none opacity-30", e.stroke)}
+                  strokeWidth={1}
                 />
               );
             })}
@@ -672,7 +641,6 @@ export function RoutingView() {
                       className={cn(
                         "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-opacity",
                         shown.has(s.id) ? look[s.id].ring : "opacity-40",
-                        dim(id) && "opacity-30",
                       )}
                     >
                       <Icon className={cn("size-3.5", look[s.id].text)} />
@@ -689,12 +657,12 @@ export function RoutingView() {
                 className="flex items-center gap-3 rounded-lg border border-sky-400/40 bg-card px-3 py-1.5 focus-within:border-sky-400"
               >
                 <User className="size-3.5 shrink-0 text-sky-400" />
-                <span className="max-w-28 shrink-0 truncate font-mono text-xs text-muted-foreground">{to ? `→ ${to}` : "chat"}</span>
+                <span className="max-w-28 shrink-0 truncate font-mono text-xs text-muted-foreground">chat</span>
                 <Input
                   data-agent="log-composer"
                   value={draft}
                   onChange={e => setDraft(e.target.value)}
-                  placeholder={to ? `Message ${to}…` : "Tell the agents something…"}
+                  placeholder="Tell the agents something…"
                   className="h-7 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
                 />
                 <kbd className="shrink-0 text-xs text-muted-foreground">↵</kbd>
@@ -711,9 +679,7 @@ export function RoutingView() {
                           key={s.id}
                           {...node(id)}
                           className={cn(
-                            "flex cursor-pointer items-center gap-3 rounded-lg border bg-card px-3 py-2 text-sm transition-opacity",
-                            dim(id) && "opacity-30",
-                            focus === id && look[s.source].ring,
+                            "flex items-center gap-3 rounded-lg border bg-card px-3 py-2 text-sm",
                             fresh === s.id && "agent-edited animate-in fade-in slide-in-from-top-2",
                           )}
                         >

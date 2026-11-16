@@ -1,4 +1,4 @@
-import { Archive, ArrowLeft, Copy, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Hash, Network, Pause, Play, User, Waypoints } from "lucide-react";
+import { Archive, ArrowLeft, Copy, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Hash, Network, Pause, Play, Plus, User, Waypoints } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -118,6 +118,131 @@ function LinkRow({ icon: Icon, label, detail, href }: { icon: typeof User; label
 
 const sourceIcon = { isaac: User, gh: GitPullRequest, slack: Hash };
 
+const stateOrder: AgentState[] = ["working", "waiting", "idle", "asleep"];
+
+function when(at: string) {
+  return at.slice(0, 10) === NOW_AT.slice(0, 10) ? at.slice(11, 16) : new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+/** A router's page is about its scope: who it runs, what it handed to whom, and who shares the objective. */
+function RouterSidebar({ router }: { router: Agent }) {
+  const agents = agentStore.use();
+  const objectives = objectiveStore.use();
+  const signals = signalStore.use();
+  const tasks = taskStore.use();
+
+  const crew = agents.filter(a => a.parent === router.id);
+  const objective = objectives.find(o => o.id === router.objectiveId);
+  const peers = agents.filter(a => a.role === "router" && a.objectiveId === router.objectiveId && a.id !== router.id);
+  const crewIds = new Set(crew.map(a => a.id));
+  const dispatched = signals
+    .filter(s => pathOf(s, agents).routers.includes(router.id))
+    .map(s => ({ signal: s, to: s.routedTo.filter(id => crewIds.has(id)) }));
+
+  const spawn = () => {
+    const n = crew.length + 1;
+    const id = `${router.id.replace(/^r-/, "")}-${n}`;
+    agentStore.set(all => [...all, { id, role: "worker", objectiveId: router.objectiveId, parent: router.id, taskIds: [], state: "idle", doing: "Waiting for a brief" }]);
+  };
+
+  return (
+    <>
+      <Section title="Properties">
+        <Row label="State">
+          <span className={cn("size-2", agentStateColor[router.state])} />
+          {router.state}
+        </Row>
+        {objective && (
+          <Row label="Objective">
+            <a href={`#objective/${objective.id}`} className="flex min-w-0 items-center gap-1.5 hover:underline">
+              <Waypoints className="size-3.5 shrink-0 text-agent" />
+              <span className="truncate">{objective.title}</span>
+            </a>
+          </Row>
+        )}
+        <Row label="Scope">{router.scope}</Row>
+        <Row label="Model">opus 5.5</Row>
+      </Section>
+
+      <Separator />
+
+      <Section title={`Agents · ${crew.length}`}>
+        {stateOrder.map(state => {
+          const group = crew.filter(a => a.state === state);
+          if (!group.length) return null;
+          return (
+            <div key={state} className="flex flex-col">
+              <p className="flex items-center gap-1.5 pt-1 pb-0.5 text-[11px] text-muted-foreground">
+                <span className={cn("size-1.5", agentStateColor[state])} />
+                {state} · {group.length}
+              </p>
+              {group.map(a => {
+                const task = tasks.find(t => a.taskIds.includes(t.id));
+                return (
+                  <a key={a.id} href={`#agent/${a.id}`} className="flex flex-col px-1 py-1 hover:bg-muted">
+                    <span className="font-mono text-xs">{a.id}</span>
+                    <span className="truncate text-xs text-muted-foreground">{task ? task.title : a.doing}</span>
+                  </a>
+                );
+              })}
+            </div>
+          );
+        })}
+        <button onClick={spawn} className="flex items-center gap-2 px-1 py-1 text-left text-sm text-muted-foreground hover:bg-muted">
+          <Plus className="size-3.5" /> Spawn agent
+        </button>
+      </Section>
+
+      <Separator />
+
+      <Section title={`Dispatched · ${dispatched.length}`}>
+        {dispatched.length === 0 && <p className="text-xs text-muted-foreground">Nothing has reached this router yet.</p>}
+        {dispatched.slice(0, 10).map(({ signal, to }) => {
+          const Icon = sourceIcon[signal.source];
+          return (
+            <div key={signal.id} className="flex flex-col gap-0.5 py-0.5 text-sm">
+              <div className="flex items-start gap-2">
+                <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate">{signal.text}</span>
+                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{when(signal.at)}</span>
+              </div>
+              <p className="pl-5.5 font-mono text-[11px] text-muted-foreground">
+                {to.length ? (
+                  to.map((id, i) => (
+                    <span key={id}>
+                      {i > 0 && ", "}→{" "}
+                      <a href={`#agent/${id}`} className="text-foreground hover:underline">
+                        {id}
+                      </a>
+                    </span>
+                  ))
+                ) : (
+                  <span>kept · handled by {router.id}</span>
+                )}
+              </p>
+            </div>
+          );
+        })}
+      </Section>
+
+      <Separator />
+
+      <Section title={`Other routers on this objective · ${peers.length}`}>
+        {peers.length === 0 && <p className="text-xs text-muted-foreground">This router owns the whole objective.</p>}
+        {peers.map(r => (
+          <a key={r.id} href={`#agent/${r.id}`} className="flex flex-col px-1 py-1 hover:bg-muted">
+            <span className="flex items-center gap-1.5 font-mono text-xs">
+              <Network className="size-3 text-fuchsia-400" />
+              {r.id}
+            </span>
+            <span className="truncate text-xs text-muted-foreground">{r.scope}</span>
+          </a>
+        ))}
+      </Section>
+    </>
+  );
+}
+
 export function AgentPage({ id, back }: { id: string; back: string }) {
   const agents = agentStore.use();
   const tasks = taskStore.use();
@@ -155,6 +280,19 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
         <h1 className="font-mono text-lg">{agent.id}</h1>
         <Badge variant="outline">{agent.role}</Badge>
         <span className="truncate text-sm text-muted-foreground">{agent.role === "router" ? agent.scope : agent.doing}</span>
+        {agent.role === "router" && (
+          <span className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+            {stateOrder.map(state => {
+              const n = crew.filter(a => a.state === state).length;
+              return n ? (
+                <span key={state} className="flex items-center gap-1">
+                  <span className={cn("size-1.5", agentStateColor[state])} />
+                  {n} {state}
+                </span>
+              ) : null;
+            })}
+          </span>
+        )}
         <div className="ml-auto flex gap-1.5">
           {agent.state === "idle" || agent.state === "asleep" ? (
             <Button variant="outline" size="sm" onClick={() => setState("working")}>
@@ -175,6 +313,10 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
         <Tty agent={agent} lines={lines} />
 
         <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">
+          {agent.role === "router" ? (
+            <RouterSidebar router={agent} />
+          ) : (
+            <>
           <Section title="Properties">
             <Row label="State">
               <span className={cn("size-2", agentStateColor[agent.state])} />
@@ -254,6 +396,8 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
               </a>
             ))}
           </Section>
+            </>
+          )}
         </aside>
       </div>
     </div>
