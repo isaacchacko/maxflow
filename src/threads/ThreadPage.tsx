@@ -11,6 +11,17 @@ import { Replies, repliesOf } from "./Replies";
 import { markSeen } from "./seen";
 import { RefChip, refsIn, urlsIn, type Ref } from "./Rich";
 
+// Climbing out of a subthread lands on the message it hangs off: scrolled to and flashed once.
+const arriving: { message?: string } = {};
+
+/** Escape climbs one level: a subthread goes to its parent at the message it hangs off, a top thread to the view it came from. */
+export function threadUp(id: string, view: string) {
+  const t = threadStore.get().find(x => x.id === id);
+  if (!t?.parentId) return void (location.hash = view);
+  arriving.message = t.parentMessageId;
+  location.hash = `thread/${t.parentId}`;
+}
+
 // Slack's grouping: a sender's next message within this long drops its picture and name.
 const GROUP_MS = 5 * 60_000;
 
@@ -56,6 +67,14 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   useEffect(() => {
     if (thread) markSeen(thread.id, thread.messages.length);
   }, [thread?.id, thread?.messages.length]);
+
+  useEffect(() => {
+    const el = arriving.message && scrollRef.current?.querySelector(`[data-msg="${arriving.message}"]`);
+    arriving.message = undefined;
+    if (!el) return;
+    el.scrollIntoView({ block: "center" });
+    el.animate([{ backgroundColor: "color-mix(in oklch, var(--color-sky-400) 25%, transparent)" }, { backgroundColor: "transparent" }], { duration: 1600, easing: "ease-out" });
+  }, [id]);
 
   if (!thread) return <p className="p-6 text-muted-foreground">No thread {id}.</p>;
 
@@ -114,7 +133,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
               return (
                 <Fragment key={i}>
                 {resolvedHere && <p className="my-2 border-t pt-1 text-center text-xs text-muted-foreground">new since resolved</p>}
-                <div className="group/msg relative">
+                <div data-msg={m.id} className="group/msg relative">
                   <MessageRow from={m.from} at={m.at} text={m.text} grouped={grouped} className={cn(!grouped && i > 0 && "mt-2.5")}>
                     {sub && (sub.messages.length > 0 || sub.pending) && <Replies t={sub} />}
                   </MessageRow>

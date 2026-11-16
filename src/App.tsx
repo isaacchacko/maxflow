@@ -7,7 +7,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Page } from "@/page/Page";
 import type { PageRef } from "@/store";
-import { ThreadPage } from "@/threads/ThreadPage";
+import { ThreadPage, threadUp } from "@/threads/ThreadPage";
 import { InboxView } from "@/views/InboxView";
 import { RoutingView } from "@/views/RoutingView";
 import { SentriesView } from "@/views/SentriesView";
@@ -54,7 +54,9 @@ export function App() {
     const onHash = () => setRoute(routeFromHash());
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === "Escape" && routeFromHash().detail) location.hash = route.view;
+      const { detail } = routeFromHash();
+      if (e.key === "Escape" && detail?.kind === "thread") threadUp(detail.id, route.view);
+      else if (e.key === "Escape" && detail) location.hash = route.view;
       const match = views.find(v => v.key === e.key);
       if (match) location.hash = match.id;
     };
