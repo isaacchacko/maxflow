@@ -1,10 +1,10 @@
-import { GitPullRequest, Hash, Network, Search, User, Waypoints, X } from "lucide-react";
+import { GitPullRequest, Hash, MessagesSquare, Network, Search, User, Waypoints, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
-export type Kind = "event" | "objective" | "router" | "agent";
+export type Kind = "event" | "objective" | "router" | "agent" | "thread";
 export type ChipKey = "is" | "from" | "state" | "status" | "in";
 export type Chip = { key: ChipKey; value: string };
 export type Filter = { chips: Chip[]; text: string };
@@ -22,7 +22,7 @@ export type NodeMeta = {
 };
 
 const fixedValues: Record<Exclude<ChipKey, "in">, string[]> = {
-  is: ["event", "objective", "router", "agent"],
+  is: ["event", "objective", "router", "agent", "thread"],
   from: ["you", "gh", "slack"],
   state: ["working", "waiting", "idle", "asleep"],
   status: ["todo", "doing", "review", "done"],
@@ -30,7 +30,7 @@ const fixedValues: Record<Exclude<ChipKey, "in">, string[]> = {
 
 const chipKeys = Object.keys(fixedValues).concat("in") as ChipKey[];
 
-const kindIcon: Record<Kind, typeof User> = { event: Hash, objective: Waypoints, router: Network, agent: User };
+const kindIcon: Record<Kind, typeof User> = { event: Hash, objective: Waypoints, router: Network, agent: User, thread: MessagesSquare };
 const sourceIcon: Record<string, typeof User> = { isaac: User, gh: GitPullRequest, slack: Hash };
 
 function valuesFor(key: ChipKey, objectiveIds: string[]) {

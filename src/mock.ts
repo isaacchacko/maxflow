@@ -37,6 +37,18 @@ export type Task = {
 
 export type Objective = { id: string; title: string; taskIds: string[]; events: Event[]; page: Block[] };
 
+/**
+ * A virtual chat routers (and their objective) post into. Message text is prose with inline references:
+ * [[agent:id]], [[router:id]], [[task:id]], [[objective:id]], and [label](https://url) for external links.
+ */
+export type Thread = {
+  id: string;
+  title: string;
+  objectiveId: string;
+  routerIds: string[];
+  messages: { from: string; at: string; text: string }[];
+};
+
 export type AgentState = "working" | "waiting" | "idle" | "asleep";
 
 export type Agent = {
@@ -306,6 +318,48 @@ export const agents: Agent[] = [
   { id: "mf-3", role: "worker", objectiveId: "board", parent: "r-board", taskIds: ["t5"], state: "asleep", doing: "Merged #42" },
   { id: "r-reviews", role: "router", scope: "Whole objective", objectiveId: "reviews", taskIds: [], state: "working", doing: "Watching #reviews-pls" },
   { id: "mf-4", role: "worker", objectiveId: "reviews", parent: "r-reviews", taskIds: ["t8", "t6"], state: "working", doing: "Drafting review comments on #7149" },
+];
+
+export const threads: Thread[] = [
+  {
+    id: "th-pager",
+    title: "Pager rollout",
+    objectiveId: "festo-perf",
+    routerIds: ["r-festo"],
+    messages: [
+      { from: "r-festo", at: "2026-11-10T09:05", text: "Started [[agent:mf-1]] on [[task:t1]]. Measurement from [[task:t7]] says $skip is quadratic." },
+      { from: "r-festo", at: "2026-11-15T10:04", text: "CI is green on [#6250](https://github.com/acme/app/pull/6250). Holding [[task:t2]] until it merges." },
+    ],
+  },
+  {
+    id: "th-close-path",
+    title: "Close path decision",
+    objectiveId: "overdue",
+    routerIds: ["r-overdue", "r-sap"],
+    messages: [
+      { from: "r-sap", at: "2026-11-12T17:40", text: "No Festo run has ever sent a full snapshot. Checked the last 30 days." },
+      { from: "r-overdue", at: "2026-11-13T09:30", text: "So flipping the flag would close ~45% falsely. Asked Isaac on [[objective:overdue]]; [[agent:mf-2]] keeps tracing meanwhile." },
+      { from: "isaac", at: "2026-11-13T11:00", text: "Reconciler." },
+      { from: "r-overdue", at: "2026-11-13T11:05", text: "Queued [[task:t4]] behind [[task:t3]]." },
+    ],
+  },
+  {
+    id: "th-board",
+    title: "Board notes",
+    objectiveId: "board",
+    routerIds: ["r-board"],
+    messages: [{ from: "r-board", at: "2026-11-14T16:10", text: "[[agent:mf-3]] merged [#42](https://github.com/acme/maxflow/pull/42). Nothing queued." }],
+  },
+  {
+    id: "th-reviews",
+    title: "Review queue",
+    objectiveId: "reviews",
+    routerIds: ["r-reviews"],
+    messages: [
+      { from: "r-reviews", at: "2026-11-14T15:02", text: "Ping on [#7149](https://github.com/acme/app/pull/7149). Started [[agent:mf-4]]." },
+      { from: "r-reviews", at: "2026-11-15T10:25", text: "Two judgment calls drafted on [[task:t6]], waiting on you." },
+    ],
+  },
 ];
 
 export const sentries: Sentry[] = [

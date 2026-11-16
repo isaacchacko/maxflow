@@ -1,14 +1,14 @@
-import { ChevronLeft, ChevronRight, GitPullRequest, Hash, Network, Plus, Search, SquareArrowOutUpRight, User, Waypoints } from "lucide-react";
+import { ChevronLeft, ChevronRight, GitPullRequest, Hash, MessagesSquare, Network, Plus, Search, SquareArrowOutUpRight, User, Waypoints } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { routeChat } from "@/agent/route";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { ChipView, SearchPalette, hits, isActive, type Filter, type NodeMeta } from "@/views/SearchPalette";
-import { NOW_AT, agentStateColor, objectiveStatus, sentries, statusColor, type Agent, type Signal, type Source } from "@/mock";
-import { agentStore, objectiveStore, pathOf, signalStore, splitRouter, taskStore } from "@/store";
+import { NOW_AT, agentStateColor, objectiveStatus, sentries, statusColor, type Agent, type Signal, type Source, type Thread } from "@/mock";
+import { agentStore, objectiveStore, pathOf, signalStore, splitRouter, taskStore, threadStore } from "@/store";
+import { Rich } from "@/threads/Rich";
 
 const look: Record<Source, { icon: typeof User; text: string; stroke: string; ring: string }> = {
   isaac: { icon: User, text: "text-sky-400", stroke: "stroke-sky-400", ring: "border-sky-400/60" },
@@ -17,7 +17,9 @@ const look: Record<Source, { icon: typeof User; text: string; stroke: string; ri
 };
 
 const GAP = 160;
-const snaps = ["Events → Objectives", "Objectives → Routers", "Routers → Agents"];
+const VIEWS = 4;
+/** Threads reuse the agents' slot: both views show routers on the left. */
+const paneOf = (snap: number) => Math.min(snap, 2);
 
 type Edge = { key: string; from: string; to: string; stroke: string };
 type Pos = Record<string, { l: number; r: number; y: number }>;
@@ -97,11 +99,12 @@ function layoutStructure(
   objectives: { id: string }[],
   routers: Agent[],
   agents: Agent[],
+  threads: Thread[],
   height: (id: string) => number,
   shown: (id: string) => boolean,
 ) {
   const y = new Map<string, number>();
-  const bottom = { compact: 0, objectiveRows: 0, routerRows: 0 };
+  const bottom = { compact: 0, objectiveRows: 0, agentRows: 0, threadRows: 0 };
 
   const byObjective = () => {
     let top = 0;
@@ -120,13 +123,13 @@ function layoutStructure(
     bottom.objectiveRows = top;
   };
 
-  const byRouter = (placeRouters: boolean) => {
+  const byRouter = (placeRouters: boolean, stackOf: (routerId: string) => string[], into: "agentRows" | "threadRows") => {
     let top = 0;
     for (const o of objectives) {
       let any = false;
       for (const r of routers.filter(r => r.objectiveId === o.id)) {
         const showRouter = placeRouters && shown(`router:${r.id}`);
-        const stackIds = crewOf(r.id, agents, shown);
+        const stackIds = stackOf(r.id);
         if (!showRouter && !stackIds.length) continue;
         any = true;
         if (showRouter) y.set(`router:${r.id}`, top);
@@ -139,7 +142,7 @@ function layoutStructure(
       }
       if (any) top += ROW_GAP - STACK_GAP * 2;
     }
-    bottom.routerRows = top;
+    bottom[into] = top;
   };
 
   byObjective();
@@ -151,9 +154,10 @@ function layoutStructure(
     }
     bottom.compact = top;
   }
-  byRouter(snap === 2);
+  byRouter(snap === 2, id => crewOf(id, agents, shown), "agentRows");
+  byRouter(snap === 3, id => threadsOf(id, threads, shown), "threadRows");
 
-  const inView = [bottom.compact, bottom.objectiveRows, bottom.routerRows][snap]!;
+  const inView = [bottom.compact, bottom.objectiveRows, bottom.agentRows, bottom.threadRows][snap]!;
   return { y, height: inView, signature: `${snap}:${[...y].join(",")}` };
 }
 
@@ -164,15 +168,15 @@ function crewOf(routerId: string, agents: Agent[], shown: (id: string) => boolea
   return all.map(w => `agent:${w.id}`).filter(shown);
 }
 
-function lastSnap() {
-  try {
-    return Number(sessionStorage.getItem("routing-snap") ?? 0);
-  } catch {
-    return 0;
-  }
+/** A thread sits beside the first router that posts to it. */
+function threadsOf(routerId: string, threads: Thread[], shown: (id: string) => boolean) {
+  const own = threads.filter(t => t.routerIds[0] === routerId);
+  if (!own.length) return shown(`nothreads:${routerId}`) ? [`nothreads:${routerId}`] : [];
+  return own.map(t => `thread:${t.id}`).filter(shown);
 }
 
-export function RoutingView() {
+export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: number) => void }) {
+  const threads = threadStore.use();
   const signals = signalStore.use();
   const agents = agentStore.use();
   const objectives = objectiveStore.use();
@@ -180,7 +184,6 @@ export function RoutingView() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(1200);
-  const [snap, setSnap] = useState(lastSnap);
   const [pos, setPos] = useState<Pos>({});
   const [shown, setShown] = useState<Set<Source>>(new Set(["isaac", "gh", "slack"]));
   const [draft, setDraft] = useState("");
@@ -244,12 +247,32 @@ export function RoutingView() {
         objectives: [objectiveOfAgent.get(a.id)!],
       };
     }),
+    ...threads.map(t => ({
+      id: `thread:${t.id}`,
+      kind: "thread" as const,
+      label: t.routerIds.join(", "),
+      detail: t.title,
+      text: `${t.title} ${t.messages.map(m => m.text).join(" ")}`,
+      objectives: [t.objectiveId],
+    })),
   ];
 
   // A filter keeps each hit plus everything wired to it, so whole routes survive.
   const filterHits = isActive(filter) ? hits(nodes, filter) : undefined;
-  const kept = filterHits && new Set(filterHits.flatMap(n => [n.id, ...trace(n.id, signals, paths, agents).nodes]));
-  const shownNode = (id: string) => !kept || kept.has(id);
+  const kept =
+    filterHits &&
+    new Set(
+      filterHits.flatMap(n => {
+        if (n.kind !== "thread") return [n.id, ...trace(n.id, signals, paths, agents).nodes];
+        const t = threads.find(x => `thread:${x.id}` === n.id)!;
+        return [n.id, `obj:${t.objectiveId}`, ...t.routerIds.map(r => `router:${r}`)];
+      }),
+    );
+  const shownNode = (id: string) => {
+    if (!kept || kept.has(id)) return true;
+    const t = id.startsWith("thread:") && threads.find(x => `thread:${x.id}` === id);
+    return !!t && t.routerIds.some(r => kept.has(`router:${r}`));
+  };
 
   const visible = signals.filter(s => shown.has(s.source) && shownNode(`sig:${s.id}`));
 
@@ -264,16 +287,10 @@ export function RoutingView() {
 
   useLayoutEffect(measure, [measure, visible.length, agents.length, col, splitting]);
 
-  const go = useCallback((n: number) => {
-    const next = Math.max(0, Math.min(snaps.length - 1, n));
-    setSnap(next);
-    try {
-      sessionStorage.setItem("routing-snap", String(next));
-    } catch {}
-  }, []);
-
   const snapRef = useRef(snap);
   snapRef.current = snap;
+  const goRef = useRef(go);
+  goRef.current = go;
 
   /** One sideways swipe moves one view; trackpad momentum after it is swallowed until the swipe goes quiet. */
   useEffect(() => {
@@ -293,12 +310,12 @@ export function RoutingView() {
       if (spent) return;
       pushed += e.deltaX;
       if (Math.abs(pushed) < 60) return;
-      go(snapRef.current + Math.sign(pushed));
+      goRef.current(snapRef.current + Math.sign(pushed));
       spent = true;
     };
     viewport.addEventListener("wheel", onWheel, { passive: false });
     return () => viewport.removeEventListener("wheel", onWheel);
-  }, [go]);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -353,12 +370,13 @@ export function RoutingView() {
   const days = [...new Set(visible.map(s => day(s.at)))];
   const routers = agents.filter(a => a.role === "router");
 
-  const faded = (index: number) => index !== snap && index !== snap + 1;
+  const pane = paneOf(snap);
+  const faded = (index: number) => index !== pane && index !== pane + 1;
   const capture = (index: number) => (e: React.MouseEvent) => {
     if (!faded(index)) return;
     e.stopPropagation();
     e.preventDefault();
-    go(index > snap ? index - 1 : index);
+    go(index > pane ? index - 1 : index);
   };
 
   const heights = useRef(new Map<string, number>());
@@ -377,7 +395,7 @@ export function RoutingView() {
     if (changed) setHeightsVersion(v => v + 1);
   });
 
-  const placed = layoutStructure(snap, objectives, routers, agents, id => heights.current.get(id) ?? 96, shownNode);
+  const placed = layoutStructure(snap, objectives, routers, agents, threads, id => heights.current.get(id) ?? 96, shownNode);
 
   useEffect(() => {
     let frame = 0;
@@ -390,7 +408,9 @@ export function RoutingView() {
     return () => cancelAnimationFrame(frame);
   }, [measure, placed.signature]);
 
-  const place = (id: string, column: number, card: React.ReactNode) => (
+  const place = (id: string, column: number, card: React.ReactNode, only?: "agents" | "threads") => {
+    const away = (only === "threads" && snap !== 3) || (only === "agents" && snap === 3);
+    return (
     <div
       key={id}
       data-place={id}
@@ -398,12 +418,40 @@ export function RoutingView() {
         if (el) sizer.current!.observe(el);
       }}
       onClickCapture={capture(1 + column)}
-      className={cn("absolute top-0 transition-[transform,opacity] duration-500 ease-in-out", faded(1 + column) && "opacity-35")}
+      className={cn(
+        "absolute top-0 transition-[transform,opacity] duration-500 ease-in-out",
+        away ? "pointer-events-none opacity-0" : faded(1 + column) && "opacity-35",
+      )}
       style={{ width: col, left: column * (col + GAP), transform: `translateY(${placed.y.get(id) ?? 0}px)` }}
     >
       {card}
     </div>
-  );
+    );
+  };
+
+  const threadCard = (t: Thread) => {
+    const last = t.messages.at(-1);
+    return (
+      <Card {...node(`thread:${t.id}`)} onClick={open(`thread/${t.id}`)} className="cursor-pointer gap-1.5 px-3 py-2.5 hover:border-ring">
+        <div className="flex items-center gap-2">
+          <MessagesSquare className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate text-sm font-medium">{t.title}</span>
+          <span className="ml-auto shrink-0 text-xs text-muted-foreground">{t.messages.length}</span>
+        </div>
+        {last && <Rich text={last.text} className="line-clamp-2 text-xs text-muted-foreground" />}
+        {t.routerIds.length > 1 && (
+          <div className="flex flex-wrap gap-1">
+            {t.routerIds.map(r => (
+              <span key={r} className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
+                <Network className="size-2.5 text-fuchsia-400" />
+                {r}
+              </span>
+            ))}
+          </div>
+        )}
+      </Card>
+    );
+  };
 
   const objectiveCard = (o: (typeof objectives)[number]) => {
     const id = `obj:${o.id}`;
@@ -501,7 +549,7 @@ export function RoutingView() {
 
   const pick = (n: NodeMeta) => {
     setPalette(false);
-    go({ event: 0, objective: 1, router: 1, agent: 2 }[n.kind]);
+    go({ event: 0, objective: 1, router: 1, agent: 2, thread: 3 }[n.kind]);
     setTimeout(() => {
       const el = document.querySelector<HTMLElement>(`[data-node="${n.id}"]`);
       const scroller = el?.closest<HTMLElement>(".overflow-y-auto");
@@ -532,16 +580,8 @@ export function RoutingView() {
 
   return (
     <div className="flex h-full flex-col gap-3 p-4">
+      {isActive(filter) && (
       <div className="flex items-center gap-4">
-        <Tabs value={String(snap)} onValueChange={v => go(Number(v))}>
-          <TabsList>
-            {snaps.map((label, i) => (
-              <TabsTrigger key={label} value={String(i)} data-agent={`snap:${i}`} onClick={e => e.stopPropagation()}>
-                {label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
         {isActive(filter) && (
           <div
             role="button"
@@ -567,6 +607,7 @@ export function RoutingView() {
           </span>
         )}
       </div>
+      )}
 
       <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-hidden">
         <div className="absolute top-1/2 z-30 flex -translate-x-1/2 -translate-y-1/2 gap-1" style={{ left: col + GAP / 2 }}>
@@ -581,7 +622,7 @@ export function RoutingView() {
                 key={label as string}
                 aria-label={label as string}
                 data-agent={`pan:${step}`}
-                disabled={to < 0 || to >= snaps.length}
+                disabled={to < 0 || to >= VIEWS}
                 onClick={e => {
                   e.stopPropagation();
                   go(to);
@@ -596,7 +637,7 @@ export function RoutingView() {
         <div
           ref={canvasRef}
           className="relative flex h-full transition-transform duration-500 ease-in-out"
-          style={{ gap: GAP, width: col * 4 + GAP * 3, transform: `translateX(${-snap * (col + GAP)}px)` }}
+          style={{ gap: GAP, width: col * 4 + GAP * 3, transform: `translateX(${-pane * (col + GAP)}px)` }}
         >
           <svg className="pointer-events-none absolute inset-0 size-full overflow-visible">
             {edges.map(e => {
@@ -698,7 +739,9 @@ export function RoutingView() {
                 [
                   ["Objectives", "obj", objectives.map(o => `obj:${o.id}`)],
                   ["Routers", "router", routers.map(r => `router:${r.id}`)],
-                  ["Agents", "agent", agents.filter(a => a.role === "worker").map(a => `agent:${a.id}`)],
+                  snap === 3
+                    ? ["Threads", "thread", threads.map(t => `thread:${t.id}`)]
+                    : ["Agents", "agent", agents.filter(a => a.role === "worker").map(a => `agent:${a.id}`)],
                 ] as const
               ).map(([title, , ids], k) => (
                 <h2 key={title} className={cn("flex h-7 items-center gap-2 text-sm font-medium transition-opacity duration-500", faded(1 + k) && "opacity-35")} style={{ width: col }}>
@@ -713,7 +756,14 @@ export function RoutingView() {
                 {routers.filter(r => shownNode(`router:${r.id}`)).map(r => place(`router:${r.id}`, 1, routerCard(r)))}
                 {routers.flatMap(r =>
                   crewOf(r.id, agents, shownNode).map(id =>
-                    id.startsWith("empty:") ? place(id, 2, emptyCard(r)) : place(id, 2, agentCard(agents.find(a => `agent:${a.id}` === id)!)),
+                    id.startsWith("empty:") ? place(id, 2, emptyCard(r), "agents") : place(id, 2, agentCard(agents.find(a => `agent:${a.id}` === id)!), "agents"),
+                  ),
+                )}
+                {routers.flatMap(r =>
+                  threadsOf(r.id, threads, shownNode).map(id =>
+                    id.startsWith("nothreads:")
+                      ? place(id, 2, <p className="border border-dashed px-3 py-2 text-xs text-muted-foreground">No threads</p>, "threads")
+                      : place(id, 2, threadCard(threads.find(t => `thread:${t.id}` === id)!), "threads"),
                   ),
                 )}
               </div>

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { NOW_AT, agents as seedAgents, signals as seedSignals, tasks as seedTasks, objectives as seedObjectives, type Block, type Event, type Agent, type Signal, type Status } from "./mock";
+import { NOW_AT, threads as seedThreads, agents as seedAgents, signals as seedSignals, tasks as seedTasks, objectives as seedObjectives, type Block, type Event, type Agent, type Signal, type Status } from "./mock";
 
 export function createStore<T>(initial: T) {
   let state = initial;
@@ -22,6 +22,7 @@ export const taskStore = createStore(seedTasks);
 export const objectiveStore = createStore(seedObjectives);
 export const agentStore = createStore(seedAgents);
 export const signalStore = createStore(seedSignals);
+export const threadStore = createStore(seedThreads);
 export const editedStore = createStore<Record<string, number>>({});
 
 /** A page is addressed the same way as its route: "task/t1" or "objective/overdue". */
@@ -88,4 +89,9 @@ export async function loadLocalMock() {
   objectiveStore.set(local.objectives);
   agentStore.set(local.agents);
   signalStore.set(local.signals);
+  if (local.threads) threadStore.set(local.threads);
+}
+
+export function postToThread(threadId: string, from: string, text: string) {
+  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, messages: [...t.messages, { from, at: NOW_AT, text }] } : t)));
 }

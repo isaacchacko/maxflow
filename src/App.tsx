@@ -5,34 +5,34 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Page } from "@/page/Page";
 import type { PageRef } from "@/store";
-import { AgentsView } from "@/views/AgentsView";
+import { ThreadPage } from "@/threads/ThreadPage";
 import { RoutingView } from "@/views/RoutingView";
-import { KanbanView } from "@/views/KanbanView";
-import { TimelineView } from "@/views/TimelineView";
 
-const views = [
-  { id: "routing", label: "Routing", key: "1", View: RoutingView },
-  { id: "kanban", label: "Kanban", key: "2", View: KanbanView },
-  { id: "timeline", label: "Timeline", key: "3", View: TimelineView },
-  { id: "agents", label: "Agents", key: "4", View: AgentsView },
+export const views = [
+  { id: "events", label: "Events", key: "1" },
+  { id: "objectives", label: "Objectives", key: "2" },
+  { id: "agents", label: "Agents", key: "3" },
+  { id: "threads", label: "Threads", key: "4" },
 ] as const;
 
 type ViewId = (typeof views)[number]["id"];
-type Route = { view: ViewId; page?: PageRef; agent?: string };
+type Detail = { kind: "page"; ref: PageRef } | { kind: "agent" | "thread"; id: string };
+type Route = { view: ViewId; detail?: Detail };
 
 function lastView(): ViewId {
   try {
-    return (sessionStorage.getItem("view") as ViewId | null) ?? "routing";
+    const v = sessionStorage.getItem("view");
+    return views.find(x => x.id === v)?.id ?? "events";
   } catch {
-    return "routing";
+    return "events";
   }
 }
 
 function routeFromHash(): Route {
   const [first, id] = location.hash.slice(1).split("/");
-  if ((first === "task" || first === "objective") && id) return { view: lastView(), page: `${first}/${id}` as PageRef };
-  if (first === "agent" && id) return { view: lastView(), agent: id };
-  const view = views.find(v => v.id === first)?.id ?? "routing";
+  if ((first === "task" || first === "objective") && id) return { view: lastView(), detail: { kind: "page", ref: `${first}/${id}` as PageRef } };
+  if ((first === "agent" || first === "thread") && id) return { view: lastView(), detail: { kind: first, id } };
+  const view = views.find(v => v.id === first)?.id ?? lastView();
   try {
     sessionStorage.setItem("view", view);
   } catch {}
@@ -46,7 +46,7 @@ export function App() {
     const onHash = () => setRoute(routeFromHash());
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === "Escape" && (routeFromHash().page || routeFromHash().agent)) location.hash = route.view;
+      if (e.key === "Escape" && routeFromHash().detail) location.hash = route.view;
       const match = views.find(v => v.key === e.key);
       if (match) location.hash = match.id;
     };
@@ -58,14 +58,15 @@ export function App() {
     };
   }, [route.view]);
 
-  const { View } = views.find(v => v.id === route.view)!;
+  const snap = views.findIndex(v => v.id === route.view);
+  const { detail } = route;
 
   return (
     <TooltipProvider>
       <div className="flex h-full flex-col">
         <header className="flex items-center gap-6 border-b px-4 py-2">
           <span className="font-semibold tracking-tight">maxflow</span>
-          <Tabs value={route.page || route.agent ? "" : route.view} onValueChange={v => (location.hash = v)}>
+          <Tabs value={detail ? "" : route.view} onValueChange={v => (location.hash = v)}>
             <TabsList>
               {views.map(v => (
                 <TabsTrigger key={v.id} value={v.id} data-agent={`tab:${v.id}`} className="gap-2">
@@ -77,12 +78,14 @@ export function App() {
           </Tabs>
         </header>
         <main className="min-h-0 flex-1 overflow-hidden">
-          {route.agent ? (
-            <AgentPage key={route.agent} id={route.agent} back={route.view} />
-          ) : route.page ? (
-            <Page key={route.page} pageRef={route.page} back={route.view} />
+          {detail?.kind === "agent" ? (
+            <AgentPage key={detail.id} id={detail.id} back={route.view} />
+          ) : detail?.kind === "thread" ? (
+            <ThreadPage key={detail.id} id={detail.id} back={route.view} />
+          ) : detail?.kind === "page" ? (
+            <Page key={detail.ref} pageRef={detail.ref} back={route.view} />
           ) : (
-            <View />
+            <RoutingView snap={snap} onSnap={n => (location.hash = views[Math.max(0, Math.min(views.length - 1, n))]!.id)} />
           )}
         </main>
       </div>
