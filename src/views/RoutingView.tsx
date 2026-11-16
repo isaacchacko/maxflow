@@ -1,9 +1,8 @@
 import { GitPullRequest, Hash, Network, User, Waypoints } from "lucide-react";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { agentStateColor, sentries, type Signal, type Source } from "@/mock";
+import { NOW_AT, agentStateColor, sentries, type Signal, type Source } from "@/mock";
 import { agentStore, signalStore, threadStore } from "@/store";
 
 const look: Record<Source, { icon: typeof User; text: string; stroke: string; ring: string }> = {
@@ -61,6 +60,12 @@ function trace(focus: string, edges: Edge[]) {
   return { nodes, lit };
 }
 
+function day(at: string) {
+  const d = at.slice(0, 10);
+  if (d === NOW_AT.slice(0, 10)) return "Today";
+  return new Date(at).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+}
+
 export function RoutingView() {
   const signals = signalStore.use();
   const agents = agentStore.use();
@@ -69,6 +74,7 @@ export function RoutingView() {
   const [pos, setPos] = useState<Pos>({});
   const [pinned, setPinned] = useState<string>();
   const [hover, setHover] = useState<string>();
+  const [shown, setShown] = useState<Set<Source>>(new Set(["isaac", "gh", "slack"]));
 
   const measure = useCallback(() => {
     const root = rootRef.current;
@@ -82,14 +88,16 @@ export function RoutingView() {
     setPos(next);
   }, []);
 
+  const visible = signals.filter(s => shown.has(s.source));
+
   useLayoutEffect(() => {
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(rootRef.current!);
     return () => ro.disconnect();
-  }, [measure, signals.length]);
+  }, [measure, visible.length]);
 
-  const edges = buildEdges(signals);
+  const edges = buildEdges(visible).filter(e => !e.watch || shown.has(e.source));
   const focus = hover ?? pinned;
   const traced = focus ? trace(focus, edges) : undefined;
   const dim = (id: string) => traced && !traced.nodes.has(id);
@@ -104,89 +112,107 @@ export function RoutingView() {
     },
   });
 
+  const toggle = (source: Source) =>
+    setShown(prev => {
+      const next = new Set(prev);
+      if (next.has(source) && next.size > 1) next.delete(source);
+      else next.add(source);
+      return next;
+    });
+
+  const days = [...new Set(visible.map(s => day(s.at)))];
+
   return (
-    <div className="flex h-full flex-col gap-3 p-4">
-      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-        {sentries.map(s => {
-          const Icon = look[s.id].icon;
+    <div ref={rootRef} onClick={() => setPinned(undefined)} className="relative grid h-full grid-cols-[minmax(0,1fr)_18rem] gap-x-40 p-4">
+      <svg className="pointer-events-none absolute inset-0 size-full overflow-hidden">
+        {edges.map(e => {
+          if (e.from.startsWith("src:") && !e.watch) return null;
+          const a = e.watch ? pos.log && { ...pos.log, y: pos.log.y } : pos[e.from];
+          const b = pos[e.to];
+          if (!a || !b) return null;
+          const on = traced?.lit.has(e.key);
+          if (e.watch && !on) return null;
+          const x1 = a.r, x2 = b.l, mid = (x1 + x2) / 2;
           return (
-            <span key={s.id} className={cn("flex items-center gap-1.5", look[s.id].text)}>
-              <Icon className="size-3.5" />
-              {s.label}
-            </span>
+            <path
+              key={e.key}
+              d={`M${x1},${a.y} C${mid},${a.y} ${mid},${b.y} ${x2},${b.y}`}
+              className={cn("fill-none transition-opacity", look[e.source].stroke, on ? "opacity-90" : traced ? "opacity-5" : "opacity-30")}
+              strokeWidth={on ? 1.75 : 1}
+              strokeDasharray={e.watch ? "4 4" : undefined}
+            />
           );
         })}
-        <span className="flex items-center gap-1.5"><span className="w-5 border-t" /> routed</span>
-        <span className="flex items-center gap-1.5"><span className="w-5 border-t border-dashed" /> watches for</span>
-        <span className="ml-auto">{pinned ? "Click again or on empty space to release" : "Hover or click anything to trace it"}</span>
-      </div>
+      </svg>
 
-      <div ref={rootRef} onClick={() => setPinned(undefined)} className="relative grid min-h-0 flex-1 grid-cols-[14rem_1fr_17rem] gap-x-24">
-        <svg className="pointer-events-none absolute inset-0 size-full overflow-hidden">
-          {edges.map(e => {
-            const a = pos[e.from];
-            const b = pos[e.to];
-            if (!a || !b) return null;
-            const on = traced?.lit.has(e.key);
-            if (e.watch && !on) return null;
-            const x1 = a.r, x2 = b.l, mid = (x1 + x2) / 2;
-            return (
-              <path
-                key={e.key}
-                d={`M${x1},${a.y} C${mid},${a.y} ${mid},${b.y} ${x2},${b.y}`}
-                className={cn("fill-none transition-opacity", look[e.source].stroke, on ? "opacity-90" : traced ? "opacity-5" : "opacity-25")}
-                strokeWidth={on ? 1.75 : 1}
-                strokeDasharray={e.watch ? "4 4" : undefined}
-              />
-            );
-          })}
-        </svg>
-
-        <section className="relative flex flex-col justify-around gap-3">
+      <section className="relative flex min-h-0 flex-col gap-3">
+        <header data-node="log" className="flex items-center gap-2">
+          <h2 className="mr-2 text-sm font-medium">Event log</h2>
           {sentries.map(s => {
             const Icon = look[s.id].icon;
             const id = `src:${s.id}`;
+            const on = shown.has(s.id);
             return (
-              <Card key={s.id} {...node(id)} className={cn("cursor-pointer gap-2 px-3 py-3 transition-opacity", dim(id) && "opacity-30", focus === id && look[s.id].ring)}>
-                <div className="flex items-center gap-2">
-                  <Icon className={cn("size-4", look[s.id].text)} />
-                  <span className="text-sm font-medium">{s.label}</span>
-                  <Badge variant="outline" className="ml-auto gap-1 text-[10px]">
-                    <span className={cn("size-1.5 rounded-full", s.state === "backoff" ? "bg-amber-400" : "animate-pulse bg-emerald-400")} />
-                    {s.state}
-                  </Badge>
-                </div>
-                {s.every && <p className="text-xs text-muted-foreground">every {s.every} · last {s.lastPoll}</p>}
-                <div className="flex flex-wrap gap-1">
-                  {s.watching.map(w => (
-                    <Badge key={w.target} variant="secondary" className="font-mono text-[10px]">{w.target}</Badge>
-                  ))}
-                </div>
-              </Card>
+              <button
+                key={s.id}
+                {...node(id)}
+                onClick={e => {
+                  e.stopPropagation();
+                  toggle(s.id);
+                }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-opacity",
+                  on ? look[s.id].ring : "opacity-40",
+                  dim(id) && "opacity-30",
+                )}
+              >
+                <Icon className={cn("size-3.5", look[s.id].text)} />
+                {s.label}
+                <span className={cn("size-1.5 rounded-full", s.state === "backoff" ? "bg-amber-400" : "animate-pulse bg-emerald-400")} />
+                <span className="text-muted-foreground">{s.state === "live" ? "live" : `${s.state} · ${s.every}`}</span>
+              </button>
             );
           })}
-        </section>
+          <span className="ml-auto text-xs text-muted-foreground">
+            {pinned ? "Click again or on empty space to release" : "Hover or click to trace · click a source to filter"}
+          </span>
+        </header>
 
-        <section className="relative -mx-2 min-h-0 overflow-y-auto px-2" onScroll={measure}>
-          <div className="flex flex-col gap-2 py-1">
-            {signals.map(s => {
-              const Icon = look[s.source].icon;
-              const id = `sig:${s.id}`;
-              return (
-                <Card key={s.id} {...node(id)} className={cn("cursor-pointer gap-1 px-3 py-2 transition-opacity", dim(id) && "opacity-30", focus === id && look[s.source].ring)}>
-                  <div className="flex items-center gap-2 text-xs">
-                    <Icon className={cn("size-3.5 shrink-0", look[s.source].text)} />
-                    <span className="font-mono text-muted-foreground">{s.target}</span>
-                    <span className="ml-auto text-muted-foreground tabular-nums">{when(s.at)}</span>
-                  </div>
-                  <p className="line-clamp-1 text-sm">{s.text}</p>
-                </Card>
-              );
-            })}
-          </div>
-        </section>
+        <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1" onScroll={measure}>
+          {days.map(d => (
+            <div key={d} className="mb-3">
+              <p className="sticky top-0 z-20 bg-background py-1 text-xs text-muted-foreground">{d}</p>
+              <ol className="flex flex-col gap-1.5">
+                {visible.filter(s => day(s.at) === d).map(s => {
+                  const Icon = look[s.source].icon;
+                  const id = `sig:${s.id}`;
+                  return (
+                    <li
+                      key={s.id}
+                      {...node(id)}
+                      className={cn(
+                        "flex cursor-pointer items-center gap-3 rounded-lg border bg-card px-3 py-2 text-sm transition-opacity",
+                        dim(id) && "opacity-30",
+                        focus === id && look[s.source].ring,
+                      )}
+                    >
+                      <span className="w-11 shrink-0 text-xs text-muted-foreground tabular-nums">{when(s.at)}</span>
+                      <Icon className={cn("size-3.5 shrink-0", look[s.source].text)} />
+                      <span className="w-24 shrink-0 truncate font-mono text-xs text-muted-foreground">{s.target}</span>
+                      <span className="min-w-0 flex-1 truncate">{s.text}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">→ {s.routedTo.length || "none"}</span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          ))}
+        </div>
+      </section>
 
-        <section className="relative flex min-h-0 flex-col justify-center gap-3 overflow-y-auto">
+      <section className="relative flex min-h-0 flex-col gap-3">
+        <h2 className="text-sm font-medium">Agents</h2>
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto" onScroll={measure}>
           {threads.map(thread => (
             <div key={thread.id} className="flex flex-col gap-1">
               <a href={`#thread/${thread.id}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground hover:text-foreground">
@@ -208,7 +234,7 @@ export function RoutingView() {
                           focus === id && "border-agent",
                         )}
                       >
-                        {a.role === "router" ? <Network className="size-3.5 text-fuchsia-400" /> : <span className={cn("size-2 rounded-full", agentStateColor[a.state])} />}
+                        {a.role === "router" ? <Network className="size-3.5 shrink-0 text-fuchsia-400" /> : <span className={cn("size-2 shrink-0 rounded-full", agentStateColor[a.state])} />}
                         <span className="shrink-0 font-mono text-xs whitespace-nowrap">{a.id}</span>
                         <span className="truncate text-xs text-muted-foreground">{a.doing}</span>
                       </Card>
@@ -218,8 +244,8 @@ export function RoutingView() {
               ))}
             </div>
           ))}
-        </section>
-      </div>
+        </div>
+      </section>
     </div>
   );
 }
