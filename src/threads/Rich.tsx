@@ -2,6 +2,7 @@ import { ExternalLink, GitPullRequest, MessageSquareQuote, MessagesSquare, Netwo
 import { useContext, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { AgentFace, expressionOf } from "@/components/AgentFace";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor } from "@/mock";
 import { agentStore, nameStore, objectiveStore, prStore, sentryStore, taskStore, threadStore } from "@/store";
@@ -264,9 +265,6 @@ export function Markdown({ text, className }: { text: string; className?: string
   );
 }
 
-// A worker's tile keeps one color for its whole life, picked from its session id.
-const TILE = ["bg-tile-1", "bg-tile-2", "bg-tile-3", "bg-tile-4", "bg-tile-5", "bg-tile-6", "bg-tile-7", "bg-tile-8"];
-const tileOf = (id: string) => TILE[[...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % TILE.length]!;
 const GITHUB_LOGIN = "isaacchacko";
 
 /** A message's sender as a 36px square, Slack-style: Isaac's GitHub picture, and agents in the sidebar's role and state language. */
@@ -296,17 +294,16 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
         <Radar className="size-4 text-muted-foreground" />
       </span>
     );
+  // An agent's own face, its expression following its state; a list of them stays still, so a long inbox doesn't repaint.
   const a = agents.find(x => x.id === from);
-  if (a?.role === "router")
-    return (
-      <span className={cn(tile, "bg-muted")}>
-        <Network className="size-4 text-router" />
-      </span>
-    );
   return (
-    <span className={cn(tile, tileOf(from), "text-tile-ink")}>
-      {(a?.name ?? names[from] ?? from).match(/[a-z0-9]/i)?.[0]?.toUpperCase()}
-      {!small && a && <span className={cn("absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-card", agentStateColor[a.state])} />}
+    <span title={a?.name ?? names[from] ?? from} className={cn("relative flex shrink-0", small ? "size-5" : "size-9")}>
+      <AgentFace id={from} expression={expressionOf(a?.state)} small={small} still className="size-full" />
+      {!small && a?.role === "router" && (
+        <span className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-full bg-card shadow-card">
+          <Network className="size-2.5 text-router" />
+        </span>
+      )}
     </span>
   );
 }

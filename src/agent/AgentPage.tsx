@@ -1,5 +1,6 @@
 import { Archive, ArrowLeft, Bot, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Hash, Link2, Network, Pause, Play, Plus, Radar, User, Waypoints } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { AgentFace, expressionOf } from "@/components/AgentFace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -273,7 +274,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
             <ArrowLeft />
           </a>
         </Button>
-        {agent.role === "router" ? <Network className="size-4 text-router" /> : <span className={cn("size-2.5 rounded-full", agentStateColor[agent.state])} />}
+        <AgentFace id={agent.id} expression={expressionOf(agent.state)} className="size-9" />
         <h1 className={cn("text-lg", !agent.name && "font-mono")}>{agent.name ?? agent.id}</h1>
         <Badge variant="outline">{agent.role}</Badge>
         {agent.role === "router" && <span className="truncate text-sm text-muted-foreground">{agent.scope}</span>}

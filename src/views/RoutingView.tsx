@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
+import { AgentFace, expressionOf } from "@/components/AgentFace";
 import { cn } from "@/lib/utils";
 import { ChipView, SearchPalette, hits, isActive, type Filter, type NodeMeta } from "@/views/SearchPalette";
 import { NOW_AT, agentStateColor, objectiveStatus, statusColor, type Agent, type Signal, type Source, type Thread } from "@/mock";
@@ -470,9 +471,9 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
         )}
       >
         <div className="flex items-center gap-2">
-          <Network className="size-3.5 text-router" />
+          <AgentFace id={r.id} expression={expressionOf(r.state)} small still className="size-6" />
+          <Network className="size-3 text-router" />
           <span className={cn("truncate text-xs", !r.name && "font-mono")}>{r.name ?? r.id}</span>
-          <span className={cn("size-1.5 rounded-full", agentStateColor[r.state])} />
           <span className="ml-auto text-xs text-muted-foreground">{crew} {crew === 1 ? "agent" : "agents"}</span>
         </div>
         <p className="text-sm">{r.scope}</p>
@@ -486,7 +487,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
     return (
       <Card {...node(id)} onClick={open(`agent/${w.id}`)} className="cursor-pointer gap-1 px-3 py-2.5 hover:border-ring">
         <div className="flex items-center gap-2">
-          <span className={cn("size-2 rounded-full", agentStateColor[w.state], w.state === "working" && "animate-pulse")} />
+          <AgentFace id={w.id} expression={expressionOf(w.state)} small still className="size-6" />
           <span className={cn("truncate text-xs", !w.name && "font-mono")}>{w.name ?? w.id}</span>
           <span className="ml-auto text-xs text-muted-foreground">{w.state}</span>
         </div>

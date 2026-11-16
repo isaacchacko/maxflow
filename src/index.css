@@ -201,13 +201,20 @@
 }
 .shimmer * { color: inherit; }
 .shimmer code { background: none; padding: 0; }
-/* The mark's face blinks every few seconds and now and then glances aside. */
-@keyframes mark-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
-@keyframes mark-glance { 0%, 55%, 78%, 100% { transform: translateX(0); } 60%, 73% { transform: translateX(1.6px); } }
-.mark-blink { transform-box: fill-box; transform-origin: center; animation: mark-blink 4.6s ease-in-out infinite; }
-.mark-glance { animation: mark-glance 11s ease-in-out infinite; }
+/* An agent's face: it blinks and looks about while idle, glances up and around while thinking, and breathes while asleep. */
+.agent-face :is(.face-sway, .face-look, .face-blink) { transform-box: fill-box; transform-origin: center; }
+@keyframes face-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.12); } }
+@keyframes face-look { 0%, 40%, 100% { transform: translate(0, 0); } 46%, 60% { transform: translate(1.2px, 0); } 66%, 82% { transform: translate(-1px, 0.3px); } }
+@keyframes face-think { 0%, 100% { transform: translate(0.4px, -0.6px); } 35% { transform: translate(1.4px, -1.2px); } 70% { transform: translate(-0.6px, -1px); } }
+@keyframes face-sway { 0%, 100% { transform: rotate(-2.5deg); } 50% { transform: rotate(2.5deg); } }
+@keyframes face-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04, 0.97); } }
+:is(.face-idle, .face-waiting, .face-thinking, .face-error) .face-blink { animation: face-blink 5.2s ease-in-out infinite; }
+:is(.face-idle, .face-waiting) .face-look { animation: face-look 9s ease-in-out infinite; }
+.face-thinking .face-look { animation: face-think 2.6s ease-in-out infinite; }
+.face-thinking .face-sway { animation: face-sway 3.2s ease-in-out infinite; }
+.face-asleep .face-sway { animation: face-breathe 4.8s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .working-ring, .working-pill::before, .shimmer, .mark-blink, .mark-glance { animation: none; }
+  .working-ring, .working-pill::before, .shimmer, .agent-face * { animation: none !important; }
 }
 /* While the image viewer is open nothing under its scrim moves: a turning ring repaints the page beneath every frame, and with it
    re-rasters the inbox's full-size image previews, which made zooming crawl. */

@@ -1,6 +1,6 @@
 import { Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Working } from "@/components/Working";
+import { AgentFace } from "@/components/AgentFace";
 import { card, surface } from "@/lib/surface";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
@@ -56,7 +56,7 @@ function CommandRow({ t, active, open, compact, menu, onToggle, onResolve }: { t
         title={compact ? status : undefined}
         className={cn("flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 text-sm hover:bg-muted/50", active && "bg-muted/60 shadow-[inset_2px_0_0_var(--color-link)]", t.resolved && "opacity-50")}
       >
-        {result ? <Check className="size-3.5 shrink-0 text-ok" /> : <Working />}
+        {result ? <Check className="size-3.5 shrink-0 text-ok" /> : <AgentFace id={t.routerIds[0] ?? t.id} expression="thinking" small className="size-5" />}
         {/* In the column, the result shares the line with the ask once the column is 28rem wide, and is on hover until then. */}
         <Rich still text={firstLine(asked?.text ?? t.title) || t.title} className={cn("truncate", compact ? "min-w-0 flex-1" : "w-80 shrink-0")} />
         <span className={cn("min-w-0 flex-1 truncate text-xs text-muted-foreground", compact && "hidden @md:block")}>

@@ -3,6 +3,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
+import { AgentFace } from "@/components/AgentFace";
 import { Working } from "@/components/Working";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
@@ -55,13 +56,14 @@ export function Pending({ pending, names }: { pending: NonNullable<Thread["pendi
   const who = `${names.length > 1 ? "routers" : "router"} ${names.join(", ")}`;
   if (pending.stale)
     return (
-      <p data-agent="thread-pending" className="text-xs text-muted-foreground">
+      <p data-agent="thread-pending" className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <AgentFace id={pending.routerIds[0] ?? ""} expression="error" small still className="size-4" />
         {who} stopped without answering · since {when(pending.since)}
       </p>
     );
   return (
-    <p data-agent="thread-pending" className="working-pill flex w-fit max-w-full min-w-0 items-center gap-2 py-1 pr-3 pl-1.5 text-xs font-medium">
-      <Working />
+    <p data-agent="thread-pending" className="working-pill flex w-fit max-w-full min-w-0 items-center gap-2 py-0.5 pr-3 pl-1 text-xs font-medium">
+      <AgentFace id={pending.routerIds[0] ?? ""} expression="thinking" small className="size-5" />
       {/* A router's status is markdown with chips; it may sit inside the inbox row's link, so its chips stay text. */}
       <span className="shimmer min-w-0 truncate">{pending.status ? <Rich still text={`${names[0]}: ${pending.status}…`} /> : `${who} ${names.length > 1 ? "are" : "is"} working on a response…`}</span>
       <span className="text-muted-foreground tabular-nums">since {when(pending.since)}</span>
