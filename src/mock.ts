@@ -78,7 +78,21 @@ export type Agent = {
 /** Where a signal came from: Isaac, a GitHub or Slack sentry, another agent, another sentry, or maxflow itself. */
 export type Source = "isaac" | "gh" | "slack" | "agent" | "sentry" | "maxflow";
 
-export type Signal = { id: string; source: Source; at: string; target: string; text: string; routedTo: string[]; from?: string };
+export type Signal = {
+  id: string;
+  source: Source;
+  at: string;
+  target: string;
+  text: string;
+  routedTo: string[];
+  from?: string;
+  /** Live only: each hop, first where it was sent, then where the funnel routed it after the fact. */
+  route?: { at: string; to: string[]; objective?: string; kind?: string; routed?: boolean }[];
+  /** Live only: the inbox thread Isaac wrote it in. */
+  thread?: string;
+  /** Live only: per recipient, whether it still waits in its inbox, reached its prompt, or the session is gone. */
+  delivery?: Record<string, "queued" | "delivered" | "gone">;
+};
 
 export type Sentry = {
   id: Source;

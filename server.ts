@@ -1120,11 +1120,20 @@ async function world() {
   if (unrouted.length) out.push({ id: front?.id ?? UNROUTED, name: "funnel", role: "router", objectiveId: UNROUTED, scope: "Not routed yet", taskIds: [], state: front ? agentState(front) : "idle", doing: "funnel", cwd: DIR, links: [], wait: null });
 
   const events = await query("signal*/**", 0, 0);
-  const routes = new Map(events.filter((e) => e.topic.startsWith("signal-route/")).map((e) => [(e.data as { seq: number }).seq, e.data as { routedTo: string[]; objective: string }]));
+  const routes = new Map(events.filter((e) => e.topic.startsWith("signal-route/")).map((e) => [(e.data as { seq: number }).seq, { at: e.at, ...(e.data as { routedTo: string[]; objective: string; kind?: string }) }]));
+  // Whether each recipient has it: still queued in its inbox, typed into its prompt, or its session is gone.
+  const delivery = (d: Signal, ids: string[]) => Object.fromEntries(ids.map((id) => {
+    const s = sessions.get(id);
+    const head = d.text.slice(0, 80);
+    return [id, !s || !live(s) ? "gone" : s.inbox.some((t) => t.includes(head)) ? "queued" : "delivered"];
+  }));
   const signals = events.filter((e) => e.topic.startsWith("signal/")).slice(-500).reverse().map((e) => {
     const d = e.data as Signal;
     const r = routes.get(e.seq);
-    return { id: `s${e.seq}`, seq: e.seq, source: d.source, at: iso(e.at), target: d.target, text: d.text, from: d.from, routedTo: r ? [...d.routedTo, ...r.routedTo] : d.routedTo, objective: r?.objective ?? d.objective };
+    // The route in steps: where it went when sent (the funnel, an objective's routers, named sessions), then where the funnel routed it.
+    const route = [{ at: iso(e.at), to: d.routedTo, objective: d.objective }, ...(r ? [{ at: iso(r.at), to: r.routedTo, objective: r.objective, kind: r.kind, routed: true }] : [])];
+    const thread = d.source === "isaac" ? threads.find((t) => t.messages.some((m) => m.from === "isaac" && m.text === d.text))?.id : undefined;
+    return { id: `s${e.seq}`, seq: e.seq, source: d.source, at: iso(e.at), target: d.target, text: d.text, from: d.from, routedTo: r ? [...d.routedTo, ...r.routedTo] : d.routedTo, objective: r?.objective ?? d.objective, route, thread, delivery: delivery(d, [...d.routedTo, ...(r?.routedTo ?? [])]) };
   });
   const mergedInto = (id?: string): string | undefined => { const o = objectives.find((x) => x.id === id); return o?.mergedInto ? mergedInto(o.mergedInto) : id; };
   const objectiveOf = (sig: (typeof signals)[number]) => mergedInto(sig.objective ?? sig.routedTo.map((id) => sessions.get(id)?.role?.objective).find(Boolean));
