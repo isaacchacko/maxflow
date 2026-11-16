@@ -458,8 +458,8 @@ export const columns: { status: Status; label: string }[] = [
 ];
 
 export const agentStateColor: Record<AgentState, string> = {
-  working: "bg-sky-400",
-  waiting: "bg-amber-400",
+  working: "bg-link",
+  waiting: "bg-warn",
   idle: "bg-muted-foreground",
   asleep: "bg-muted-foreground/40",
 };
@@ -473,7 +473,7 @@ export function objectiveStatus(statuses: Status[]): Status {
 
 export const statusColor: Record<Status, string> = {
   todo: "bg-muted-foreground",
-  doing: "bg-sky-400",
-  review: "bg-amber-400",
-  done: "bg-emerald-400",
+  doing: "bg-link",
+  review: "bg-warn",
+  done: "bg-ok",
 };

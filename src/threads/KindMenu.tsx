@@ -23,7 +23,7 @@ export function KindMenu({ thread }: { thread: Thread }) {
         title={`${KINDS[kind].label}: click to change`}
         className="group/kind flex shrink-0 items-center gap-0.5 border border-transparent p-1 text-muted-foreground outline-none hover:border-border hover:text-foreground data-[state=open]:border-border data-[state=open]:text-foreground"
       >
-        <Icon className={cn("size-4", kind === "command" && "text-amber-400")} />
+        <Icon className={cn("size-4", kind === "command" && "text-command")} />
         <ChevronDown className="size-3 opacity-0 group-hover/kind:opacity-100 group-data-[state=open]/kind:opacity-100" />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
@@ -37,12 +37,12 @@ export function KindMenu({ thread }: { thread: Thread }) {
                 onSelect={() => k !== kind && setKind(thread.id, k)}
                 className="flex cursor-pointer items-start gap-2 px-2 py-1.5 outline-none select-none data-highlighted:bg-muted"
               >
-                <KIcon className={cn("mt-0.5 size-3.5 shrink-0", k === "command" ? "text-amber-400" : "text-muted-foreground")} />
+                <KIcon className={cn("mt-0.5 size-3.5 shrink-0", k === "command" ? "text-command" : "text-muted-foreground")} />
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span>{label}</span>
                   <span className="text-xs text-muted-foreground">{means}</span>
                 </span>
-                <Check className={cn("mt-0.5 size-3.5 shrink-0", k === kind ? "text-sky-400" : "invisible")} />
+                <Check className={cn("mt-0.5 size-3.5 shrink-0", k === kind ? "text-link" : "invisible")} />
               </DropdownMenu.Item>
             );
           })}

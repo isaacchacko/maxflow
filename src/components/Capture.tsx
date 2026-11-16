@@ -171,7 +171,7 @@ export function Capture() {
           }}
         >
           {/* Everything outside the box is dimmed; the box is the part that will be captured. */}
-          {box ? <div className="absolute border-2 border-sky-400 shadow-[0_0_0_9999px_rgb(0_0_0/0.45)]" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} /> : <div className="absolute inset-0 bg-black/45" />}
+          {box ? <div className="absolute border-2 border-link shadow-[0_0_0_9999px_rgb(0_0_0/0.45)]" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} /> : <div className="absolute inset-0 bg-black/45" />}
           <p className="absolute top-3 left-1/2 -translate-x-1/2 border bg-background px-3 py-1.5 text-xs text-muted-foreground">
             Drag a region or click a message, card or row · <Kbd>esc</Kbd> cancels
           </p>

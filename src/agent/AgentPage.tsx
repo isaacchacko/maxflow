@@ -39,11 +39,11 @@ function Tty({ agent, lines }: { agent: Agent; lines: Line[] }) {
         {lines.map((l, i) => (
           <div key={i} className="mb-2">
             {l.kind === "system" && <p className="text-muted-foreground/60">{l.text}</p>}
-            {l.kind === "router" && <p className="border-l-2 border-fuchsia-400/60 pl-3 text-fuchsia-300">{l.text}</p>}
-            {l.kind === "sentry" && <p className="border-l-2 border-amber-400/60 pl-3 text-amber-300/90">{l.text}</p>}
+            {l.kind === "router" && <p className="border-l-2 border-router/60 pl-3 text-router">{l.text}</p>}
+            {l.kind === "sentry" && <p className="border-l-2 border-command/60 pl-3 text-command/90">{l.text}</p>}
             {l.kind === "user" && (
               <p className="bg-muted/40 px-2 py-1">
-                <span className="text-sky-400">&gt; </span>
+                <span className="text-link">&gt; </span>
                 {l.text}
               </p>
             )}
@@ -56,7 +56,7 @@ function Tty({ agent, lines }: { agent: Agent; lines: Line[] }) {
             {l.kind === "tool" && (
               <>
                 <p>
-                  <span className="text-emerald-400">⏺ </span>
+                  <span className="text-ok">⏺ </span>
                   <span className="font-semibold">{l.name}</span>
                   <span className="text-muted-foreground">({l.arg})</span>
                 </p>
@@ -72,7 +72,7 @@ function Tty({ agent, lines }: { agent: Agent; lines: Line[] }) {
         ))}
       </div>
       <form onSubmit={send} className="flex items-center gap-2 border-t px-4 py-2.5">
-        <span className="text-sky-400">&gt;</span>
+        <span className="text-link">&gt;</span>
         <input
           data-agent="tty-input"
           value={draft}
@@ -225,7 +225,7 @@ function RouterSidebar({ router }: { router: Agent }) {
         {peers.map(r => (
           <a key={r.id} href={`#agent/${r.id}`} className="flex flex-col px-1 py-1 hover:bg-muted">
             <span className="flex items-center gap-1.5 font-mono text-xs">
-              <Network className="size-3 text-fuchsia-400" />
+              <Network className="size-3 text-router" />
               {r.id}
             </span>
             <span className="truncate text-xs text-muted-foreground">{r.scope}</span>
@@ -273,7 +273,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
             <ArrowLeft />
           </a>
         </Button>
-        {agent.role === "router" ? <Network className="size-4 text-fuchsia-400" /> : <span className={cn("size-2.5", agentStateColor[agent.state])} />}
+        {agent.role === "router" ? <Network className="size-4 text-router" /> : <span className={cn("size-2.5", agentStateColor[agent.state])} />}
         <h1 className={cn("text-lg", !agent.name && "font-mono")}>{agent.name ?? agent.id}</h1>
         <Badge variant="outline">{agent.role}</Badge>
         {agent.role === "router" && <span className="truncate text-sm text-muted-foreground">{agent.scope}</span>}
@@ -337,7 +337,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
             {parent && (
               <Row label="Router">
                 <a href={`#agent/${parent.id}`} className="flex min-w-0 items-center gap-1.5 hover:underline">
-                  <Network className="size-3.5 shrink-0 text-fuchsia-400" />
+                  <Network className="size-3.5 shrink-0 text-router" />
                   <span className="truncate font-mono text-xs">{parent.id}</span>
                 </a>
               </Row>
@@ -426,7 +426,7 @@ function SentryPage({ id, back }: { id: string; back: string }) {
             <ArrowLeft />
           </a>
         </Button>
-        <Radar className="size-4 text-amber-400" />
+        <Radar className="size-4 text-command" />
         <h1 className="text-lg">{sentry.name}</h1>
         <Badge variant="outline">sentry</Badge>
       </header>
@@ -437,7 +437,7 @@ function SentryPage({ id, back }: { id: string; back: string }) {
         <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">
           <Section title="Properties">
             <Row label="State">
-              <span className={cn("size-2", sentry.running ? "bg-emerald-400" : "bg-red-400")} />
+              <span className={cn("size-2", sentry.running ? "bg-ok" : "bg-destructive")} />
               {sentry.running ? "running" : "exited"}
             </Row>
             <Row label="Started">{new Date(sentry.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</Row>

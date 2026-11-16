@@ -13,11 +13,11 @@ import { agentStore, objectiveStore, pathOf, signalStore, sourceStore, splitRout
 import { Rich } from "@/threads/Rich";
 
 const look: Record<Source, { icon: typeof User; text: string; ring: string }> = {
-  isaac: { icon: User, text: "text-sky-400", ring: "border-sky-400/60" },
-  gh: { icon: GitPullRequest, text: "text-emerald-400", ring: "border-emerald-400/60" },
-  slack: { icon: Hash, text: "text-amber-400", ring: "border-amber-400/60" },
+  isaac: { icon: User, text: "text-link", ring: "border-link/60" },
+  gh: { icon: GitPullRequest, text: "text-ok", ring: "border-ok/60" },
+  slack: { icon: Hash, text: "text-command", ring: "border-command/60" },
   agent: { icon: Bot, text: "text-agent", ring: "border-agent/60" },
-  sentry: { icon: Radar, text: "text-orange-400", ring: "border-orange-400/60" },
+  sentry: { icon: Radar, text: "text-warn", ring: "border-warn/60" },
   maxflow: { icon: Waypoints, text: "text-muted-foreground", ring: "border-muted-foreground/60" },
 };
 
@@ -402,7 +402,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
           <div className="flex flex-wrap gap-1">
             {t.routerIds.map(r => (
               <span key={r} className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
-                <Network className="size-2.5 text-fuchsia-400" />
+                <Network className="size-2.5 text-router" />
                 {r}
               </span>
             ))}
@@ -465,12 +465,12 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
         {...node(id)}
         onClick={open(`agent/${r.id}`)}
         className={cn(
-          "cursor-pointer gap-1 border-fuchsia-400/30 px-3 py-2.5 hover:border-fuchsia-400",
+          "cursor-pointer gap-1 border-router/30 px-3 py-2.5 hover:border-router",
           fresh === r.id && "agent-edited animate-in fade-in zoom-in-95",
         )}
       >
         <div className="flex items-center gap-2">
-          <Network className="size-3.5 text-fuchsia-400" />
+          <Network className="size-3.5 text-router" />
           <span className={cn("truncate text-xs", !r.name && "font-mono")}>{r.name ?? r.id}</span>
           <span className={cn("size-1.5 rounded-full", agentStateColor[r.state])} />
           <span className="ml-auto text-xs text-muted-foreground">{crew} {crew === 1 ? "agent" : "agents"}</span>
@@ -621,7 +621,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
                     >
                       <Icon className={cn("size-3.5", look[s.id].text)} />
                       {s.label}
-                      <span className={cn("size-1.5 rounded-full", s.state === "backoff" ? "bg-amber-400" : "animate-pulse bg-emerald-400")} />
+                      <span className={cn("size-1.5 rounded-full", s.state === "backoff" ? "bg-warn" : "animate-pulse bg-ok")} />
                       <span className="text-muted-foreground">{s.state === "live" ? "live" : `${s.state} · ${s.every}`}</span>
                     </button>
                   );
@@ -630,9 +630,9 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
               <form
                 onSubmit={send}
                 onClick={e => e.stopPropagation()}
-                className="flex items-center gap-3 rounded-lg border border-sky-400/40 bg-card px-3 py-1.5 focus-within:border-sky-400"
+                className="flex items-center gap-3 rounded-lg border border-link/40 bg-card px-3 py-1.5 focus-within:border-link"
               >
-                <User className="size-3.5 shrink-0 text-sky-400" />
+                <User className="size-3.5 shrink-0 text-link" />
                 <span className="max-w-28 shrink-0 truncate font-mono text-xs text-muted-foreground">chat</span>
                 <Input
                   data-agent="log-composer"
@@ -665,7 +665,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
                           <Icon className={cn("size-3.5 shrink-0", look[s.source].text)} />
                           <span className="w-24 shrink-0 truncate font-mono text-xs text-muted-foreground">{s.target}</span>
                           <span className="min-w-0 flex-1 truncate">{s.text}</span>
-                          {s.routedTo.length === 0 && <span className="shrink-0 text-xs text-amber-400">unrouted</span>}
+                          {s.routedTo.length === 0 && <span className="shrink-0 text-xs text-warn">unrouted</span>}
                         </li>
                       );
                     })}

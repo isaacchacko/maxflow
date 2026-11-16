@@ -52,9 +52,9 @@ function CommandRow({ t, active, open, compact, menu, onToggle, onResolve }: { t
         data-agent={`command:${t.id}`}
         onClick={e => (e.target as Element).closest("a, button") || onToggle()}
         title={compact ? status : undefined}
-        className={cn("flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-sm hover:bg-muted/40", active && "bg-muted/40 shadow-[inset_2px_0_0_var(--color-sky-400)]", t.resolved && "opacity-50")}
+        className={cn("flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-sm hover:bg-muted/40", active && "bg-muted/40 shadow-[inset_2px_0_0_var(--color-link)]", t.resolved && "opacity-50")}
       >
-        {result ? <Check className="size-3.5 shrink-0 text-emerald-400" /> : <span className="inline-block w-3.5 shrink-0 animate-spin text-center text-agent">✻</span>}
+        {result ? <Check className="size-3.5 shrink-0 text-ok" /> : <span className="inline-block w-3.5 shrink-0 animate-spin text-center text-agent">✻</span>}
         <Rich still text={firstLine(asked?.text ?? t.title) || t.title} className={cn("truncate", compact ? "min-w-0 flex-1" : "w-80 shrink-0")} />
         {!compact && (
           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
@@ -70,7 +70,7 @@ function CommandRow({ t, active, open, compact, menu, onToggle, onResolve }: { t
           <KINDS.conversation.icon className="size-3" />
           {!compact && "talk it through"}
         </button>
-        <button data-agent={`inbox-resolve:${t.id}`} title={t.resolved ? "Reopen" : "Resolve"} onClick={onResolve} className={cn("shrink-0 border p-0.5 hover:border-ring", t.resolved ? "text-emerald-400" : "text-muted-foreground opacity-0 group-hover:opacity-100", compact && "hidden group-hover:block")}>
+        <button data-agent={`inbox-resolve:${t.id}`} title={t.resolved ? "Reopen" : "Resolve"} onClick={onResolve} className={cn("shrink-0 border p-0.5 hover:border-ring", t.resolved ? "text-ok" : "text-muted-foreground opacity-0 group-hover:opacity-100", compact && "hidden group-hover:block")}>
           <Check className="size-3" />
         </button>
         <span className={cn("w-8 shrink-0 text-right text-xs text-muted-foreground tabular-nums", compact && "group-hover:hidden")}>{last && ago(Date.parse(last))}</span>
@@ -83,7 +83,7 @@ function CommandRow({ t, active, open, compact, menu, onToggle, onResolve }: { t
             ))}
           </ShotScope.Provider>
           {!result && t.pending && <p className="text-xs text-muted-foreground">waiting since {when(t.pending.since)}</p>}
-          <a href={`#thread/${t.id}`} className="mt-1 inline-block text-xs text-sky-400 hover:underline">
+          <a href={`#thread/${t.id}`} className="mt-1 inline-block text-xs text-link hover:underline">
             open the thread
           </a>
         </div>
@@ -156,7 +156,7 @@ export function InboxView() {
             data-agent={`inbox-resolve:${t.id}`}
             title={t.resolved ? "Reopen" : "Resolve"}
             onClick={() => toggle(t)}
-            className={cn("absolute top-2 right-3 z-10 border p-1 hover:border-ring", t.resolved ? "text-emerald-400" : "bg-background text-muted-foreground opacity-0 group-hover:opacity-100")}
+            className={cn("absolute top-2 right-3 z-10 border p-1 hover:border-ring", t.resolved ? "text-ok" : "bg-background text-muted-foreground opacity-0 group-hover:opacity-100")}
           >
             <Check className="size-3.5" />
           </button>
@@ -166,7 +166,7 @@ export function InboxView() {
             onClick={() => setKind(t.id, "command")}
             className="absolute top-2 right-11 z-10 flex items-center gap-1 border bg-background px-1.5 py-0.5 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 hover:border-ring hover:text-foreground"
           >
-            <KINDS.command.icon className="size-3 text-amber-400" />
+            <KINDS.command.icon className="size-3 text-command" />
             just do it
           </button>
           <div className={cn(t.resolved && "opacity-50")}>
@@ -184,7 +184,7 @@ export function InboxView() {
               onClick={e => (e.target as Element).closest("a") || (location.hash = `thread/${t.id}`)}
               meta={
                 <span className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
-                  {t.asks && <span className="shrink-0 font-medium text-amber-400">needs you</span>}
+                  {t.asks && <span className="shrink-0 font-medium text-warn">needs you</span>}
                   <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : t.asks ? "" : "routing…"}</span>
                   {t.resolved && <Check className="size-3 shrink-0 self-center" />}
                 </span>
@@ -202,7 +202,7 @@ export function InboxView() {
   const strip = allCommands.length > 0 && (
     <section data-agent="inbox-commands" className="flex flex-col gap-1">
       <h2 className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-        <KINDS.command.icon className="size-3 text-amber-400" />
+        <KINDS.command.icon className="size-3 text-command" />
         Commands · {earlier ? "all" : "today"}
       </h2>
       <ol className="flex flex-col border empty:hidden">
@@ -236,7 +236,7 @@ export function InboxView() {
             Resolved ({resolved})
           </button>
         )}
-        {needsYou.length > 0 && <ol className="flex flex-col border border-amber-400/40">{needsYou.map(({ t }) => conversationRow(t))}</ol>}
+        {needsYou.length > 0 && <ol className="flex flex-col border border-warn/40">{needsYou.map(({ t }) => conversationRow(t))}</ol>}
         {!wide && strip}
         {!wide && strip && conversations.length > 0 && <h2 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Conversations</h2>}
         <ol className="flex flex-col border empty:hidden">{conversations.map(({ t }) => conversationRow(t))}</ol>

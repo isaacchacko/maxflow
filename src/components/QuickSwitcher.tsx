@@ -192,7 +192,7 @@ export function QuickSwitcher({ views }: { views: readonly { id: string; label: 
               >
                 <span className="flex w-5 shrink-0 justify-center">{item.icon}</span>
                 <span className="max-w-[65%] shrink-0 truncate">{item.label}</span>
-                {item.detail && <Rich still text={item.kind === "Tasks" ? `\`${item.detail}\`` : item.detail} className={cn("min-w-0 truncate text-xs", /^\d+ new$/.test(item.detail) ? "text-rose-400" : "text-muted-foreground")} />}
+                {item.detail && <Rich still text={item.kind === "Tasks" ? `\`${item.detail}\`` : item.detail} className={cn("min-w-0 truncate text-xs", /^\d+ new$/.test(item.detail) ? "text-new" : "text-muted-foreground")} />}
               </button>
             </div>
           ))}

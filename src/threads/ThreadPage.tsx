@@ -77,7 +77,7 @@ function CommandStatus({ threadId, messageId, result }: { threadId: string; mess
   return (
     <div data-agent={`command-status:${messageId}`} className="mt-1 ml-11.5 flex flex-col gap-1">
       <p className="flex min-w-0 items-center gap-2 text-xs">
-        {result ? <Check className="size-3 shrink-0 text-emerald-400" /> : <span className="inline-block animate-spin text-agent">✻</span>}
+        {result ? <Check className="size-3 shrink-0 text-ok" /> : <span className="inline-block animate-spin text-agent">✻</span>}
         <button onClick={() => result && setOpen(v => !v)} className={cn("min-w-0 truncate text-left text-muted-foreground", result && "hover:text-foreground")}>
           {result ? (
             <>
@@ -337,7 +337,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
               return (
                 <a key={rid} href={`#agent/${rid}`} className="flex flex-col px-1 py-1 hover:bg-muted">
                   <span className="flex items-center gap-1.5 text-xs">
-                    <Network className="size-3 text-fuchsia-400" />
+                    <Network className="size-3 text-router" />
                     {r?.name ?? rid}
                   </span>
                   {r?.scope && <span className="truncate text-xs text-muted-foreground">{r.scope}</span>}

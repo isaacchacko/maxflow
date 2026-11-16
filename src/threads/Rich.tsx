@@ -78,21 +78,21 @@ export function RefChip({ r, still }: { r: Ref; still?: boolean }) {
         title={m ? undefined : `No message ${r.id} in maxflow now`}
         className={cn("inline-flex items-center gap-1 border px-1 align-baseline text-[0.92em] not-italic hover:border-ring", !m && "border-dashed text-muted-foreground line-through")}
       >
-        <MessageSquareQuote className="size-3 text-sky-400" />
+        <MessageSquareQuote className="size-3 text-link" />
         {m ? `${who} · ${m.at.slice(11, 16)}` : messageId}
       </Tag>
     );
   }
   if (r.kind === "thread") {
     const t = threads.find(x => x.id === r.id);
-    return chip(`#thread/${r.id}`, !!t, <MessagesSquare className="size-3 text-sky-400" />, t?.title ?? r.id);
+    return chip(`#thread/${r.id}`, !!t, <MessagesSquare className="size-3 text-link" />, t?.title ?? r.id);
   }
   const a = agents.find(x => x.id === r.id);
   const sentry = sentries.find(x => x.id === r.id);
   return chip(
     `#agent/${r.id}`,
     !!(a ?? sentry),
-    a?.role === "router" || r.kind === "router" ? <Network className="size-3 text-fuchsia-400" /> : sentry ? <Radar className="size-3 text-muted-foreground" /> : <span className={cn("size-1.5", a ? agentStateColor[a.state] : "bg-muted-foreground")} />,
+    a?.role === "router" || r.kind === "router" ? <Network className="size-3 text-router" /> : sentry ? <Radar className="size-3 text-muted-foreground" /> : <span className={cn("size-1.5", a ? agentStateColor[a.state] : "bg-muted-foreground")} />,
     a?.name ?? sentry?.name ?? r.id,
     true,
   );
@@ -151,7 +151,7 @@ function breakLines(node: Node) {
 }
 const remarkBreaks = () => breakLines;
 
-const prColor = { open: "text-emerald-400", merged: "text-violet-400", closed: "text-red-400" } as const;
+const prColor = { open: "text-ok", merged: "text-merged", closed: "text-destructive" } as const;
 function PrChip({ repo, n }: { repo: string; n: string }) {
   const pr = prStore.use()[`${repo}#${n}`];
   return (
@@ -166,7 +166,7 @@ function PrChip({ repo, n }: { repo: string; n: string }) {
 function LinearChip({ issue }: { issue: string }) {
   return (
     <a href={`${LINEAR}/${issue}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 border px-1 align-baseline text-[0.92em] tabular-nums hover:border-ring">
-      <SquareKanban className="size-3 text-indigo-400" />
+      <SquareKanban className="size-3 text-link" />
       {issue}
     </a>
   );
@@ -197,7 +197,7 @@ const md: Components = {
     const issue = href.match(/^linear:([A-Z]+-\d+)$/) ?? href.match(/^https:\/\/linear\.app\/[\w-]+\/issue\/([A-Z]+-\d+)/);
     if (issue) return <LinearChip issue={issue[1]!} />;
     return (
-      <a href={href} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-0.5 text-sky-400 hover:underline">
+      <a href={href} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-0.5 text-link hover:underline">
         {children}
         <ExternalLink className="size-3" />
       </a>
@@ -236,7 +236,7 @@ const inline: Components = {
   img: ({ src = "" }) => {
     const name = typeof src === "string" && src.match(/\/uploads\/([\w.-]+)$/)?.[1];
     return name ? (
-      <Upload name={name} className="text-sky-400 hover:underline">
+      <Upload name={name} className="text-link hover:underline">
         [image]
       </Upload>
     ) : null;
@@ -247,9 +247,9 @@ const inlineStill: Components = {
   ...inline,
   a: ({ href = "", children }) => {
     const ref = href.match(/^ref:(agent|router|task|objective|thread|msg)\/(.+)$/);
-    return ref ? <RefChip r={{ kind: ref[1] as Ref["kind"], id: decodeURIComponent(ref[2]!) }} still /> : <span className="text-sky-400">{children}</span>;
+    return ref ? <RefChip r={{ kind: ref[1] as Ref["kind"], id: decodeURIComponent(ref[2]!) }} still /> : <span className="text-link">{children}</span>;
   },
-  img: () => <span className="text-sky-400">[image]</span>,
+  img: () => <span className="text-link">[image]</span>,
 };
 const keepRefs = (url: string) => (/^(ref|pr|linear):/.test(url) ? url : defaultUrlTransform(url));
 
@@ -265,7 +265,7 @@ export function Markdown({ text, className }: { text: string; className?: string
 }
 
 // A worker's tile keeps one color for its whole life, picked from its session id.
-const TILE = ["bg-sky-600", "bg-emerald-600", "bg-amber-600", "bg-rose-600", "bg-teal-600", "bg-indigo-600", "bg-orange-600", "bg-cyan-700"];
+const TILE = ["bg-tile-1", "bg-tile-2", "bg-tile-3", "bg-tile-4", "bg-tile-5", "bg-tile-6", "bg-tile-7", "bg-tile-8"];
 const tileOf = (id: string) => TILE[[...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % TILE.length]!;
 const GITHUB_LOGIN = "isaacchacko";
 
@@ -280,7 +280,7 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
   const tile = cn("relative flex shrink-0 items-center justify-center font-semibold", small ? "size-5 text-[10px] [&>svg]:size-3" : "size-9 text-sm");
   if (from === "isaac")
     return broken ? (
-      <span className={cn(tile, "bg-sky-600 text-white")}>IC</span>
+      <span className={cn(tile, "bg-tile-1 text-tile-ink")}>IC</span>
     ) : (
       <img src={`https://avatars.githubusercontent.com/${GITHUB_LOGIN}?s=72`} alt="" onError={() => setBroken(true)} className={cn("shrink-0 object-cover", small ? "size-5" : "size-9")} />
     );
@@ -299,12 +299,12 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
   const a = agents.find(x => x.id === from);
   if (a?.role === "router")
     return (
-      <span className={cn(tile, "border border-fuchsia-400/30 bg-fuchsia-500/15")}>
-        <Network className="size-4 text-fuchsia-400" />
+      <span className={cn(tile, "border border-router/30 bg-router/15")}>
+        <Network className="size-4 text-router" />
       </span>
     );
   return (
-    <span className={cn(tile, tileOf(from), "text-white")}>
+    <span className={cn(tile, tileOf(from), "text-tile-ink")}>
       {(a?.name ?? names[from] ?? from).match(/[a-z0-9]/i)?.[0]?.toUpperCase()}
       {!small && a && <span className={cn("absolute -right-0.5 -bottom-0.5 size-2.5 ring-2 ring-background", agentStateColor[a.state])} />}
     </span>

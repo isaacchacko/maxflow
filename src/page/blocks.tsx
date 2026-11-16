@@ -68,7 +68,7 @@ function StepsBlock({ block }: Props<"steps">) {
   );
 }
 
-const tone = { good: "text-emerald-400", bad: "text-red-400", flat: "text-muted-foreground" };
+const tone = { good: "text-ok", bad: "text-destructive", flat: "text-muted-foreground" };
 
 function StatBlock({ block }: Props<"stat">) {
   return (
@@ -109,7 +109,7 @@ function ChartBlock({ block }: Props<"chart">) {
   );
 }
 
-const who = { isaac: "bg-sky-500", agent: "bg-agent", router: "bg-fuchsia-400", sentry: "bg-amber-500" };
+const who = { isaac: "bg-link", agent: "bg-agent", router: "bg-router", sentry: "bg-command" };
 
 function ActivityBlock({ subject }: Props<"activity">) {
   return (
@@ -129,9 +129,9 @@ function ActivityBlock({ subject }: Props<"activity">) {
 }
 
 const check = {
-  pass: <Check className="size-3.5 text-emerald-400" />,
-  fail: <X className="size-3.5 text-red-400" />,
-  running: <Loader2 className="size-3.5 animate-spin text-amber-400" />,
+  pass: <Check className="size-3.5 text-ok" />,
+  fail: <X className="size-3.5 text-destructive" />,
+  running: <Loader2 className="size-3.5 animate-spin text-command" />,
 };
 
 function PrBlock({ block, subject }: Props<"pr">) {
@@ -188,9 +188,9 @@ function QuestionBlock({ block, subject }: Props<"question">) {
     putBlock(subject.ref, { id: block.id, kind: "note", w: block.w, h: block.h, title: "Decision", text: `${option}. ${block.question}` });
   };
   return (
-    <Card className="h-full gap-3 overflow-hidden border-amber-400/40 bg-amber-400/5 py-3">
+    <Card className="h-full gap-3 overflow-hidden border-warn/40 bg-warn/5 py-3">
       <CardHeader className="px-4">
-        <CardTitle className="text-xs font-medium tracking-wide text-amber-400 uppercase">Needs you</CardTitle>
+        <CardTitle className="text-xs font-medium tracking-wide text-warn uppercase">Needs you</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col justify-between gap-3 px-4">
         <p className="text-sm leading-snug">{block.question}</p>
@@ -253,7 +253,7 @@ export function AgentRow({ id, indent }: { id: string; indent?: boolean }) {
   const agent = agentStore.use().find(a => a.id === id)!;
   return (
     <a href={`#agent/${id}`} data-agent={`agent:${id}`} className={cn("flex items-center gap-2 py-1 text-sm hover:bg-muted", indent && "ml-3 border-l pl-4")}>
-      {agent.role === "router" ? <Network className="size-3.5 shrink-0 text-fuchsia-400" /> : <span className={cn("ml-1 size-2 shrink-0 rounded-full", agentStateColor[agent.state])} />}
+      {agent.role === "router" ? <Network className="size-3.5 shrink-0 text-router" /> : <span className={cn("ml-1 size-2 shrink-0 rounded-full", agentStateColor[agent.state])} />}
       <span className="shrink-0 truncate text-xs">{agent.name ?? agent.id}</span>
       <Rich still text={agent.doing} className="truncate text-muted-foreground" />
     </a>

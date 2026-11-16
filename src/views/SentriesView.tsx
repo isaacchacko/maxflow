@@ -24,8 +24,8 @@ export function SentriesView() {
           const running = name === "vis-factory" ? workers.length > 0 : !!s?.running;
           const row = (
             <>
-              <span className={cn("size-2 shrink-0", running ? "bg-emerald-400" : "bg-muted-foreground/40")} />
-              <Radar className="size-3.5 shrink-0 text-amber-400" />
+              <span className={cn("size-2 shrink-0", running ? "bg-ok" : "bg-muted-foreground/40")} />
+              <Radar className="size-3.5 shrink-0 text-command" />
               <span className="w-28 shrink-0 font-mono text-sm">{name}</span>
               <span className="w-16 shrink-0 text-xs text-muted-foreground">{AGENTS.has(name) || name === "vis-factory" ? "agent" : "script"}</span>
               <span className="w-24 shrink-0 text-xs text-muted-foreground">

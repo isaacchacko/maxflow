@@ -15,7 +15,7 @@ export function when(at: string) {
  */
 export function MessageRow({ from, at, text, grouped, active, meta, children, className, bodyClassName, onClick }: { from: string; at: string; text: string; grouped?: boolean; active?: boolean; meta?: React.ReactNode; children?: React.ReactNode; className?: string; bodyClassName?: string; onClick?: (e: React.MouseEvent) => void }) {
   return (
-    <article onClick={onClick} data-from={from} data-at={at} className={cn("group -mx-2 flex gap-2.5 px-2 py-1 hover:bg-muted/40", active && "bg-muted/40 shadow-[inset_2px_0_0_var(--color-sky-400)]", className)}>
+    <article onClick={onClick} data-from={from} data-at={at} className={cn("group -mx-2 flex gap-2.5 px-2 py-1 hover:bg-muted/40", active && "bg-muted/40 shadow-[inset_2px_0_0_var(--color-link)]", className)}>
       {grouped ? <span className="invisible w-9 shrink-0 pt-0.5 text-right text-[10px] text-muted-foreground tabular-nums group-hover:visible">{at.slice(11, 16)}</span> : <Avatar from={from} />}
       <div className="min-w-0 flex-1">
         {!grouped && (

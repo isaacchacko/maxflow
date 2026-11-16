@@ -29,8 +29,8 @@ export function Replies({ t }: { t: Thread }) {
           ))}
         </span>
       )}
-      {replies.length > 0 ? <span className="font-semibold text-sky-400">{replies.length === 1 ? "1 reply" : `${replies.length} replies`}</span> : !t.pending && <span className="text-muted-foreground">No replies yet</span>}
-      {fresh > 0 && <span className="bg-rose-500/15 px-1 font-medium text-rose-400">{fresh} new</span>}
+      {replies.length > 0 ? <span className="font-semibold text-link">{replies.length === 1 ? "1 reply" : `${replies.length} replies`}</span> : !t.pending && <span className="text-muted-foreground">No replies yet</span>}
+      {fresh > 0 && <span className="bg-new-soft px-1 font-medium text-new">{fresh} new</span>}
       {t.pending ? (
         <Pending pending={t.pending} names={t.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />
       ) : (

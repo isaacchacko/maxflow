@@ -7,8 +7,8 @@ import { when } from "@/threads/MessageRow";
 import { Markdown, RefChip } from "@/threads/Rich";
 
 const deliveryLook = {
-  queued: { label: "queued", className: "text-amber-400" },
-  delivered: { label: "delivered", className: "text-emerald-400" },
+  queued: { label: "queued", className: "text-warn" },
+  delivered: { label: "delivered", className: "text-ok" },
   gone: { label: "session gone", className: "text-muted-foreground" },
 };
 
@@ -44,7 +44,7 @@ function EventDetail({ signal, onClose }: { signal: Signal; onClose: () => void 
     const a = agents.find(x => x.id === id);
     return (
       <a key={id} href={`#agent/${id}`} className="flex items-center gap-1.5 truncate hover:underline">
-        {a?.role === "router" ? <Network className="size-3.5 shrink-0 text-fuchsia-400" /> : <Bot className="size-3.5 shrink-0 text-muted-foreground" />}
+        {a?.role === "router" ? <Network className="size-3.5 shrink-0 text-router" /> : <Bot className="size-3.5 shrink-0 text-muted-foreground" />}
         {a?.name ?? id}
       </a>
     );
@@ -65,7 +65,7 @@ function EventDetail({ signal, onClose }: { signal: Signal; onClose: () => void 
         <section data-agent="event-route" className="flex flex-col gap-2">
           <h3 className="text-xs font-medium text-muted-foreground">Routed to</h3>
           {route.length === 0 || route.every(h => h.to.length === 0) ? (
-            <span className="text-sm text-amber-400">unrouted</span>
+            <span className="text-sm text-warn">unrouted</span>
           ) : (
             <ol className="flex flex-col gap-2.5 border-l pl-3">
               {route.map((hop, n) => (

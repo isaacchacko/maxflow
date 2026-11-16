@@ -7,7 +7,7 @@ export function flashMessage(id = arriving.message) {
   const el = id && document.querySelector(`[data-msg="${id}"]`);
   if (!el) return;
   el.scrollIntoView({ block: "center" });
-  el.animate([{ backgroundColor: "color-mix(in oklch, var(--color-sky-400) 25%, transparent)" }, { backgroundColor: "transparent" }], { duration: 1600, easing: "ease-out" });
+  el.animate([{ backgroundColor: "color-mix(in oklch, var(--color-link) 25%, transparent)" }, { backgroundColor: "transparent" }], { duration: 1600, easing: "ease-out" });
   return id;
 }
 
