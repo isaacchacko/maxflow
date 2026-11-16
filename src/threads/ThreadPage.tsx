@@ -3,6 +3,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
+import { Working } from "@/components/Working";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { agentStore, answerHere, objectiveStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
@@ -59,10 +60,10 @@ export function Pending({ pending, names }: { pending: NonNullable<Thread["pendi
       </p>
     );
   return (
-    <p data-agent="thread-pending" className="flex min-w-0 items-center gap-2 text-xs text-agent">
-      <span className="inline-block animate-spin">✻</span>
+    <p data-agent="thread-pending" className="working-pill flex w-fit max-w-full min-w-0 items-center gap-2 py-1 pr-3 pl-1.5 text-xs font-medium">
+      <Working />
       {/* A router's status is markdown with chips; it may sit inside the inbox row's link, so its chips stay text. */}
-      <span className="min-w-0 truncate animate-pulse">{pending.status ? <Rich still text={`${names[0]}: ${pending.status}…`} /> : `${who} ${names.length > 1 ? "are" : "is"} working on a response…`}</span>
+      <span className="shimmer min-w-0 truncate">{pending.status ? <Rich still text={`${names[0]}: ${pending.status}…`} /> : `${who} ${names.length > 1 ? "are" : "is"} working on a response…`}</span>
       <span className="text-muted-foreground tabular-nums">since {when(pending.since)}</span>
     </p>
   );
@@ -77,7 +78,7 @@ function CommandStatus({ threadId, messageId, result }: { threadId: string; mess
   return (
     <div data-agent={`command-status:${messageId}`} className="mt-1 ml-11.5 flex flex-col gap-1">
       <p className="flex min-w-0 items-center gap-2 text-xs">
-        {result ? <Check className="size-3 shrink-0 text-ok" /> : <span className="inline-block animate-spin text-agent">✻</span>}
+        {result ? <Check className="size-3 shrink-0 text-ok" /> : <Working className="size-3" />}
         <button onClick={() => result && setOpen(v => !v)} className={cn("min-w-0 truncate text-left text-muted-foreground", result && "hover:text-foreground")}>
           {result ? (
             <>
@@ -88,7 +89,7 @@ function CommandStatus({ threadId, messageId, result }: { threadId: string; mess
           )}
         </button>
         {result && messageId && (
-          <button data-agent={`answer-here:${messageId}`} onClick={() => answerHere(threadId, messageId)} className="shrink-0 border px-1.5 text-muted-foreground hover:border-ring hover:text-foreground">
+          <button data-agent={`answer-here:${messageId}`} onClick={() => answerHere(threadId, messageId)} className="shrink-0 rounded-full border bg-card px-2 text-muted-foreground hover:border-ring hover:text-foreground">
             ↗ answer here instead
           </button>
         )}
@@ -224,7 +225,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
             <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
           </Fragment>
         ))}
-        <h1 className={cn("truncate text-lg font-semibold", thread.resolved && "text-muted-foreground")}>{thread.title}</h1>
+        <h1 className={cn("truncate text-xl font-semibold tracking-tight", thread.resolved && "text-muted-foreground")}>{thread.title}</h1>
         {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
         <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-resolve" onClick={() => resolveOrReopen(thread, back)}>
           {thread.resolved ? <RotateCcw /> : <Check />}
@@ -234,7 +235,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
       </RowMenu>
 
       <div className="flex min-h-0 flex-1 gap-4">
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col border">
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-card shadow-card">
           {/* An image here opens the viewer over this thread's images, the root's included and its subthreads' not. */}
           <ShotScope.Provider value={shotsOf([...(root ? [root] : []), ...replies])}>
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
@@ -254,7 +255,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                 onMouseDown={e => e.preventDefault()}
                 onClick={() => (quoteInto(`thread:${thread.id}`, quoted(selected.text, selected.thread, selected.message)), getSelection()?.removeAllRanges())}
                 style={{ left: selected.x, top: selected.y - 30 }}
-                className="fixed z-20 flex items-center gap-1 border bg-background px-1.5 py-0.5 text-xs shadow-md hover:border-ring"
+                className="fixed z-20 flex items-center gap-1 rounded-full border bg-card px-2 py-0.5 text-xs shadow-raised hover:border-ring"
               >
                 <Quote className="size-3" />
                 Quote
@@ -294,7 +295,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                       data-agent={`reply-in-thread:${m.id}`}
                       title="Reply in thread"
                       onClick={() => openSubthread(thread.id, m.id!)}
-                      className="absolute top-0 right-0 border bg-background p-1 text-muted-foreground opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
+                      className="absolute top-0 right-0 rounded-md border bg-card p-1 text-muted-foreground shadow-card opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
                     >
                       <MessageSquareReply className="size-3.5" />
                     </button>
@@ -304,7 +305,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                       data-agent={`quote:${m.id}`}
                       title="Quote"
                       onClick={() => quoteInto(`thread:${thread.id}`, quoted(m.text, thread.id, m.id!))}
-                      className="absolute top-0 right-7 border bg-background p-1 text-muted-foreground opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
+                      className="absolute top-0 right-7 rounded-md border bg-card p-1 text-muted-foreground shadow-card opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
                     >
                       <Quote className="size-3.5" />
                     </button>
@@ -324,7 +325,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
         <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">
           {objective && (
             <Section title="Objective">
-              <a href={`#objective/${objective.id}`} className="flex items-center gap-1.5 px-1 py-1 text-sm hover:bg-muted">
+              <a href={`#objective/${objective.id}`} className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-sm hover:bg-muted">
                 <Waypoints className="size-3.5 text-agent" />
                 {objective.title}
               </a>
@@ -335,7 +336,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
             {thread.routerIds.map(rid => {
               const r = agents.find(a => a.id === rid);
               return (
-                <a key={rid} href={`#agent/${rid}`} className="flex flex-col px-1 py-1 hover:bg-muted">
+                <a key={rid} href={`#agent/${rid}`} className="flex flex-col rounded-md px-1.5 py-1 hover:bg-muted">
                   <span className="flex items-center gap-1.5 text-xs">
                     <Network className="size-3 text-router" />
                     {r?.name ?? rid}
@@ -358,7 +359,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
           <Section title={`Links · ${links.size}`}>
             {links.size === 0 && <p className="text-xs text-muted-foreground">None</p>}
             {[...links.values()].map(l => (
-              <a key={l.url} href={l.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-1 py-1 text-sm hover:bg-muted">
+              <a key={l.url} href={l.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-muted">
                 <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="truncate">{l.label}</span>
                 <span className="truncate text-xs text-muted-foreground">{new URL(l.url).hostname}</span>
@@ -381,7 +382,7 @@ function NudgeToggle({ on, set }: { on: string; set: (on: boolean) => void }) {
       title={on ? "asking for the answer in a subthread (click to answer inline)" : "ask for the answer in a subthread"}
       onMouseDown={e => e.preventDefault()}
       onClick={() => set(!on)}
-      className={cn("mt-0.5 shrink-0 p-0.5 hover:bg-muted", on ? "text-foreground" : "text-muted-foreground/50")}
+      className={cn("mt-0.5 shrink-0 rounded-md p-0.5 hover:bg-muted", on ? "text-foreground" : "text-muted-foreground/50")}
     >
       <GitBranch className="size-3.5" />
     </button>

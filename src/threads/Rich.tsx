@@ -52,7 +52,7 @@ export function RefChip({ r, still }: { r: Ref; still?: boolean }) {
       href={still ? undefined : href}
       onClick={e => e.stopPropagation()}
       title={found ? undefined : `No ${r.kind} ${r.id} in maxflow now`}
-      className={cn("inline-flex items-center gap-1 border px-1 align-baseline hover:border-ring", mono ? "font-mono text-[0.85em]" : "text-[0.92em]", !found && "border-dashed text-muted-foreground line-through")}
+      className={cn("inline-flex items-center gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline hover:border-ring", mono ? "font-mono text-[0.85em]" : "text-[0.92em]", !found && "border-dashed border-border bg-transparent text-muted-foreground line-through")}
     >
       {icon}
       {label}
@@ -76,7 +76,7 @@ export function RefChip({ r, still }: { r: Ref; still?: boolean }) {
         href={still ? undefined : `#thread/${threadId}`}
         onClick={e => (e.stopPropagation(), !still && (e.preventDefault(), goToMessage(threadId!, messageId)))}
         title={m ? undefined : `No message ${r.id} in maxflow now`}
-        className={cn("inline-flex items-center gap-1 border px-1 align-baseline text-[0.92em] not-italic hover:border-ring", !m && "border-dashed text-muted-foreground line-through")}
+        className={cn("inline-flex items-center gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline text-[0.92em] not-italic hover:border-ring", !m && "border-dashed border-border bg-transparent text-muted-foreground line-through")}
       >
         <MessageSquareQuote className="size-3 text-link" />
         {m ? `${who} · ${m.at.slice(11, 16)}` : messageId}
@@ -155,7 +155,7 @@ const prColor = { open: "text-ok", merged: "text-merged", closed: "text-destruct
 function PrChip({ repo, n }: { repo: string; n: string }) {
   const pr = prStore.use()[`${repo}#${n}`];
   return (
-    <a href={`https://github.com/${repo}/pull/${n}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title={pr?.title} className="inline-flex max-w-96 items-center gap-1 border px-1 align-baseline text-[0.92em] hover:border-ring">
+    <a href={`https://github.com/${repo}/pull/${n}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title={pr?.title} className="inline-flex max-w-96 items-center gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline text-[0.92em] hover:border-ring">
       <GitPullRequest className={cn("size-3 shrink-0", pr ? prColor[pr.state] : "text-muted-foreground")} />
       <span className="shrink-0 tabular-nums">{repo === REPO ? "" : repo}#{n}</span>
       {pr && <span className="truncate text-muted-foreground">{pr.title}</span>}
@@ -165,7 +165,7 @@ function PrChip({ repo, n }: { repo: string; n: string }) {
 
 function LinearChip({ issue }: { issue: string }) {
   return (
-    <a href={`${LINEAR}/${issue}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 border px-1 align-baseline text-[0.92em] tabular-nums hover:border-ring">
+    <a href={`${LINEAR}/${issue}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline text-[0.92em] tabular-nums hover:border-ring">
       <SquareKanban className="size-3 text-link" />
       {issue}
     </a>
@@ -182,8 +182,8 @@ const md: Components = {
   h3: ({ children }) => <h3 className="mt-2.5 mb-1 text-sm font-semibold first:mt-0">{children}</h3>,
   strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
   blockquote: ({ children }) => <blockquote className="my-1.5 border-l-2 pl-3 text-muted-foreground">{children}</blockquote>,
-  code: ({ children, className }) => <code className={cn("bg-muted px-1 font-mono text-[0.9em]", className)}>{children}</code>,
-  pre: ({ children }) => <pre className="my-1.5 overflow-x-auto bg-muted p-2.5 text-xs [&>code]:bg-transparent [&>code]:p-0">{children}</pre>,
+  code: ({ children, className }) => <code className={cn("rounded-md bg-muted px-1 font-mono text-[0.88em]", className)}>{children}</code>,
+  pre: ({ children }) => <pre className="my-1.5 overflow-x-auto rounded-lg bg-muted p-2.5 text-xs [&>code]:bg-transparent [&>code]:p-0">{children}</pre>,
   table: ({ children }) => <table className="my-1.5 border-collapse text-xs">{children}</table>,
   th: ({ children }) => <th className="border px-2 py-1 text-left font-medium">{children}</th>,
   td: ({ children }) => <td className="border px-2 py-1">{children}</td>,
@@ -277,36 +277,36 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
   const names = nameStore.use();
   const [broken, setBroken] = useState(false);
   // Small is the 20px face in a replies line, where a worker's state dot would crowd it.
-  const tile = cn("relative flex shrink-0 items-center justify-center font-semibold", small ? "size-5 text-[10px] [&>svg]:size-3" : "size-9 text-sm");
+  const tile = cn("relative flex shrink-0 items-center justify-center rounded-full font-semibold", small ? "size-5 text-[10px] [&>svg]:size-3" : "size-9 text-sm");
   if (from === "isaac")
     return broken ? (
       <span className={cn(tile, "bg-tile-1 text-tile-ink")}>IC</span>
     ) : (
-      <img src={`https://avatars.githubusercontent.com/${GITHUB_LOGIN}?s=72`} alt="" onError={() => setBroken(true)} className={cn("shrink-0 object-cover", small ? "size-5" : "size-9")} />
+      <img src={`https://avatars.githubusercontent.com/${GITHUB_LOGIN}?s=72`} alt="" onError={() => setBroken(true)} className={cn("shrink-0 rounded-full object-cover", small ? "size-5" : "size-9")} />
     );
   if (objectives.some(o => o.id === from))
     return (
-      <span className={cn(tile, "border bg-agent/15")}>
+      <span className={cn(tile, "bg-agent/10")}>
         <Waypoints className="size-4 text-agent" />
       </span>
     );
   if (sentries.some(x => x.id === from))
     return (
-      <span className={cn(tile, "border bg-muted")}>
+      <span className={cn(tile, "bg-muted")}>
         <Radar className="size-4 text-muted-foreground" />
       </span>
     );
   const a = agents.find(x => x.id === from);
   if (a?.role === "router")
     return (
-      <span className={cn(tile, "border border-router/30 bg-router/15")}>
+      <span className={cn(tile, "bg-muted")}>
         <Network className="size-4 text-router" />
       </span>
     );
   return (
     <span className={cn(tile, tileOf(from), "text-tile-ink")}>
       {(a?.name ?? names[from] ?? from).match(/[a-z0-9]/i)?.[0]?.toUpperCase()}
-      {!small && a && <span className={cn("absolute -right-0.5 -bottom-0.5 size-2.5 ring-2 ring-background", agentStateColor[a.state])} />}
+      {!small && a && <span className={cn("absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-card", agentStateColor[a.state])} />}
     </span>
   );
 }

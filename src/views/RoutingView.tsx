@@ -586,7 +586,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
                   e.stopPropagation();
                   go(to);
                 }}
-                className="flex size-8 items-center justify-center border bg-background text-muted-foreground hover:border-ring hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
+                className="flex size-8 items-center justify-center rounded-lg border bg-card text-muted-foreground shadow-card hover:border-ring hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
               >
                 <Chevron className="size-4" />
               </button>

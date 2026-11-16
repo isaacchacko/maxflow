@@ -64,7 +64,7 @@ export function Drawer({ open, onClose, contentKey, children, className, ...rest
         ref={panel}
         style={timing}
         className={cn(
-          "absolute inset-y-0 right-0 w-[min(520px,100vw)] overflow-y-auto border-l bg-background shadow-2xl transition-[translate,opacity] will-change-[translate,opacity] motion-reduce:transition-none",
+          "absolute inset-y-0 right-0 w-[min(520px,100vw)] overflow-y-auto border-l bg-card shadow-2xl transition-[translate,opacity] will-change-[translate,opacity] motion-reduce:transition-none",
           shown ? "translate-x-0 opacity-100" : "translate-x-full opacity-0",
           open && "pointer-events-auto",
         )}

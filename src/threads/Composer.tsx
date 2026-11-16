@@ -86,19 +86,19 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools 
         <div className="flex flex-wrap gap-2" data-agent={`${agent}-images`}>
           {images.map((path, n) => (
             <div key={path} className="relative">
-              <img src={preview(path)} alt="" className="h-20 max-w-40 border object-cover" />
-              <button type="button" aria-label="Remove image" onClick={() => setImages(images.filter((_, m) => m !== n))} className="absolute top-0.5 right-0.5 bg-background/80 p-0.5 hover:bg-muted">
+              <img src={preview(path)} alt="" className="h-20 max-w-40 rounded-lg border object-cover" />
+              <button type="button" aria-label="Remove image" onClick={() => setImages(images.filter((_, m) => m !== n))} className="absolute top-1 right-1 rounded-full bg-card/90 p-0.5 hover:bg-muted">
                 <X className="size-3" />
               </button>
             </div>
           ))}
-          {uploading > 0 && <div className="flex h-20 w-20 items-center justify-center border text-xs text-muted-foreground">uploading…</div>}
+          {uploading > 0 && <div className="flex h-20 w-20 items-center justify-center rounded-lg border text-xs text-muted-foreground">uploading…</div>}
         </div>
       )}
       {quote && (
         <div className="relative max-h-32 overflow-y-auto pr-6" data-agent={`${agent}-quote`}>
           <Markdown text={quote} className="text-xs" />
-          <button type="button" aria-label="Remove quote" onClick={() => setQuote("")} className="absolute top-0 right-0 p-0.5 hover:bg-muted">
+          <button type="button" aria-label="Remove quote" onClick={() => setQuote("")} className="absolute top-0 right-0 rounded-md p-0.5 hover:bg-muted">
             <X className="size-3" />
           </button>
         </div>

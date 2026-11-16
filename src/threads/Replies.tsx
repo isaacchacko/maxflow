@@ -21,7 +21,7 @@ export function Replies({ t }: { t: Thread }) {
   const fresh = unseenDeep(t, all);
   const faces = [...new Set(replies.map(m => m.from).reverse())].slice(0, 4);
   return (
-    <a href={`#thread/${t.id}`} data-agent={`inbox:${t.id}`} className="mt-1 flex w-fit max-w-full items-center gap-2 border whitespace-nowrap border-transparent py-0.5 pr-2 text-xs hover:border-border hover:bg-background">
+    <a href={`#thread/${t.id}`} data-agent={`inbox:${t.id}`} className="mt-1 -ml-1 flex w-fit max-w-full items-center gap-2 rounded-full border border-transparent py-0.5 pr-2.5 pl-1 text-xs whitespace-nowrap hover:border-border hover:bg-card">
       {faces.length > 0 && (
         <span className="flex gap-0.5">
           {faces.map(f => (
@@ -30,7 +30,7 @@ export function Replies({ t }: { t: Thread }) {
         </span>
       )}
       {replies.length > 0 ? <span className="font-semibold text-link">{replies.length === 1 ? "1 reply" : `${replies.length} replies`}</span> : !t.pending && <span className="text-muted-foreground">No replies yet</span>}
-      {fresh > 0 && <span className="bg-new-soft px-1 font-medium text-new">{fresh} new</span>}
+      {fresh > 0 && <span className="rounded-full bg-new-soft px-1.5 font-medium text-new">{fresh} new</span>}
       {t.pending ? (
         <Pending pending={t.pending} names={t.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />
       ) : (

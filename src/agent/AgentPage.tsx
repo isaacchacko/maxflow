@@ -308,7 +308,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
 
       <div className="flex min-h-0 flex-1 gap-4">
         {live ? (
-          <section className="min-h-0 min-w-0 flex-1 border bg-background p-2">
+          <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border bg-background p-2 shadow-card">
             <Terminal key={agent.id} id={agent.id} />
           </section>
         ) : (
@@ -431,7 +431,7 @@ function SentryPage({ id, back }: { id: string; back: string }) {
         <Badge variant="outline">sentry</Badge>
       </header>
       <div className="flex min-h-0 flex-1 gap-4">
-        <section className="min-h-0 min-w-0 flex-1 border bg-background p-2">
+        <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border bg-background p-2 shadow-card">
           <Terminal key={sentry.id} id={sentry.id} />
         </section>
         <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">

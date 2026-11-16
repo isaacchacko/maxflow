@@ -171,15 +171,15 @@ export function Capture() {
           }}
         >
           {/* Everything outside the box is dimmed; the box is the part that will be captured. */}
-          {box ? <div className="absolute border-2 border-link shadow-[0_0_0_9999px_rgb(0_0_0/0.45)]" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} /> : <div className="absolute inset-0 bg-black/45" />}
-          <p className="absolute top-3 left-1/2 -translate-x-1/2 border bg-background px-3 py-1.5 text-xs text-muted-foreground">
+          {box ? <div className="absolute rounded-md border-2 border-link shadow-[0_0_0_9999px_rgb(0_0_0/0.45)]" style={{ left: box.x, top: box.y, width: box.w, height: box.h }} /> : <div className="absolute inset-0 bg-black/45" />}
+          <p className="absolute top-3 left-1/2 -translate-x-1/2 rounded-full border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-raised">
             Drag a region or click a message, card or row · <Kbd>esc</Kbd> cancels
           </p>
         </div>
       )}
       {(mode === "comment" || (mode === "shooting" && shot)) && (
         <div className="pointer-events-auto fixed inset-0 z-[100] flex items-center justify-center bg-black/30" onMouseDown={e => e.target === e.currentTarget && reset()}>
-          <div data-agent="capture-popover" className="flex w-[min(36rem,calc(100%-2rem))] flex-col gap-2 border bg-background p-3 shadow-lg">
+          <div data-agent="capture-popover" className="flex w-[min(36rem,calc(100%-2rem))] flex-col gap-2 rounded-2xl border bg-card p-3 shadow-lg">
             {shot && <img src={shot.preview} alt="" className="max-h-64 self-start border object-contain" />}
             {error && <p className="text-xs text-destructive">{error}</p>}
             <input
@@ -194,7 +194,7 @@ export function Capture() {
                 if (e.key === "Escape") e.preventDefault(), reset();
               }}
               placeholder="Say what this is about, Enter sends it to the funnel"
-              className="border bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground/60"
+              className="rounded-xl border bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground/60"
             />
             <p className="text-[11px] text-muted-foreground">
               {mode === "shooting" ? "Sending…" : <>Starts an inbox thread with the screenshot and where it was taken · <Kbd>↵</Kbd> send · <Kbd>esc</Kbd> cancel</>}

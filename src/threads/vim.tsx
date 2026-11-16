@@ -123,7 +123,7 @@ export function useVim(scope: string, items: string[], scroller: React.RefObject
   }, [scope]);
 
   const panel = help && (
-    <div data-agent="vim-help" className="fixed right-4 bottom-4 z-30 flex flex-col gap-1 border bg-background p-3 text-xs shadow-lg">
+    <div data-agent="vim-help" className="fixed right-4 bottom-4 z-30 flex flex-col gap-1 rounded-2xl border bg-card p-3.5 text-xs shadow-raised">
       {HELP.map(([k, what]) => (
         <p key={k} className="flex items-center justify-between gap-6">
           <span className="flex gap-1">

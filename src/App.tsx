@@ -83,7 +83,7 @@ export function App() {
           <Tabs value={detail ? "" : route.view} onValueChange={v => (location.hash = v)}>
             <TabsList>
               {views.map(v => (
-                <TabsTrigger key={v.id} value={v.id} data-agent={`tab:${v.id}`} className="gap-2">
+                <TabsTrigger key={v.id} value={v.id} data-agent={`tab:${v.id}`} className="gap-2 data-[state=active]:bg-card">
                   {v.label}
                   <Kbd>{v.key}</Kbd>
                 </TabsTrigger>

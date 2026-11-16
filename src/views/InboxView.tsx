@@ -1,5 +1,7 @@
 import { Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Working } from "@/components/Working";
+import { card, surface } from "@/lib/surface";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { markAskShown, objectiveStore, setKind, setResolved, startThread, threadStore } from "@/store";
@@ -47,14 +49,14 @@ function CommandRow({ t, active, open, compact, menu, onToggle, onResolve }: { t
   const status = result ? firstLine(result.text) : t.pending?.status ? `${t.pending.status}…` : "router working on it…";
   return (
     <RowMenu agent={t.id} items={menu}>
-    <li {...vimRow(t.id)} className="group border-b last:border-b-0">
+    <li {...vimRow(t.id)} className={cn("group", card)}>
       <div
         data-agent={`command:${t.id}`}
         onClick={e => (e.target as Element).closest("a, button") || onToggle()}
         title={compact ? status : undefined}
-        className={cn("flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-sm hover:bg-muted/40", active && "bg-muted/40 shadow-[inset_2px_0_0_var(--color-link)]", t.resolved && "opacity-50")}
+        className={cn("flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 text-sm hover:bg-muted/50", active && "bg-muted/60 shadow-[inset_2px_0_0_var(--color-link)]", t.resolved && "opacity-50")}
       >
-        {result ? <Check className="size-3.5 shrink-0 text-ok" /> : <span className="inline-block w-3.5 shrink-0 animate-spin text-center text-agent">✻</span>}
+        {result ? <Check className="size-3.5 shrink-0 text-ok" /> : <Working />}
         <Rich still text={firstLine(asked?.text ?? t.title) || t.title} className={cn("truncate", compact ? "min-w-0 flex-1" : "w-80 shrink-0")} />
         {!compact && (
           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
@@ -65,18 +67,18 @@ function CommandRow({ t, active, open, compact, menu, onToggle, onResolve }: { t
           data-agent={`talk-it-through:${t.id}`}
           title="Make it a conversation: its router keeps the thread open and talks it through with you"
           onClick={() => setKind(t.id, "conversation")}
-          className={cn("flex shrink-0 items-center gap-1 border px-1.5 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 hover:border-ring hover:text-foreground", compact && "hidden py-0.5 group-hover:flex")}
+          className={cn("flex shrink-0 items-center gap-1 rounded-full border bg-card px-2 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 hover:border-ring hover:text-foreground", compact && "hidden py-0.5 group-hover:flex")}
         >
           <KINDS.conversation.icon className="size-3" />
           {!compact && "talk it through"}
         </button>
-        <button data-agent={`inbox-resolve:${t.id}`} title={t.resolved ? "Reopen" : "Resolve"} onClick={onResolve} className={cn("shrink-0 border p-0.5 hover:border-ring", t.resolved ? "text-ok" : "text-muted-foreground opacity-0 group-hover:opacity-100", compact && "hidden group-hover:block")}>
+        <button data-agent={`inbox-resolve:${t.id}`} title={t.resolved ? "Reopen" : "Resolve"} onClick={onResolve} className={cn("shrink-0 rounded-md border bg-card p-0.5 hover:border-ring", t.resolved ? "text-ok" : "text-muted-foreground opacity-0 group-hover:opacity-100", compact && "hidden group-hover:block")}>
           <Check className="size-3" />
         </button>
         <span className={cn("w-8 shrink-0 text-right text-xs text-muted-foreground tabular-nums", compact && "group-hover:hidden")}>{last && ago(Date.parse(last))}</span>
       </div>
       {open && (
-        <div className={cn("border-t bg-muted/15 py-2", compact ? "px-3" : "px-5")}>
+        <div className={cn("rounded-b-xl border-t bg-muted/30 py-2", compact ? "px-3" : "px-5")}>
           <ShotScope.Provider value={shotsOf(t.messages)}>
             {t.messages.map((m, i) => (
               <MessageRow key={m.id ?? i} from={m.from} at={m.at} text={m.text} />
@@ -151,12 +153,12 @@ export function InboxView() {
       const first = t.messages[0] ?? { from: t.routerIds[0] ?? t.objectiveId, at: "", text: t.title };
       return (
         <RowMenu key={t.id} agent={t.id} items={menu(t)}>
-        <li {...vimRow(t.id)} className="group relative border-b px-3 py-2 last:border-b-0">
+        <li {...vimRow(t.id)} className={cn("group relative px-3 py-2.5", card)}>
           <button
             data-agent={`inbox-resolve:${t.id}`}
             title={t.resolved ? "Reopen" : "Resolve"}
             onClick={() => toggle(t)}
-            className={cn("absolute top-2 right-3 z-10 border p-1 hover:border-ring", t.resolved ? "text-ok" : "bg-background text-muted-foreground opacity-0 group-hover:opacity-100")}
+            className={cn("absolute top-2.5 right-3 z-10 rounded-md border bg-card p-1 shadow-card hover:border-ring", t.resolved ? "text-ok" : "text-muted-foreground opacity-0 group-hover:opacity-100")}
           >
             <Check className="size-3.5" />
           </button>
@@ -164,7 +166,7 @@ export function InboxView() {
             data-agent={`just-do-it:${t.id}`}
             title="Make it a command: its router acts on it and answers once, with the result"
             onClick={() => setKind(t.id, "command")}
-            className="absolute top-2 right-11 z-10 flex items-center gap-1 border bg-background px-1.5 py-0.5 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 hover:border-ring hover:text-foreground"
+            className="absolute top-2.5 right-11 z-10 flex items-center gap-1 rounded-full border bg-card px-2 py-0.5 text-xs shadow-card text-muted-foreground opacity-0 group-hover:opacity-100 hover:border-ring hover:text-foreground"
           >
             <KINDS.command.icon className="size-3 text-command" />
             just do it
@@ -184,7 +186,7 @@ export function InboxView() {
               onClick={e => (e.target as Element).closest("a") || (location.hash = `thread/${t.id}`)}
               meta={
                 <span className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
-                  {t.asks && <span className="shrink-0 font-medium text-warn">needs you</span>}
+                  {t.asks && <span className="shrink-0 rounded-full bg-warn-soft px-2 font-medium text-warn">needs you</span>}
                   <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : t.asks ? "" : "routing…"}</span>
                   {t.resolved && <Check className="size-3 shrink-0 self-center" />}
                 </span>
@@ -201,16 +203,16 @@ export function InboxView() {
 
   const strip = allCommands.length > 0 && (
     <section data-agent="inbox-commands" className="flex flex-col gap-1">
-      <h2 className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+      <h2 className="flex items-center gap-2 px-1 text-[13px] font-medium text-muted-foreground">
         <KINDS.command.icon className="size-3 text-command" />
         Commands · {earlier ? "all" : "today"}
       </h2>
-      <ol className="flex flex-col border empty:hidden">
+      <ol className={cn(surface, "empty:hidden")}>
         {shown.map(({ t }) => (
           <CommandRow key={t.id} t={t} compact={wide} active={vim.cursor === t.id} open={opened === t.id} menu={menu(t)} onToggle={() => setOpened(o => (o === t.id ? undefined : t.id))} onResolve={() => toggle(t)} />
         ))}
       </ol>
-      <p className="flex gap-3 text-xs text-muted-foreground empty:hidden">
+      <p className="flex gap-3 px-1 text-xs text-muted-foreground empty:hidden">
         {!wide && commands.length > 3 && (
           <button data-agent="inbox-commands-more" onClick={() => setMore(v => !v)} className="hover:text-foreground">
             {more ? "show 3" : `+ ${commands.length - 3} more`}
@@ -229,17 +231,17 @@ export function InboxView() {
     <div ref={scrollRef} className="flex h-full gap-6 overflow-y-auto p-4">
       {vim.panel}
       <div className="flex max-w-4xl min-w-0 flex-1 flex-col gap-3">
-        <Composer autoFocus agent="inbox-input" draftKey="inbox" onSend={startThread} className="border px-3 py-2.5" />
+        <Composer autoFocus agent="inbox-input" draftKey="inbox" onSend={startThread} className="rounded-2xl border bg-card px-3.5 py-3 shadow-raised" />
         {resolved > 0 && (
-          <button data-agent="inbox-resolved" onClick={() => setShowResolved(v => !v)} className={cn("flex w-fit items-center gap-1.5 border px-2 py-0.5 text-xs text-muted-foreground hover:border-ring", showResolved && "border-ring text-foreground")}>
+          <button data-agent="inbox-resolved" onClick={() => setShowResolved(v => !v)} className={cn("flex w-fit items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring", showResolved && "border-ring text-foreground")}>
             <Check className="size-3" />
             Resolved ({resolved})
           </button>
         )}
-        {needsYou.length > 0 && <ol className="flex flex-col border border-warn/40">{needsYou.map(({ t }) => conversationRow(t))}</ol>}
+        {needsYou.length > 0 && <ol className={cn(surface, "bg-warn-soft/70")}>{needsYou.map(({ t }) => conversationRow(t))}</ol>}
         {!wide && strip}
-        {!wide && strip && conversations.length > 0 && <h2 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Conversations</h2>}
-        <ol className="flex flex-col border empty:hidden">{conversations.map(({ t }) => conversationRow(t))}</ol>
+        {!wide && strip && conversations.length > 0 && <h2 className="px-1 text-[13px] font-medium text-muted-foreground">Conversations</h2>}
+        <ol className={cn(surface, "empty:hidden")}>{conversations.map(({ t }) => conversationRow(t))}</ol>
       </div>
       {/* Sticky, so the commands stay in view while the conversations scroll under them. */}
       {wide && strip && <aside className="sticky top-0 max-h-[calc(100dvh-6rem)] w-80 shrink-0 self-start overflow-y-auto">{strip}</aside>}
