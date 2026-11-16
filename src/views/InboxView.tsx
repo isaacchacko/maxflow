@@ -1,8 +1,8 @@
 import { Check } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
-import { objectiveStore, setResolved, startThread, threadStore } from "@/store";
+import { markAskShown, objectiveStore, setResolved, startThread, threadStore } from "@/store";
 import { Composer } from "@/threads/Composer";
 import { composeOnArrival } from "@/threads/jump";
 import { MessageRow } from "@/threads/MessageRow";
@@ -31,6 +31,11 @@ export function InboxView() {
     // An agent waiting on him comes first, longest-waiting on top.
     .sort((a, b) => Number(!a.t.asks) - Number(!b.t.asks) || (a.asked ?? Infinity) - (b.asked ?? Infinity) || b.last - a.last);
   const toggle = (t: Thread) => (setKept(k => new Set(k).add(t.id)), setResolved(t.id, !t.resolved));
+  // Drawing an ask flagged, on a page he has in front of him, starts the clock on its agent's default.
+  const unshown = rows.filter(r => r.t.asks && !r.t.asks.shown).map(r => r.t.id);
+  useEffect(() => {
+    if (document.visibilityState === "visible") for (const id of unshown) markAskShown(id);
+  }, [unshown.join()]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const vim = useVim("inbox", rows.map(r => r.t.id), scrollRef, "first", {
     compose: () => document.querySelector<HTMLElement>('[data-agent="inbox-input"]')?.focus(),

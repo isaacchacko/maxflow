@@ -141,6 +141,11 @@ export async function setResolved(threadId: string, resolved: boolean) {
   threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: resolved ? { at: NOW_AT } : undefined } : t)));
 }
 
+/** His inbox drew an ask flagged: its agent's 3h default counts from the first time it did. */
+export function markAskShown(threadId: string) {
+  if (isLive()) void fetch(`/api/threads/${threadId}/shown`, { method: "POST" });
+}
+
 /** A blank worker under a router, which the router is told to brief. */
 export function spawnWorker(router: Agent) {
   if (isLive()) return void api("/api/sessions", { name: "new worker", parent: router.id, cwd: router.cwd, cmd: ["claude", "--permission-mode", "bypassPermissions"] });

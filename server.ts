@@ -612,7 +612,8 @@ async function acceptTrust(s: Session) {
 // pending: his last message was handed to these routers, and none has answered yet; status is the line a router set on it.
 type Pending = { routers: string[]; since: number; status?: string };
 // asks: an agent asked him here and waits on his reply (see ask); default: its recommendation, taken after DEFAULT_AFTER_MS.
-type Ask = { session: string; since: number; default?: string };
+// shown: when his inbox first drew it flagged; the default's clock runs from then, never from before he could see it.
+type Ask = { session: string; since: number; default?: string; shown?: number };
 // kind: a command wants an ack and one result, a conversation (the default) is talked through. kindBy: who last set it, the
 // funnel, a router or "isaac", so his flips are labelled data on the classifier. task: a command's own board task, which closes
 // when a router posts its result; done: when that was. A message's re: the index of his message a router's result answers.
@@ -700,7 +701,11 @@ function postIn(t: Thread, from: Session | undefined, text: string, done?: boole
     // A subthread with no live router of its own goes to the nearest ancestor's.
     const live_ = [t, ...ancestors(t).reverse()].map((x) => x.routers.flatMap((id) => sessions.get(id) ?? []).filter(live)).find((r) => r.length) ?? [];
     const to = live_.length ? live_ : routersOf(t.objective);
-    dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] Answer in the thread with \`${CLI} thread post ${t.id} '<text>'\`. While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line. To answer one message in a subthread of its own, \`${CLI} thread new --parent ${t.id}:<message id> '<text>'\`.` });
+    // Nobody left to hear it (its agents ended, and it has no objective with a router): the funnel finds it an owner.
+    const front = funnel();
+    if (!to.length && front)
+      dispatch({ source: "isaac", to: [front], target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] Nobody owns this thread any more: its agents ended and it has no objective with a router. Give it one with \`${CLI} thread move ${t.id} <objective id>\`, which hands it to that objective's routers, then tell them his message is waiting there.` });
+    else dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] Answer in the thread with \`${CLI} thread post ${t.id} '<text>'\`. While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line. To answer one message in a subthread of its own, \`${CLI} thread new --parent ${t.id}:<message id> '<text>'\`.` });
     if (to.length) t.pending = { routers: to.map((s) => s.id), since: Date.now() };
     answered(t);
   } else t.pending = undefined;
@@ -953,7 +958,7 @@ function migrateQuestions() {
     const t: Thread = {
       id: `th-${crypto.randomUUID().slice(0, 6)}`, title: headline(said[0]?.text ?? q.name).slice(0, 80), objective: s?.role?.objective ?? "", routers: [q.session],
       messages: [...said.map((m) => ({ ...message(m.from === "user" ? "isaac" : q.session, m.text), at: m.at })), ...(q.default ? [message(q.session, `If you haven't answered in ${DEFAULT_AFTER_H}h, I go ahead with: ${q.default}`)] : [])], kind: "conversation", kindBy: q.session, q: q.id,
-      asks: { session: q.session, since: q.at, ...(q.default && { default: q.default }) },
+      asks: { session: q.session, since: Date.now(), ...(q.default && { default: q.default }) },
     };
     threads.push(t);
     saveThreads();
@@ -1081,7 +1086,7 @@ setInterval(settleTasks, 15_000);
 setInterval(() => {
   for (const t of threads) {
     const a = t.asks;
-    if (!a?.default || Date.now() - a.since < DEFAULT_AFTER_MS) continue;
+    if (!a?.default || !a.shown || Date.now() - a.shown < DEFAULT_AFTER_MS) continue;
     t.messages.push(message(a.session, `No answer in ${DEFAULT_AFTER_H}h, so I went ahead with: ${a.default}`));
     answered(t);
     saveThreads();
@@ -1212,7 +1217,7 @@ async function world() {
       events: t.timeline.map((e) => ({ from: e.session && sessions.get(e.session)?.role?.role === "router" ? "router" : e.session ? "agent" : "sentry", at: iso(e.at), text: e.text })),
       page: t.page ?? [],
     })),
-    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), kind: t.kind ?? "conversation", kindBy: t.kindBy, ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since) } }), done: t.done && iso(t.done), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, re: m.re })) })),
+    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), kind: t.kind ?? "conversation", kindBy: t.kindBy, ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), done: t.done && iso(t.done), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, re: m.re })) })),
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({
       id: s.id,
@@ -1498,6 +1503,13 @@ Bun.serve<WsData>({
       threads.push(t);
       saveThreads();
       return Response.json(t, { status: 201 });
+    }
+    // His inbox drew this ask flagged; the 3h default counts from the first time.
+    const askShown = path.match(/^\/api\/threads\/([\w-]+)\/shown$/);
+    if (askShown && req.method === "POST") {
+      const t = threads.find((x) => x.id === askShown[1]);
+      if (t?.asks && !t.asks.shown) (t.asks.shown = Date.now()), saveThreads();
+      return new Response(null, { status: 204 });
     }
     // Flipping a thread between command and conversation. His flip goes to its routers, and onto the bus as a label on the
     // classifier's call; a router's flip is its own call on his reply.
