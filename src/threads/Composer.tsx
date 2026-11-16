@@ -20,7 +20,8 @@ export const quoteInto = (draftKey: string, markdown: string) => dispatchEvent(n
 const imagesIn = (files: FileList | undefined) => [...(files ?? [])].filter(f => f.type.startsWith("image/"));
 
 /** A message box that wraps and grows with its text, and takes images pasted from the clipboard or dropped on it: each is uploaded at once, and its path is kept with the draft so a reload keeps it attached. */
-export function Composer({ onSend, className, autoFocus, agent, draftKey }: { onSend: (text: string) => unknown; className?: string; autoFocus?: boolean; agent: string; draftKey: string }) {
+// tools: small buttons drawn at the box's right, such as the thread's subthread nudge.
+export function Composer({ onSend, className, autoFocus, agent, draftKey, tools }: { onSend: (text: string) => unknown; className?: string; autoFocus?: boolean; agent: string; draftKey: string; tools?: React.ReactNode }) {
   const [draft, setDraft] = usePersistentDraft(draftKey);
   const [imageDraft, setImageDraft] = usePersistentDraft(`${draftKey}:images`);
   const images = imageDraft.split("\n").filter(Boolean);
@@ -102,6 +103,7 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey }: { on
           </button>
         </div>
       )}
+      <div className="flex items-start gap-2">
       <textarea
         ref={input}
         rows={1}
@@ -122,6 +124,8 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey }: { on
         placeholder="Message"
         className="w-full resize-none overflow-y-auto bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60"
       />
+      {tools}
+      </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
     </form>
   );

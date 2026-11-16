@@ -59,8 +59,8 @@ export type Thread = {
   kind?: "command" | "conversation";
   /** A command's result is in, from its router's `thread done`; his next message clears it. */
   done?: string | null;
-  /** re: the id of his message this router message is a command result for. */
-  messages: { id?: string; from: string; at: string; text: string; re?: string }[];
+  /** re: the id of his message this router message is a command result for; nudge: he asked for its answer in a subthread. */
+  messages: { id?: string; from: string; at: string; text: string; re?: string; nudge?: "subthread" }[];
 };
 
 export type AgentState = "working" | "waiting" | "idle" | "asleep";

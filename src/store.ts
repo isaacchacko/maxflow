@@ -124,9 +124,9 @@ export function startThread(text: string) {
   return api("/api/threads", { text });
 }
 
-export function postToThread(threadId: string, from: string, text: string) {
-  if (isLive()) return void api(`/api/threads/${threadId}/messages`, { text });
-  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: undefined, messages: [...t.messages, { from, at: NOW_AT, text }] } : t)));
+export function postToThread(threadId: string, from: string, text: string, nudge?: "subthread") {
+  if (isLive()) return void api(`/api/threads/${threadId}/messages`, { text, nudge });
+  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: undefined, messages: [...t.messages, { from, at: NOW_AT, text, nudge }] } : t)));
 }
 
 /** Opens the subthread under a message, making it on the first visit; a top thread's first message is the thread itself. */

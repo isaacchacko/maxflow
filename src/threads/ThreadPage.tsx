@@ -1,7 +1,8 @@
-import { ArrowLeft, Check, ChevronRight, ExternalLink, MessageSquareReply, MessagesSquare, Network, Quote, RotateCcw, Waypoints } from "lucide-react";
+import { ArrowLeft, Check, ChevronRight, ExternalLink, GitBranch, MessageSquareReply, MessagesSquare, Network, Quote, RotateCcw, Waypoints } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { agentStore, answerHere, objectiveStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
@@ -118,6 +119,8 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   const root = thread?.parentId ? all.find(t => t.id === thread.parentId)?.messages.find(m => m.id === thread.parentMessageId) : thread?.messages[0];
   // A router's command result draws under the message it answers, not as a reply of its own.
   const replies = thread ? repliesOf(thread).filter(m => !m.re) : [];
+  // Whether his next message here asks for its answer in a subthread; each thread remembers it, as it does a draft.
+  const [nudge, setNudge] = usePersistentDraft(`thread:${id}:nudge`);
   const resultFor = (m?: { id?: string }) => (m?.id ? thread?.messages.findLast(x => x.re === m.id) : undefined);
   // In a command thread his last message runs until its router posts the result.
   const lastMine = thread?.messages.findLast(m => m.from === "isaac");
@@ -223,7 +226,9 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
             {root && (
               <RowMenu agent={`msg:${keyOf(root, -1)}`} items={messageMenu(root, keyOf(root, -1))}>
               <div data-msg={root.id} data-thread={thread.parentId ?? thread.id} {...vimRow(keyOf(root, -1))}>
-                <MessageRow from={root.from} at={root.at} text={root.text} active={vim.cursor === keyOf(root, -1)} />
+                <MessageRow from={root.from} at={root.at} text={root.text} active={vim.cursor === keyOf(root, -1)}>
+                  {root.nudge && <NudgeMark />}
+                </MessageRow>
                 {(resultFor(root) || running === root) && <CommandStatus threadId={thread.parentId ?? thread.id} messageId={root.id} result={resultFor(root)} />}
               </div>
               </RowMenu>
@@ -258,6 +263,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                 <RowMenu agent={`msg:${keyOf(m, i)}`} items={messageMenu(m, keyOf(m, i))}>
                 <div data-msg={m.id} data-thread={thread.id} {...vimRow(keyOf(m, i))} className="group/msg relative">
                   <MessageRow from={m.from} at={m.at} text={m.text} grouped={grouped} active={vim.cursor === keyOf(m, i)} className={cn(!grouped && i > 0 && "mt-2.5")}>
+                    {m.nudge && <NudgeMark />}
                     {sub && (sub.messages.length > 0 || sub.pending) && <Replies t={sub} />}
                   </MessageRow>
                   {(resultFor(m) || running === m) && <CommandStatus threadId={thread.id} messageId={m.id} result={resultFor(m)} />}
@@ -290,7 +296,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
           </div>
           </ShotScope.Provider>
           {vim.panel}
-          <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => postToThread(thread.id, "isaac", text)} className="border-t px-4 py-2.5" />
+          <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => postToThread(thread.id, "isaac", text, nudge ? "subthread" : undefined)} tools={<NudgeToggle on={nudge} set={on => setNudge(on ? "subthread" : "")} />} className="border-t px-4 py-2.5" />
         </section>
 
         <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">
@@ -342,3 +348,28 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
     </div>
   );
 }
+
+/** Off by default: on, his message asks the router to answer it in a subthread of its own rather than inline. It never takes focus, so the vim keys and the box keep it. */
+function NudgeToggle({ on, set }: { on: string; set: (on: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      data-agent="thread-nudge"
+      aria-pressed={!!on}
+      title={on ? "asking for the answer in a subthread (click to answer inline)" : "ask for the answer in a subthread"}
+      onMouseDown={e => e.preventDefault()}
+      onClick={() => set(!on)}
+      className={cn("mt-0.5 shrink-0 p-0.5 hover:bg-muted", on ? "text-foreground" : "text-muted-foreground/50")}
+    >
+      <GitBranch className="size-3.5" />
+    </button>
+  );
+}
+
+/** On his sent message: he asked for its answer in a subthread. */
+const NudgeMark = () => (
+  <span title="asked for the answer in a subthread" className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/70">
+    <GitBranch className="size-2.5" />
+    subthread asked
+  </span>
+);

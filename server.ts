@@ -626,7 +626,8 @@ const KINDS: Kind[] = ["command", "conversation"];
 // parent: a subthread hangs off a message in another thread, which is its root; its messages are that message's replies, and
 // any of them can have a subthread of its own. A top thread's root is its first message, so replying to that posts in it.
 // re: the id of his message a router's command result answers (an index into messages, before merges could reorder them).
-type Message = { id: string; from: string; at: number; text: string; re?: string | number };
+// nudge: he asked for the answer to this message in a subthread of its own.
+type Message = { id: string; from: string; at: number; text: string; re?: string | number; nudge?: "subthread" };
 type Thread = { id: string; title: string; objective: string; routers: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; kind?: Kind; kindBy?: string; task?: number; done?: number; resolved?: { at: number }; asks?: Ask; q?: number; mergedInto?: string };
 const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
@@ -688,10 +689,10 @@ const onIt = (s?: Session) => live(s) && (s.inbox.length > 0 || agentState(s) ==
 const pendingOf = (p?: Pending) => p && { routerIds: p.routers, since: iso(p.since), status: p.status, stale: Date.now() - p.since > PENDING_GRACE_MS && !p.routers.some((id) => onIt(sessions.get(id))) };
 
 // A message into a thread at any level: Isaac's goes to its routers and waits on them, an agent's answers him.
-function postIn(t: Thread, from: Session | undefined, text: string, done?: boolean) {
+function postIn(t: Thread, from: Session | undefined, text: string, done?: boolean, nudge?: "subthread") {
   // A command's result answers his last message, and in a command thread closes it and its task; his follow-up reopens it.
   const re = done ? t.messages.findLast((m) => m.from === "isaac")?.id : undefined;
-  const m = message(from?.id ?? "isaac", text);
+  const m = { ...message(from?.id ?? "isaac", text), ...(nudge && !from && { nudge }) };
   t.messages.push(re ? { ...m, re } : m);
   if (done && t.kind === "command") {
     t.done = Date.now();
@@ -710,7 +711,7 @@ function postIn(t: Thread, from: Session | undefined, text: string, done?: boole
     const front = funnel();
     if (!to.length && front)
       dispatch({ source: "isaac", to: [front], target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] Nobody owns this thread any more: its agents ended and it has no objective with a router. Give it one with \`${CLI} thread move ${t.id} <objective id>\`, which hands it to that objective's routers, then tell them his message is waiting there.` });
-    else dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] Answer in the thread with \`${CLI} thread post ${t.id} '<text>'\`. While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line. To answer one message in a subthread of its own, \`${CLI} thread new --parent ${t.id}:<message id> '<text>'\`.` });
+    else dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] ${m.nudge ? `He asked for the answer in a subthread of its own: answer this message with \`${CLI} thread new --parent ${t.id}:${m.id} '<text>'\`, and post there from then on, not in the thread.` : `Answer inline in the thread with \`${CLI} thread post ${t.id} '<text>'\`.`} While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line.` });
     if (to.length) t.pending = { routers: to.map((s) => s.id), since: Date.now() };
     answered(t);
   } else t.pending = undefined;
@@ -1222,7 +1223,7 @@ async function world() {
       events: t.timeline.map((e) => ({ from: e.session && sessions.get(e.session)?.role?.role === "router" ? "router" : e.session ? "agent" : "sentry", at: iso(e.at), text: e.text })),
       page: t.page ?? [],
     })),
-    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), kind: t.kind ?? "conversation", kindBy: t.kindBy, ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), done: t.done && iso(t.done), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, re: typeof m.re === "number" ? t.messages[m.re]?.id : m.re })) })),
+    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), kind: t.kind ?? "conversation", kindBy: t.kindBy, ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), done: t.done && iso(t.done), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, re: typeof m.re === "number" ? t.messages[m.re]?.id : m.re, ...(m.nudge && { nudge: m.nudge }) })) })),
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({
       id: s.id,
@@ -1611,12 +1612,12 @@ Bun.serve<WsData>({
     if (threadPost && req.method === "POST") {
       const t = live_thread(threads.find((x) => x.id === threadPost[1]));
       if (!t) return new Response("no such thread", { status: 404 });
-      const body = (await req.json().catch(() => ({}))) as { text?: string; done?: boolean };
+      const body = (await req.json().catch(() => ({}))) as { text?: string; done?: boolean; nudge?: string };
       const text = body.text?.trim();
       if (!text) return new Response("text required", { status: 400 });
       const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
       if (body.done && !from) return new Response("only an agent posts a command's result", { status: 400 });
-      postIn(t, from, text, body.done);
+      postIn(t, from, text, body.done, body.nudge === "subthread" ? "subthread" : undefined);
       return Response.json(t, { status: 201 });
     }
 
