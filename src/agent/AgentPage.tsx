@@ -7,6 +7,7 @@ import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { cn } from "@/lib/utils";
 import { NOW_AT, agentStateColor, statusColor, type Agent, type AgentState } from "@/mock";
 import { addSignal, agentStore, api, liveStore, objectiveStore, pathOf, questionStore, sentryStore, setArchived, settleQuestion, signalStore, spawnWorker, taskStore } from "@/store";
+import { Rich } from "@/threads/Rich";
 import { Terminal } from "./Terminal";
 import { closing, transcriptFor, typedStore, type Line } from "./transcript";
 
@@ -231,7 +232,7 @@ function RouterSidebar({ router }: { router: Agent }) {
             <div key={signal.id} className="flex flex-col gap-0.5 py-0.5 text-sm">
               <div className="flex items-start gap-2">
                 <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate">{signal.text}</span>
+                <Rich text={signal.text} className="min-w-0 flex-1 truncate" />
                 <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{when(signal.at)}</span>
               </div>
               <p className="pl-5.5 font-mono text-[11px] text-muted-foreground">
@@ -421,7 +422,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
               return (
                 <div key={s.id} className="flex items-start gap-2 text-sm">
                   <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate">{s.text}</span>
+                  <Rich text={s.text} className="min-w-0 flex-1 truncate" />
                   <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
                     {s.at.slice(0, 10) === NOW_AT.slice(0, 10) ? s.at.slice(11, 16) : new Date(s.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                   </span>
@@ -438,7 +439,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
               <a key={a.id} href={`#agent/${a.id}`} className="flex items-center gap-2 px-1 py-1 text-sm hover:bg-muted">
                 <span className={cn("size-2 shrink-0", agentStateColor[a.state])} />
                 <span className="shrink-0 font-mono text-xs">{a.name ?? a.id}</span>
-                <span className="truncate text-xs text-muted-foreground">{a.doing}</span>
+                <Rich still text={a.doing} className="truncate text-xs text-muted-foreground" />
               </a>
             ))}
           </Section>

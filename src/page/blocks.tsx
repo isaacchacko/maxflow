@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor, type Block, type Event, type Status } from "@/mock";
 import { addEvent, agentStore, putBlock, taskStore, objectiveStore, type PageRef } from "@/store";
+import { Rich } from "@/threads/Rich";
 
 export type Subject = { ref: PageRef; status: Status; events: Event[]; pr?: number; objectiveId?: string };
 
@@ -37,7 +38,7 @@ function StatusBlock({ block, subject }: Props<"status">) {
         </Badge>
       }
     >
-      <p className="text-lg leading-snug">{block.summary}</p>
+      <Rich text={block.summary} className="block text-lg leading-snug" />
     </Shell>
   );
 }
@@ -117,7 +118,7 @@ function ActivityBlock({ subject }: Props<"activity">) {
         {subject.events.slice(-4).map((e, i) => (
           <li key={i} className="flex gap-2 text-sm">
             <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", who[e.from])} />
-            <span className="flex-1 text-muted-foreground">{e.text}</span>
+            <Rich text={e.text} className="flex-1 text-muted-foreground" />
             <span className="shrink-0 text-xs text-muted-foreground/60">{e.at}</span>
           </li>
         ))}
@@ -254,7 +255,7 @@ export function AgentRow({ id, indent }: { id: string; indent?: boolean }) {
     <a href={`#agent/${id}`} data-agent={`agent:${id}`} className={cn("flex items-center gap-2 py-1 text-sm hover:bg-muted", indent && "ml-3 border-l pl-4")}>
       {agent.role === "router" ? <Network className="size-3.5 shrink-0 text-fuchsia-400" /> : <span className={cn("ml-1 size-2 shrink-0 rounded-full", agentStateColor[agent.state])} />}
       <span className="shrink-0 truncate text-xs">{agent.name ?? agent.id}</span>
-      <span className="truncate text-muted-foreground">{agent.doing}</span>
+      <Rich still text={agent.doing} className="truncate text-muted-foreground" />
     </a>
   );
 }

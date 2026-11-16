@@ -32,24 +32,28 @@ export function urlsIn(text: string) {
   return parse(text).flatMap(p => ("url" in p ? [p] : []));
 }
 
-/** A link to a maxflow entity, opened in place; one that no longer exists is struck through and says so on hover. */
-export function RefChip({ r }: { r: Ref }) {
+/**
+ * A link to a maxflow entity, opened in place; one that no longer exists is struck through and says so on hover. `still`
+ * draws it as plain text in the same look, for a chip inside something that is itself a link or button.
+ */
+export function RefChip({ r, still }: { r: Ref; still?: boolean }) {
   const agents = agentStore.use();
   const tasks = taskStore.use();
   const objectives = objectiveStore.use();
   const threads = threadStore.use();
   const sentries = sentryStore.use();
 
+  const Tag = still ? "span" : "a";
   const chip = (href: string, found: boolean, icon: React.ReactNode, label: string, mono = false) => (
-    <a
-      href={href}
+    <Tag
+      href={still ? undefined : href}
       onClick={e => e.stopPropagation()}
       title={found ? undefined : `No ${r.kind} ${r.id} in maxflow now`}
       className={cn("inline-flex items-center gap-1 border px-1 align-baseline hover:border-ring", mono ? "font-mono text-[0.85em]" : "text-[0.92em]", !found && "border-dashed text-muted-foreground line-through")}
     >
       {icon}
       {label}
-    </a>
+    </Tag>
   );
 
   if (r.kind === "task") {
@@ -75,25 +79,13 @@ export function RefChip({ r }: { r: Ref }) {
   );
 }
 
-export function Rich({ text, className }: { text: string; className?: string }) {
+/** Agent-written text on one line: chips, links, code and emphasis as in a message, but no paragraphs, lists or headings. */
+export function Rich({ text, className, still }: { text: string; className?: string; still?: boolean }) {
   return (
     <span className={className}>
-      {parse(text).map((p, i) =>
-        "text" in p ? (
-          <span key={i}>{p.text}</span>
-        ) : "ref" in p ? (
-          <RefChip key={i} r={p.ref} />
-        ) : "image" in p ? (
-          <a key={i} href={p.image} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="my-1 block w-fit">
-            <img src={p.image} alt="" className="max-h-80 max-w-full border" />
-          </a>
-        ) : (
-          <a key={i} href={p.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-0.5 text-sky-400 hover:underline">
-            {p.label}
-            <ExternalLink className="size-3" />
-          </a>
-        ),
-      )}
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips]} components={still ? inlineStill : inline} allowedElements={INLINE} unwrapDisallowed urlTransform={keepRefs}>
+        {asLinks(text.replace(/\s*\n\s*/g, " "))}
+      </ReactMarkdown>
     </span>
   );
 }
@@ -190,11 +182,35 @@ const md: Components = {
   },
 };
 
+const INLINE = ["p", "a", "code", "strong", "em", "del", "img"];
+const inline: Components = {
+  ...md,
+  p: ({ children }) => <>{children}</>,
+  img: ({ src = "" }) => {
+    const name = typeof src === "string" && src.match(/\/uploads\/([\w.-]+)$/)?.[1];
+    return name ? (
+      <a href={`/api/uploads/${name}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-sky-400 hover:underline">
+        [image]
+      </a>
+    ) : null;
+  },
+};
+// Inside a link or button: entity chips keep their look without being links, and other links are just their text.
+const inlineStill: Components = {
+  ...inline,
+  a: ({ href = "", children }) => {
+    const ref = href.match(/^ref:(agent|router|task|objective|thread)\/(.+)$/);
+    return ref ? <RefChip r={{ kind: ref[1] as Ref["kind"], id: decodeURIComponent(ref[2]!) }} still /> : <span className="text-sky-400">{children}</span>;
+  },
+  img: () => <span className="text-sky-400">[image]</span>,
+};
+const keepRefs = (url: string) => (/^(ref|pr|linear):/.test(url) ? url : defaultUrlTransform(url));
+
 /** A whole message as GitHub-flavored markdown, with Rich's chips, links and pasted images inside it. */
 export function Markdown({ text, className }: { text: string; className?: string }) {
   return (
     <div className={cn("break-words", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips]} components={md} urlTransform={url => (/^(ref|pr|linear):/.test(url) ? url : defaultUrlTransform(url))}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips]} components={md} urlTransform={keepRefs}>
         {asLinks(text)}
       </ReactMarkdown>
     </div>

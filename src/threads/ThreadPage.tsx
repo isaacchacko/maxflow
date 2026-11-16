@@ -9,7 +9,7 @@ import { Composer } from "./Composer";
 import { MessageRow, when } from "./MessageRow";
 import { Replies, repliesOf } from "./Replies";
 import { markSeen } from "./seen";
-import { RefChip, refsIn, urlsIn, type Ref } from "./Rich";
+import { RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
 
 // Climbing out of a subthread lands on the message it hangs off: scrolled to and flashed once.
 const arriving: { message?: string } = {};
@@ -44,9 +44,10 @@ export function Pending({ pending, names }: { pending: NonNullable<Thread["pendi
       </p>
     );
   return (
-    <p data-agent="thread-pending" className="flex items-center gap-2 text-xs text-agent">
+    <p data-agent="thread-pending" className="flex min-w-0 items-center gap-2 text-xs text-agent">
       <span className="inline-block animate-spin">✻</span>
-      <span className="animate-pulse">{pending.status ? `${names[0]}: ${pending.status}` : `${who} ${names.length > 1 ? "are" : "is"} working on a response`}…</span>
+      {/* A router's status is markdown with chips; it may sit inside the inbox row's link, so its chips stay text. */}
+      <span className="min-w-0 truncate animate-pulse">{pending.status ? <Rich still text={`${names[0]}: ${pending.status}…`} /> : `${who} ${names.length > 1 ? "are" : "is"} working on a response…`}</span>
       <span className="text-muted-foreground tabular-nums">since {when(pending.since)}</span>
     </p>
   );

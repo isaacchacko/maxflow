@@ -5,7 +5,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 import { statusColor } from "@/mock";
 import { agentStore, objectiveStore, sentryStore, taskStore, threadStore } from "@/store";
-import { Avatar } from "@/threads/Rich";
+import { Avatar, Rich } from "@/threads/Rich";
 import { unseen } from "@/threads/seen";
 
 type Item = { kind: Kind; href: string; label: string; detail?: string; icon: React.ReactNode; text: string; rank: number };
@@ -189,7 +189,7 @@ export function QuickSwitcher({ views }: { views: readonly { id: string; label: 
               >
                 <span className="flex w-5 shrink-0 justify-center">{item.icon}</span>
                 <span className="max-w-[65%] shrink-0 truncate">{item.label}</span>
-                {item.detail && <span className={cn("min-w-0 truncate text-xs", /^\d+ new$/.test(item.detail) ? "text-rose-400" : "text-muted-foreground")}>{item.detail}</span>}
+                {item.detail && <Rich still text={item.kind === "Tasks" ? `\`${item.detail}\`` : item.detail} className={cn("min-w-0 truncate text-xs", /^\d+ new$/.test(item.detail) ? "text-rose-400" : "text-muted-foreground")} />}
               </button>
             </div>
           ))}
