@@ -54,5 +54,7 @@ export function removeBlock(ref: PageRef, blockId: string) {
 }
 
 export function addSignal(signal: Omit<Signal, "id" | "at">) {
-  signalStore.set(all => [{ ...signal, id: `s${Date.now()}`, at: NOW_AT }, ...all]);
+  const id = `s${Date.now()}`;
+  signalStore.set(all => [{ ...signal, id, at: NOW_AT }, ...all]);
+  return id;
 }

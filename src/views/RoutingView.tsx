@@ -1,6 +1,8 @@
 import { GitPullRequest, Hash, Network, User, Waypoints } from "lucide-react";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { routeChat } from "@/agent/plan";
 import { cn } from "@/lib/utils";
 import { NOW_AT, agentStateColor, sentries, type Signal, type Source } from "@/mock";
 import { agentStore, signalStore, threadStore } from "@/store";
@@ -75,6 +77,8 @@ export function RoutingView() {
   const [pinned, setPinned] = useState<string>();
   const [hover, setHover] = useState<string>();
   const [shown, setShown] = useState<Set<Source>>(new Set(["isaac", "gh", "slack"]));
+  const [draft, setDraft] = useState("");
+  const [fresh, setFresh] = useState<string>();
 
   const measure = useCallback(() => {
     const root = rootRef.current;
@@ -121,6 +125,16 @@ export function RoutingView() {
     });
 
   const days = [...new Set(visible.map(s => day(s.at)))];
+  const to = pinned?.startsWith("agent:") ? pinned.slice("agent:".length) : undefined;
+
+  function send(e: React.FormEvent) {
+    e.preventDefault();
+    const text = draft.trim();
+    if (!text) return;
+    setShown(prev => new Set([...prev, "isaac"]));
+    setFresh(routeChat(text, to));
+    setDraft("");
+  }
 
   return (
     <div ref={rootRef} onClick={() => setPinned(undefined)} className="relative grid h-full grid-cols-[minmax(0,1fr)_18rem] gap-x-40 p-4">
@@ -178,6 +192,24 @@ export function RoutingView() {
           </span>
         </header>
 
+        <form
+          onSubmit={send}
+          onClick={e => e.stopPropagation()}
+          className="flex items-center gap-3 rounded-lg border border-sky-400/40 bg-card px-3 py-1.5 focus-within:border-sky-400"
+        >
+          <span className="w-11 shrink-0 text-xs text-muted-foreground tabular-nums">now</span>
+          <User className="size-3.5 shrink-0 text-sky-400" />
+          <span className="w-24 shrink-0 truncate font-mono text-xs text-muted-foreground">{to ? `→ ${to}` : "chat"}</span>
+          <Input
+            data-agent="log-composer"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            placeholder={to ? `Message ${to}…` : "Tell the agents something… it routes to whoever owns what you mention"}
+            className="h-7 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
+          />
+          <kbd className="shrink-0 text-xs text-muted-foreground">↵</kbd>
+        </form>
+
         <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1" onScroll={measure}>
           {days.map(d => (
             <div key={d} className="mb-3">
@@ -194,13 +226,16 @@ export function RoutingView() {
                         "flex cursor-pointer items-center gap-3 rounded-lg border bg-card px-3 py-2 text-sm transition-opacity",
                         dim(id) && "opacity-30",
                         focus === id && look[s.source].ring,
+                        fresh === s.id && "agent-edited animate-in fade-in slide-in-from-top-2",
                       )}
                     >
                       <span className="w-11 shrink-0 text-xs text-muted-foreground tabular-nums">{when(s.at)}</span>
                       <Icon className={cn("size-3.5 shrink-0", look[s.source].text)} />
                       <span className="w-24 shrink-0 truncate font-mono text-xs text-muted-foreground">{s.target}</span>
                       <span className="min-w-0 flex-1 truncate">{s.text}</span>
-                      <span className="shrink-0 text-xs text-muted-foreground">→ {s.routedTo.length || "none"}</span>
+                      <span className={cn("shrink-0 text-xs", s.routedTo.length ? "text-muted-foreground" : "text-amber-400")}>
+                        → {s.routedTo.length || "unrouted"}
+                      </span>
                     </li>
                   );
                 })}

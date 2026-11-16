@@ -105,16 +105,25 @@ async function moveCard(task: Task, status: Status, say: (s: string) => void) {
   if (card) putBlock(ref, { ...card, summary: `Moved to ${status} by ${task.agent ?? "the agent"}. Previously: ${card.summary}` });
 }
 
-function pickTarget(text: string): PageRef | undefined {
+function pickTarget(text: string, fallback = true): PageRef | undefined {
   const task = bestMatch(text, taskStore.get());
   const thread = bestMatch(text, threadStore.get());
   const wantsThread = /\bthread\b/.test(text);
   if (thread && (wantsThread || !task || thread.score > task.score)) return `thread/${thread.item.id}`;
   if (task) return `task/${task.item.id}`;
+  if (!fallback) return;
   const here = location.hash.match(/^#((task|thread)\/[\w-]+)/)?.[1];
   if (here) return here as PageRef;
   const todo = taskStore.get().find(t => t.status === "todo");
   return todo && `task/${todo.id}`;
+}
+
+/** A message typed into the event log: to the pinned agent, else to whoever owns what it mentions. */
+export function routeChat(request: string, to?: string) {
+  if (to) return addSignal({ source: "isaac", target: "chat", text: request, routedTo: [to] });
+  const ref = pickTarget(request.toLowerCase(), false);
+  if (ref) return routePrompt(ref, request);
+  return addSignal({ source: "isaac", target: "chat", text: request, routedTo: [] });
 }
 
 function routePrompt(ref: PageRef, request: string) {
@@ -122,7 +131,7 @@ function routePrompt(ref: PageRef, request: string) {
   const threadId = type === "thread" ? id : threadStore.get().find(t => t.taskIds.includes(id!))?.id;
   const router = agentStore.get().find(a => a.role === "router" && a.threadId === threadId);
   const worker = type === "task" ? taskStore.get().find(t => t.id === id)?.agent : undefined;
-  addSignal({ source: "isaac", target: "chat", text: request, routedTo: [router?.id, worker].filter((a): a is string => !!a) });
+  return addSignal({ source: "isaac", target: "chat", text: request, routedTo: [router?.id, worker].filter((a): a is string => !!a) });
 }
 
 export async function act(request: string, say: (s: string) => void) {
