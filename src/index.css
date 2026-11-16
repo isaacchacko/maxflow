@@ -201,8 +201,13 @@
 }
 .shimmer * { color: inherit; }
 .shimmer code { background: none; padding: 0; }
+/* The mark's face blinks every few seconds and now and then glances aside. */
+@keyframes mark-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
+@keyframes mark-glance { 0%, 55%, 78%, 100% { transform: translateX(0); } 60%, 73% { transform: translateX(1.6px); } }
+.mark-blink { transform-box: fill-box; transform-origin: center; animation: mark-blink 4.6s ease-in-out infinite; }
+.mark-glance { animation: mark-glance 11s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .working-ring, .working-pill::before, .shimmer { animation: none; }
+  .working-ring, .working-pill::before, .shimmer, .mark-blink, .mark-glance { animation: none; }
 }
 /* While the image viewer is open nothing under its scrim moves: a turning ring repaints the page beneath every frame, and with it
    re-rasters the inbox's full-size image previews, which made zooming crawl. */
