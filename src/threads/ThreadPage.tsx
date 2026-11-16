@@ -1,9 +1,10 @@
 import { ArrowLeft, ExternalLink, MessagesSquare, Network, Waypoints } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { NOW_AT } from "@/mock";
 import { agentStore, objectiveStore, postToThread, threadStore } from "@/store";
+import { Composer } from "./Composer";
 import { Author, RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
 
 function when(at: string) {
@@ -25,7 +26,6 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   const thread = threadStore.use().find(t => t.id === id);
   const agents = agentStore.use();
   const objective = objectiveStore.use().find(o => o.id === thread?.objectiveId);
-  const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,13 +38,6 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   const mentioned = new Map<string, Ref>();
   for (const m of thread.messages) for (const r of refsIn(m.text)) mentioned.set(`${r.kind}:${r.id}`, r);
   const links = new Map(thread.messages.flatMap(m => urlsIn(m.text)).map(l => [l.url, l]));
-
-  function send(e: React.FormEvent) {
-    e.preventDefault();
-    if (!draft.trim()) return;
-    postToThread(thread!.id, "isaac", draft.trim());
-    setDraft("");
-  }
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-hidden p-4">
@@ -71,15 +64,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
               </article>
             ))}
           </div>
-          <form onSubmit={send} className="border-t px-4 py-2.5">
-            <input
-              data-agent="thread-input"
-              value={draft}
-              onChange={e => setDraft(e.target.value)}
-              placeholder="Message"
-              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
-            />
-          </form>
+          <Composer agent="thread-input" onSend={text => postToThread(thread.id, "isaac", text)} className="border-t px-4 py-2.5" />
         </section>
 
         <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">

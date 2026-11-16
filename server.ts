@@ -583,6 +583,8 @@ const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
 const saveThreads = () => writeFileSync(THREADS, JSON.stringify(threads));
 const ISAAC_IN_THREAD = "[maxflow · Isaac, in thread";
+// An image pasted into a thread is markdown pointing at its file in UPLOADS, so the agent reading the text can Read the path.
+const IMAGE = /!\[[^\]]*\]\([^)\s]+\)/g;
 
 // A page (an objective's or a task's) is a grid of cards its agents keep current.
 function pageOf(ref: string): { page: Block[]; save: () => void } | null {
@@ -1321,7 +1323,7 @@ Bun.serve<WsData>({
       // Isaac's inbox: each message starts a thread, and the funnel picks the router that owns it.
       if (!from && body.text?.trim()) {
         const text = body.text.trim();
-        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: text.split("\n")[0].slice(0, 80), objective: "", routers: [], messages: [{ from: "isaac", at: Date.now(), text }] };
+        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: (text.replace(IMAGE, "").trim().split("\n")[0] || "image").slice(0, 80), objective: "", routers: [], messages: [{ from: "isaac", at: Date.now(), text }] };
         const ev = dispatch({ source: "isaac", target: t.title, text, deliver: (seq) => `${text}\n[maxflow] signal ${seq}, his inbox thread ${t.id}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`. Always route an inbox thread, small talk included: its router answers him there.` });
         t.signal = ev.seq;
         threads.push(t);
@@ -1489,6 +1491,11 @@ Bun.serve<WsData>({
       const file = `${UPLOADS}/${new Date().toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID().slice(0, 8)}.${ext === "jpeg" ? "jpg" : ext}`;
       await Bun.write(file, await req.arrayBuffer());
       return Response.json({ path: file });
+    }
+    const upload = path.match(/^\/api\/uploads\/(\w[\w.-]*)$/);
+    if (upload && req.method === "GET") {
+      const file = Bun.file(`${UPLOADS}/${upload[1]}`);
+      return (await file.exists()) ? new Response(file, { headers: { "cache-control": "max-age=31536000, immutable" } }) : new Response("no such upload", { status: 404 });
     }
     if (path === "/api/link" && req.method === "POST") {
       const body = (await req.json().catch(() => ({}))) as { a?: string; b?: string; why?: string };

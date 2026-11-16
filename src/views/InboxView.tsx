@@ -1,8 +1,8 @@
 import { MessagesSquare } from "lucide-react";
-import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { objectiveStore, startThread, threadStore } from "@/store";
+import { Composer } from "@/threads/Composer";
 
 function ago(at: number) {
   const s = Math.round((Date.now() - at) / 1000);
@@ -16,7 +16,7 @@ function askedAt(t: Thread) {
   return ask ? Date.parse(ask.at) : null;
 }
 
-const plain = (text: string) => text.replace(/\[\[\w+:([^\]]+)\]\]/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+const plain = (text: string) => text.replace(/!\[[^\]]*\]\([^)]+\)/g, "[image]").replace(/\[\[\w+:([^\]]+)\]\]/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
 
 export function InboxView() {
   const threads = threadStore.use();
@@ -25,26 +25,9 @@ export function InboxView() {
     .map(t => ({ t, asked: askedAt(t), last: Date.parse(t.messages.at(-1)?.at ?? "") || 0 }))
     .sort((a, b) => (a.asked ?? Infinity) - (b.asked ?? Infinity) || b.last - a.last);
 
-  const [draft, setDraft] = useState("");
-  function send(e: React.FormEvent) {
-    e.preventDefault();
-    if (!draft.trim()) return;
-    void startThread(draft.trim());
-    setDraft("");
-  }
-
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-4">
-      <form onSubmit={send} className="max-w-4xl border px-3 py-2.5">
-        <input
-          autoFocus
-          data-agent="inbox-input"
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          placeholder="Message"
-          className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
-        />
-      </form>
+      <Composer autoFocus agent="inbox-input" onSend={startThread} className="max-w-4xl border px-3 py-2.5" />
       <ol className="flex max-w-4xl flex-col border empty:hidden">
         {rows.map(({ t, asked, last }) => {
           const latest = t.messages.at(-1);

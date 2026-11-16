@@ -4,16 +4,17 @@ import { agentStateColor, statusColor } from "@/mock";
 import { agentStore, objectiveStore, taskStore } from "@/store";
 
 export type Ref = { kind: "agent" | "router" | "task" | "objective"; id: string };
-type Part = { text: string } | { ref: Ref } | { url: string; label: string };
+type Part = { text: string } | { ref: Ref } | { url: string; label: string } | { image: string };
 
-const TOKEN = /\[\[(agent|router|task|objective):([^\]]+)\]\]|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
+// An image is markdown pointing at its file in the server's uploads dir, which the server serves by name.
+const TOKEN = /\[\[(agent|router|task|objective):([^\]]+)\]\]|!\[[^\]]*\]\(\S*\/uploads\/([\w.-]+)\)|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
 
 export function parse(text: string): Part[] {
   const parts: Part[] = [];
   let last = 0;
   for (const m of text.matchAll(TOKEN)) {
     if (m.index > last) parts.push({ text: text.slice(last, m.index) });
-    parts.push(m[1] ? { ref: { kind: m[1] as Ref["kind"], id: m[2]! } } : { url: m[4]!, label: m[3]! });
+    parts.push(m[1] ? { ref: { kind: m[1] as Ref["kind"], id: m[2]! } } : m[3] ? { image: `/api/uploads/${m[3]}` } : { url: m[5]!, label: m[4]! });
     last = m.index + m[0].length;
   }
   if (last < text.length) parts.push({ text: text.slice(last) });
@@ -68,6 +69,10 @@ export function Rich({ text, className }: { text: string; className?: string }) 
           <span key={i}>{p.text}</span>
         ) : "ref" in p ? (
           <RefChip key={i} r={p.ref} />
+        ) : "image" in p ? (
+          <a key={i} href={p.image} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="my-1 block w-fit">
+            <img src={p.image} alt="" className="max-h-80 max-w-full border" />
+          </a>
         ) : (
           <a key={i} href={p.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-0.5 text-sky-400 hover:underline">
             {p.label}
