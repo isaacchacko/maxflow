@@ -6,11 +6,12 @@ import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { agentStore, objectiveStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
 import { Composer, quoteInto } from "./Composer";
-import { flashMessage, goToMessage } from "./jump";
+import { composeOnArrival, flashMessage, goToMessage, takeCompose } from "./jump";
 import { MessageRow, when } from "./MessageRow";
 import { Replies, repliesOf } from "./Replies";
 import { markSeen } from "./seen";
 import { RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
+import { useVim, vimRow } from "./vim";
 
 /** Escape climbs one level: a subthread goes to its parent at the message it hangs off, a top thread to the view it came from. */
 export function threadUp(id: string, view: string) {
@@ -79,7 +80,34 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
     if (thread) markSeen(thread.id, thread.messages.length);
   }, [thread?.id, thread?.messages.length]);
 
-  useEffect(() => flashMessage(), [id]);
+  const composer = () => document.querySelector<HTMLElement>('[data-agent="thread-input"]')?.focus();
+  // The keyboard cursor walks the root, then the replies: each by its id, or its place for an old message without one.
+  const root = thread?.parentId ? all.find(t => t.id === thread.parentId)?.messages.find(m => m.id === thread.parentMessageId) : thread?.messages[0];
+  const replies = thread ? repliesOf(thread) : [];
+  const keyOf = (m: { id?: string }, i: number) => m.id ?? `#${i}`;
+  const keys = [...(root ? [keyOf(root, -1)] : []), ...replies.map(keyOf)];
+  const byKey = (k: string) => (root && k === keyOf(root, -1) ? root : replies.find((m, i) => keyOf(m, i) === k));
+  const vim = useVim(`thread:${id}`, keys, scrollRef, "last", {
+    compose: composer,
+    up: () => threadUp(id, back),
+    resolve: () => thread && resolveOrReopen(thread, back),
+    open: k => {
+      const sub = all.find(t => t.parentId === id && t.parentMessageId === k);
+      if (sub && (sub.messages.length > 0 || sub.pending)) location.hash = `thread/${sub.id}`;
+    },
+    // Replying to the root is replying here; any other message gets a subthread of its own.
+    reply: k => (k === root?.id || !byKey(k)?.id ? composer() : (composeOnArrival(), void openSubthread(id, k))),
+    quote: k => {
+      const m = byKey(k);
+      if (m?.id) quoteInto(`thread:${id}`, quoted(m.text, m === root ? (thread?.parentId ?? id) : id, m.id));
+    },
+  });
+
+  // Landing on a message (from its subthread, or a quote's link) puts the cursor there; replying from the keyboard opens in the box.
+  useEffect(() => {
+    vim.move(flashMessage(), false);
+    if (takeCompose()) composer();
+  }, [id]);
 
   // A selection inside one message offers to quote it; anything else hides the button.
   const [selected, setSelected] = useState<Selected>();
@@ -102,8 +130,6 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   // A subthread's root is a message in its parent; the breadcrumb climbs back up through every ancestor.
   const ancestors: Thread[] = [];
   for (let up = all.find(t => t.id === thread.parentId); up; up = all.find(t => t.id === up!.parentId)) ancestors.unshift(up);
-  const root = thread.parentId ? ancestors.at(-1)?.messages.find(m => m.id === thread.parentMessageId) : thread.messages[0];
-  const replies = repliesOf(thread);
   const subOf = (messageId?: string) => all.find(t => t.parentId === thread.id && t.parentMessageId === messageId);
 
   const mentioned = new Map<string, Ref>();
@@ -139,8 +165,8 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
         <section className="flex min-h-0 min-w-0 flex-1 flex-col border">
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {root && (
-              <div data-msg={root.id} data-thread={thread.parentId ?? thread.id}>
-                <MessageRow from={root.from} at={root.at} text={root.text} />
+              <div data-msg={root.id} data-thread={thread.parentId ?? thread.id} {...vimRow(keyOf(root, -1))}>
+                <MessageRow from={root.from} at={root.at} text={root.text} active={vim.cursor === keyOf(root, -1)} />
               </div>
             )}
             {selected && (
@@ -170,8 +196,8 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
               return (
                 <Fragment key={i}>
                 {resolvedHere && <p className="my-2 border-t pt-1 text-center text-xs text-muted-foreground">new since resolved</p>}
-                <div data-msg={m.id} data-thread={thread.id} className="group/msg relative">
-                  <MessageRow from={m.from} at={m.at} text={m.text} grouped={grouped} className={cn(!grouped && i > 0 && "mt-2.5")}>
+                <div data-msg={m.id} data-thread={thread.id} {...vimRow(keyOf(m, i))} className="group/msg relative">
+                  <MessageRow from={m.from} at={m.at} text={m.text} grouped={grouped} active={vim.cursor === keyOf(m, i)} className={cn(!grouped && i > 0 && "mt-2.5")}>
                     {sub && (sub.messages.length > 0 || sub.pending) && <Replies t={sub} />}
                   </MessageRow>
                   {m.id && (
@@ -200,6 +226,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
             })}
             {thread.pending && <Pending pending={thread.pending} names={thread.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />}
           </div>
+          {vim.panel}
           <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => postToThread(thread.id, "isaac", text)} className="border-t px-4 py-2.5" />
         </section>
 

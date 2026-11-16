@@ -95,7 +95,7 @@ function useItems(views: readonly { id: string; label: string }[]) {
   }, [threads, agents, sentries, objectives, tasks, views]);
 }
 
-/** ⌘K / Ctrl+K from anywhere, composers included: one box that jumps to any thread, agent, objective, task or view. */
+/** ⌘K / Ctrl+K from anywhere, composers included (or / outside them, as a "quick-switcher-open" event): one box that jumps to any thread, agent, objective, task or view. */
 export function QuickSwitcher({ views }: { views: readonly { id: string; label: string }[] }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -110,11 +110,14 @@ export function QuickSwitcher({ views }: { views: readonly { id: string; label: 
       setOpen(o => !o);
     };
     const onHash = () => visited(location.hash);
+    const onOpen = () => setOpen(true);
     addEventListener("keydown", onKey, true);
     addEventListener("hashchange", onHash);
+    addEventListener("quick-switcher-open", onOpen);
     return () => {
       removeEventListener("keydown", onKey, true);
       removeEventListener("hashchange", onHash);
+      removeEventListener("quick-switcher-open", onOpen);
     };
   }, []);
 

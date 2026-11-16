@@ -109,8 +109,12 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey }: { on
         data-agent={agent}
         value={draft}
         onChange={e => setDraft(e.target.value)}
-        // Enter sends, Shift+Enter is a new line; Enter that confirms an IME composition is neither.
-        onKeyDown={e => e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (e.preventDefault(), e.currentTarget.form?.requestSubmit())}
+        // Enter sends, Shift+Enter is a new line; Enter that confirms an IME composition is neither. Escape in an empty box
+        // leaves it, back to the keys that move through the page.
+        onKeyDown={e => {
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) e.preventDefault(), e.currentTarget.form?.requestSubmit();
+          else if (e.key === "Escape" && !draft) e.currentTarget.blur();
+        }}
         onPaste={e => {
           const files = imagesIn(e.clipboardData.files);
           if (files.length) e.preventDefault(), void attach(files);
