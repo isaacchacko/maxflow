@@ -552,7 +552,7 @@ async function reroute(seq: number, o: Objective, kind?: Kind) {
   const said = thread ? thread.messages.filter((m) => m.from === "isaac").map((m) => m.text).join("\n\n") : sig.text;
   const text = (sig.source === "isaac" ? `${VERIFIED}\n${unforge(said)}` : `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(said)}`) +
     (thread ? `\n[maxflow] He wrote this in his inbox as thread "${thread.title}" (${thread.id}), which is yours now. Answer him there with \`${CLI} thread post ${thread.id} '<text>'\`.` : "") +
-    (kind === "command" ? `\n[maxflow] The funnel judged this a command: do it, or have one worker do it, then answer once${thread ? ` with \`${CLI} thread done ${thread.id} '<result>'\`, which closes its task. If it needs talking through after all, \`${CLI} thread kind ${thread.id} conversation\`` : ""}. No "on it" post and no task of your own for it.` : "");
+    (kind === "command" ? `\n[maxflow] The funnel judged this a command: do it, or have one worker do it, then answer once${thread ? ` with \`${CLI} thread done ${thread.id} '<result>'\`, which closes its task. If it needs talking through after all, \`${CLI} thread kind ${thread.id} conversation\`` : ""}. No "on it" post and no task of your own for it.` : "") + mentionsIn(said);
   const to = routersOf(o.id);
   if (to.length) for (const s of to) enqueue(s, text);
   else to.push(startRouter(o, "Whole objective", text));
@@ -668,6 +668,22 @@ function rememberNames() {
   if (changed) writeFileSync(NAMES, JSON.stringify(names));
 }
 const pathTitle = (t: Thread) => [...ancestors(t), t].map((x) => x.title).join(" › ");
+// A thread he @-mentions ([[thread:<id>]]) reaches the router as a line of context: where it sits, who owns it, how it last stood,
+// and how to read the rest.
+function mentionsIn(text: string) {
+  const ids = [...new Set([...text.matchAll(/\[\[thread:([\w-]+)\]\]/g)].map((m) => m[1]!))];
+  return ids
+    .map((id) => {
+      const t = live_thread(threads.find((x) => x.id === id));
+      if (!t) return `\n[maxflow] He mentions thread ${id}, which no longer exists.`;
+      const objective = objectives.find((o) => o.id === t.objective);
+      const owners = t.routers.map((r) => sessions.get(r)?.name ?? names[r] ?? r);
+      const last = t.messages.at(-1);
+      const who = !last ? "" : last.from === "isaac" ? "him" : (sessions.get(last.from)?.name ?? names[last.from] ?? last.from);
+      return `\n[maxflow] He mentions thread "${pathTitle(t)}" (${t.id})${objective ? `, on "${objective.title}"` : ""}${owners.length ? `, owned by ${owners.join(", ")}` : ""}${last ? `; last from ${who}: "${headline(last.text)}"` : ""}. Read it with \`${CLI} thread read ${t.id} --last 20\`.`;
+    })
+    .join("");
+}
 // The subthread under a message, made on its first reply; a top thread's first message is the thread itself.
 function subthread(parent: Thread, messageId: string) {
   const m = parent.messages.find((x) => x.id === messageId);
@@ -710,8 +726,8 @@ function postIn(t: Thread, from: Session | undefined, text: string, done?: boole
     // Nobody left to hear it (its agents ended, and it has no objective with a router): the funnel finds it an owner.
     const front = funnel();
     if (!to.length && front)
-      dispatch({ source: "isaac", to: [front], target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] Nobody owns this thread any more: its agents ended and it has no objective with a router. Give it one with \`${CLI} thread move ${t.id} <objective id>\`, which hands it to that objective's routers, then tell them his message is waiting there.` });
-    else dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] ${m.nudge ? `He asked for the answer in a subthread of its own: answer this message with \`${CLI} thread new --parent ${t.id}:${m.id} '<text>'\`, and post there from then on, not in the thread.` : `Answer inline in the thread with \`${CLI} thread post ${t.id} '<text>'\`.`} While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line.` });
+      dispatch({ source: "isaac", to: [front], target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] Nobody owns this thread any more: its agents ended and it has no objective with a router. Give it one with \`${CLI} thread move ${t.id} <objective id>\`, which hands it to that objective's routers, then tell them his message is waiting there.${mentionsIn(text)}` });
+    else dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] ${m.nudge ? `He asked for the answer in a subthread of its own: answer this message with \`${CLI} thread new --parent ${t.id}:${m.id} '<text>'\`, and post there from then on, not in the thread.` : `Answer inline in the thread with \`${CLI} thread post ${t.id} '<text>'\`.`} While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line.${mentionsIn(text)}` });
     if (to.length) t.pending = { routers: to.map((s) => s.id), since: Date.now() };
     answered(t);
   } else t.pending = undefined;

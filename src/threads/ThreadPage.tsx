@@ -207,6 +207,8 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   const mentioned = new Map<string, Ref>();
   for (const m of thread.messages) for (const r of refsIn(m.text)) mentioned.set(`${r.kind}:${r.id}`, r);
   const links = new Map(thread.messages.flatMap(m => urlsIn(m.text)).map(l => [l.url, l]));
+  // Backlinks: the threads with a message that @-mentions this one.
+  const mentionedIn = all.filter(t => t.id !== thread.id && t.messages.some(m => m.text.includes(`[[thread:${thread.id}]]`)));
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-hidden p-4">
@@ -358,6 +360,18 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
             </div>
           </Section>
           <Separator />
+          {mentionedIn.length > 0 && (
+            <>
+              <Section title={`Mentioned in · ${mentionedIn.length}`}>
+                <div className="flex flex-wrap gap-1.5 text-sm" data-agent="mentioned-in">
+                  {mentionedIn.map(t => (
+                    <RefChip key={t.id} r={{ kind: "thread", id: t.id }} />
+                  ))}
+                </div>
+              </Section>
+              <Separator />
+            </>
+          )}
           <Section title={`Links · ${links.size}`}>
             {links.size === 0 && <p className="text-xs text-muted-foreground">None</p>}
             {[...links.values()].map(l => (

@@ -8,7 +8,7 @@ import { agentStore, objectiveStore, sentryStore, taskStore, threadStore } from 
 import { Avatar, Rich } from "@/threads/Rich";
 import { unseen } from "@/threads/seen";
 
-type Item = { kind: Kind; href: string; label: string; detail?: string; icon: React.ReactNode; text: string; rank: number };
+export type Item = { kind: Kind; href: string; label: string; detail?: string; icon: React.ReactNode; text: string; rank: number };
 type Kind = "Unread" | "Recent" | "Threads" | "Agents" | "Objectives" | "Tasks" | "Views";
 const ORDER: Kind[] = ["Unread", "Recent", "Threads", "Agents", "Objectives", "Tasks", "Views"];
 const PER_KIND = 6;
@@ -30,13 +30,13 @@ function visited(hash: string) {
   } catch {}
 }
 
-const plain = (text: string) => text.replace(/!\[[^\]]*\]\([^)]+\)/g, "[image]").replace(/\[\[\w+:([^\]]+)\]\]/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/\s+/g, " ");
+export const plain = (text: string) => text.replace(/!\[[^\]]*\]\([^)]+\)/g, "[image]").replace(/\[\[\w+:([^\]]+)\]\]/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/\s+/g, " ");
 
 /**
  * Higher is better; null for no match. The query as one run counts most, earlier and at a word start more. Letters in order
  * with gaps count only in a short name (`loose`), since a long message holds almost any letters in order.
  */
-function score(query: string, text: string, loose: boolean) {
+export function score(query: string, text: string, loose: boolean) {
   const q = query.toLowerCase(), t = text.toLowerCase();
   const at = t.indexOf(q);
   if (at >= 0) return 1000 - Math.min(at, 300) + (at === 0 || /\W/.test(t[at - 1]!) ? 200 : 0);
@@ -46,31 +46,40 @@ function score(query: string, text: string, loose: boolean) {
   return i === q.length && gaps <= q.length * 2 ? 500 - gaps : null;
 }
 
-function useItems(views: readonly { id: string; label: string }[]) {
+/** Every thread as a switcher item: subthreads labelled with their path, unread first, then whatever moved last. The composer's @ picker lists the same. */
+export function useThreadItems() {
   const threads = threadStore.use();
+  return useMemo<Item[]>(
+    () =>
+      threads.map(t => {
+        const first = t.messages[0];
+        const fresh = unseen(t);
+        const opener = first ? plain(first.text) : "";
+        // A subthread shows the threads above it, so it reads as where it sits.
+        const up: string[] = [];
+        for (let p = threads.find(x => x.id === t.parentId); p; p = threads.find(x => x.id === p!.parentId)) up.unshift(p.title);
+        return {
+          kind: "Threads" as const,
+          href: `#thread/${t.id}`,
+          label: [...up, t.title].join(" › "),
+          detail: fresh > 0 ? `${fresh} new` : opener.startsWith(t.title) ? undefined : opener,
+          icon: <Avatar from={first?.from ?? t.routerIds[0] ?? ""} small />,
+          text: `${t.title} ${opener}`,
+          // Unread first, then whatever moved last.
+          rank: (fresh > 0 ? UNREAD : 0) + (Date.parse(t.messages.at(-1)?.at ?? "") || 0),
+        };
+      }),
+    [threads],
+  );
+}
+
+function useItems(views: readonly { id: string; label: string }[]) {
+  const thread = useThreadItems();
   const agents = agentStore.use();
   const sentries = sentryStore.use();
   const objectives = objectiveStore.use();
   const tasks = taskStore.use();
   return useMemo<Item[]>(() => {
-    const thread = threads.map(t => {
-      const first = t.messages[0];
-      const fresh = unseen(t);
-      const opener = first ? plain(first.text) : "";
-      // A subthread shows the threads above it, so it reads as where it sits.
-      const up: string[] = [];
-      for (let p = threads.find(x => x.id === t.parentId); p; p = threads.find(x => x.id === p!.parentId)) up.unshift(p.title);
-      return {
-        kind: "Threads" as const,
-        href: `#thread/${t.id}`,
-        label: [...up, t.title].join(" › "),
-        detail: fresh > 0 ? `${fresh} new` : opener.startsWith(t.title) ? undefined : opener,
-        icon: <Avatar from={first?.from ?? t.routerIds[0] ?? ""} small />,
-        text: `${t.title} ${opener}`,
-        // Unread first, then whatever moved last.
-        rank: (fresh > 0 ? UNREAD : 0) + (Date.parse(t.messages.at(-1)?.at ?? "") || 0),
-      };
-    });
     const agent = [...agents.map(a => ({ id: a.id, name: a.name ?? a.id, detail: a.doing })), ...sentries.map(s => ({ id: s.id, name: `sentry: ${s.name}`, detail: s.status }))].map(a => ({
       kind: "Agents" as const,
       href: `#agent/${a.id}`,
@@ -92,7 +101,7 @@ function useItems(views: readonly { id: string; label: string }[]) {
     }));
     const view = views.map(v => ({ kind: "Views" as const, href: `#${v.id}`, label: v.label, icon: <LayoutGrid className="size-4 text-muted-foreground" />, text: v.label, rank: 0 }));
     return [...thread, ...agent, ...objective, ...task, ...view];
-  }, [threads, agents, sentries, objectives, tasks, views]);
+  }, [thread, agents, sentries, objectives, tasks, views]);
 }
 
 /** ⌘K / Ctrl+K from anywhere, composers included (or / outside them, as a "quick-switcher-open" event): one box that jumps to any thread, agent, objective, task or view. */

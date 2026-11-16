@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { cn } from "@/lib/utils";
+import { useMentionPicker } from "./Mention";
 import { Markdown } from "./Rich";
 
 /** The server keeps a pasted image as a file and returns its path, which the message carries as markdown for the agent to Read. */
@@ -65,6 +66,7 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools 
     addEventListener("composer-quote", onQuote);
     return () => removeEventListener("composer-quote", onQuote);
   }, [draftKey]);
+  const mention = useMentionPicker(input, draft, setDraft, draftKey.match(/^thread:([\w-]+)$/)?.[1]);
   const [uploading, setUploading] = useState(0);
   const [error, setError] = useState("");
 
@@ -123,17 +125,19 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools 
           </button>
         </div>
       )}
-      <div className="flex items-start gap-2">
+      <div className="relative flex items-start gap-2">
       <textarea
         ref={input}
         rows={1}
         autoFocus={autoFocus}
         data-agent={agent}
         value={draft}
-        onChange={e => setDraft(e.target.value)}
-        // Enter sends, Shift+Enter is a new line; Enter that confirms an IME composition is neither. Escape in an empty box
+        onChange={e => (setDraft(e.target.value), mention.track())}
+        onSelect={mention.track}
+        // The @ picker takes its keys first while it is open. Enter sends, Shift+Enter is a new line; Enter that confirms an IME composition is neither. Escape in an empty box
         // leaves it, back to the keys that move through the page.
         onKeyDown={e => {
+          if (mention.onKeyDown(e)) return;
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) e.preventDefault(), e.currentTarget.form?.requestSubmit();
           else if (e.key === "Escape" && !draft) e.currentTarget.blur();
         }}
@@ -145,6 +149,7 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools 
         className="w-full resize-none overflow-y-auto bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60"
       />
       {tools}
+      {mention.panel}
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
     </form>

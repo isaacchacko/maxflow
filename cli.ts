@@ -30,6 +30,7 @@ const usage = `usage:
   maxflow objective merge <from id> <into id>   the target takes the source's agents, threads, tasks and signals; the source closes
   maxflow route <signal seq> <objective id> [--kind command|conversation] | maxflow route <signal seq> --new <title> [--cwd DIR]   the funnel routing a signal from the event log
   maxflow thread new <title...> [--objective ID] | maxflow thread new --parent <thread id>:<message id> [text...]   a subthread under that message | maxflow thread post <thread id> <text...> | maxflow thread status <thread id> <line...> | maxflow threads
+  maxflow thread read <thread id> [--last N]   print a thread's messages as text, e.g. one he @-mentions
   maxflow thread done <thread id> <result...>   a command's one answer: closes the thread and its task
                                              --image PATH on thread new/post/done and ask, repeatable: shows him that png/jpg/gif/webp inline
   maxflow thread kind <thread id> command|conversation   flip what a thread is
@@ -281,6 +282,17 @@ if (verb === "ls") {
   const t = await call("/api/threads", { method: "POST", body: JSON.stringify({ title: positional(rest.slice(1), ["--objective", "--image"]).join(" "), objective: flag(rest, "--objective") }) });
   if (rest.includes("--image")) await call(`/api/threads/${t.id}/messages`, { method: "POST", body: JSON.stringify({ text: await withImages("", rest) }) });
   console.log(t.id);
+} else if (verb === "thread" && rest[0] === "read" && rest[1]) {
+  type Msg = { id: string; from: string; at: number; text: string };
+  const all: { id: string; title: string; objective: string; messages: Msg[]; parent?: { thread: string; message: string }; mergedInto?: string }[] = await call("/api/threads");
+  let t = all.find((x) => x.id === rest[1]);
+  while (t?.mergedInto) t = all.find((x) => x.id === t!.mergedInto);
+  if (!t) console.error(`no thread ${rest[1]}`), process.exit(1);
+  const who = new Map<string, string>((await call("/api/sessions")).map((s: { id: string; name: string }) => [s.id, s.name]));
+  const last = Number(flag(rest, "--last") ?? 0);
+  const shown = last > 0 ? t.messages.slice(-last) : t.messages;
+  console.log(`${t.id} "${t.title}"${t.objective ? ` on ${t.objective}` : ""}${t.parent ? `, a subthread of ${t.parent.thread} under ${t.parent.message}` : ""}: ${t.messages.length} messages${shown.length < t.messages.length ? `, the last ${shown.length} below` : ""}`);
+  for (const m of shown) console.log(`\n${m.id}  ${new Date(m.at).toLocaleString()}  ${m.from === "isaac" ? "Isaac" : (who.get(m.from) ?? m.from)}\n${m.text}`);
 } else if (verb === "thread" && rest[0] === "post" && rest[2]) {
   await call(`/api/threads/${rest[1]}/messages`, { method: "POST", body: JSON.stringify({ text: await withImages(withoutImages(rest.slice(2)).join(" "), rest) }) });
 } else if (verb === "thread" && rest[0] === "done" && rest[2]) {
