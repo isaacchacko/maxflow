@@ -54,6 +54,12 @@ export function unseenDeep(t: Thread, all: Thread[]): number {
 /** Replies he hasn't had on screen; a thread this browser never opened counts what came after his last message. A top thread's
  * opening message is on its inbox row, so it counts as seen and a thread with no replies has nothing new. */
 export function unseen(t: Thread) {
-  const shown = Math.max(seenCount(t.id) ?? t.messages.findLastIndex(m => m.from === "isaac") + 1, t.parentId ? 0 : 1);
-  return Math.max(0, t.messages.length - shown);
+  return Math.max(0, t.messages.length - shownOf(t));
+}
+const shownOf = (t: Thread) => Math.max(seenCount(t.id) ?? t.messages.findLastIndex(m => m.from === "isaac") + 1, t.parentId ? 0 : 1);
+
+/** Where his unread messages start in the thread's messages, or undefined with none: where the red "New" line goes. */
+export function firstUnseen(t: Thread) {
+  const shown = shownOf(t);
+  return shown < t.messages.length ? shown : undefined;
 }

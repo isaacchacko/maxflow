@@ -11,7 +11,7 @@ import { composeOnArrival, flashMessage, goToMessage, takeCompose } from "./jump
 import { MessageRow, when } from "./MessageRow";
 import { Replies, repliesOf } from "./Replies";
 import { RowMenu, messageItems, threadItems } from "./RowMenu";
-import { markSeen, setSeen } from "./seen";
+import { firstUnseen, markSeen, setSeen } from "./seen";
 import { RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
 import { KindMenu } from "./KindMenu";
 import { ShotScope, shotsOf } from "./Viewer";
@@ -104,11 +104,22 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   const agents = agentStore.use();
   const objective = objectiveStore.use().find(o => o.id === thread?.objectiveId);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Slack's red "New" line: above the first message he hadn't seen when he opened the thread, taken before it is marked seen,
+  // so it stays put while he reads and as more arrive under it. Gone once he writes here or leaves; "Mark unread from here" moves it.
+  const [line, setLine] = useState<{ id: string; at?: number }>();
+  if (thread && line?.id !== id) setLine({ id, at: firstUnseen(thread) });
+  const lineAt = line?.id === id ? line.at : undefined;
+  const lineRef = useRef<HTMLDivElement>(null);
+  const opened = useRef<string>(undefined);
 
+  // Opening with something unread scrolls to the line; otherwise, and as messages arrive, to the bottom.
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [thread?.messages.length, !!thread?.pending]);
+    if (!el || !thread) return;
+    if (opened.current !== id && lineRef.current) lineRef.current.scrollIntoView({ block: "center" });
+    else el.scrollTop = el.scrollHeight;
+    opened.current = id;
+  }, [id, !!thread, thread?.messages.length, !!thread?.pending]);
 
   useEffect(() => {
     if (thread) markSeen(thread.id, thread.messages.length);
@@ -144,10 +155,14 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
     },
   } satisfies VimActions;
   const vim = useVim(`thread:${id}`, keys, scrollRef, "last", actions);
+  const firstNew = lineAt === undefined ? -1 : replies.findIndex(m => thread!.messages.indexOf(m) >= lineAt);
 
   // Landing on a message (from its subthread, or a quote's link) puts the cursor there; replying from the keyboard opens in the box.
   useEffect(() => {
-    vim.move(flashMessage(), false);
+    // With nothing to land on, the cursor starts at the first unread, and the line is scrolled to after vim restores its cursor.
+    const landed = flashMessage();
+    if (!landed) lineRef.current?.scrollIntoView({ block: "center" });
+    vim.move(landed ?? (firstNew >= 0 ? keyOf(replies[firstNew]!, firstNew) : undefined), false);
     if (takeCompose()) composer();
   }, [id]);
 
@@ -181,7 +196,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
       open: sub && (sub.messages.length > 0 || sub.pending) ? () => actions.open(k) : undefined,
       reply: m.id ? () => actions.reply(k) : undefined,
       quote: m.id ? () => actions.quote(k) : undefined,
-      unread: at >= (thread.parentId ? 0 : 1) ? () => setSeen(thread.id, at) : undefined,
+      unread: at >= (thread.parentId ? 0 : 1) ? () => (setSeen(thread.id, at), setLine({ id, at })) : undefined,
       link: m.id && `[[msg:${m === root ? (thread.parentId ?? id) : id}/${m.id}]]`,
     });
   };
@@ -254,12 +269,19 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
             {replies.map((m, i) => {
               const prev = replies[i - 1];
               const sub = subOf(m.id);
-              const grouped = prev?.from === m.from && Date.parse(m.at) - Date.parse(prev.at) <= GROUP_MS;
-              // What agents posted after he resolved it sits below a line saying so.
+              // What agents posted after he resolved it sits below a line saying so; where the "New" line falls too, that line says both.
               const resolvedHere = thread.resolved && m.at > thread.resolved.at && !(prev && prev.at > thread.resolved.at);
+              const isNew = i === firstNew;
+              const grouped = !isNew && prev?.from === m.from && Date.parse(m.at) - Date.parse(prev.at) <= GROUP_MS;
               return (
                 <Fragment key={i}>
-                {resolvedHere && <p className="my-2 border-t pt-1 text-center text-xs text-muted-foreground">new since resolved</p>}
+                {resolvedHere && !isNew && <p className="my-2 border-t pt-1 text-center text-xs text-muted-foreground">new since resolved</p>}
+                {isNew && (
+                  <div ref={lineRef} data-agent="unread-line" className="my-2 flex items-center gap-1.5 text-[11px] font-semibold text-destructive">
+                    <span className="h-px flex-1 bg-destructive" />
+                    {resolvedHere ? "New since resolved" : "New"}
+                  </div>
+                )}
                 <RowMenu agent={`msg:${keyOf(m, i)}`} items={messageMenu(m, keyOf(m, i))}>
                 <div data-msg={m.id} data-thread={thread.id} {...vimRow(keyOf(m, i))} className="group/msg relative">
                   <MessageRow from={m.from} at={m.at} text={m.text} grouped={grouped} active={vim.cursor === keyOf(m, i)} className={cn(!grouped && i > 0 && "mt-2.5")}>
@@ -296,7 +318,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
           </div>
           </ShotScope.Provider>
           {vim.panel}
-          <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => postToThread(thread.id, "isaac", text, nudge ? "subthread" : undefined)} tools={<NudgeToggle on={nudge} set={on => setNudge(on ? "subthread" : "")} />} className="border-t px-4 py-2.5" />
+          <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => (setLine({ id }), postToThread(thread.id, "isaac", text, nudge ? "subthread" : undefined))} tools={<NudgeToggle on={nudge} set={on => setNudge(on ? "subthread" : "")} />} className="border-t px-4 py-2.5" />
         </section>
 
         <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">
