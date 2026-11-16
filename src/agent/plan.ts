@@ -1,5 +1,5 @@
 import { GRID_COLS, GRID_ROWS, type Block, type Status, type Task } from "@/mock";
-import { addEvent, moveTask, putBlock, removeBlock, taskStore, threadStore, type PageRef } from "@/store";
+import { addEvent, addSignal, agentStore, moveTask, putBlock, removeBlock, taskStore, threadStore, type PageRef } from "@/store";
 import { click, drag, hide, moveTo, press, show } from "./cursor";
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -61,9 +61,9 @@ async function openPage(ref: PageRef) {
     if (!location.hash.startsWith("#timeline") && !location.hash.startsWith("#agents")) await click("tab:timeline");
     return click(`thread:${id}`);
   }
-  const view = (["graph", "timeline"] as const).find(v => location.hash.startsWith(`#${v}`)) ?? "kanban";
+  const view = location.hash.startsWith("#timeline") ? "timeline" : "kanban";
   if (!location.hash.startsWith(`#${view}`)) await click(`tab:${view}`);
-  await click(`${{ graph: "node", kanban: "card", timeline: "bar" }[view]}:${id}`);
+  await click(`${view === "kanban" ? "card" : "bar"}:${id}`);
 }
 
 async function editPage(ref: PageRef, draft: Draft, say: (s: string) => void) {
@@ -117,11 +117,20 @@ function pickTarget(text: string): PageRef | undefined {
   return todo && `task/${todo.id}`;
 }
 
+function routePrompt(ref: PageRef, request: string) {
+  const [type, id] = ref.split("/");
+  const threadId = type === "thread" ? id : threadStore.get().find(t => t.taskIds.includes(id!))?.id;
+  const router = agentStore.get().find(a => a.role === "router" && a.threadId === threadId);
+  const worker = type === "task" ? taskStore.get().find(t => t.id === id)?.agent : undefined;
+  addSignal({ source: "isaac", target: "chat", text: request, routedTo: [router?.id, worker].filter((a): a is string => !!a) });
+}
+
 export async function act(request: string, say: (s: string) => void) {
   const text = request.toLowerCase();
   const ref = pickTarget(text);
   if (!ref) return say("Nothing on the board to work on.");
   const target = resolve(ref);
+  routePrompt(ref, request);
 
   const status = target.task && columnWords.find(([re]) => re.test(text))?.[1];
   const draft = draftFor(text, request, target.agent);

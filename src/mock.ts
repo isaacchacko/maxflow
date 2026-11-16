@@ -49,19 +49,21 @@ export type Agent = {
   doing: string;
 };
 
-export type SentryEvent = { at: string; text: string; routedTo: string[] };
+export type Source = "isaac" | "gh" | "slack";
+
+export type Signal = { id: string; source: Source; at: string; target: string; text: string; routedTo: string[] };
 
 export type Sentry = {
-  id: "gh" | "slack";
+  id: Source;
   label: string;
-  state: "polling" | "backoff";
-  every: string;
-  lastPoll: string;
+  state: "polling" | "backoff" | "live";
+  every?: string;
+  lastPoll?: string;
   watching: { target: string; what: string; routedTo: string[] }[];
-  events: SentryEvent[];
 };
 
-export const NOW = new Date("2026-11-15T14:00:00");
+export const NOW_AT = "2026-11-15T14:00";
+export const NOW = new Date(NOW_AT);
 
 export const GRID_COLS = 12;
 export const GRID_ROWS = 6;
@@ -306,6 +308,12 @@ export const agents: Agent[] = [
 
 export const sentries: Sentry[] = [
   {
+    id: "isaac",
+    label: "You",
+    state: "live",
+    watching: [{ target: "chat", what: "prompts", routedTo: ["r-festo", "r-overdue", "r-board", "r-reviews"] }],
+  },
+  {
     id: "gh",
     label: "GitHub",
     state: "polling",
@@ -314,13 +322,7 @@ export const sentries: Sentry[] = [
     watching: [
       { target: "#6250", what: "CI, reviews, merge", routedTo: ["mf-1", "r-festo"] },
       { target: "#7149", what: "CI, comments", routedTo: ["mf-4"] },
-      { target: "#42", what: "merged", routedTo: ["mf-3"] },
-    ],
-    events: [
-      { at: "13:41", text: "#7149 CI started", routedTo: ["mf-4"] },
-      { at: "10:02", text: "#6250 CI green", routedTo: ["mf-1", "r-festo"] },
-      { at: "09:58", text: "#6250 review requested from Ayush", routedTo: ["mf-1"] },
-      { at: "Nov 14", text: "#42 merged", routedTo: ["mf-3", "r-board"] },
+      { target: "#42", what: "merged", routedTo: ["mf-3", "r-board"] },
     ],
   },
   {
@@ -334,20 +336,22 @@ export const sentries: Sentry[] = [
       { target: "#reviews-pls", what: "pings naming Isaac", routedTo: ["r-reviews"] },
       { target: "DM Ayush", what: "replies", routedTo: ["r-overdue"] },
     ],
-    events: [
-      { at: "13:58", text: "Rate limited, backing off to 2m", routedTo: [] },
-      { at: "13:20", text: "#festo-ops: \"is the backfill safe to run yet?\"", routedTo: ["r-festo"] },
-      { at: "11:02", text: "DM Ayush: \"SAP side can't change the CDS view until 2027\"", routedTo: ["r-overdue", "r-sap"] },
-      { at: "Nov 14", text: "#reviews-pls: review ping on #7149", routedTo: ["r-reviews"] },
-    ],
   },
 ];
 
-export const columns: { status: Status; label: string }[] = [
-  { status: "todo", label: "Todo" },
-  { status: "doing", label: "Doing" },
-  { status: "review", label: "Review" },
-  { status: "done", label: "Done" },
+export const signals: Signal[] = [
+  { id: "s1", source: "gh", at: "2026-11-15T13:41", target: "#7149", text: "Author replied: \"why rename fetchRows?\"", routedTo: ["mf-4"] },
+  { id: "s2", source: "slack", at: "2026-11-15T13:20", target: "#festo-ops", text: "\"Is the backfill safe to run yet?\"", routedTo: ["r-festo"] },
+  { id: "s3", source: "slack", at: "2026-11-15T11:02", target: "DM Ayush", text: "\"SAP side can't change the CDS view until 2027\"", routedTo: ["r-overdue", "r-sap"] },
+  { id: "s4", source: "gh", at: "2026-11-15T10:02", target: "#6250", text: "CI green", routedTo: ["mf-1", "r-festo"] },
+  { id: "s5", source: "gh", at: "2026-11-15T09:58", target: "#6250", text: "Review requested from Ayush", routedTo: ["mf-1"] },
+  { id: "s6", source: "isaac", at: "2026-11-15T09:15", target: "chat", text: "Once #6250 merges, re-run intake for the last 30 days.", routedTo: ["r-festo"] },
+  { id: "s7", source: "isaac", at: "2026-11-15T08:50", target: "chat", text: "Why do overdue cases stay open after SAP clears them?", routedTo: ["r-overdue", "mf-2"] },
+  { id: "s8", source: "slack", at: "2026-11-14T14:55", target: "#reviews-pls", text: "Review ping naming Isaac on #7149", routedTo: ["r-reviews"] },
+  { id: "s9", source: "gh", at: "2026-11-14T16:00", target: "#42", text: "Merged", routedTo: ["mf-3", "r-board"] },
+  { id: "s10", source: "isaac", at: "2026-11-11T10:40", target: "chat", text: "Cards should show their PR state.", routedTo: ["r-board"] },
+  { id: "s11", source: "isaac", at: "2026-11-08T09:00", target: "chat", text: "Overdue cases keep piling up. Find out why and stop it.", routedTo: ["r-overdue"] },
+  { id: "s12", source: "isaac", at: "2026-11-03T10:00", target: "chat", text: "Get Festo sweeps under the prod tick, then backfill what we missed.", routedTo: ["r-festo"] },
 ];
 
 export const agentStateColor: Record<AgentState, string> = {

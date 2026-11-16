@@ -7,17 +7,15 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Page } from "@/page/Page";
 import type { PageRef } from "@/store";
 import { AgentsView } from "@/views/AgentsView";
-import { SentriesView } from "@/views/SentriesView";
-import { GraphView } from "@/views/GraphView";
+import { RoutingView } from "@/views/RoutingView";
 import { KanbanView } from "@/views/KanbanView";
 import { TimelineView } from "@/views/TimelineView";
 
 const views = [
-  { id: "graph", label: "Graph", key: "1", View: GraphView },
+  { id: "routing", label: "Routing", key: "1", View: RoutingView },
   { id: "kanban", label: "Kanban", key: "2", View: KanbanView },
   { id: "timeline", label: "Timeline", key: "3", View: TimelineView },
   { id: "agents", label: "Agents", key: "4", View: AgentsView },
-  { id: "sentries", label: "Sentries", key: "5", View: SentriesView },
 ] as const;
 
 type ViewId = (typeof views)[number]["id"];
@@ -25,16 +23,16 @@ type Route = { view: ViewId; page?: PageRef };
 
 function lastView(): ViewId {
   try {
-    return (sessionStorage.getItem("view") as ViewId | null) ?? "graph";
+    return (sessionStorage.getItem("view") as ViewId | null) ?? "routing";
   } catch {
-    return "graph";
+    return "routing";
   }
 }
 
 function routeFromHash(): Route {
   const [first, id] = location.hash.slice(1).split("/");
   if ((first === "task" || first === "thread") && id) return { view: lastView(), page: `${first}/${id}` as PageRef };
-  const view = views.find(v => v.id === first)?.id ?? "graph";
+  const view = views.find(v => v.id === first)?.id ?? "routing";
   try {
     sessionStorage.setItem("view", view);
   } catch {}

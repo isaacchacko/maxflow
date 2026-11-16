@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { agents as seedAgents, tasks as seedTasks, threads as seedThreads, type Block, type Event, type Status } from "./mock";
+import { NOW_AT, agents as seedAgents, signals as seedSignals, tasks as seedTasks, threads as seedThreads, type Block, type Event, type Signal, type Status } from "./mock";
 
 export function createStore<T>(initial: T) {
   let state = initial;
@@ -21,6 +21,7 @@ export function createStore<T>(initial: T) {
 export const taskStore = createStore(seedTasks);
 export const threadStore = createStore(seedThreads);
 export const agentStore = createStore(seedAgents);
+export const signalStore = createStore(seedSignals);
 export const editedStore = createStore<Record<string, number>>({});
 
 /** A page is addressed the same way as its route: "task/t1" or "thread/overdue". */
@@ -50,4 +51,8 @@ export function putBlock(ref: PageRef, block: Block) {
 
 export function removeBlock(ref: PageRef, blockId: string) {
   update(ref, s => ({ ...s, page: s.page.filter(b => b.id !== blockId) }));
+}
+
+export function addSignal(signal: Omit<Signal, "id" | "at">) {
+  signalStore.set(all => [{ ...signal, id: `s${Date.now()}`, at: NOW_AT }, ...all]);
 }
