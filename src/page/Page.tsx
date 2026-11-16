@@ -2,34 +2,34 @@ import { ArrowLeft, GitPullRequest, Waypoints } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { GRID_COLS, GRID_ROWS, statusColor, threadStatus, type Block } from "@/mock";
-import { editedStore, taskStore, threadStore, type PageRef } from "@/store";
+import { GRID_COLS, GRID_ROWS, statusColor, objectiveStatus, type Block } from "@/mock";
+import { editedStore, taskStore, objectiveStore, type PageRef } from "@/store";
 import { BlockView, type Subject } from "./blocks";
 
 function useSubject(ref: PageRef) {
   const [type, id] = ref.split("/");
   const tasks = taskStore.use();
-  const threads = threadStore.use();
+  const objectives = objectiveStore.use();
   if (type === "task") {
     const task = tasks.find(t => t.id === id);
     if (!task) return;
-    const thread = threads.find(th => th.taskIds.includes(task.id));
-    const subject: Subject = { ref, status: task.status, events: task.events, pr: task.pr, threadId: thread?.id };
-    return { subject, title: task.title, page: task.page, agent: task.agent, thread };
+    const objective = objectives.find(th => th.taskIds.includes(task.id));
+    const subject: Subject = { ref, status: task.status, events: task.events, pr: task.pr, objectiveId: objective?.id };
+    return { subject, title: task.title, page: task.page, agent: task.agent, objective };
   }
-  const thread = threads.find(th => th.id === id);
-  if (!thread) return;
-  const status = threadStatus(thread.taskIds.map(tid => tasks.find(t => t.id === tid)!.status));
-  const subject: Subject = { ref, status, events: thread.events, threadId: thread.id };
-  return { subject, title: thread.title, page: thread.page, agent: undefined, thread: undefined };
+  const objective = objectives.find(th => th.id === id);
+  if (!objective) return;
+  const status = objectiveStatus(objective.taskIds.map(tid => tasks.find(t => t.id === tid)!.status));
+  const subject: Subject = { ref, status, events: objective.events, objectiveId: objective.id };
+  return { subject, title: objective.title, page: objective.page, agent: undefined, objective: undefined };
 }
 
 export function Page({ pageRef, back }: { pageRef: PageRef; back: string }) {
   const found = useSubject(pageRef);
   const edited = editedStore.use();
   if (!found) return <p className="p-6 text-muted-foreground">Nothing at {pageRef}.</p>;
-  const { subject, title, page, agent, thread } = found;
-  const isThread = pageRef.startsWith("thread/");
+  const { subject, title, page, agent, objective } = found;
+  const isObjective = pageRef.startsWith("objective/");
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-hidden p-4">
@@ -37,19 +37,19 @@ export function Page({ pageRef, back }: { pageRef: PageRef; back: string }) {
         <Button variant="ghost" size="icon" asChild data-agent="back">
           <a href={`#${back}`}><ArrowLeft /></a>
         </Button>
-        {isThread ? <Waypoints className="size-5 text-agent" /> : <span className={cn("size-2.5 rounded-full", statusColor[subject.status])} />}
+        {isObjective ? <Waypoints className="size-5 text-agent" /> : <span className={cn("size-2.5 rounded-full", statusColor[subject.status])} />}
         <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-        {isThread && <Badge variant="outline" className="capitalize">{subject.status}</Badge>}
+        {isObjective && <Badge variant="outline" className="capitalize">{subject.status}</Badge>}
         {agent && <Badge variant="secondary">{agent}</Badge>}
         {subject.pr && (
           <Badge variant="outline" className="gap-1">
             <GitPullRequest className="size-3" />#{subject.pr}
           </Badge>
         )}
-        {thread && (
-          <a href={`#thread/${thread.id}`} data-agent={`thread:${thread.id}`} className="ml-auto flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+        {objective && (
+          <a href={`#objective/${objective.id}`} data-agent={`objective:${objective.id}`} className="ml-auto flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
             <Waypoints className="size-4" />
-            {thread.title}
+            {objective.title}
           </a>
         )}
       </header>

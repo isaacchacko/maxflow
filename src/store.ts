@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { NOW_AT, agents as seedAgents, signals as seedSignals, tasks as seedTasks, threads as seedThreads, type Block, type Event, type Signal, type Status } from "./mock";
+import { NOW_AT, agents as seedAgents, signals as seedSignals, tasks as seedTasks, objectives as seedObjectives, type Block, type Event, type Agent, type Signal, type Status } from "./mock";
 
 export function createStore<T>(initial: T) {
   let state = initial;
@@ -19,17 +19,17 @@ export function createStore<T>(initial: T) {
 }
 
 export const taskStore = createStore(seedTasks);
-export const threadStore = createStore(seedThreads);
+export const objectiveStore = createStore(seedObjectives);
 export const agentStore = createStore(seedAgents);
 export const signalStore = createStore(seedSignals);
 export const editedStore = createStore<Record<string, number>>({});
 
-/** A page is addressed the same way as its route: "task/t1" or "thread/overdue". */
-export type PageRef = `task/${string}` | `thread/${string}`;
+/** A page is addressed the same way as its route: "task/t1" or "objective/overdue". */
+export type PageRef = `task/${string}` | `objective/${string}`;
 
 function update(ref: PageRef, fn: (subject: { events: Event[]; page: Block[] }) => { events: Event[]; page: Block[] }) {
   const [type, id] = ref.split("/");
-  const store = (type === "task" ? taskStore : threadStore) as unknown as ReturnType<typeof createStore<{ id: string; events: Event[]; page: Block[] }[]>>;
+  const store = (type === "task" ? taskStore : objectiveStore) as unknown as ReturnType<typeof createStore<{ id: string; events: Event[]; page: Block[] }[]>>;
   store.set(items => items.map(item => (item.id === id ? { ...item, ...fn(item) } : item)));
 }
 
@@ -56,5 +56,24 @@ export function removeBlock(ref: PageRef, blockId: string) {
 export function addSignal(signal: Omit<Signal, "id" | "at">) {
   const id = `s${Date.now()}`;
   signalStore.set(all => [{ ...signal, id, at: NOW_AT }, ...all]);
+  return id;
+}
+
+/** The path a signal took: objectives it reached, the routers that took it, and the agents they handed it to. */
+export function pathOf(signal: Signal, agents: Agent[]) {
+  const byId = new Map(agents.map(a => [a.id, a]));
+  const reached = signal.routedTo.map(id => byId.get(id)).filter((a): a is Agent => !!a);
+  const workers = reached.filter(a => a.role === "worker");
+  const routers = new Set([...reached.filter(a => a.role === "router").map(a => a.id), ...workers.map(w => w.parent!).filter(Boolean)]);
+  const objectives = new Set([...routers].map(r => byId.get(r)!.objectiveId));
+  return { objectives: [...objectives], routers: [...routers], agents: workers.map(w => w.id) };
+}
+
+export function splitRouter(objectiveId: string, scope: string) {
+  const all = agentStore.get();
+  const n = all.filter(a => a.objectiveId === objectiveId && a.role === "router").length + 1;
+  const id = `r-${objectiveId.split("-")[0]}-${n}`;
+  const narrowed = all.map(a => (a.objectiveId === objectiveId && a.scope === "Whole objective" ? { ...a, scope: "Rest of the objective" } : a));
+  agentStore.set([...narrowed, { id, role: "router", objectiveId, scope, taskIds: [], state: "idle", doing: "Just split off, reading the objective" }]);
   return id;
 }

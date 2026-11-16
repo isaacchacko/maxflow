@@ -35,15 +35,17 @@ export type Task = {
   page: Block[];
 };
 
-export type Thread = { id: string; title: string; taskIds: string[]; events: Event[]; page: Block[] };
+export type Objective = { id: string; title: string; taskIds: string[]; events: Event[]; page: Block[] };
 
 export type AgentState = "working" | "waiting" | "idle" | "asleep";
 
 export type Agent = {
   id: string;
   role: "router" | "worker";
-  threadId: string;
+  objectiveId: string;
   parent?: string;
+  /** Routers only: the part of the objective this router owns. */
+  scope?: string;
   taskIds: string[];
   state: AgentState;
   doing: string;
@@ -218,7 +220,7 @@ export const tasks: Task[] = [
   },
 ];
 
-export const threads: Thread[] = [
+export const objectives: Objective[] = [
   {
     id: "festo-perf",
     title: "Festo gateway performance",
@@ -295,15 +297,15 @@ export const threads: Thread[] = [
 ];
 
 export const agents: Agent[] = [
-  { id: "r-festo", role: "router", threadId: "festo-perf", taskIds: [], state: "waiting", doing: "Holding the backfill until #6250 merges" },
-  { id: "mf-1", role: "worker", threadId: "festo-perf", parent: "r-festo", taskIds: ["t7", "t1"], state: "waiting", doing: "#6250 waiting on approval" },
-  { id: "r-overdue", role: "router", threadId: "overdue", taskIds: [], state: "waiting", doing: "Waiting on your call: reconciler or flag" },
-  { id: "r-sap", role: "router", threadId: "overdue", taskIds: [], state: "working", doing: "Pulling which Festo runs ever sent a full snapshot" },
-  { id: "mf-2", role: "worker", threadId: "overdue", parent: "r-overdue", taskIds: ["t9", "t3"], state: "working", doing: "Tracing which runs set full_snapshot" },
-  { id: "r-board", role: "router", threadId: "board", taskIds: [], state: "idle", doing: "Nothing queued" },
-  { id: "mf-3", role: "worker", threadId: "board", parent: "r-board", taskIds: ["t5"], state: "asleep", doing: "Merged #42" },
-  { id: "r-reviews", role: "router", threadId: "reviews", taskIds: [], state: "working", doing: "Watching #reviews-pls" },
-  { id: "mf-4", role: "worker", threadId: "reviews", parent: "r-reviews", taskIds: ["t8", "t6"], state: "working", doing: "Drafting review comments on #7149" },
+  { id: "r-festo", role: "router", scope: "Whole objective", objectiveId: "festo-perf", taskIds: [], state: "waiting", doing: "Holding the backfill until #6250 merges" },
+  { id: "mf-1", role: "worker", objectiveId: "festo-perf", parent: "r-festo", taskIds: ["t7", "t1"], state: "waiting", doing: "#6250 waiting on approval" },
+  { id: "r-overdue", role: "router", scope: "Close-path fix", objectiveId: "overdue", taskIds: [], state: "waiting", doing: "Waiting on your call: reconciler or flag" },
+  { id: "r-sap", role: "router", scope: "SAP data: which runs send full snapshots", objectiveId: "overdue", taskIds: [], state: "working", doing: "Pulling which Festo runs ever sent a full snapshot" },
+  { id: "mf-2", role: "worker", objectiveId: "overdue", parent: "r-overdue", taskIds: ["t9", "t3"], state: "working", doing: "Tracing which runs set full_snapshot" },
+  { id: "r-board", role: "router", scope: "Whole objective", objectiveId: "board", taskIds: [], state: "idle", doing: "Nothing queued" },
+  { id: "mf-3", role: "worker", objectiveId: "board", parent: "r-board", taskIds: ["t5"], state: "asleep", doing: "Merged #42" },
+  { id: "r-reviews", role: "router", scope: "Whole objective", objectiveId: "reviews", taskIds: [], state: "working", doing: "Watching #reviews-pls" },
+  { id: "mf-4", role: "worker", objectiveId: "reviews", parent: "r-reviews", taskIds: ["t8", "t6"], state: "working", doing: "Drafting review comments on #7149" },
 ];
 
 export const sentries: Sentry[] = [
@@ -368,7 +370,7 @@ export const agentStateColor: Record<AgentState, string> = {
   asleep: "bg-muted-foreground/40",
 };
 
-export function threadStatus(statuses: Status[]): Status {
+export function objectiveStatus(statuses: Status[]): Status {
   if (statuses.includes("doing")) return "doing";
   if (statuses.includes("review")) return "review";
   if (statuses.every(s => s === "done")) return "done";

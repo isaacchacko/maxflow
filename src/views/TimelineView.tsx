@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { NOW, statusColor, type Task } from "@/mock";
-import { taskStore, threadStore } from "@/store";
+import { taskStore, objectiveStore } from "@/store";
 
 const DAY = 86_400_000;
 const FROM = new Date("2026-11-02T00:00:00").getTime();
@@ -53,7 +53,7 @@ function Bar({ task }: { task: Task }) {
 
 export function TimelineView() {
   const tasks = taskStore.use();
-  const threads = threadStore.use();
+  const objectives = objectiveStore.use();
   const byId = new Map(tasks.map(t => [t.id, t]));
 
   return (
@@ -83,22 +83,22 @@ export function TimelineView() {
           </div>
         </div>
 
-        {threads.map(thread => {
-          const items = thread.taskIds.map(id => byId.get(id)!).filter(Boolean);
+        {objectives.map(objective => {
+          const items = objective.taskIds.map(id => byId.get(id)!).filter(Boolean);
           const ranges = items.map(range);
           const first = Math.min(...ranges.map(r => r[0]));
           const last = Math.max(...ranges.map(r => r[1]));
           const live = items.some(t => !t.end);
           return (
-            <section key={thread.id} data-agent={`lane:${thread.id}`} className="relative border-b last:border-b-0">
+            <section key={objective.id} data-agent={`lane:${objective.id}`} className="relative border-b last:border-b-0">
               <div className="flex h-10 items-center">
                 <a
-                  href={`#thread/${thread.id}`}
-                  data-agent={`thread:${thread.id}`}
+                  href={`#objective/${objective.id}`}
+                  data-agent={`objective:${objective.id}`}
                   className="flex h-full w-56 shrink-0 items-center gap-2 px-3 hover:bg-muted/50"
                 >
                   <Waypoints className="size-3.5 shrink-0 text-agent" />
-                  <span className="truncate text-sm font-medium">{thread.title}</span>
+                  <span className="truncate text-sm font-medium">{objective.title}</span>
                   <Badge variant={live ? "secondary" : "outline"} className="shrink-0">{items.length}</Badge>
                 </a>
                 <div className="relative h-full flex-1">

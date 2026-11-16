@@ -31,7 +31,7 @@ function lastView(): ViewId {
 
 function routeFromHash(): Route {
   const [first, id] = location.hash.slice(1).split("/");
-  if ((first === "task" || first === "thread") && id) return { view: lastView(), page: `${first}/${id}` as PageRef };
+  if ((first === "task" || first === "objective") && id) return { view: lastView(), page: `${first}/${id}` as PageRef };
   const view = views.find(v => v.id === first)?.id ?? "routing";
   try {
     sessionStorage.setItem("view", view);

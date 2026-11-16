@@ -1,5 +1,5 @@
 import { GRID_COLS, GRID_ROWS, type Block, type Status, type Task } from "@/mock";
-import { addEvent, addSignal, agentStore, moveTask, putBlock, removeBlock, taskStore, threadStore, type PageRef } from "@/store";
+import { addEvent, addSignal, agentStore, moveTask, putBlock, removeBlock, taskStore, objectiveStore, type PageRef } from "@/store";
 import { click, drag, hide, moveTo, press, show } from "./cursor";
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -50,16 +50,16 @@ function resolve(ref: PageRef): Target {
     const task = taskStore.get().find(t => t.id === id)!;
     return { ref, title: task.title, page: task.page, agent: task.agent, task };
   }
-  const thread = threadStore.get().find(t => t.id === id)!;
-  return { ref, title: thread.title, page: thread.page };
+  const objective = objectiveStore.get().find(t => t.id === id)!;
+  return { ref, title: objective.title, page: objective.page };
 }
 
 async function openPage(ref: PageRef) {
   if (location.hash === `#${ref}`) return;
   const [type, id] = ref.split("/");
-  if (type === "thread") {
+  if (type === "objective") {
     if (!location.hash.startsWith("#timeline") && !location.hash.startsWith("#agents")) await click("tab:timeline");
-    return click(`thread:${id}`);
+    return click(`objective:${id}`);
   }
   const view = location.hash.startsWith("#timeline") ? "timeline" : "kanban";
   if (!location.hash.startsWith(`#${view}`)) await click(`tab:${view}`);
@@ -107,12 +107,12 @@ async function moveCard(task: Task, status: Status, say: (s: string) => void) {
 
 function pickTarget(text: string, fallback = true): PageRef | undefined {
   const task = bestMatch(text, taskStore.get());
-  const thread = bestMatch(text, threadStore.get());
-  const wantsThread = /\bthread\b/.test(text);
-  if (thread && (wantsThread || !task || thread.score > task.score)) return `thread/${thread.item.id}`;
+  const objective = bestMatch(text, objectiveStore.get());
+  const wantsObjective = /\bobjective\b/.test(text);
+  if (objective && (wantsObjective || !task || objective.score > task.score)) return `objective/${objective.item.id}`;
   if (task) return `task/${task.item.id}`;
   if (!fallback) return;
-  const here = location.hash.match(/^#((task|thread)\/[\w-]+)/)?.[1];
+  const here = location.hash.match(/^#((task|objective)\/[\w-]+)/)?.[1];
   if (here) return here as PageRef;
   const todo = taskStore.get().find(t => t.status === "todo");
   return todo && `task/${todo.id}`;
@@ -128,8 +128,8 @@ export function routeChat(request: string, to?: string) {
 
 function routePrompt(ref: PageRef, request: string) {
   const [type, id] = ref.split("/");
-  const threadId = type === "thread" ? id : threadStore.get().find(t => t.taskIds.includes(id!))?.id;
-  const router = agentStore.get().find(a => a.role === "router" && a.threadId === threadId);
+  const objectiveId = type === "objective" ? id : objectiveStore.get().find(t => t.taskIds.includes(id!))?.id;
+  const router = agentStore.get().find(a => a.role === "router" && a.objectiveId === objectiveId);
   const worker = type === "task" ? taskStore.get().find(t => t.id === id)?.agent : undefined;
   return addSignal({ source: "isaac", target: "chat", text: request, routedTo: [router?.id, worker].filter((a): a is string => !!a) });
 }

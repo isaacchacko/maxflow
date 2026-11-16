@@ -2,8 +2,8 @@ import { Network, User, Waypoints } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { agentStateColor, statusColor, threadStatus, type Agent } from "@/mock";
-import { agentStore, taskStore, threadStore } from "@/store";
+import { agentStateColor, statusColor, objectiveStatus, type Agent } from "@/mock";
+import { agentStore, taskStore, objectiveStore } from "@/store";
 
 function WorkerCard({ agent }: { agent: Agent }) {
   const tasks = taskStore.use();
@@ -29,7 +29,7 @@ function WorkerCard({ agent }: { agent: Agent }) {
 }
 
 export function AgentsView() {
-  const threads = threadStore.use();
+  const objectives = objectiveStore.use();
   const tasks = taskStore.use();
   const agents = agentStore.use();
 
@@ -39,20 +39,20 @@ export function AgentsView() {
         <User className="size-3.5" /> isaac
       </Badge>
       <div className="grid w-full flex-1 grid-cols-4 gap-4">
-        {threads.map(thread => {
-          const status = threadStatus(thread.taskIds.map(id => tasks.find(t => t.id === id)!.status));
-          const routers = agents.filter(a => a.threadId === thread.id && a.role === "router");
+        {objectives.map(objective => {
+          const status = objectiveStatus(objective.taskIds.map(id => tasks.find(t => t.id === id)!.status));
+          const routers = agents.filter(a => a.objectiveId === objective.id && a.role === "router");
           return (
-            <section key={thread.id} className="flex flex-col gap-3 rounded-xl bg-muted/30 p-3">
-              <a href={`#thread/${thread.id}`} data-agent={`thread:${thread.id}`}>
+            <section key={objective.id} className="flex flex-col gap-3 rounded-xl bg-muted/30 p-3">
+              <a href={`#objective/${objective.id}`} data-agent={`objective:${objective.id}`}>
                 <Card className="gap-1 px-3 py-3 transition-colors hover:border-ring">
                   <CardHeader className="flex items-center gap-2 px-0">
                     <Waypoints className="size-4 text-agent" />
-                    <CardTitle className="truncate text-sm">{thread.title}</CardTitle>
+                    <CardTitle className="truncate text-sm">{objective.title}</CardTitle>
                   </CardHeader>
                   <CardContent className="flex items-center gap-2 px-0 text-xs text-muted-foreground">
                     <span className={cn("size-1.5 rounded-full", statusColor[status])} />
-                    {status} · {thread.taskIds.length} tasks
+                    {status} · {objective.taskIds.length} tasks
                   </CardContent>
                 </Card>
               </a>

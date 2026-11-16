@@ -7,9 +7,9 @@ import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor, type Block, type Event, type Status } from "@/mock";
-import { addEvent, agentStore, putBlock, taskStore, threadStore, type PageRef } from "@/store";
+import { addEvent, agentStore, putBlock, taskStore, objectiveStore, type PageRef } from "@/store";
 
-export type Subject = { ref: PageRef; status: Status; events: Event[]; pr?: number; threadId?: string };
+export type Subject = { ref: PageRef; status: Status; events: Event[]; pr?: number; objectiveId?: string };
 
 type Of<K extends Block["kind"]> = Extract<Block, { kind: K }>;
 type Props<K extends Block["kind"]> = { block: Of<K>; subject: Subject };
@@ -226,9 +226,9 @@ function VisionBlock({ block }: Props<"vision">) {
 }
 
 function TasksBlock({ subject }: Props<"tasks">) {
-  const thread = threadStore.use().find(t => t.id === subject.threadId);
+  const objective = objectiveStore.use().find(t => t.id === subject.objectiveId);
   const all = taskStore.use();
-  const items = (thread?.taskIds ?? []).map(id => all.find(t => t.id === id)!).filter(Boolean);
+  const items = (objective?.taskIds ?? []).map(id => all.find(t => t.id === id)!).filter(Boolean);
   const done = items.filter(t => t.status === "done").length;
   return (
     <Shell title="Tasks" action={<span className="text-xs text-muted-foreground">{done}/{items.length} done</span>}>
@@ -260,7 +260,7 @@ export function AgentRow({ id, indent }: { id: string; indent?: boolean }) {
 }
 
 function AgentsBlock({ subject }: Props<"agents">) {
-  const all = agentStore.use().filter(a => a.threadId === subject.threadId);
+  const all = agentStore.use().filter(a => a.objectiveId === subject.objectiveId);
   const count = (role: "router" | "worker") => {
     const n = all.filter(a => a.role === role).length;
     return `${n} ${role}${n === 1 ? "" : "s"}`;
