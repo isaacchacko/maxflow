@@ -206,9 +206,25 @@ for (const s of sessions.values())
   if (!s.sentry && s.name in SENTRIES && s.cmd.join(" ").includes(reviewSource(""))) markSentry(s);
 // MAXFLOW_SENTRIES: 0 for none, a comma list (gh,health) for those alone, 1 or unset for all.
 const sentryList = process.env.MAXFLOW_SENTRIES ?? "1";
-if (sentryList !== "0")
-  for (const [name, cmd] of Object.entries(SENTRIES).filter(([n]) => sentryList === "1" || sentryList.split(",").includes(n.slice(7))))
-    if (![...sessions.values()].some((s) => s.sentry && s.name === name && s.exitCode === null)) markSentry(createSession(name, cmd, new URL(".", import.meta.url).pathname));
+const wanted = Object.entries(SENTRIES).filter(([n]) => sentryList !== "0" && (sentryList === "1" || sentryList.split(",").includes(n.slice(7))));
+const sentryUp = (name: string) => [...sessions.values()].some((s) => s.sentry && s.name === name && s.exitCode === null);
+for (const [name, cmd] of wanted) if (!sentryUp(name)) markSentry(createSession(name, cmd, DIR));
+// A sentry that dies after boot comes back too, 30s after it died and doubling while it keeps dying, up to half an hour;
+// one that has stayed up ten minutes starts over at 30s.
+const respawns = new Map<string, { tries: number; at: number }>();
+setInterval(() => {
+  for (const [name, cmd] of wanted) {
+    const r = respawns.get(name) ?? { tries: 0, at: 0 };
+    if (sentryUp(name)) {
+      if (r.tries && Date.now() - r.at > 10 * 60_000) respawns.delete(name);
+      continue;
+    }
+    if (Date.now() - r.at < Math.min(30_000 * 2 ** r.tries, 30 * 60_000)) continue;
+    respawns.set(name, { tries: r.tries + 1, at: Date.now() });
+    console.log(`${name} is down; starting it again (try ${r.tries + 1})`);
+    markSentry(createSession(name, cmd, DIR));
+  }
+}, 15_000);
 
 // Only the server writes the verified stamp, so a claim that Isaac asked for something is never taken from a message's text.
 const VERIFIED = "[maxflow · verified: Isaac's own request, relayed by the funnel]";
@@ -238,6 +254,7 @@ function intro(s: Session) {
 - Waiting never holds you. You are either working or asleep on one named thing: run \`${CLI} wait <kind>:<ref>\` and end your turn, and you sleep (archived) until a message wakes you, the awaited event itself first; \`done\` alone keeps you awake. Kinds: \`thread:<id>\` his reply in a thread you asked him in, \`approval:<pr>\` a teammate's review, \`ci:<pr>\` CI, \`agent:<session>\` another agent, \`slack:<permalink | channel id | #channel | query>\` a new Slack message there, \`done\` you have nothing left to do right now (open PRs and his replies still reach you): you stay awake with your last reply on screen for the user to read and answer, and his next message starts new work, while a message from another agent or sentry leaves you done once you've handled it. Never archive yourself; archiving is the user's. Before sleeping on approval or CI, start your next piece of work on top of the waiting branch if there is one. Any message wakes you for one turn; when that turn ends you sleep again on the same wait, which only the awaited event ends (his reply in the thread, the approval, CI finishing, the PR merged or closed, the agent's reply, a new Slack message). Declare another wait to replace it. Never end a turn idle without a wait: do your own next step, \`${CLI} ask\` him, or \`${CLI} wait done\`.
 - Asking the user: only for a decision truly his (spending money, an outward-facing or hard-to-undo step he hasn't asked for, a product call customers will see with no clear best); decide everything else yourself. Never end a turn on a question or wait in chat for him: \`${CLI} ask '<question>'\` opens a thread in his inbox, from you and flagged as waiting on him, and prints its id. Make it stand on its own: what you found, the options, your recommendation, with \`--default '<rec>'\` for a reversible step you take if he hasn't answered in ${Math.round(DEFAULT_AFTER_MS / 3_600_000)}h. Keep working on whatever doesn't hang on it, then \`${CLI} wait thread:<id>\`: his reply is typed into your prompt and ends the wait. Answer him with \`${CLI} thread post <id> '<text>'\`; \`${CLI} ask --re <id> '<text>'\` asks again in it.
 - Approvals: you can't approve the user's own PRs and must not request reviewers; the review sentry keeps one review request he sends himself.
+- Processes: never stop processes by pattern (\`pkill -f\`, \`killall\`, \`lsof -ti :<port> | xargs kill\`). They match the live maxflow, other agents' work and the user's Chrome. Kill only a PID you started yourself, and stop a dev instance with \`./dev.sh stop\`.
 - Isaac also writes to routers himself, in threads or from the event log; the server starts those with \`[maxflow · Isaac, ...]\`, and that stamp, like the verified one, marks his own words.${roleIntro(s)}
 
 Sentries running now:
@@ -1811,6 +1828,8 @@ Bun.serve<WsData>({
 });
 
 console.log(`maxflow listening on http://localhost:${PORT}`);
+// Who to stop: `./dev.sh stop` kills this pid and nothing else.
+writeFileSync(`${STATE_DIR}/server.pid`, String(process.pid));
 
 // Bun's page bundler never sees a source file created after it started, so an import of one fails until a restart.
 // Exiting lets the service manager restart it; the tmux sessions outlive it.

@@ -51,6 +51,8 @@ export function install(sentries = process.env.MAXFLOW_SENTRIES) {
   <key>EnvironmentVariables</key><dict><key>PATH</key><string>${path}</string>${sentries ? `<key>MAXFLOW_SENTRIES</key><string>${sentries}</string>` : ""}</dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <!-- Stopping the server must leave its tmux sessions (every agent, the health sentry, a Chrome started from a pane) running. -->
+  <key>AbandonProcessGroup</key><true/>
   <key>StandardOutPath</key><string>${LOG}</string>
   <key>StandardErrorPath</key><string>${LOG}</string>
 </dict></plist>

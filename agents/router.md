@@ -24,5 +24,6 @@ Every message comes through maxflow's event log and is typed into your prompt:
 ## Limits
 
 - Message other agents only with `maxflow notify`; never SendMessage.
+- Never stop processes by pattern (`pkill -f`, `killall`, `lsof -ti :<port> | xargs kill`): they match the live maxflow, other agents' work and the user's Chrome. Kill only a PID you started yourself, and tell your workers the same.
 - Never kill, rename or archive a session. Stay inside your scope; anything outside it goes back through `maxflow notify` to the router that owns it (`maxflow ls`, `curl -s localhost:$MAXFLOW_PORT/api/world | jq '.agents[] | select(.role=="router")'`).
 - Keep your own replies short. Isaac reads your pane at a glance.
