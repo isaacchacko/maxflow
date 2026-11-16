@@ -596,11 +596,10 @@ function setArchived(s: Session, archived: boolean) {
 function stopAgent(s: Session) {
   const chat = s.chatId ?? s.transcript?.match(/([0-9a-f-]{36})\.jsonl$/)?.[1];
   if (s.asleep || !chat || isSentry(s) || !isAgent(s) || s.exitCode !== null || s.claude?.state === "working" || s.claude?.state === "waiting") return;
-  const note = "[maxflow] archived: claude stopped to free its memory; unarchive to resume this chat";
   // The respawn keeps the pane's history but wipes its screen, which holds the chat's last reply, so the placeholder prints that screen back first.
   const screen = `${STATE_DIR}/asleep-${s.id}.ans`;
   writeFileSync(screen, tmux("capture-pane", "-p", "-e", "-J", "-t", tmuxName(s.id)).out.trimEnd() + "\x1b[0m\n");
-  if (!tmux("respawn-pane", "-k", "-t", tmuxName(s.id), "--", "sh", "-c", `cat '${screen}'; rm -f '${screen}'; echo '${note}'; exec tail -f /dev/null`).ok) return;
+  if (!tmux("respawn-pane", "-k", "-t", tmuxName(s.id), "--", process.execPath, `${DIR}/sleeper.ts`, screen, BASE, s.id).ok) return;
   s.asleep = chat;
   setOption(s.id, "@mf-asleep", chat);
   setClaudeState(s, "gone");
@@ -1481,7 +1480,7 @@ Bun.serve<WsData>({
       return Response.json([describe(a), describe(b)]);
     }
 
-    const act = path.match(/^\/api\/sessions\/([\w-]+)\/(input|screen|wait|notify|state|intro|await)$/);
+    const act = path.match(/^\/api\/sessions\/([\w-]+)\/(input|screen|wait|notify|state|intro|await|wake)$/);
     if (act) {
       const s = sessions.get(act[1]);
       if (!s) return new Response("no such session", { status: 404 });
@@ -1501,6 +1500,14 @@ Bun.serve<WsData>({
         if (body.keys?.length) await tmuxAsync("send-keys", "-t", t, ...body.keys);
         // A TUI like claude reads text + Enter in one burst as a paste, so the submit goes separately.
         if (body.enter) await Bun.sleep(body.text ? 150 : 0), await tmuxAsync("send-keys", "-t", t, "Enter");
+        return Response.json(describe(s));
+      }
+      // Typed by the user into an asleep agent's pane: his own words, delivered once its claude is back.
+      if (act[2] === "wake" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { text?: string };
+        if (!body.text?.trim()) return new Response("text required", { status: 400 });
+        if (s.exitCode !== null) return new Response("session ended", { status: 409 });
+        dispatch({ source: "isaac", to: [s], text: body.text.trim() });
         return Response.json(describe(s));
       }
       if (act[2] === "notify" && req.method === "POST") {
