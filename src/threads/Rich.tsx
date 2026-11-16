@@ -1,16 +1,18 @@
-import { ExternalLink, GitPullRequest, MessagesSquare, Network, Radar, SquareKanban, Waypoints } from "lucide-react";
+import { ExternalLink, GitPullRequest, MessageSquareQuote, MessagesSquare, Network, Radar, SquareKanban, Waypoints } from "lucide-react";
 import { useState } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor } from "@/mock";
 import { agentStore, objectiveStore, prStore, sentryStore, taskStore, threadStore } from "@/store";
+import { goToMessage } from "./jump";
 
-export type Ref = { kind: "agent" | "router" | "task" | "objective" | "thread"; id: string };
+// A msg ref is <thread id>/<message id>: a quote's link back to where it came from.
+export type Ref = { kind: "agent" | "router" | "task" | "objective" | "thread" | "msg"; id: string };
 type Part = { text: string } | { ref: Ref } | { url: string; label: string } | { image: string };
 
 // An image is markdown pointing at its file in the server's uploads dir, which the server serves by name.
-const TOKEN = /\[\[(agent|router|task|objective|thread):([^\]]+)\]\]|!\[[^\]]*\]\(\S*\/uploads\/([\w.-]+)\)|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
+const TOKEN = /\[\[(agent|router|task|objective|thread|msg):([^\]]+)\]\]|!\[[^\]]*\]\(\S*\/uploads\/([\w.-]+)\)|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
 
 export function parse(text: string): Part[] {
   const parts: Part[] = [];
@@ -64,6 +66,22 @@ export function RefChip({ r, still }: { r: Ref; still?: boolean }) {
     const o = objectives.find(x => x.id === r.id);
     return chip(`#objective/${r.id}`, !!o, <Waypoints className="size-3 text-agent" />, o?.title ?? r.id);
   }
+  if (r.kind === "msg") {
+    const [threadId, messageId] = r.id.split("/");
+    const m = threads.find(x => x.id === threadId)?.messages.find(x => x.id === messageId);
+    const who = m && (m.from === "isaac" ? "you" : (agents.find(x => x.id === m.from)?.name ?? sentries.find(x => x.id === m.from)?.name ?? m.from));
+    return (
+      <Tag
+        href={still ? undefined : `#thread/${threadId}`}
+        onClick={e => (e.stopPropagation(), !still && (e.preventDefault(), goToMessage(threadId!, messageId)))}
+        title={m ? undefined : `No message ${r.id} in maxflow now`}
+        className={cn("inline-flex items-center gap-1 border px-1 align-baseline text-[0.92em] not-italic hover:border-ring", !m && "border-dashed text-muted-foreground line-through")}
+      >
+        <MessageSquareQuote className="size-3 text-sky-400" />
+        {m ? `${who} · ${m.at.slice(11, 16)}` : messageId}
+      </Tag>
+    );
+  }
   if (r.kind === "thread") {
     const t = threads.find(x => x.id === r.id);
     return chip(`#thread/${r.id}`, !!t, <MessagesSquare className="size-3 text-sky-400" />, t?.title ?? r.id);
@@ -91,7 +109,7 @@ export function Rich({ text, className, still }: { text: string; className?: str
 }
 
 // In markdown a chip is a link to ref:<kind>/<id>, so the link renderer draws it and refs never get parsed twice.
-const asLinks = (text: string) => text.replace(/\[\[(agent|router|task|objective|thread):([^\]]+)\]\]/g, (_, kind, id) => `[ref](ref:${kind}/${encodeURIComponent(id)})`);
+const asLinks = (text: string) => text.replace(/\[\[(agent|router|task|objective|thread|msg):([^\]]+)\]\]/g, (_, kind, id) => `[ref](ref:${kind}/${encodeURIComponent(id)})`);
 
 // A PR or Linear issue named in plain text becomes a link to pr:<owner/repo>/<n> or linear:<key>, so it draws as a chip.
 // Code and existing links are other node types, so nothing inside them changes.
@@ -157,7 +175,7 @@ const md: Components = {
   hr: () => <hr className="my-3" />,
   a: ({ href = "", children }) => {
     // [[kind:id]] and bare ids arrive as ref: links; a link to this app (#thread/th-…, or a localhost URL to one) opens in place.
-    const ref = href.match(/^ref:(agent|router|task|objective|thread)\/(.+)$/) ?? href.match(/^(?:https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?\/?)?#(agent|task|objective|thread)\/([^/?#]+)$/);
+    const ref = href.match(/^ref:(agent|router|task|objective|thread|msg)\/(.+)$/) ?? href.match(/^(?:https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?\/?)?#(agent|task|objective|thread)\/([^/?#]+)$/);
     if (ref) return <RefChip r={{ kind: ref[1] as Ref["kind"], id: decodeURIComponent(ref[2]!) }} />;
     const pr = href.match(/^pr:([\w.-]+\/[\w.-]+)\/(\d+)$/) ?? href.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/i);
     if (pr) return <PrChip repo={pr[1]!.toLowerCase()} n={pr[2]!} />;
@@ -199,7 +217,7 @@ const inline: Components = {
 const inlineStill: Components = {
   ...inline,
   a: ({ href = "", children }) => {
-    const ref = href.match(/^ref:(agent|router|task|objective|thread)\/(.+)$/);
+    const ref = href.match(/^ref:(agent|router|task|objective|thread|msg)\/(.+)$/);
     return ref ? <RefChip r={{ kind: ref[1] as Ref["kind"], id: decodeURIComponent(ref[2]!) }} still /> : <span className="text-sky-400">{children}</span>;
   },
   img: () => <span className="text-sky-400">[image]</span>,

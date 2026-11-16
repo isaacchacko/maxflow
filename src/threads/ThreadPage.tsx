@@ -1,26 +1,29 @@
-import { ArrowLeft, Check, ChevronRight, ExternalLink, MessageSquareReply, MessagesSquare, Network, RotateCcw, Waypoints } from "lucide-react";
-import { Fragment, useEffect, useRef } from "react";
+import { ArrowLeft, Check, ChevronRight, ExternalLink, MessageSquareReply, MessagesSquare, Network, Quote, RotateCcw, Waypoints } from "lucide-react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { agentStore, objectiveStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
-import { Composer } from "./Composer";
+import { Composer, quoteInto } from "./Composer";
+import { flashMessage, goToMessage } from "./jump";
 import { MessageRow, when } from "./MessageRow";
 import { Replies, repliesOf } from "./Replies";
 import { markSeen } from "./seen";
 import { RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
 
-// Climbing out of a subthread lands on the message it hangs off: scrolled to and flashed once.
-const arriving: { message?: string } = {};
-
 /** Escape climbs one level: a subthread goes to its parent at the message it hangs off, a top thread to the view it came from. */
 export function threadUp(id: string, view: string) {
   const t = threadStore.get().find(x => x.id === id);
   if (!t?.parentId) return void (location.hash = view);
-  arriving.message = t.parentMessageId;
-  location.hash = `thread/${t.parentId}`;
+  goToMessage(t.parentId, t.parentMessageId);
 }
+
+// Text selected inside one message, with where to draw its Quote button.
+type Selected = { thread: string; message: string; text: string; x: number; y: number };
+
+/** A quote as markdown: the passage, then a link back to the message it came from, which draws as a chip. */
+const quoted = (text: string, thread: string, message: string) => `${text.trim().split("\n").map(l => `> ${l}`).join("\n")}\n>\n> — [[msg:${thread}/${message}]]`;
 
 // Slack's grouping: a sender's next message within this long drops its picture and name.
 const GROUP_MS = 5 * 60_000;
@@ -69,13 +72,23 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
     if (thread) markSeen(thread.id, thread.messages.length);
   }, [thread?.id, thread?.messages.length]);
 
+  useEffect(() => flashMessage(), [id]);
+
+  // A selection inside one message offers to quote it; anything else hides the button.
+  const [selected, setSelected] = useState<Selected>();
   useEffect(() => {
-    const el = arriving.message && scrollRef.current?.querySelector(`[data-msg="${arriving.message}"]`);
-    arriving.message = undefined;
-    if (!el) return;
-    el.scrollIntoView({ block: "center" });
-    el.animate([{ backgroundColor: "color-mix(in oklch, var(--color-sky-400) 25%, transparent)" }, { backgroundColor: "transparent" }], { duration: 1600, easing: "ease-out" });
-  }, [id]);
+    const onChange = () => {
+      const sel = getSelection();
+      const text = sel?.toString().trim();
+      const at = (n: Node | null | undefined) => (n instanceof Element ? n : n?.parentElement)?.closest<HTMLElement>("[data-msg]");
+      const msg = sel && at(sel.anchorNode);
+      if (!text || !msg || msg !== at(sel.focusNode) || !scrollRef.current?.contains(msg)) return setSelected(undefined);
+      const r = sel.getRangeAt(0).getBoundingClientRect();
+      setSelected({ thread: msg.dataset.thread!, message: msg.dataset.msg!, text, x: r.right, y: r.top });
+    };
+    document.addEventListener("selectionchange", onChange);
+    return () => document.removeEventListener("selectionchange", onChange);
+  }, []);
 
   if (!thread) return <p className="p-6 text-muted-foreground">No thread {id}.</p>;
 
@@ -118,7 +131,23 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
       <div className="flex min-h-0 flex-1 gap-4">
         <section className="flex min-h-0 min-w-0 flex-1 flex-col border">
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-            {root && <MessageRow from={root.from} at={root.at} text={root.text} />}
+            {root && (
+              <div data-msg={root.id} data-thread={thread.parentId ?? thread.id}>
+                <MessageRow from={root.from} at={root.at} text={root.text} />
+              </div>
+            )}
+            {selected && (
+              <button
+                data-agent="quote-selection"
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => (quoteInto(`thread:${thread.id}`, quoted(selected.text, selected.thread, selected.message)), getSelection()?.removeAllRanges())}
+                style={{ left: selected.x, top: selected.y - 30 }}
+                className="fixed z-20 flex items-center gap-1 border bg-background px-1.5 py-0.5 text-xs shadow-md hover:border-ring"
+              >
+                <Quote className="size-3" />
+                Quote
+              </button>
+            )}
             {root && replies.length > 0 && (
               <p className="my-2 flex items-center gap-2 text-xs text-muted-foreground">
                 {replies.length === 1 ? "1 reply" : `${replies.length} replies`}
@@ -134,7 +163,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
               return (
                 <Fragment key={i}>
                 {resolvedHere && <p className="my-2 border-t pt-1 text-center text-xs text-muted-foreground">new since resolved</p>}
-                <div data-msg={m.id} className="group/msg relative">
+                <div data-msg={m.id} data-thread={thread.id} className="group/msg relative">
                   <MessageRow from={m.from} at={m.at} text={m.text} grouped={grouped} className={cn(!grouped && i > 0 && "mt-2.5")}>
                     {sub && (sub.messages.length > 0 || sub.pending) && <Replies t={sub} />}
                   </MessageRow>
@@ -146,6 +175,16 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                       className="absolute top-0 right-0 border bg-background p-1 text-muted-foreground opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
                     >
                       <MessageSquareReply className="size-3.5" />
+                    </button>
+                  )}
+                  {m.id && (
+                    <button
+                      data-agent={`quote:${m.id}`}
+                      title="Quote"
+                      onClick={() => quoteInto(`thread:${thread.id}`, quoted(m.text, thread.id, m.id!))}
+                      className="absolute top-0 right-7 border bg-background p-1 text-muted-foreground opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
+                    >
+                      <Quote className="size-3.5" />
                     </button>
                   )}
                 </div>
