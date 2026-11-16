@@ -57,12 +57,11 @@ function CommandRow({ t, active, open, compact, menu, onToggle, onResolve }: { t
         className={cn("flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 text-sm hover:bg-muted/50", active && "bg-muted/60 shadow-[inset_2px_0_0_var(--color-link)]", t.resolved && "opacity-50")}
       >
         {result ? <Check className="size-3.5 shrink-0 text-ok" /> : <Working />}
+        {/* In the column, the result shares the line with the ask once the column is 28rem wide, and is on hover until then. */}
         <Rich still text={firstLine(asked?.text ?? t.title) || t.title} className={cn("truncate", compact ? "min-w-0 flex-1" : "w-80 shrink-0")} />
-        {!compact && (
-          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            <Rich still text={status} />
-          </span>
-        )}
+        <span className={cn("min-w-0 flex-1 truncate text-xs text-muted-foreground", compact && "hidden @md:block")}>
+          <Rich still text={status} />
+        </span>
         <button
           data-agent={`talk-it-through:${t.id}`}
           title="Make it a conversation: its router keeps the thread open and talks it through with you"
@@ -230,7 +229,7 @@ export function InboxView() {
   return (
     <div ref={scrollRef} className="flex h-full gap-6 overflow-y-auto p-4">
       {vim.panel}
-      <div className="flex max-w-4xl min-w-0 flex-1 flex-col gap-3">
+      <div className="flex max-w-4xl min-w-0 shrink basis-4xl flex-col gap-3">
         <Composer autoFocus agent="inbox-input" draftKey="inbox" onSend={startThread} className="rounded-2xl border bg-card px-3.5 py-3 shadow-raised" />
         {resolved > 0 && (
           <button data-agent="inbox-resolved" onClick={() => setShowResolved(v => !v)} className={cn("flex w-fit items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring", showResolved && "border-ring text-foreground")}>
@@ -244,7 +243,7 @@ export function InboxView() {
         <ol className={cn(surface, "empty:hidden")}>{conversations.map(({ t }) => conversationRow(t))}</ol>
       </div>
       {/* Sticky, so the commands stay in view while the conversations scroll under them. */}
-      {wide && strip && <aside className="sticky top-0 max-h-[calc(100dvh-6rem)] w-80 shrink-0 self-start overflow-y-auto">{strip}</aside>}
+      {wide && strip && <aside className="@container sticky top-0 max-h-[calc(100dvh-6rem)] max-w-5xl min-w-70 flex-1 self-start overflow-y-auto">{strip}</aside>}
     </div>
   );
 }
