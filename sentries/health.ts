@@ -6,7 +6,7 @@
 // the server adopts that session like any other once it is back.
 import type { ServerWebSocket, Subprocess } from "bun";
 import { join } from "node:path";
-import { BASE as base, LIVE, PORT, TMUX_SOCKET } from "../instance";
+import { BASE as base, LIVE, PORT, TMUX_SCOPE, TMUX_SOCKET } from "../instance";
 import { LABEL, LOG, loaded, restartCommand, status as serviceStatus } from "../service";
 
 const INTERVAL_MS = Number(process.env.HEALTH_INTERVAL ?? 1000);
@@ -37,7 +37,7 @@ async function probe(): Promise<"up" | "refused" | "hung"> {
   try {
     return (await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) })).ok ? "up" : "hung";
   } catch (e) {
-    return String((e as { code?: string }).code ?? e).includes("ConnectionRefused") ? "refused" : "hung";
+    return /ConnectionRefused|ECONNREFUSED/.test(String((e as { code?: string }).code ?? e)) ? "refused" : "hung";
   }
 }
 
@@ -78,7 +78,7 @@ function startAgent(prompt: string) {
   const id = crypto.randomUUID().slice(0, 8);
   const meta = { name: "maxflow recovery", cmd: ["claude"], cwd: DIR, createdAt: Date.now() };
   const t = `mf-${id}`;
-  const created = run([...TMUX, "new-session", "-d", "-s", t, "-x", "120", "-y", "34", "-c", DIR, "-e", `MAXFLOW_SESSION=${id}`, "--", "claude", "--permission-mode", "bypassPermissions", prompt]);
+  const created = run([...TMUX_SCOPE, ...TMUX, "new-session", "-d", "-s", t, "-x", "120", "-y", "34", "-c", DIR, "-e", `MAXFLOW_SESSION=${id}`, "--", "claude", "--permission-mode", "bypassPermissions", prompt]);
   if (!created.ok) throw new Error(`tmux new-session failed: ${created.out}`);
   run([...TMUX, "set-option", "-t", t, "@mf", JSON.stringify(meta)]);
   return { id, tmux: t, at: Date.now() };

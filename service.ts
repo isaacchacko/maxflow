@@ -9,8 +9,10 @@ export const LABEL = MAC ? "com.isaacchacko.maxflow-v2" : "maxflow-v2.service";
 const PLIST = join(process.env.HOME!, "Library/LaunchAgents", `${LABEL}.plist`);
 const UNIT = join(process.env.HOME!, ".config/systemd/user", LABEL);
 
+// systemctl --user needs the user's bus, which a shell outside the login session (ssh, tmux started elsewhere) may not carry.
+const env = { ...process.env, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid!()}` };
 const run = (cmd: string[]) => {
-  const r = Bun.spawnSync(cmd);
+  const r = Bun.spawnSync(cmd, { env });
   return { ok: r.exitCode === 0, out: r.stdout.toString() + r.stderr.toString() };
 };
 
@@ -34,7 +36,8 @@ export function status() {
 export const restartCommand = MAC ? `launchctl kickstart -k gui/$(id -u)/${LABEL}` : `systemctl --user restart ${LABEL}`;
 
 // Writes and starts the service, running `bun server.ts` from this checkout (Bun reads its Tailwind plugin from bunfig.toml here).
-export function install() {
+// sentries: MAXFLOW_SENTRIES for the service, when it should run fewer than all of them.
+export function install(sentries = process.env.MAXFLOW_SENTRIES) {
   const bun = process.execPath;
   const path = `${join(bun, "..")}:${process.env.PATH}`;
   if (MAC) {
@@ -45,7 +48,7 @@ export function install() {
   <key>Label</key><string>${LABEL}</string>
   <key>ProgramArguments</key><array><string>${bun}</string><string>server.ts</string></array>
   <key>WorkingDirectory</key><string>${DIR}</string>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>${path}</string></dict>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>${path}</string>${sentries ? `<key>MAXFLOW_SENTRIES</key><string>${sentries}</string>` : ""}</dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>${LOG}</string>
@@ -63,8 +66,10 @@ Description=maxflow v2
 WorkingDirectory=${DIR}
 ExecStart=${bun} server.ts
 Environment=PATH=${path}
-Restart=always
+${sentries ? `Environment=MAXFLOW_SENTRIES=${sentries}\n` : ""}Restart=always
 RestartSec=2
+# Stopping the server must leave its tmux sessions (every agent, and the health sentry) running.
+KillMode=process
 StandardOutput=append:${LOG}
 StandardError=append:${LOG}
 

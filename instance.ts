@@ -11,3 +11,7 @@ export const TMUX_SOCKET = LIVE ? "maxflow-v2" : `maxflow-v2-${INSTANCE}`;
 export const STATE_DIR = join(process.env.HOME!, LIVE ? ".maxflow-v2" : `.maxflow-v2-${INSTANCE}`);
 export const DIR = import.meta.dir;
 export const CLI = join(DIR, "cli.ts");
+// tmux on Linux puts each pane in a systemd scope PartOf the unit that started the tmux server, so a tmux server first
+// started by the maxflow service would take every session down with it on restart. Under systemd, sessions are created
+// from a scope of their own instead.
+export const TMUX_SCOPE = process.platform === "linux" && process.env.INVOCATION_ID ? ["systemd-run", "--user", "--scope", "--quiet", "--collect"] : [];

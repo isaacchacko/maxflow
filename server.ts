@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
-import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR, TMUX_SOCKET } from "./instance";
+import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR, TMUX_SCOPE, TMUX_SOCKET } from "./instance";
 import app from "./src/index.html";
 
 const HOST = "127.0.0.1";
@@ -73,6 +73,11 @@ function tmux(...args: string[]) {
   const r = Bun.spawnSync([...TMUX, ...args], { env: termEnv, timeout: 5000 });
   return { ok: r.exitCode === 0, out: r.stdout.toString() };
 }
+// Creating a session may start the tmux server, which must not belong to the maxflow service (see TMUX_SCOPE).
+function scoped(...args: string[]) {
+  const r = Bun.spawnSync([...TMUX_SCOPE, ...TMUX, ...args], { env: termEnv, timeout: 5000 });
+  return { ok: r.exitCode === 0, out: r.stdout.toString() };
+}
 // send-keys can wait on tmux flushing to attached clients, which only drain while the event loop runs, so it must not block.
 async function tmuxAsync(...args: string[]) {
   const p = Bun.spawn([...TMUX, ...args], { env: termEnv, stdout: "pipe" });
@@ -125,7 +130,7 @@ function createSession(name: string, cmd: string[], cwd: string, chatId?: string
   const id = crypto.randomUUID().slice(0, 8);
   const session = { id, name, cmd, cwd, chatId, createdAt: Date.now(), lastOutputAt: Date.now(), chunks: [], bytes: 0, clients: new Set(), exitCode: null, inbox: [] } as unknown as Session;
   const t = tmuxName(id);
-  const created = tmux("new-session", "-d", "-s", t, "-x", String(cols), "-y", String(rows), "-c", cwd, ...paneEnv(id), "--", ...launchable(id, cmd));
+  const created = scoped("new-session", "-d", "-s", t, "-x", String(cols), "-y", String(rows), "-c", cwd, ...paneEnv(id), "--", ...launchable(id, cmd));
   if (!created.ok) throw new Error(`tmux new-session failed for ${cmd.join(" ").slice(0, 200)}`);
   const meta = { name, cmd: cmd.map((a) => (a.length > 2000 ? `${a.slice(0, 2000)}…` : a)), cwd, chatId, createdAt: session.createdAt };
   setOption(id, "@mf", JSON.stringify(meta));
@@ -195,8 +200,10 @@ function markSentry(s: Session) {
 // Sentries started before the flag existed: exactly a sentry's name, running a script from sentries/.
 for (const s of sessions.values())
   if (!s.sentry && s.name in SENTRIES && s.cmd.join(" ").includes(reviewSource(""))) markSentry(s);
-if (process.env.MAXFLOW_SENTRIES !== "0")
-  for (const [name, cmd] of Object.entries(SENTRIES))
+// MAXFLOW_SENTRIES: 0 for none, a comma list (gh,health) for those alone, 1 or unset for all.
+const sentryList = process.env.MAXFLOW_SENTRIES ?? "1";
+if (sentryList !== "0")
+  for (const [name, cmd] of Object.entries(SENTRIES).filter(([n]) => sentryList === "1" || sentryList.split(",").includes(n.slice(7))))
     if (![...sessions.values()].some((s) => s.sentry && s.name === name && s.exitCode === null)) markSentry(createSession(name, cmd, new URL(".", import.meta.url).pathname));
 
 // Only the server writes the verified stamp, so a claim that Isaac asked for something is never taken from a message's text.
