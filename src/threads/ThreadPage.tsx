@@ -13,6 +13,7 @@ import { RowMenu, messageItems, threadItems } from "./RowMenu";
 import { markSeen, setSeen } from "./seen";
 import { RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
 import { KindMenu } from "./KindMenu";
+import { ShotScope, shotsOf } from "./Viewer";
 import { useVim, vimRow, type VimActions } from "./vim";
 
 /** Escape climbs one level: a subthread goes to its parent at the message it hangs off, a top thread to the view it came from. */
@@ -216,6 +217,8 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
 
       <div className="flex min-h-0 flex-1 gap-4">
         <section className="flex min-h-0 min-w-0 flex-1 flex-col border">
+          {/* An image here opens the viewer over this thread's images, the root's included and its subthreads' not. */}
+          <ShotScope.Provider value={shotsOf([...(root ? [root] : []), ...replies])}>
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {root && (
               <RowMenu agent={`msg:${keyOf(root, -1)}`} items={messageMenu(root, keyOf(root, -1))}>
@@ -285,6 +288,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
             })}
             {thread.pending && !running && <Pending pending={thread.pending} names={thread.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />}
           </div>
+          </ShotScope.Provider>
           {vim.panel}
           <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => postToThread(thread.id, "isaac", text)} className="border-t px-4 py-2.5" />
         </section>

@@ -1,11 +1,12 @@
 import { ExternalLink, GitPullRequest, MessageSquareQuote, MessagesSquare, Network, Radar, SquareKanban, Waypoints } from "lucide-react";
-import { useState } from "react";
+import { useContext, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor } from "@/mock";
 import { agentStore, nameStore, objectiveStore, prStore, sentryStore, taskStore, threadStore } from "@/store";
 import { goToMessage } from "./jump";
+import { openViewer, ShotScope } from "./Viewer";
 
 // A msg ref is <thread id>/<message id>: a quote's link back to where it came from.
 export type Ref = { kind: "agent" | "router" | "task" | "objective" | "thread" | "msg"; id: string };
@@ -112,6 +113,8 @@ export function Rich({ text, className, still }: { text: string; className?: str
 // A file in the uploads dir draws like his pasted images even when an agent names it as a bare path on its own line or a file:// src.
 const showUploads = (text: string) =>
   text.replace(/^(?:file:\/\/)?(\S*\/uploads\/[\w.-]+\.(?:png|jpe?g|gif|webp))$/gim, "![image]($1)").replace(/\]\(file:\/\/(\S*\/uploads\/)/g, "]($1");
+/** The uploaded images in a message, in order, as the URLs the server serves them at. */
+export const uploadsIn = (text: string) => [...showUploads(text).matchAll(/!\[[^\]]*\]\(\S*\/uploads\/([\w.-]+)\)/g)].map(m => `/api/uploads/${m[1]}`);
 const asLinks = (text: string) => text.replace(/\[\[(agent|router|task|objective|thread|msg):([^\]]+)\]\]/g, (_, kind, id) => `[ref](ref:${kind}/${encodeURIComponent(id)})`);
 
 // A PR or Linear issue named in plain text becomes a link to pr:<owner/repo>/<n> or linear:<key>, so it draws as a chip.
@@ -203,14 +206,28 @@ const md: Components = {
   img: ({ src = "" }) => {
     const name = typeof src === "string" && src.match(/\/uploads\/([\w.-]+)$/)?.[1];
     if (!name) return null;
-    const url = `/api/uploads/${name}`;
     return (
-      <a href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="my-1 block w-fit">
-        <img src={url} alt="" className="max-h-80 max-w-full border" />
-      </a>
+      <Upload name={name} className="my-1 block w-fit">
+        <img src={`/api/uploads/${name}`} alt="" className="max-h-80 max-w-full border" />
+      </Upload>
     );
   },
 };
+
+/** An uploaded image: inside a thread it opens the viewer over that thread's images; a modified click, or one outside, opens a tab. */
+function Upload({ name, className, children }: { name: string; className: string; children: React.ReactNode }) {
+  const shots = useContext(ShotScope);
+  const url = `/api/uploads/${name}`;
+  const onClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (shots?.length && !e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault(), openViewer(shots, url);
+  };
+  return (
+    <a href={url} target="_blank" rel="noreferrer" onClick={onClick} className={className}>
+      {children}
+    </a>
+  );
+}
 
 const INLINE = ["p", "a", "code", "strong", "em", "del", "img"];
 const inline: Components = {
@@ -219,9 +236,9 @@ const inline: Components = {
   img: ({ src = "" }) => {
     const name = typeof src === "string" && src.match(/\/uploads\/([\w.-]+)$/)?.[1];
     return name ? (
-      <a href={`/api/uploads/${name}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-sky-400 hover:underline">
+      <Upload name={name} className="text-sky-400 hover:underline">
         [image]
-      </a>
+      </Upload>
     ) : null;
   },
 };

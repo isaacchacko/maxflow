@@ -10,6 +10,7 @@ import { KINDS } from "@/threads/KindMenu";
 import { ago, Replies } from "@/threads/Replies";
 import { Rich } from "@/threads/Rich";
 import { RowMenu, threadItems, type MenuItem } from "@/threads/RowMenu";
+import { ShotScope, shotsOf } from "@/threads/Viewer";
 import { useVim, vimRow } from "@/threads/vim";
 
 /** A thread asks for Isaac from the first message after his last reply; null once he has answered everything in it. */
@@ -56,9 +57,11 @@ function CommandRow({ t, active, open, menu, onToggle, onResolve }: { t: Thread;
       </div>
       {open && (
         <div className="border-t bg-muted/15 px-5 py-2">
-          {t.messages.map((m, i) => (
-            <MessageRow key={m.id ?? i} from={m.from} at={m.at} text={m.text} />
-          ))}
+          <ShotScope.Provider value={shotsOf(t.messages)}>
+            {t.messages.map((m, i) => (
+              <MessageRow key={m.id ?? i} from={m.from} at={m.at} text={m.text} />
+            ))}
+          </ShotScope.Provider>
           {!result && t.pending && <p className="text-xs text-muted-foreground">waiting since {when(t.pending.since)}</p>}
           <a href={`#thread/${t.id}`} className="mt-1 inline-block text-xs text-sky-400 hover:underline">
             open the thread
@@ -138,6 +141,8 @@ export function InboxView() {
             just do it
           </button>
           <div className={cn(t.resolved && "opacity-50")}>
+            {/* An image in the preview opens the viewer over the whole thread's. */}
+            <ShotScope.Provider value={shotsOf(t.messages)}>
             <MessageRow
               from={first.from}
               at={first.at}
@@ -158,6 +163,7 @@ export function InboxView() {
             >
               <Replies t={t} />
             </MessageRow>
+            </ShotScope.Provider>
           </div>
         </li>
         </RowMenu>

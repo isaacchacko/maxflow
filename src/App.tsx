@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AgentPage } from "@/agent/AgentPage";
 import { Capture } from "@/components/Capture";
 import { QuickSwitcher } from "@/components/QuickSwitcher";
+import { Viewer } from "@/threads/Viewer";
 import { Kbd } from "@/components/ui/kbd";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -74,6 +75,7 @@ export function App() {
   return (
     <TooltipProvider>
       <QuickSwitcher views={views} />
+      <Viewer />
       <div className="flex h-full flex-col">
         <header className="flex items-center gap-6 border-b px-4 py-2">
           <span className="font-semibold tracking-tight">maxflow</span>
