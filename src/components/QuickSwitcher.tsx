@@ -1,0 +1,196 @@
+import { LayoutGrid, Waypoints } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Kbd } from "@/components/ui/kbd";
+import { cn } from "@/lib/utils";
+import { statusColor } from "@/mock";
+import { agentStore, objectiveStore, sentryStore, taskStore, threadStore } from "@/store";
+import { Avatar } from "@/threads/Rich";
+import { unseen } from "@/threads/seen";
+
+type Item = { kind: Kind; href: string; label: string; detail?: string; icon: React.ReactNode; text: string; rank: number };
+type Kind = "Recent" | "Threads" | "Agents" | "Objectives" | "Tasks" | "Views";
+const ORDER: Kind[] = ["Recent", "Threads", "Agents", "Objectives", "Tasks", "Views"];
+const PER_KIND = 6;
+
+// Where Isaac went last, newest first, so an empty query starts there.
+const RECENT = "switcher:recent";
+function recent(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+function visited(hash: string) {
+  try {
+    localStorage.setItem(RECENT, JSON.stringify([hash, ...recent().filter(h => h !== hash)].slice(0, 20)));
+  } catch {}
+}
+
+const plain = (text: string) => text.replace(/!\[[^\]]*\]\([^)]+\)/g, "[image]").replace(/\[\[\w+:([^\]]+)\]\]/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/\s+/g, " ");
+
+/**
+ * Higher is better; null for no match. The query as one run counts most, earlier and at a word start more. Letters in order
+ * with gaps count only in a short name (`loose`), since a long message holds almost any letters in order.
+ */
+function score(query: string, text: string, loose: boolean) {
+  const q = query.toLowerCase(), t = text.toLowerCase();
+  const at = t.indexOf(q);
+  if (at >= 0) return 1000 - Math.min(at, 300) + (at === 0 || /\W/.test(t[at - 1]!) ? 200 : 0);
+  if (!loose) return null;
+  let i = 0, gaps = 0, last = -1;
+  for (let j = 0; j < t.length && i < q.length; j++) if (t[j] === q[i]) (gaps += last < 0 ? 0 : j - last - 1), (last = j), i++;
+  return i === q.length && gaps <= q.length * 2 ? 500 - gaps : null;
+}
+
+function useItems(views: readonly { id: string; label: string }[]) {
+  const threads = threadStore.use();
+  const agents = agentStore.use();
+  const sentries = sentryStore.use();
+  const objectives = objectiveStore.use();
+  const tasks = taskStore.use();
+  return useMemo<Item[]>(() => {
+    const thread = threads.map(t => {
+      const first = t.messages[0];
+      const fresh = unseen(t);
+      const opener = first ? plain(first.text) : "";
+      return {
+        kind: "Threads" as const,
+        href: `#thread/${t.id}`,
+        label: t.title,
+        detail: fresh > 0 ? `${fresh} new` : opener.startsWith(t.title) ? undefined : opener,
+        icon: <Avatar from={first?.from ?? t.routerIds[0] ?? ""} small />,
+        text: `${t.title} ${opener}`,
+        // Unread first, then whatever moved last.
+        rank: (fresh > 0 ? 1e13 : 0) + (Date.parse(t.messages.at(-1)?.at ?? "") || 0),
+      };
+    });
+    const agent = [...agents.map(a => ({ id: a.id, name: a.name ?? a.id, detail: a.doing })), ...sentries.map(s => ({ id: s.id, name: `sentry: ${s.name}`, detail: s.status }))].map(a => ({
+      kind: "Agents" as const,
+      href: `#agent/${a.id}`,
+      label: a.name,
+      detail: a.detail,
+      icon: <Avatar from={a.id} small />,
+      text: `${a.name} ${a.id}`,
+      rank: 0,
+    }));
+    const objective = objectives.map(o => ({ kind: "Objectives" as const, href: `#objective/${o.id}`, label: o.title, icon: <Waypoints className="size-4 text-agent" />, text: o.title, rank: 0 }));
+    const task = tasks.map(t => ({
+      kind: "Tasks" as const,
+      href: `#task/${t.id}`,
+      label: t.title,
+      detail: t.id,
+      icon: <span className={cn("mx-1.5 size-2", statusColor[t.status])} />,
+      text: `${t.id} ${t.title}`,
+      rank: Number(t.id.replace(/\D/g, "")) || 0,
+    }));
+    const view = views.map(v => ({ kind: "Views" as const, href: `#${v.id}`, label: v.label, icon: <LayoutGrid className="size-4 text-muted-foreground" />, text: v.label, rank: 0 }));
+    return [...thread, ...agent, ...objective, ...task, ...view];
+  }, [threads, agents, sentries, objectives, tasks, views]);
+}
+
+/** ⌘K / Ctrl+K from anywhere, composers included: one box that jumps to any thread, agent, objective, task or view. */
+export function QuickSwitcher({ views }: { views: readonly { id: string; label: string }[] }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const items = useItems(views);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      setOpen(o => !o);
+    };
+    const onHash = () => visited(location.hash);
+    addEventListener("keydown", onKey, true);
+    addEventListener("hashchange", onHash);
+    return () => {
+      removeEventListener("keydown", onKey, true);
+      removeEventListener("hashchange", onHash);
+    };
+  }, []);
+
+  const shown = useMemo(() => {
+    const q = query.trim();
+    if (!q) {
+      const byHref = new Map(items.map(i => [i.href, i]));
+      const here = location.hash;
+      const recents = recent().filter(h => h !== here).flatMap(h => (byHref.has(h) ? [{ ...byHref.get(h)!, kind: "Recent" as const }] : [])).slice(0, 5);
+      const threads = items.filter(i => i.kind === "Threads" && !recents.some(r => r.href === i.href)).sort((a, b) => b.rank - a.rank).slice(0, PER_KIND);
+      return [...recents, ...threads, ...items.filter(i => i.kind === "Views")];
+    }
+    const scored = items.flatMap(i => {
+      // A thread's opening message matches only as a run, and ranks under a match in its title.
+      const thread = i.kind === "Threads";
+      const name = score(q, i.label, true), body = score(q, i.text, !thread);
+      return name === null && body === null ? [] : [{ ...i, s: Math.max(name ?? 0, (body ?? 0) - (thread ? 100 : 0)) }];
+    });
+    // Each kind keeps its best few, and the kind holding the best match comes first.
+    const groups = ORDER.map(kind => scored.filter(i => i.kind === kind).sort((a, b) => b.s - a.s || b.rank - a.rank).slice(0, PER_KIND)).filter(g => g.length);
+    return groups.sort((a, b) => b[0]!.s - a[0]!.s).flat();
+  }, [items, query, open]);
+
+  useEffect(() => {
+    setActive(0);
+  }, [query, open]);
+  useEffect(() => {
+    listRef.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
+  function go(i: Item | undefined) {
+    if (!i) return;
+    setOpen(false);
+    setQuery("");
+    location.hash = i.href;
+  }
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) e.preventDefault(), setActive(a => Math.min(shown.length - 1, a + 1));
+    else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) e.preventDefault(), setActive(a => Math.max(0, a - 1));
+    else if (e.key === "Enter") e.preventDefault(), go(shown[active]);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={o => (setOpen(o), o || setQuery(""))}>
+      <DialogContent showCloseButton={false} className="top-[20%] translate-y-0 gap-0 overflow-hidden rounded-none p-0 sm:max-w-xl" data-agent="switcher">
+        <DialogTitle className="sr-only">Jump to</DialogTitle>
+        <DialogDescription className="sr-only">Search threads, agents, objectives, tasks and views</DialogDescription>
+        <input
+          autoFocus
+          data-agent="switcher-input"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="Jump to a thread, agent, objective, task or view…"
+          className="border-b bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground/60"
+        />
+        <div ref={listRef} className="max-h-[60vh] overflow-y-auto py-1">
+          {shown.length === 0 && <p className="px-4 py-6 text-center text-sm text-muted-foreground">Nothing matches “{query}”</p>}
+          {shown.map((item, n) => (
+            <div key={`${item.kind}:${item.href}`}>
+              {item.kind !== shown[n - 1]?.kind && <p className="px-4 pt-2 pb-1 text-[11px] font-medium text-muted-foreground">{!query.trim() && item.kind === "Threads" ? "Threads, unread first" : item.kind}</p>}
+              <button
+                data-index={n}
+                onMouseMove={() => setActive(n)}
+                onClick={() => go(item)}
+                className={cn("flex w-full items-center gap-2.5 px-4 py-1.5 text-left text-sm", n === active && "bg-muted")}
+              >
+                <span className="flex w-5 shrink-0 justify-center">{item.icon}</span>
+                <span className="max-w-[65%] shrink-0 truncate">{item.label}</span>
+                {item.detail && <span className={cn("min-w-0 truncate text-xs", /^\d+ new$/.test(item.detail) ? "text-rose-400" : "text-muted-foreground")}>{item.detail}</span>}
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-3 border-t px-4 py-1.5 text-[11px] text-muted-foreground">
+          <span><Kbd>↑</Kbd> <Kbd>↓</Kbd> move</span>
+          <span><Kbd>↵</Kbd> open</span>
+          <span><Kbd>esc</Kbd> close</span>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

@@ -6,7 +6,7 @@ import { agentStore, objectiveStore, setResolved, startThread, threadStore } fro
 import { Composer } from "@/threads/Composer";
 import { MessageRow } from "@/threads/MessageRow";
 import { Avatar } from "@/threads/Rich";
-import { seenCount } from "@/threads/seen";
+import { unseen } from "@/threads/seen";
 import { Pending } from "@/threads/ThreadPage";
 
 function ago(at: number) {
@@ -19,12 +19,6 @@ function askedAt(t: Thread) {
   const lastMine = t.messages.findLastIndex(m => m.from === "isaac");
   const ask = t.messages.slice(lastMine + 1)[0];
   return ask ? Date.parse(ask.at) : null;
-}
-
-/** Replies he hasn't had on screen; a thread this browser never opened counts what came after his last message. */
-function unseen(t: Thread) {
-  const seen = seenCount(t.id);
-  return seen === null ? t.messages.length - 1 - t.messages.findLastIndex(m => m.from === "isaac") : Math.max(0, t.messages.length - seen);
 }
 
 /** Under the opening message, as Slack does: who replied, how many, and when last; or the router still working on it. */
