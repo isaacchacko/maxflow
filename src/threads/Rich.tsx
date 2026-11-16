@@ -1,9 +1,9 @@
-import { ExternalLink, Network, User, Waypoints } from "lucide-react";
+import { ExternalLink, GitPullRequest, Network, SquareKanban, User, Waypoints } from "lucide-react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor } from "@/mock";
-import { agentStore, objectiveStore, taskStore } from "@/store";
+import { agentStore, objectiveStore, prStore, taskStore } from "@/store";
 
 export type Ref = { kind: "agent" | "router" | "task" | "objective"; id: string };
 type Part = { text: string } | { ref: Ref } | { url: string; label: string } | { image: string };
@@ -89,6 +89,50 @@ export function Rich({ text, className }: { text: string; className?: string }) 
 // In markdown a chip is a link to ref:<kind>/<id>, so the link renderer draws it and refs never get parsed twice.
 const asLinks = (text: string) => text.replace(/\[\[(agent|router|task|objective):([^\]]+)\]\]/g, (_, kind, id) => `[ref](ref:${kind}/${encodeURIComponent(id)})`);
 
+// A PR or Linear issue named in plain text becomes a link to pr:<owner/repo>/<n> or linear:<key>, so it draws as a chip.
+// Code and existing links are other node types, so nothing inside them changes.
+const LINEAR = "https://linear.app/dryftai/issue";
+const REPO = "dryft-ai/app";
+const NAMED = /(?<![\w/&#-])(?:([\w.-]+\/[\w.-]+)#(\d+)|#(\d{3,})|((?:PRO|DRY|TI)-\d+))\b/g;
+type Node = { type: string; value?: string; url?: string; children?: Node[] };
+function chipNamed(node: Node) {
+  if (!node.children || node.type === "link" || node.type === "linkReference") return;
+  node.children = node.children.flatMap(child => {
+    if (child.type !== "text") return chipNamed(child), [child];
+    const out: Node[] = [];
+    let last = 0;
+    for (const m of child.value!.matchAll(NAMED)) {
+      if (m.index > last) out.push({ type: "text", value: child.value!.slice(last, m.index) });
+      out.push({ type: "link", url: m[4] ? `linear:${m[4]}` : `pr:${(m[1] ?? REPO).toLowerCase()}/${m[2] ?? m[3]}`, children: [{ type: "text", value: m[0] }] });
+      last = m.index + m[0].length;
+    }
+    if (last < child.value!.length) out.push({ type: "text", value: child.value!.slice(last) });
+    return out;
+  });
+}
+const remarkChips = () => chipNamed;
+
+const prColor = { open: "text-emerald-400", merged: "text-violet-400", closed: "text-red-400" } as const;
+function PrChip({ repo, n }: { repo: string; n: string }) {
+  const pr = prStore.use()[`${repo}#${n}`];
+  return (
+    <a href={`https://github.com/${repo}/pull/${n}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title={pr?.title} className="inline-flex max-w-96 items-center gap-1 border px-1 align-baseline text-[0.92em] hover:border-ring">
+      <GitPullRequest className={cn("size-3 shrink-0", pr ? prColor[pr.state] : "text-muted-foreground")} />
+      <span className="shrink-0 tabular-nums">{repo === REPO ? "" : repo}#{n}</span>
+      {pr && <span className="truncate text-muted-foreground">{pr.title}</span>}
+    </a>
+  );
+}
+
+function LinearChip({ issue }: { issue: string }) {
+  return (
+    <a href={`${LINEAR}/${issue}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 border px-1 align-baseline text-[0.92em] tabular-nums hover:border-ring">
+      <SquareKanban className="size-3 text-indigo-400" />
+      {issue}
+    </a>
+  );
+}
+
 const md: Components = {
   p: ({ children }) => <p className="my-1.5 first:mt-0 last:mb-0">{children}</p>,
   ul: ({ children }) => <ul className="my-1.5 list-disc pl-5">{children}</ul>,
@@ -108,6 +152,10 @@ const md: Components = {
   a: ({ href = "", children }) => {
     const ref = href.match(/^ref:(agent|router|task|objective)\/(.+)$/);
     if (ref) return <RefChip r={{ kind: ref[1] as Ref["kind"], id: decodeURIComponent(ref[2]!) }} />;
+    const pr = href.match(/^pr:([\w.-]+\/[\w.-]+)\/(\d+)$/) ?? href.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/i);
+    if (pr) return <PrChip repo={pr[1]!.toLowerCase()} n={pr[2]!} />;
+    const issue = href.match(/^linear:([A-Z]+-\d+)$/) ?? href.match(/^https:\/\/linear\.app\/[\w-]+\/issue\/([A-Z]+-\d+)/);
+    if (issue) return <LinearChip issue={issue[1]!} />;
     return (
       <a href={href} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-0.5 text-sky-400 hover:underline">
         {children}
@@ -131,7 +179,7 @@ const md: Components = {
 export function Markdown({ text, className }: { text: string; className?: string }) {
   return (
     <div className={cn("break-words", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={md} urlTransform={url => (url.startsWith("ref:") ? url : defaultUrlTransform(url))}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips]} components={md} urlTransform={url => (/^(ref|pr|linear):/.test(url) ? url : defaultUrlTransform(url))}>
         {asLinks(text)}
       </ReactMarkdown>
     </div>

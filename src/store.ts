@@ -27,6 +27,9 @@ export const editedStore = createStore<Record<string, number>>({});
 export const sourceStore = createStore(seedSources);
 export const sentryStore = createStore<SentrySession[]>([]);
 export const questionStore = createStore<Question[]>([]);
+export type Pr = { title: string; state: "open" | "merged" | "closed" };
+/** The PRs the gh sentry polls, keyed owner/repo#n in lower case. */
+export const prStore = createStore<Record<string, Pr>>({});
 /** True once the server answered with real data; until then, or with no server, the stores hold the mock. */
 export const liveStore = createStore(false);
 const isLive = () => liveStore.get();

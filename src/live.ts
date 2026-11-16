@@ -1,7 +1,7 @@
 import type { Agent, Objective, Question, Sentry, SentrySession, Signal, Task, Thread } from "./mock";
-import { agentStore, liveStore, objectiveStore, questionStore, refreshed, sentryStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
+import { agentStore, liveStore, objectiveStore, prStore, type Pr, questionStore, refreshed, sentryStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
 
-type World = { objectives: Objective[]; agents: Agent[]; tasks: Task[]; threads: Thread[]; signals: Signal[]; sentries: SentrySession[]; questions: Question[] };
+type World = { objectives: Objective[]; agents: Agent[]; tasks: Task[]; threads: Thread[]; signals: Signal[]; sentries: SentrySession[]; questions: Question[]; prs: Record<string, Pr> };
 
 const SOURCE_SENTRY: Partial<Record<Sentry["id"], string>> = { gh: "gh", slack: "slack" };
 const LABEL: Record<Sentry["id"], string> = { isaac: "You", gh: "GitHub", slack: "Slack", agent: "Agents", sentry: "Sentries", maxflow: "maxflow" };
@@ -24,6 +24,7 @@ function apply(w: World) {
   sentryStore.set(w.sentries);
   sourceStore.set(sourcesOf(w.sentries));
   questionStore.set(w.questions);
+  prStore.set(w.prs ?? {});
   // Pending questions wait on Isaac; the tab says how many, as v1's did.
   const pending = w.questions.filter(q => q.status === "pending").length;
   document.title = pending ? `(${pending}) maxflow` : "maxflow";

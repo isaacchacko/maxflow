@@ -1090,6 +1090,8 @@ async function world() {
       use: SENTRY_USES[s.name] ?? "",
     })),
     questions: questions.filter(isOpen),
+    // Every PR the gh sentry polls, so a PR named in a message shows its title and state.
+    prs: Object.fromEntries(Object.entries(ghStatus()).map(([key, { pr }]) => [key.toLowerCase(), { title: pr.title, state: pr.state.toLowerCase() }])),
   };
 }
 
