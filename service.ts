@@ -56,6 +56,8 @@ export function install(sentries = process.env.MAXFLOW_SENTRIES) {
 </dict></plist>
 `);
     run(["launchctl", "bootout", `gui/${process.getuid!()}/${LABEL}`]);
+    // bootout returns before the old job is gone, and bootstrapping over it fails with an I/O error.
+    for (let i = 0; i < 20 && run(["launchctl", "print", `gui/${process.getuid!()}/${LABEL}`]).ok; i++) Bun.sleepSync(250);
     return run(["launchctl", "bootstrap", `gui/${process.getuid!()}`, PLIST]);
   }
   mkdirSync(join(UNIT, ".."), { recursive: true });
