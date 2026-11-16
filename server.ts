@@ -621,7 +621,8 @@ type Kind = "command" | "conversation";
 const KINDS: Kind[] = ["command", "conversation"];
 // parent: a subthread hangs off a message in another thread, which is its root; its messages are that message's replies, and
 // any of them can have a subthread of its own. A top thread's root is its first message, so replying to that posts in it.
-type Message = { id: string; from: string; at: number; text: string; re?: number };
+// re: the id of his message a router's command result answers (an index into messages, before merges could reorder them).
+type Message = { id: string; from: string; at: number; text: string; re?: string | number };
 type Thread = { id: string; title: string; objective: string; routers: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; kind?: Kind; kindBy?: string; task?: number; done?: number; resolved?: { at: number }; asks?: Ask; q?: number; mergedInto?: string };
 const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
@@ -685,9 +686,9 @@ const pendingOf = (p?: Pending) => p && { routerIds: p.routers, since: iso(p.sin
 // A message into a thread at any level: Isaac's goes to its routers and waits on them, an agent's answers him.
 function postIn(t: Thread, from: Session | undefined, text: string, done?: boolean) {
   // A command's result answers his last message, and in a command thread closes it and its task; his follow-up reopens it.
-  const re = done ? t.messages.findLastIndex((m) => m.from === "isaac") : -1;
+  const re = done ? t.messages.findLast((m) => m.from === "isaac")?.id : undefined;
   const m = message(from?.id ?? "isaac", text);
-  t.messages.push(re >= 0 ? { ...m, re } : m);
+  t.messages.push(re ? { ...m, re } : m);
   if (done && t.kind === "command") {
     t.done = Date.now();
     const task = tasks.find((x) => x.id === t.task);
@@ -1217,7 +1218,7 @@ async function world() {
       events: t.timeline.map((e) => ({ from: e.session && sessions.get(e.session)?.role?.role === "router" ? "router" : e.session ? "agent" : "sentry", at: iso(e.at), text: e.text })),
       page: t.page ?? [],
     })),
-    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), kind: t.kind ?? "conversation", kindBy: t.kindBy, ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), done: t.done && iso(t.done), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, re: m.re })) })),
+    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), kind: t.kind ?? "conversation", kindBy: t.kindBy, ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), done: t.done && iso(t.done), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, re: typeof m.re === "number" ? t.messages[m.re]?.id : m.re })) })),
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({
       id: s.id,
@@ -1513,6 +1514,22 @@ Bun.serve<WsData>({
     }
     // Flipping a thread between command and conversation. His flip goes to its routers, and onto the bus as a label on the
     // classifier's call; a router's flip is its own call on his reply.
+    // "Answer here instead" on a command result inside a conversation: the result becomes an ordinary reply, and the routers
+    // hear he wants that message talked through. Logged with the kind flips, as a label on the router's call.
+    const answerHere = path.match(/^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/conversation$/);
+    if (answerHere && req.method === "POST") {
+      const t = threads.find((x) => x.id === answerHere[1]);
+      const asked = t?.messages.find((m) => m.id === answerHere[2]);
+      const results = t?.messages.filter((m) => m.re !== undefined && (m.re === asked?.id || t.messages[m.re as number] === asked)) ?? [];
+      if (!t || !asked || !results.length) return new Response("no command result on that message", { status: 404 });
+      for (const m of results) delete m.re;
+      saveThreads();
+      publish(`thread-kind/${t.id}`, { thread: t.id, message: asked.id, was: "command", kind: "conversation", by: "isaac", text: asked.text });
+      const to = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(live);
+      dispatch({ to: to.length ? to : routersOf(t.objective), objective: t.objective, target: t.title, text: `[maxflow] In thread "${t.title}" (${t.id}), Isaac wants his message ${asked.id} talked through rather than just run as a command: "${headline(asked.text)}". Answer it in the thread with \`${CLI} thread post ${t.id} '<text>'\`.` });
+      publish(`thread/${t.id}`, { thread: t.id });
+      return Response.json(t);
+    }
     // Folding a duplicate thread into another; resolving stays his, so this is the way agents tidy his inbox.
     const threadMerge = path.match(/^\/api\/threads\/([\w-]+)\/merge$/);
     if (threadMerge && req.method === "POST") {

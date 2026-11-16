@@ -1,12 +1,13 @@
-import { Check } from "lucide-react";
+import { Check, MessagesSquare, Zap } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
-import { markAskShown, objectiveStore, setResolved, startThread, threadStore } from "@/store";
+import { markAskShown, objectiveStore, setKind, setResolved, startThread, threadStore } from "@/store";
 import { Composer } from "@/threads/Composer";
 import { composeOnArrival } from "@/threads/jump";
-import { MessageRow } from "@/threads/MessageRow";
-import { Replies } from "@/threads/Replies";
+import { MessageRow, when } from "@/threads/MessageRow";
+import { ago, Replies } from "@/threads/Replies";
+import { Rich } from "@/threads/Rich";
 import { useVim, vimRow } from "@/threads/vim";
 
 /** A thread asks for Isaac from the first message after his last reply; null once he has answered everything in it. */
@@ -14,6 +15,55 @@ function askedAt(t: Thread) {
   const lastMine = t.messages.findLastIndex(m => m.from === "isaac");
   const ask = t.messages.slice(lastMine + 1)[0];
   return ask ? Date.parse(ask.at) : null;
+}
+
+const firstLine = (text: string) => text.replace(/!\[[^\]]*\]\([^)]*\)/g, "").trim().split("\n")[0] ?? "";
+const today = (at: string) => new Date(at).toDateString() === new Date().toDateString();
+
+/** A command he gave: one line, ✻ while its router works and ✓ with the result its router posted; open, it shows the exchange. */
+function CommandRow({ t, active, open, onToggle, onResolve }: { t: Thread; active: boolean; open: boolean; onToggle(): void; onResolve(): void }) {
+  const asked = t.messages.find(m => m.from === "isaac") ?? t.messages[0];
+  const result = t.done ? (t.messages.findLast(m => m.re) ?? t.messages.at(-1)) : undefined;
+  const last = t.messages.at(-1)?.at ?? "";
+  return (
+    <li {...vimRow(t.id)} className="group border-b last:border-b-0">
+      <div
+        data-agent={`command:${t.id}`}
+        onClick={e => (e.target as Element).closest("a, button") || onToggle()}
+        className={cn("flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-sm hover:bg-muted/40", active && "bg-muted/40 shadow-[inset_2px_0_0_var(--color-sky-400)]", t.resolved && "opacity-50")}
+      >
+        {result ? <Check className="size-3.5 shrink-0 text-emerald-400" /> : <span className="inline-block w-3.5 shrink-0 animate-spin text-center text-agent">✻</span>}
+        <Rich still text={firstLine(asked?.text ?? t.title) || t.title} className="w-80 shrink-0 truncate" />
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          {result ? <Rich still text={firstLine(result.text)} /> : t.pending?.status ? <Rich still text={`${t.pending.status}…`} /> : "router working on it…"}
+        </span>
+        <button
+          data-agent={`talk-it-through:${t.id}`}
+          title="Make it a conversation: its router keeps the thread open and talks it through with you"
+          onClick={() => setKind(t.id, "conversation")}
+          className="flex shrink-0 items-center gap-1 border px-1.5 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 hover:border-ring hover:text-foreground"
+        >
+          <MessagesSquare className="size-3" />
+          talk it through
+        </button>
+        <button data-agent={`inbox-resolve:${t.id}`} title={t.resolved ? "Reopen" : "Resolve"} onClick={onResolve} className={cn("shrink-0 border p-0.5 hover:border-ring", t.resolved ? "text-emerald-400" : "text-muted-foreground opacity-0 group-hover:opacity-100")}>
+          <Check className="size-3" />
+        </button>
+        <span className="w-8 shrink-0 text-right text-xs text-muted-foreground tabular-nums">{last && ago(Date.parse(last))}</span>
+      </div>
+      {open && (
+        <div className="border-t bg-muted/15 px-5 py-2">
+          {t.messages.map((m, i) => (
+            <MessageRow key={m.id ?? i} from={m.from} at={m.at} text={m.text} />
+          ))}
+          {!result && t.pending && <p className="text-xs text-muted-foreground">waiting since {when(t.pending.since)}</p>}
+          <a href={`#thread/${t.id}`} className="mt-1 inline-block text-xs text-sky-400 hover:underline">
+            open the thread
+          </a>
+        </div>
+      )}
+    </li>
+  );
 }
 
 export function InboxView() {
@@ -30,6 +80,14 @@ export function InboxView() {
     .map(t => ({ t, asked: askedAt(t), last: Date.parse(t.messages.at(-1)?.at ?? "") || 0 }))
     // An agent waiting on him comes first, longest-waiting on top.
     .sort((a, b) => Number(!a.t.asks) - Number(!b.t.asks) || (a.asked ?? Infinity) - (b.asked ?? Infinity) || b.last - a.last);
+  // Commands sit in a strip of their own above the conversations, today's in view and older ones behind a toggle.
+  const [earlier, setEarlier] = useState(false);
+  const [opened, setOpened] = useState<string>();
+  // An agent waiting on him stays on top of everything, the strip included.
+  const needsYou = rows.filter(r => r.t.asks);
+  const allCommands = rows.filter(r => !r.t.asks && r.t.kind === "command");
+  const commands = allCommands.filter(r => earlier || today(r.t.messages.at(-1)?.at ?? r.t.messages[0]?.at ?? ""));
+  const conversations = rows.filter(r => !r.t.asks && r.t.kind !== "command");
   const toggle = (t: Thread) => (setKept(k => new Set(k).add(t.id)), setResolved(t.id, !t.resolved));
   // Drawing an ask flagged, on a page he has in front of him, starts the clock on its agent's default.
   const unshown = rows.filter(r => r.t.asks && !r.t.asks.shown).map(r => r.t.id);
@@ -37,15 +95,64 @@ export function InboxView() {
     if (document.visibilityState === "visible") for (const id of unshown) markAskShown(id);
   }, [unshown.join()]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const vim = useVim("inbox", rows.map(r => r.t.id), scrollRef, "first", {
+  const vim = useVim("inbox", [...needsYou, ...commands, ...conversations].map(r => r.t.id), scrollRef, "first", {
     compose: () => document.querySelector<HTMLElement>('[data-agent="inbox-input"]')?.focus(),
-    open: id => (location.hash = `thread/${id}`),
+    // A command row opens in place; a conversation opens its thread.
+    open: id => (commands.some(r => r.t.id === id) ? setOpened(o => (o === id ? undefined : id)) : (location.hash = `thread/${id}`)),
     reply: id => (composeOnArrival(), (location.hash = `thread/${id}`)),
     resolve: id => {
       const t = threads.find(x => x.id === id);
       if (t) toggle(t);
     },
   });
+
+  const conversationRow = (t: Thread) => {
+      // A thread a router opened before writing in it shows its title as the opening message.
+      const first = t.messages[0] ?? { from: t.routerIds[0] ?? t.objectiveId, at: "", text: t.title };
+      return (
+        <li key={t.id} {...vimRow(t.id)} className="group relative border-b px-3 py-2 last:border-b-0">
+          <button
+            data-agent={`inbox-resolve:${t.id}`}
+            title={t.resolved ? "Reopen" : "Resolve"}
+            onClick={() => toggle(t)}
+            className={cn("absolute top-2 right-3 z-10 border p-1 hover:border-ring", t.resolved ? "text-emerald-400" : "bg-background text-muted-foreground opacity-0 group-hover:opacity-100")}
+          >
+            <Check className="size-3.5" />
+          </button>
+          <button
+            data-agent={`just-do-it:${t.id}`}
+            title="Make it a command: its router acts on it and answers once, with the result"
+            onClick={() => setKind(t.id, "command")}
+            className="absolute top-2 right-11 z-10 flex items-center gap-1 border bg-background px-1.5 py-0.5 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 hover:border-ring hover:text-foreground"
+          >
+            <Zap className="size-3" />
+            just do it
+          </button>
+          <div className={cn(t.resolved && "opacity-50")}>
+            <MessageRow
+              from={first.from}
+              at={first.at}
+              text={first.text}
+              active={vim.cursor === t.id}
+              className="cursor-pointer"
+              // A long opener or a pasted screenshot stays a preview here; the thread has it in full.
+              bodyClassName="max-h-36 overflow-hidden [&_img]:max-h-28"
+              // The whole row opens the thread, except the links and chips inside the message.
+              onClick={e => (e.target as Element).closest("a") || (location.hash = `thread/${t.id}`)}
+              meta={
+                <span className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
+                  {t.asks && <span className="shrink-0 font-medium text-amber-400">needs you</span>}
+                  <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : t.asks ? "" : "routing…"}</span>
+                  {t.resolved && <Check className="size-3 shrink-0 self-center" />}
+                </span>
+              }
+            >
+              <Replies t={t} />
+            </MessageRow>
+          </div>
+        </li>
+      );
+  };
 
   return (
     <div ref={scrollRef} className="flex h-full flex-col gap-3 overflow-y-auto p-4">
@@ -57,45 +164,27 @@ export function InboxView() {
           Resolved ({resolved})
         </button>
       )}
-      <ol className="flex max-w-4xl flex-col border empty:hidden">
-        {rows.map(({ t }) => {
-          // A thread a router opened before writing in it shows its title as the opening message.
-          const first = t.messages[0] ?? { from: t.routerIds[0] ?? t.objectiveId, at: "", text: t.title };
-          return (
-            <li key={t.id} {...vimRow(t.id)} className="group relative border-b px-3 py-2 last:border-b-0">
-              <button
-                data-agent={`inbox-resolve:${t.id}`}
-                title={t.resolved ? "Reopen" : "Resolve"}
-                onClick={() => toggle(t)}
-                className={cn("absolute top-2 right-3 z-10 border p-1 hover:border-ring", t.resolved ? "text-emerald-400" : "bg-background text-muted-foreground opacity-0 group-hover:opacity-100")}
-              >
-                <Check className="size-3.5" />
+      {needsYou.length > 0 && <ol className="flex max-w-4xl flex-col border border-amber-400/40">{needsYou.map(({ t }) => conversationRow(t))}</ol>}
+      {allCommands.length > 0 && (
+        <section data-agent="inbox-commands" className="flex max-w-4xl flex-col gap-1">
+          <h2 className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            Commands · {earlier ? "all" : "today"}
+            {allCommands.length > commands.length || earlier ? (
+              <button data-agent="inbox-commands-earlier" onClick={() => setEarlier(v => !v)} className="font-normal tracking-normal normal-case hover:text-foreground">
+                {earlier ? "today only" : `+ ${allCommands.length - commands.length} earlier`}
               </button>
-              <div className={cn(t.resolved && "opacity-50")}>
-                <MessageRow
-                  from={first.from}
-                  at={first.at}
-                  text={first.text}
-                  active={vim.cursor === t.id}
-                  className="cursor-pointer"
-                  // A long opener or a pasted screenshot stays a preview here; the thread has it in full.
-                  bodyClassName="max-h-36 overflow-hidden [&_img]:max-h-28"
-                  // The whole row opens the thread, except the links and chips inside the message.
-                  onClick={e => (e.target as Element).closest("a") || (location.hash = `thread/${t.id}`)}
-                  meta={
-                    <span className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
-                      {t.asks && <span className="shrink-0 font-medium text-amber-400">needs you</span>}
-                      <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : t.asks ? "" : "routing…"}</span>
-                      {t.resolved && <Check className="size-3 shrink-0 self-center" />}
-                    </span>
-                  }
-                >
-                  <Replies t={t} />
-                </MessageRow>
-              </div>
-            </li>
-          );
-        })}
+            ) : null}
+          </h2>
+          <ol className="flex flex-col border empty:hidden">
+            {commands.map(({ t }) => (
+              <CommandRow key={t.id} t={t} active={vim.cursor === t.id} open={opened === t.id} onToggle={() => setOpened(o => (o === t.id ? undefined : t.id))} onResolve={() => toggle(t)} />
+            ))}
+          </ol>
+        </section>
+      )}
+      {allCommands.length > 0 && conversations.length > 0 && <h2 className="max-w-4xl text-xs font-semibold tracking-wide text-muted-foreground uppercase">Conversations</h2>}
+      <ol className="flex max-w-4xl flex-col border empty:hidden">
+        {conversations.map(({ t }) => conversationRow(t))}
       </ol>
     </div>
   );

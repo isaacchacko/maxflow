@@ -55,7 +55,12 @@ export type Thread = {
   /** A subthread's root is this message in its parent thread; its own messages are that message's replies. */
   parentId?: string;
   parentMessageId?: string;
-  messages: { id?: string; from: string; at: string; text: string }[];
+  /** A command wants an ack and one result; a conversation (the default) is talked through. */
+  kind?: "command" | "conversation";
+  /** A command's result is in, from its router's `thread done`; his next message clears it. */
+  done?: string | null;
+  /** re: the id of his message this router message is a command result for. */
+  messages: { id?: string; from: string; at: string; text: string; re?: string }[];
 };
 
 export type AgentState = "working" | "waiting" | "idle" | "asleep";
