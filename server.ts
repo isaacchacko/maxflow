@@ -277,7 +277,7 @@ function roleIntro(s: Session) {
 
 // What the user decided in his old question queue that holds beyond the one question, as the retired questions sentry distilled it.
 function standingDecisions() {
-  const rules = decisions.flatMap((d) => (d.rule ? [d.rule] : [])).slice(-20);
+  const rules = decisions().flatMap((d) => (d.rule ? [d.rule] : [])).slice(-20);
   return rules.length ? `\n\nStanding decisions the user already made; act on them instead of asking again:\n${rules.map((r) => `- ${r}`).join("\n")}` : "";
 }
 
@@ -911,8 +911,9 @@ function introduce(to: Session, other: Session, why?: string) {
 // replies there; his reply ends the agent's wait on it. Each question from before threads moved into one, which keeps its id as q.
 const DEFAULT_AFTER_MS = Number(process.env.MAXFLOW_DEFAULT_AFTER_MS ?? 3 * 3_600_000);
 const DEFAULT_AFTER_H = Math.round(DEFAULT_AFTER_MS / 3_600_000);
-// The standing rules the retired questions sentry distilled from his answers; the intro still hands them to every agent.
-const decisions: { rule?: string | null }[] = (() => { try { return JSON.parse(readFileSync(`${STATE_DIR}/decisions.json`, "utf8")); } catch { return []; } })();
+// The standing rules the retired questions sentry distilled from his answers; the intro still hands them to every agent,
+// read for each intro, so a rule added to the file reaches the next agent without a restart.
+const decisions = (): { rule?: string | null }[] => { try { return JSON.parse(readFileSync(`${STATE_DIR}/decisions.json`, "utf8")); } catch { return []; } };
 const threadOf = (ref: string) => live_thread(/^q?\d+$/.test(ref) ? threads.find((t) => t.q === Number(ref.replace(/^q/, ""))) : threads.find((t) => t.id === ref));
 // An open ask on the same objective that reads like this one: most of the shorter one's words are in the other. Paraphrases
 // score low across all threads, so this only looks among the few asks still waiting on him.
