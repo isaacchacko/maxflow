@@ -40,6 +40,9 @@ type Session = {
   // When the inbox last pasted into the prompt, and how many times since it pressed Enter again on a paste left unsent.
   pastedAt?: number;
   enterRetries?: number;
+  // The inbox messages last pasted, which stay queued until the transcript shows them as a prompt; how often they were sent again.
+  sending?: { count: number; text: string; at: number };
+  resends?: number;
   // A draft the user left in the prompt while messages waited: what it says and since when, when messages first queued behind it,
   // and the draft cleared out of the way to deliver them, to be typed back once that turn ends (also kept in ~/.maxflow/drafts).
   draft?: { text: string; since: number };
@@ -90,8 +93,15 @@ let optionWrites = Promise.resolve();
 function setOption(id: string, key: string, value: string) {
   optionWrites = optionWrites.then(() => tmuxAsync("set-option", "-t", tmuxName(id), key, value)).then(() => {}, () => {});
 }
+// A pane scrolled back in the browser is in tmux's copy mode, which takes keys for itself: Enter there never reaches claude, so a
+// pasted message sat unsent while the log called it delivered. Whatever the server types leaves that mode first.
+async function leaveMode(target: string) {
+  if ((await tmuxAsync("display-message", "-p", "-t", target, "#{pane_in_mode}")).out.trim() === "1") await tmuxAsync("send-keys", "-t", target, "-X", "cancel");
+}
+const pressEnter = async (target: string) => (await leaveMode(target), await tmuxAsync("send-keys", "-t", target, "Enter"));
 // Unbracketed text reaches the pane in ~1KB reads, and claude can read the split as a paste it never closes, after which Enter only adds newlines.
 async function paste(target: string, text: string) {
+  await leaveMode(target);
   const load = Bun.spawn([...TMUX, "load-buffer", "-b", target, "-"], { env: termEnv, stdin: new Blob([text]) });
   await load.exited;
   await tmuxAsync("paste-buffer", "-p", "-d", "-b", target, "-t", target);
@@ -1318,19 +1328,74 @@ setInterval(async () => {
     delivering = false;
   }
 }, 1000);
+// Whether the transcript has the pasted text as a prompt since it was pasted. With no transcript known yet, an emptied box will do.
+async function prompted(s: Session, sent: NonNullable<Session["sending"]>, box?: { empty: boolean } | null) {
+  if (!s.transcript) return !!box?.empty;
+  const head = squash(sent.text).slice(0, 80);
+  // An explicit start: Bun's slice(-n) on a file shorter than n does not return the whole file.
+  const file = Bun.file(s.transcript);
+  const tail = await file.slice(Math.max(0, file.size - 2_000_000)).text().catch(() => "");
+  return tail.split("\n").some((line) => {
+    if (!line.includes('"type":"user"')) return false;
+    try {
+      const e = JSON.parse(line);
+      if (Date.parse(e.timestamp) < sent.at - 5000) return false;
+      const c = e.message?.content;
+      const text = typeof c === "string" ? c : Array.isArray(c) ? c.filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n") : "";
+      return squash(text).includes(head);
+    } catch {
+      return false;
+    }
+  });
+}
+// A paste is delivered once claude has it as a prompt, and only then leaves the inbox. Until that, and for CONFIRM_MS after the paste,
+// the session waits; then an Enter that didn't take is pressed again, and a paste that left the box without becoming a prompt is
+// sent again (twice at most, then dropped and logged). True while the paste is still unconfirmed, so nothing else is typed.
+const CONFIRM_MS = 10_000, RESENDS = 2;
+async function confirmSending(s: Session) {
+  const sent = s.sending!;
+  const box = Date.now() - sent.at < CONFIRM_MS && s.transcript ? undefined : await inputBox(s);
+  if (await prompted(s, sent, box)) {
+    s.inbox.splice(0, sent.count);
+    setOption(s.id, "@mf-inbox", JSON.stringify(s.inbox));
+    s.sending = s.resends = undefined;
+    return false;
+  }
+  if (Date.now() - sent.at < CONFIRM_MS || !box) return true;
+  if (!box.empty) {
+    if ((s.enterRetries ?? 0) >= ENTER_RETRIES || !unsent(s, box)) return true;
+    s.enterRetries = (s.enterRetries ?? 0) + 1;
+    if (s.peerTurnAt) s.peerTurnAt = Date.now();
+    await pressEnter(tmuxName(s.id));
+    sent.at = Date.now();
+    return true;
+  }
+  s.sending = undefined;
+  s.resends = (s.resends ?? 0) + 1;
+  if (s.resends > RESENDS) {
+    console.error(`${s.id}: ${sent.count} message(s) never became a prompt after ${RESENDS} resends; dropped: ${sent.text.slice(0, 120)}`);
+    s.inbox.splice(0, sent.count);
+    setOption(s.id, "@mf-inbox", JSON.stringify(s.inbox));
+    s.resends = undefined;
+  }
+  return false;
+}
+
 async function deliver(s: Session) {
   if (s.exitCode !== null) return;
   // A stopped claude has no prompt to deliver to, so a queued message that finds one asleep resumes it.
   if (s.inbox.length && (s.archived || s.asleep) && !isSentry(s)) return wake(s);
+  if (s.sending && (await confirmSending(s))) return;
   if (Date.now() - activeAt(s) < DELIVER_IDLE_MS) return;
   // Only sessions with a message pending or a recent paste are read, so idle ones cost no capture each second.
   if (!s.inbox.length && !s.savedDraft && Date.now() - (s.pastedAt ?? 0) >= PASTE_SEEN_MS) return;
   const box = await inputBox(s);
   if (!box) return;
+  // One of ours left unsent from before (a paste the server restarted on): Enter again.
   if ((s.enterRetries ?? 0) < ENTER_RETRIES && unsent(s, box)) {
     s.enterRetries = (s.enterRetries ?? 0) + 1;
     if (s.peerTurnAt) s.peerTurnAt = Date.now();
-    await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Enter");
+    await pressEnter(tmuxName(s.id));
     return;
   }
   // The turn our messages started has ended: the user's draft goes back where he left it, unsubmitted.
@@ -1352,15 +1417,15 @@ async function deliver(s: Session) {
     saveDraft(s, s.savedDraft ? `${s.savedDraft}\n${draft}` : draft);
   }
   s.blockedSince = s.draft = undefined;
-  const text = s.inbox.splice(0).join("\n");
-  setOption(s.id, "@mf-inbox", "[]");
+  const text = s.inbox.join("\n");
+  s.sending = { count: s.inbox.length, text, at: Date.now() };
   s.peerTurnAt = text.includes(VERIFIED) ? undefined : Date.now();
   s.pastedAt = Date.now();
   s.enterRetries = 0;
   await paste(tmuxName(s.id), text);
   // A longer paste takes claude longer to take in before Enter submits it.
   await Bun.sleep(150 + Math.min(1500, text.length / 5));
-  await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Enter");
+  await pressEnter(tmuxName(s.id));
 }
 
 // Only pages served from this server may drive it; blocks other sites from reaching localhost.
@@ -1780,12 +1845,16 @@ Bun.serve<WsData>({
         const typed: ReturnType<typeof stamp> | { text?: string; request?: undefined } = body.text && isAgent(s) ? stamp(req, body.text, body.isaac) : { text: body.text };
         if ("error" in typed) return new Response(typed.error, { status: 409 });
         if (typed.request) requested(s, typed.request);
-        if (typed.text && isAgent(s)) dispatch({ from: sessions.get(req.headers.get("x-maxflow-from") ?? ""), source: body.isaac ? "isaac" : undefined, to: [s], text: body.text!, typed: true });
+        // A session or sentry sending an agent text to submit goes through its inbox like notify: typed only at an idle prompt, and
+        // delivered only once claude has it as a prompt. Typed from a plain shell, or left unsubmitted, it goes straight in.
+        const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
+        const queued = !!typed.text && isAgent(s) && !!body.enter && (!!from || !!body.isaac);
+        if (typed.text && isAgent(s)) dispatch({ from, source: body.isaac ? "isaac" : undefined, to: [s], text: body.text!, ...(queued ? { deliver: typed.text } : { typed: true }) });
         touch("write");
-        if (typed.text) await paste(t, typed.text);
+        if (typed.text && !queued) await paste(t, typed.text);
         if (body.keys?.length) await tmuxAsync("send-keys", "-t", t, ...body.keys);
         // A TUI like claude reads text + Enter in one burst as a paste, so the submit goes separately.
-        if (body.enter) await Bun.sleep(body.text ? 150 : 0), await tmuxAsync("send-keys", "-t", t, "Enter");
+        if (body.enter && !queued) await Bun.sleep(body.text ? 150 : 0), await pressEnter(t);
         return Response.json(describe(s));
       }
       // Typed by the user into an asleep agent's pane: his own words, delivered once its claude is back.
