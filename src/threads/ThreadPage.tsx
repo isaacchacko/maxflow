@@ -73,7 +73,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
         <section className="flex min-h-0 min-w-0 flex-1 flex-col border">
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {thread.messages.map((m, i) => (
-              <article key={i} className="mb-5">
+              <article key={i} className="-mx-2 mb-3 px-2 py-1 hover:bg-muted/40">
                 <div className="mb-1 flex items-baseline gap-2">
                   <Author from={m.from} />
                   <span className="text-xs text-muted-foreground tabular-nums">{when(m.at)}</span>
