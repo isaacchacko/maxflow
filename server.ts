@@ -48,7 +48,8 @@ type Session = {
   // Where it sits in the routing: a router owns a scope of an objective, a worker is its router's.
   role?: Role;
 };
-type Role = { role: "router" | "worker"; objective: string; parent?: string; scope?: string };
+// merged: a router that came in with an objective merged into this one; it keeps its own threads but not the objective's routing.
+type Role = { role: "router" | "worker"; objective: string; parent?: string; scope?: string; merged?: boolean };
 // awake: a message woke it; it goes back to sleep on the same wait when that turn ends, until the awaited event itself clears it.
 type Wait = { kind: "q" | "approval" | "ci" | "agent" | "slack" | "done"; ref: string; at: number; awake?: boolean };
 type ClaudeState = "working" | "waiting" | "idle";
@@ -501,7 +502,11 @@ function targetOf(source: Source, text: string, from?: Session) {
 }
 const live = (s?: Session): s is Session => !!s && s.exitCode === null;
 const funnel = () => [...sessions.values()].find((s) => s.name === "sentry:funnel" && isSentry(s) && live(s));
-const routersOf = (objective: string) => [...sessions.values()].filter((s) => live(s) && s.role?.role === "router" && s.role.objective === objective);
+function routersOf(objective: string) {
+  const all = [...sessions.values()].filter((s) => live(s) && s.role?.role === "router" && s.role.objective === objective);
+  const own = all.filter((s) => !s.role!.merged);
+  return own.length ? own : all;
+}
 
 // typed: the text already reached the session (typed by `maxflow send`, or as a new router's first prompt), so it is only logged.
 // deliver: what the agents get instead of the logged text, given the signal's number.
@@ -1322,7 +1327,7 @@ Bun.serve<WsData>({
         const into = objectives.find((x) => x.id === ((await req.json().catch(() => ({}))) as { into?: string }).into);
         if (!into || into.id === o.id || into.closed) return new Response("into: an open objective other than this one", { status: 400 });
         const moved = [...sessions.values()].filter((s) => s.role?.objective === o.id);
-        for (const s of moved) setRole(s, { ...s.role!, objective: into.id, ...(s.role!.role === "router" && { scope: o.title }) });
+        for (const s of moved) setRole(s, { ...s.role!, objective: into.id, ...(s.role!.role === "router" && { scope: o.title, merged: true }) });
         for (const t of threads) if (t.objective === o.id) t.objective = into.id;
         for (const t of tasks) if (t.objective === o.id) t.objective = into.id;
         Object.assign(o, { closed: true, mergedInto: into.id, page: [] });
