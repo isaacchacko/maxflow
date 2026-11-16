@@ -1,4 +1,4 @@
-import { Check, CircleDashed, GitPullRequest, Loader2, X } from "lucide-react";
+import { Check, CircleDashed, GitPullRequest, Loader2, Network, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,11 +6,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { statusColor, type Block, type Task } from "@/mock";
-import { addEvent, putBlock } from "@/store";
+import { agentStateColor, statusColor, type Block, type Event, type Status } from "@/mock";
+import { addEvent, agentStore, putBlock, taskStore, threadStore, type PageRef } from "@/store";
+
+export type Subject = { ref: PageRef; status: Status; events: Event[]; pr?: number; threadId?: string };
 
 type Of<K extends Block["kind"]> = Extract<Block, { kind: K }>;
-type Props<K extends Block["kind"]> = { block: Of<K>; task: Task };
+type Props<K extends Block["kind"]> = { block: Of<K>; subject: Subject };
 
 function Shell({ title, action, children, className }: { title: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
@@ -24,14 +26,14 @@ function Shell({ title, action, children, className }: { title: string; action?:
   );
 }
 
-function StatusBlock({ block, task }: Props<"status">) {
+function StatusBlock({ block, subject }: Props<"status">) {
   return (
     <Shell
       title="Status"
       action={
         <Badge variant="outline" className="gap-1.5 capitalize">
-          <span className={cn("size-1.5 rounded-full", statusColor[task.status])} />
-          {task.status}
+          <span className={cn("size-1.5 rounded-full", statusColor[subject.status])} />
+          {subject.status}
         </Badge>
       }
     >
@@ -106,20 +108,20 @@ function ChartBlock({ block }: Props<"chart">) {
   );
 }
 
-const who = { isaac: "bg-sky-500", agent: "bg-agent", sentry: "bg-amber-500" };
+const who = { isaac: "bg-sky-500", agent: "bg-agent", router: "bg-fuchsia-400", sentry: "bg-amber-500" };
 
-function ActivityBlock({ task }: Props<"activity">) {
+function ActivityBlock({ subject }: Props<"activity">) {
   return (
     <Shell title="Activity" className="flex flex-col-reverse overflow-hidden">
       <ol className="space-y-2">
-        {task.events.slice(-4).map((e, i) => (
+        {subject.events.slice(-4).map((e, i) => (
           <li key={i} className="flex gap-2 text-sm">
             <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", who[e.from])} />
             <span className="flex-1 text-muted-foreground">{e.text}</span>
             <span className="shrink-0 text-xs text-muted-foreground/60">{e.at}</span>
           </li>
         ))}
-        {task.events.length === 0 && <li className="text-sm text-muted-foreground">Nothing yet.</li>}
+        {subject.events.length === 0 && <li className="text-sm text-muted-foreground">Nothing yet.</li>}
       </ol>
     </Shell>
   );
@@ -131,9 +133,9 @@ const check = {
   running: <Loader2 className="size-3.5 animate-spin text-amber-400" />,
 };
 
-function PrBlock({ block, task }: Props<"pr">) {
+function PrBlock({ block, subject }: Props<"pr">) {
   return (
-    <Shell title="Pull request" action={<Badge variant="secondary" className="gap-1"><GitPullRequest className="size-3" />#{task.pr}</Badge>}>
+    <Shell title="Pull request" action={<Badge variant="secondary" className="gap-1"><GitPullRequest className="size-3" />#{subject.pr}</Badge>}>
       <ul className="space-y-1.5">
         {block.checks.map(c => (
           <li key={c.name} className="flex items-center gap-2 font-mono text-xs">
@@ -179,10 +181,10 @@ function CodeBlock({ block }: Props<"code">) {
   );
 }
 
-function QuestionBlock({ block, task }: Props<"question">) {
+function QuestionBlock({ block, subject }: Props<"question">) {
   const answer = (option: string) => {
-    addEvent(task.id, { from: "isaac", at: "now", text: `Decided: ${option}` });
-    putBlock(task.id, { id: block.id, kind: "note", w: block.w, h: block.h, title: "Decision", text: `${option}. ${block.question}` });
+    addEvent(subject.ref, { from: "isaac", at: "now", text: `Decided: ${option}` });
+    putBlock(subject.ref, { id: block.id, kind: "note", w: block.w, h: block.h, title: "Decision", text: `${option}. ${block.question}` });
   };
   return (
     <Card className="h-full gap-3 overflow-hidden border-amber-400/40 bg-amber-400/5 py-3">
@@ -203,6 +205,78 @@ function QuestionBlock({ block, task }: Props<"question">) {
   );
 }
 
+
+function VisionBlock({ block }: Props<"vision">) {
+  return (
+    <Shell title="Vision" className="flex gap-6">
+      <p className="flex-1 text-xl leading-snug font-medium tracking-tight">{block.goal}</p>
+      <div className="w-72 shrink-0">
+        <p className="mb-2 text-xs text-muted-foreground">Done when</p>
+        <ol className="space-y-1.5">
+          {block.doneWhen.map((d, i) => (
+            <li key={d} className="flex gap-2 text-sm">
+              <span className="text-muted-foreground tabular-nums">{i + 1}.</span>
+              {d}
+            </li>
+          ))}
+        </ol>
+      </div>
+    </Shell>
+  );
+}
+
+function TasksBlock({ subject }: Props<"tasks">) {
+  const thread = threadStore.use().find(t => t.id === subject.threadId);
+  const all = taskStore.use();
+  const items = (thread?.taskIds ?? []).map(id => all.find(t => t.id === id)!).filter(Boolean);
+  const done = items.filter(t => t.status === "done").length;
+  return (
+    <Shell title="Tasks" action={<span className="text-xs text-muted-foreground">{done}/{items.length} done</span>}>
+      <Progress value={(done / (items.length || 1)) * 100} className="mb-3 h-1" />
+      <ul className="space-y-1">
+        {items.map(t => (
+          <li key={t.id}>
+            <a href={`#task/${t.id}`} data-agent={`row:${t.id}`} className="-mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted">
+              <span className={cn("size-2 shrink-0 rounded-full", statusColor[t.status])} />
+              <span className={cn("flex-1 truncate", t.status === "done" && "text-muted-foreground")}>{t.title}</span>
+              {t.agent && <Badge variant="secondary">{t.agent}</Badge>}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </Shell>
+  );
+}
+
+export function AgentRow({ id, indent }: { id: string; indent?: boolean }) {
+  const agent = agentStore.use().find(a => a.id === id)!;
+  return (
+    <div data-agent={`agent:${id}`} className={cn("flex items-center gap-2 py-1 text-sm", indent && "ml-3 border-l pl-4")}>
+      {agent.role === "router" ? <Network className="size-3.5 shrink-0 text-fuchsia-400" /> : <span className={cn("ml-1 size-2 shrink-0 rounded-full", agentStateColor[agent.state])} />}
+      <span className="shrink-0 font-mono text-xs">{agent.id}</span>
+      <span className="truncate text-muted-foreground">{agent.doing}</span>
+    </div>
+  );
+}
+
+function AgentsBlock({ subject }: Props<"agents">) {
+  const all = agentStore.use().filter(a => a.threadId === subject.threadId);
+  const count = (role: "router" | "worker") => {
+    const n = all.filter(a => a.role === role).length;
+    return `${n} ${role}${n === 1 ? "" : "s"}`;
+  };
+  return (
+    <Shell title="Agents" action={<span className="text-xs text-muted-foreground">{count("router")} · {count("worker")}</span>}>
+      {all.filter(a => a.role === "router").map(r => (
+        <div key={r.id}>
+          <AgentRow id={r.id} />
+          {all.filter(w => w.parent === r.id).map(w => <AgentRow key={w.id} id={w.id} indent />)}
+        </div>
+      ))}
+    </Shell>
+  );
+}
+
 const renderers: { [K in Block["kind"]]: (p: Props<K>) => React.ReactNode } = {
   status: StatusBlock,
   note: NoteBlock,
@@ -214,9 +288,12 @@ const renderers: { [K in Block["kind"]]: (p: Props<K>) => React.ReactNode } = {
   table: TableBlock,
   code: CodeBlock,
   question: QuestionBlock,
+  vision: VisionBlock,
+  tasks: TasksBlock,
+  agents: AgentsBlock,
 };
 
-export function BlockView({ block, task }: { block: Block; task: Task }) {
-  const Render = renderers[block.kind] as (p: { block: Block; task: Task }) => React.ReactNode;
-  return <Render block={block} task={task} />;
+export function BlockView({ block, subject }: { block: Block; subject: Subject }) {
+  const Render = renderers[block.kind] as (p: { block: Block; subject: Subject }) => React.ReactNode;
+  return <Render block={block} subject={subject} />;
 }

@@ -1,6 +1,6 @@
 export type Status = "todo" | "doing" | "review" | "done";
 
-export type Event = { from: "isaac" | "agent" | "sentry"; at: string; text: string };
+export type Event = { from: "isaac" | "agent" | "router" | "sentry"; at: string; text: string };
 
 type Size = { w: number; h: number };
 
@@ -15,6 +15,9 @@ export type Block = Size & { id: string } & (
     | { kind: "table"; title: string; columns: string[]; rows: string[][] }
     | { kind: "code"; title: string; text: string }
     | { kind: "question"; question: string; options: string[] }
+    | { kind: "vision"; goal: string; doneWhen: string[] }
+    | { kind: "tasks" }
+    | { kind: "agents" }
   );
 
 export type BlockKind = Block["kind"];
@@ -32,7 +35,31 @@ export type Task = {
   page: Block[];
 };
 
-export type Thread = { id: string; title: string; taskIds: string[] };
+export type Thread = { id: string; title: string; taskIds: string[]; events: Event[]; page: Block[] };
+
+export type AgentState = "working" | "waiting" | "idle" | "asleep";
+
+export type Agent = {
+  id: string;
+  role: "router" | "worker";
+  threadId: string;
+  parent?: string;
+  taskIds: string[];
+  state: AgentState;
+  doing: string;
+};
+
+export type SentryEvent = { at: string; text: string; routedTo: string[] };
+
+export type Sentry = {
+  id: "gh" | "slack";
+  label: string;
+  state: "polling" | "backoff";
+  every: string;
+  lastPoll: string;
+  watching: { target: string; what: string; routedTo: string[] }[];
+  events: SentryEvent[];
+};
 
 export const NOW = new Date("2026-11-15T14:00:00");
 
@@ -190,10 +217,130 @@ export const tasks: Task[] = [
 ];
 
 export const threads: Thread[] = [
-  { id: "festo-perf", title: "Festo gateway performance", taskIds: ["t7", "t1", "t2"] },
-  { id: "overdue", title: "Overdue cases never close", taskIds: ["t9", "t3", "t4"] },
-  { id: "board", title: "maxflow board", taskIds: ["t5"] },
-  { id: "reviews", title: "Style reviews", taskIds: ["t8", "t6"] },
+  {
+    id: "festo-perf",
+    title: "Festo gateway performance",
+    taskIds: ["t7", "t1", "t2"],
+    events: [
+      { from: "isaac", at: "Nov 3", text: "Get Festo sweeps under the prod tick, then backfill what we missed." },
+      { from: "router", at: "Nov 3", text: "Split into measure, pager, backfill. Backfill waits on the pager." },
+      { from: "router", at: "Nov 10", text: "Measurement done: $skip is quadratic. Started mf-1 on the keyset pager." },
+      { from: "sentry", at: "10:02", text: "CI green on #6250." },
+    ],
+    page: [
+      { id: "v", kind: "vision", w: 8, h: 2, goal: "Festo's full sweep finishes well inside the 12-minute prod tick, and intake catches up on the 30 days it missed.", doneWhen: [
+        "A full sweep takes under 12 minutes at full tenant size",
+        "No request pages with $skip above 5k rows",
+        "Intake backfilled for Oct 16 to Nov 15",
+      ] },
+      { id: "s1", kind: "stat", w: 2, h: 2, label: "Tasks done", value: "1 / 3", tone: "flat" },
+      { id: "s2", kind: "stat", w: 2, h: 2, label: "Sweep time", value: "6m 40s", delta: "was 34m", tone: "good" },
+      { id: "t", kind: "tasks", w: 6, h: 2 },
+      { id: "a", kind: "agents", w: 6, h: 2 },
+      { id: "c", kind: "chart", w: 6, h: 2, title: "Sweep time per tick", style: "line", unit: "min", points: [34, 35, 33, 36, 34, 35, 12, 7.2, 6.8, 6.7, 6.6, 6.7] },
+      { id: "e", kind: "activity", w: 6, h: 2 },
+    ],
+  },
+  {
+    id: "overdue",
+    title: "Overdue cases never close",
+    taskIds: ["t9", "t3", "t4"],
+    events: [
+      { from: "isaac", at: "Nov 8", text: "Overdue cases keep piling up. Find out why and stop it." },
+      { from: "router", at: "Nov 12", text: "Cause: Festo never sends full snapshots. Fix needs a decision." },
+      { from: "router", at: "09:30", text: "Asked Isaac: reconciler or flip the flag." },
+    ],
+    page: [
+      { id: "v", kind: "vision", w: 8, h: 2, goal: "Overdue cases close on their own once SAP clears them, without falsely closing the ones still open.", doneWhen: [
+        "Cleared cases close within one tick",
+        "Zero false closes on a full replay of last week",
+        "The 1,284 stuck cases are closed or explained",
+      ] },
+      { id: "s1", kind: "stat", w: 4, h: 2, label: "Stuck open", value: "1,284", delta: "+37 today", tone: "bad" },
+      { id: "t", kind: "tasks", w: 6, h: 2 },
+      { id: "a", kind: "agents", w: 6, h: 2 },
+      { id: "q", kind: "question", w: 6, h: 2, question: "Should the reconciler also cover postponed cases, or only overdue ones for now?", options: ["Overdue only", "Both"] },
+      { id: "e", kind: "activity", w: 6, h: 2 },
+    ],
+  },
+  {
+    id: "board",
+    title: "maxflow board",
+    taskIds: ["t5"],
+    events: [{ from: "router", at: "Nov 14", text: "PR state on cards shipped. Nothing else queued." }],
+    page: [
+      { id: "v", kind: "vision", w: 12, h: 2, goal: "The board tells Isaac what needs him at a glance, without opening a terminal.", doneWhen: ["Every card shows its PR state", "Cards that need a decision stand out"] },
+      { id: "t", kind: "tasks", w: 6, h: 2 },
+      { id: "a", kind: "agents", w: 6, h: 2 },
+      { id: "e", kind: "activity", w: 12, h: 2 },
+    ],
+  },
+  {
+    id: "reviews",
+    title: "Style reviews",
+    taskIds: ["t8", "t6"],
+    events: [
+      { from: "sentry", at: "Nov 14", text: "New #reviews-pls ping names Isaac on #7149." },
+      { from: "router", at: "Nov 14", text: "Started mf-4 on #7149." },
+    ],
+    page: [
+      { id: "v", kind: "vision", w: 12, h: 2, goal: "Every review request that names Isaac gets a style pass and a verdict within the day.", doneWhen: ["No #reviews-pls ping older than a day", "Judgment calls reach Isaac as drafted comments"] },
+      { id: "t", kind: "tasks", w: 6, h: 2 },
+      { id: "a", kind: "agents", w: 6, h: 2 },
+      { id: "e", kind: "activity", w: 12, h: 2 },
+    ],
+  },
+];
+
+export const agents: Agent[] = [
+  { id: "r-festo", role: "router", threadId: "festo-perf", taskIds: [], state: "waiting", doing: "Holding the backfill until #6250 merges" },
+  { id: "mf-1", role: "worker", threadId: "festo-perf", parent: "r-festo", taskIds: ["t7", "t1"], state: "waiting", doing: "#6250 waiting on approval" },
+  { id: "r-overdue", role: "router", threadId: "overdue", taskIds: [], state: "waiting", doing: "Waiting on your call: reconciler or flag" },
+  { id: "r-sap", role: "router", threadId: "overdue", taskIds: [], state: "working", doing: "Pulling which Festo runs ever sent a full snapshot" },
+  { id: "mf-2", role: "worker", threadId: "overdue", parent: "r-overdue", taskIds: ["t9", "t3"], state: "working", doing: "Tracing which runs set full_snapshot" },
+  { id: "r-board", role: "router", threadId: "board", taskIds: [], state: "idle", doing: "Nothing queued" },
+  { id: "mf-3", role: "worker", threadId: "board", parent: "r-board", taskIds: ["t5"], state: "asleep", doing: "Merged #42" },
+  { id: "r-reviews", role: "router", threadId: "reviews", taskIds: [], state: "working", doing: "Watching #reviews-pls" },
+  { id: "mf-4", role: "worker", threadId: "reviews", parent: "r-reviews", taskIds: ["t8", "t6"], state: "working", doing: "Drafting review comments on #7149" },
+];
+
+export const sentries: Sentry[] = [
+  {
+    id: "gh",
+    label: "GitHub",
+    state: "polling",
+    every: "60s",
+    lastPoll: "13:59:48",
+    watching: [
+      { target: "#6250", what: "CI, reviews, merge", routedTo: ["mf-1", "r-festo"] },
+      { target: "#7149", what: "CI, comments", routedTo: ["mf-4"] },
+      { target: "#42", what: "merged", routedTo: ["mf-3"] },
+    ],
+    events: [
+      { at: "13:41", text: "#7149 CI started", routedTo: ["mf-4"] },
+      { at: "10:02", text: "#6250 CI green", routedTo: ["mf-1", "r-festo"] },
+      { at: "09:58", text: "#6250 review requested from Ayush", routedTo: ["mf-1"] },
+      { at: "Nov 14", text: "#42 merged", routedTo: ["mf-3", "r-board"] },
+    ],
+  },
+  {
+    id: "slack",
+    label: "Slack",
+    state: "backoff",
+    every: "2m",
+    lastPoll: "13:58:02",
+    watching: [
+      { target: "#festo-ops", what: "messages, threads", routedTo: ["r-festo", "r-sap"] },
+      { target: "#reviews-pls", what: "pings naming Isaac", routedTo: ["r-reviews"] },
+      { target: "DM Ayush", what: "replies", routedTo: ["r-overdue"] },
+    ],
+    events: [
+      { at: "13:58", text: "Rate limited, backing off to 2m", routedTo: [] },
+      { at: "13:20", text: "#festo-ops: \"is the backfill safe to run yet?\"", routedTo: ["r-festo"] },
+      { at: "11:02", text: "DM Ayush: \"SAP side can't change the CDS view until 2027\"", routedTo: ["r-overdue", "r-sap"] },
+      { at: "Nov 14", text: "#reviews-pls: review ping on #7149", routedTo: ["r-reviews"] },
+    ],
+  },
 ];
 
 export const columns: { status: Status; label: string }[] = [
@@ -202,6 +349,20 @@ export const columns: { status: Status; label: string }[] = [
   { status: "review", label: "Review" },
   { status: "done", label: "Done" },
 ];
+
+export const agentStateColor: Record<AgentState, string> = {
+  working: "bg-sky-400",
+  waiting: "bg-amber-400",
+  idle: "bg-muted-foreground",
+  asleep: "bg-muted-foreground/40",
+};
+
+export function threadStatus(statuses: Status[]): Status {
+  if (statuses.includes("doing")) return "doing";
+  if (statuses.includes("review")) return "review";
+  if (statuses.every(s => s === "done")) return "done";
+  return "todo";
+}
 
 export const statusColor: Record<Status, string> = {
   todo: "bg-muted-foreground",

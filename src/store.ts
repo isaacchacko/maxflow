@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { tasks as seed, type Block, type Event, type Status } from "./mock";
+import { agents as seedAgents, tasks as seedTasks, threads as seedThreads, type Block, type Event, type Status } from "./mock";
 
 export function createStore<T>(initial: T) {
   let state = initial;
@@ -18,28 +18,36 @@ export function createStore<T>(initial: T) {
   };
 }
 
-export const taskStore = createStore(seed);
+export const taskStore = createStore(seedTasks);
+export const threadStore = createStore(seedThreads);
+export const agentStore = createStore(seedAgents);
 export const editedStore = createStore<Record<string, number>>({});
+
+/** A page is addressed the same way as its route: "task/t1" or "thread/overdue". */
+export type PageRef = `task/${string}` | `thread/${string}`;
+
+function update(ref: PageRef, fn: (subject: { events: Event[]; page: Block[] }) => { events: Event[]; page: Block[] }) {
+  const [type, id] = ref.split("/");
+  const store = (type === "task" ? taskStore : threadStore) as unknown as ReturnType<typeof createStore<{ id: string; events: Event[]; page: Block[] }[]>>;
+  store.set(items => items.map(item => (item.id === id ? { ...item, ...fn(item) } : item)));
+}
 
 export function moveTask(id: string, status: Status) {
   taskStore.set(tasks => tasks.map(t => (t.id === id ? { ...t, status } : t)));
 }
 
-export function addEvent(id: string, event: Event) {
-  taskStore.set(tasks => tasks.map(t => (t.id === id ? { ...t, events: [...t.events, event] } : t)));
+export function addEvent(ref: PageRef, event: Event) {
+  update(ref, s => ({ ...s, events: [...s.events, event] }));
 }
 
-export function putBlock(taskId: string, block: Block) {
-  taskStore.set(tasks =>
-    tasks.map(t => {
-      if (t.id !== taskId) return t;
-      const exists = t.page.some(b => b.id === block.id);
-      return { ...t, page: exists ? t.page.map(b => (b.id === block.id ? block : b)) : [...t.page, block] };
-    }),
-  );
-  editedStore.set(e => ({ ...e, [`${taskId}/${block.id}`]: Date.now() }));
+export function putBlock(ref: PageRef, block: Block) {
+  update(ref, s => {
+    const exists = s.page.some(b => b.id === block.id);
+    return { ...s, page: exists ? s.page.map(b => (b.id === block.id ? block : b)) : [...s.page, block] };
+  });
+  editedStore.set(e => ({ ...e, [`${ref}/${block.id}`]: Date.now() }));
 }
 
-export function removeBlock(taskId: string, blockId: string) {
-  taskStore.set(tasks => tasks.map(t => (t.id === taskId ? { ...t, page: t.page.filter(b => b.id !== blockId) } : t)));
+export function removeBlock(ref: PageRef, blockId: string) {
+  update(ref, s => ({ ...s, page: s.page.filter(b => b.id !== blockId) }));
 }
