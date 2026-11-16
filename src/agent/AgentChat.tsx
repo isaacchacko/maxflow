@@ -79,6 +79,7 @@ export function AgentChat() {
         <TooltipTrigger asChild>
           <button
             data-agent="face"
+            data-face
             onClick={() => setOpen(o => !o)}
             className="rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95"
           >

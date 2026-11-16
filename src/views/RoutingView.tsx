@@ -1,4 +1,4 @@
-import { GitPullRequest, Hash, Network, Plus, SquareArrowOutUpRight, User, Waypoints } from "lucide-react";
+import { ChevronLeft, ChevronRight, GitPullRequest, Hash, Network, Plus, Search, SquareArrowOutUpRight, User, Waypoints } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { routeChat } from "@/agent/plan";
 import { Badge } from "@/components/ui/badge";
@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { ChipView, SearchPalette, hits, isActive, type Filter, type NodeMeta } from "@/views/SearchPalette";
 import { NOW_AT, agentStateColor, objectiveStatus, sentries, statusColor, type Agent, type Signal, type Source } from "@/mock";
 import { agentStore, objectiveStore, pathOf, signalStore, splitRouter, taskStore } from "@/store";
 
@@ -95,53 +96,76 @@ const STACK_GAP = 6;
  * Where each card in the objectives, routers and agents columns sits for a view. Each pair of columns in view
  * is laid out as rows: a parent beside its stacked children, top-aligned, so a big stack pushes the next row down.
  */
-function layoutStructure(snap: number, objectives: { id: string }[], routers: Agent[], agents: Agent[], height: (id: string) => number) {
+function layoutStructure(
+  snap: number,
+  objectives: { id: string }[],
+  routers: Agent[],
+  agents: Agent[],
+  height: (id: string) => number,
+  shown: (id: string) => boolean,
+) {
   const y = new Map<string, number>();
-  const bottoms: number[] = [];
+  const bottom = { compact: 0, objectiveRows: 0, routerRows: 0 };
 
   const byObjective = () => {
     let top = 0;
     for (const o of objectives) {
-      y.set(`obj:${o.id}`, top);
+      const own = routers.filter(r => r.objectiveId === o.id && shown(`router:${r.id}`));
+      const showObjective = shown(`obj:${o.id}`);
+      if (!showObjective && !own.length) continue;
+      if (showObjective) y.set(`obj:${o.id}`, top);
       let stack = top;
-      for (const r of routers.filter(r => r.objectiveId === o.id)) {
+      for (const r of own) {
         y.set(`router:${r.id}`, stack);
         stack += height(`router:${r.id}`) + STACK_GAP;
       }
-      top = Math.max(top + height(`obj:${o.id}`), stack - STACK_GAP) + ROW_GAP;
+      top = Math.max(top + (showObjective ? height(`obj:${o.id}`) : 0), stack - STACK_GAP) + ROW_GAP;
     }
-    bottoms.push(top);
+    bottom.objectiveRows = top;
   };
 
   const byRouter = (placeRouters: boolean) => {
     let top = 0;
     for (const o of objectives) {
+      let any = false;
       for (const r of routers.filter(r => r.objectiveId === o.id)) {
-        if (placeRouters) y.set(`router:${r.id}`, top);
-        const crew = agents.filter(w => w.parent === r.id).map(w => `agent:${w.id}`);
+        const showRouter = placeRouters && shown(`router:${r.id}`);
+        const stackIds = crewOf(r.id, agents, shown);
+        if (!showRouter && !stackIds.length) continue;
+        any = true;
+        if (showRouter) y.set(`router:${r.id}`, top);
         let stack = top;
-        for (const id of crew.length ? crew : [`empty:${r.id}`]) {
+        for (const id of stackIds) {
           y.set(id, stack);
           stack += height(id) + STACK_GAP;
         }
-        top = Math.max(top + (placeRouters ? height(`router:${r.id}`) : 0), stack - STACK_GAP) + STACK_GAP * 2;
+        top = Math.max(top + (showRouter ? height(`router:${r.id}`) : 0), stack - STACK_GAP) + STACK_GAP * 2;
       }
-      top += ROW_GAP - STACK_GAP * 2;
+      if (any) top += ROW_GAP - STACK_GAP * 2;
     }
-    bottoms.push(top);
+    bottom.routerRows = top;
   };
 
   byObjective();
   if (snap === 0) {
     let top = 0;
-    for (const o of objectives) {
+    for (const o of objectives.filter(o => shown(`obj:${o.id}`))) {
       y.set(`obj:${o.id}`, top);
       top += height(`obj:${o.id}`) + STACK_GAP * 2;
     }
+    bottom.compact = top;
   }
   byRouter(snap === 2);
 
-  return { y, height: Math.max(...bottoms), signature: `${snap}:${[...y.values()].join(",")}` };
+  const inView = [bottom.compact, bottom.objectiveRows, bottom.routerRows][snap]!;
+  return { y, height: inView, signature: `${snap}:${[...y].join(",")}` };
+}
+
+/** The cards in a router's agent stack: its shown agents, or a placeholder when it has none at all. */
+function crewOf(routerId: string, agents: Agent[], shown: (id: string) => boolean) {
+  const all = agents.filter(w => w.parent === routerId);
+  if (!all.length) return shown(`empty:${routerId}`) ? [`empty:${routerId}`] : [];
+  return all.map(w => `agent:${w.id}`).filter(shown);
 }
 
 function lastSnap() {
@@ -184,7 +208,56 @@ export function RoutingView() {
     setPos(next);
   }, []);
 
-  const visible = signals.filter(s => shown.has(s.source));
+  const [filter, setFilter] = useState<Filter>({ chips: [], text: "" });
+  const [palette, setPalette] = useState(false);
+
+  const paths = new Map(signals.map(s => [s.id, pathOf(s, agents)]));
+  const statusOfTask = new Map(tasks.map(t => [t.id, t.status]));
+  const objectiveOfAgent = new Map(agents.map(a => [a.id, a.objectiveId]));
+  const nodes: NodeMeta[] = [
+    ...signals.map(s => ({
+      id: `sig:${s.id}`,
+      kind: "event" as const,
+      label: s.target,
+      detail: s.text,
+      text: `${s.text} ${s.target}`,
+      source: s.source,
+      objectives: paths.get(s.id)!.objectives,
+    })),
+    ...objectives.map(o => {
+      const vision = o.page.find(b => b.kind === "vision");
+      const goal = vision?.kind === "vision" ? vision.goal : "";
+      return {
+        id: `obj:${o.id}`,
+        kind: "objective" as const,
+        label: o.id,
+        detail: o.title,
+        text: `${o.title} ${o.id} ${goal}`,
+        status: objectiveStatus(o.taskIds.map(t => statusOfTask.get(t)!).filter(Boolean)),
+        objectives: [o.id],
+      };
+    }),
+    ...agents.map(a => {
+      const task = tasks.find(t => a.taskIds.includes(t.id));
+      return {
+        id: `${a.role === "router" ? "router" : "agent"}:${a.id}`,
+        kind: a.role === "router" ? ("router" as const) : ("agent" as const),
+        label: a.id,
+        detail: a.role === "router" ? `${a.scope} · ${a.doing}` : `${a.doing}${task ? ` · ${task.title}` : ""}`,
+        text: `${a.id} ${a.scope ?? ""} ${a.doing} ${task?.title ?? ""} ${task?.pr ?? ""}`,
+        state: a.state,
+        status: task?.status,
+        objectives: [objectiveOfAgent.get(a.id)!],
+      };
+    }),
+  ];
+
+  // A filter keeps each hit plus everything wired to it, so whole routes survive.
+  const filterHits = isActive(filter) ? hits(nodes, filter) : undefined;
+  const kept = filterHits && new Set(filterHits.flatMap(n => [n.id, ...trace(n.id, signals, paths, agents).nodes]));
+  const shownNode = (id: string) => !kept || kept.has(id);
+
+  const visible = signals.filter(s => shown.has(s.source) && shownNode(`sig:${s.id}`));
 
   useLayoutEffect(() => {
     const ro = new ResizeObserver(() => {
@@ -235,7 +308,16 @@ export function RoutingView() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setPalette(true);
+        return;
+      }
       if (e.target instanceof HTMLInputElement) return;
+      if (e.key === "/") {
+        e.preventDefault();
+        setPalette(true);
+      }
       if (e.key === "ArrowRight") go(snap + 1);
       if (e.key === "ArrowLeft") go(snap - 1);
     };
@@ -243,7 +325,6 @@ export function RoutingView() {
     return () => removeEventListener("keydown", onKey);
   }, [go, snap]);
 
-  const paths = new Map(signals.map(s => [s.id, pathOf(s, agents)]));
   const edges = buildEdges(visible, paths, agents).filter(e => !e.watch || shown.has(e.from.slice(4) as Source));
   const focus = hover ?? pinned;
   const traced = focus ? trace(focus, visible, paths, agents) : undefined;
@@ -316,7 +397,7 @@ export function RoutingView() {
     if (changed) setHeightsVersion(v => v + 1);
   });
 
-  const placed = layoutStructure(snap, objectives, routers, agents, id => heights.current.get(id) ?? 96);
+  const placed = layoutStructure(snap, objectives, routers, agents, id => heights.current.get(id) ?? 96, shownNode);
 
   useEffect(() => {
     let frame = 0;
@@ -445,6 +526,20 @@ export function RoutingView() {
     </p>
   );
 
+  const pick = (n: NodeMeta) => {
+    setPalette(false);
+    setPinned(n.id);
+    go({ event: 0, objective: 1, router: 1, agent: 2 }[n.kind]);
+    setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(`[data-node="${n.id}"]`);
+      const scroller = el?.closest<HTMLElement>(".overflow-y-auto");
+      if (!el || !scroller) return;
+      scroller.scrollTop += el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - scroller.clientHeight / 3;
+    }, 560);
+  };
+
+  const counted = (shownCount: number, total: number) => (shownCount === total ? `${total}` : `${shownCount}/${total}`);
+
   const column = (index: number, title: string, count: number, children: React.ReactNode, onScroll = true) => {
     return (
       <section
@@ -452,9 +547,9 @@ export function RoutingView() {
         style={{ width: col }}
         onClickCapture={capture(index)}
       >
-        <h2 className="flex items-baseline gap-2 text-sm font-medium">
+        <h2 className="flex h-7 items-center gap-2 text-sm font-medium">
           {title}
-          <span className="text-xs text-muted-foreground">{count}</span>
+          <span className="text-xs text-muted-foreground">{counted(count, signals.length)}</span>
         </h2>
         <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1" onScroll={onScroll ? measure : undefined}>
           {children}
@@ -475,10 +570,58 @@ export function RoutingView() {
             ))}
           </TabsList>
         </Tabs>
-        <span className="text-xs text-muted-foreground">swipe sideways or ← → to pan · hover or click to trace · click a source to filter</span>
+        {isActive(filter) && (
+          <div
+            role="button"
+            onClick={e => {
+              e.stopPropagation();
+              setPalette(true);
+            }}
+            className="flex cursor-pointer flex-wrap items-center gap-1 text-sm"
+          >
+            <Search className="mr-1 size-3.5 text-muted-foreground" />
+            {filter.chips.map((c, i) => (
+              <ChipView key={i} chip={c} onRemove={() => setFilter(f => ({ ...f, chips: f.chips.filter((_, j) => j !== i) }))} />
+            ))}
+            {filter.text && <span>{filter.text}</span>}
+          </div>
+        )}
+        {filterHits && (
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            {filterHits.length} {filterHits.length === 1 ? "match" : "matches"}, with their routes
+            <button onClick={() => setFilter({ chips: [], text: "" })} className="underline hover:text-foreground">
+              clear
+            </button>
+          </span>
+        )}
+        <span className="ml-auto text-xs text-muted-foreground">⌘F to search · swipe sideways or ← → to pan · hover or click to trace</span>
       </div>
 
       <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-hidden">
+        <div className="absolute top-1/2 z-30 flex -translate-x-1/2 -translate-y-1/2 gap-1" style={{ left: col + GAP / 2 }}>
+          {[
+            [-1, ChevronLeft, "Previous view"],
+            [1, ChevronRight, "Next view"],
+          ].map(([step, Icon, label]) => {
+            const Chevron = Icon as typeof ChevronLeft;
+            const to = snap + (step as number);
+            return (
+              <button
+                key={label as string}
+                aria-label={label as string}
+                data-agent={`pan:${step}`}
+                disabled={to < 0 || to >= snaps.length}
+                onClick={e => {
+                  e.stopPropagation();
+                  go(to);
+                }}
+                className="flex size-8 items-center justify-center border bg-background text-muted-foreground hover:border-ring hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
+              >
+                <Chevron className="size-4" />
+              </button>
+            );
+          })}
+        </div>
         <div
           ref={canvasRef}
           className="relative flex h-full transition-transform duration-500 ease-in-out"
@@ -486,6 +629,7 @@ export function RoutingView() {
         >
           <svg className="pointer-events-none absolute inset-0 size-full overflow-visible">
             {edges.map(e => {
+              if (!e.from.startsWith("sig:") && !e.watch) return null;
               const a = e.watch ? pos.log : pos[e.from];
               const b = pos[e.to];
               if (!a || !b) return null;
@@ -587,29 +731,41 @@ export function RoutingView() {
             <div className="flex" style={{ gap: GAP }}>
               {(
                 [
-                  ["Objectives", objectives.length],
-                  ["Routers", routers.length],
-                  ["Agents", agents.length - routers.length],
+                  ["Objectives", "obj", objectives.map(o => `obj:${o.id}`)],
+                  ["Routers", "router", routers.map(r => `router:${r.id}`)],
+                  ["Agents", "agent", agents.filter(a => a.role === "worker").map(a => `agent:${a.id}`)],
                 ] as const
-              ).map(([title, count], k) => (
-                <h2 key={title} className={cn("flex items-baseline gap-2 text-sm font-medium transition-opacity duration-500", faded(1 + k) && "opacity-35")} style={{ width: col }}>
+              ).map(([title, , ids], k) => (
+                <h2 key={title} className={cn("flex h-7 items-center gap-2 text-sm font-medium transition-opacity duration-500", faded(1 + k) && "opacity-35")} style={{ width: col }}>
                   {title}
-                  <span className="text-xs text-muted-foreground">{count}</span>
+                  <span className="text-xs text-muted-foreground">{counted(ids.filter(shownNode).length, ids.length)}</span>
                 </h2>
               ))}
             </div>
             <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1" onScroll={measure}>
-              <div className="relative" style={{ height: placed.height }}>
-                {objectives.map(o => place(`obj:${o.id}`, 0, objectiveCard(o)))}
-                {routers.map(r => place(`router:${r.id}`, 1, routerCard(r)))}
-                {routers.flatMap(r => {
-                  const crew = agents.filter(w => w.parent === r.id);
-                  return crew.length ? crew.map(w => place(`agent:${w.id}`, 2, agentCard(w))) : [place(`empty:${r.id}`, 2, emptyCard(r))];
-                })}
+              <div data-structure className="relative overflow-hidden" style={{ height: placed.height }}>
+                {objectives.filter(o => shownNode(`obj:${o.id}`)).map(o => place(`obj:${o.id}`, 0, objectiveCard(o)))}
+                {routers.filter(r => shownNode(`router:${r.id}`)).map(r => place(`router:${r.id}`, 1, routerCard(r)))}
+                {routers.flatMap(r =>
+                  crewOf(r.id, agents, shownNode).map(id =>
+                    id.startsWith("empty:") ? place(id, 2, emptyCard(r)) : place(id, 2, agentCard(agents.find(a => `agent:${a.id}` === id)!)),
+                  ),
+                )}
               </div>
             </div>
           </section>
         </div>
+      </div>
+      <div onClick={e => e.stopPropagation()}>
+        <SearchPalette
+        open={palette}
+        onOpenChange={setPalette}
+        nodes={nodes}
+        objectiveIds={objectives.map(o => o.id)}
+        filter={filter}
+        onFilter={setFilter}
+        onPick={pick}
+        />
       </div>
     </div>
   );

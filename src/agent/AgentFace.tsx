@@ -20,7 +20,7 @@ export function Face({ working, size = 48 }: { working: boolean; size?: number }
   const ref = useRef<HTMLDivElement>(null);
   const { dx, dy } = useLookAt(ref);
   return (
-    <div ref={ref} className="relative" style={{ width: size, height: size }}>
+    <div ref={ref} data-face className="relative" style={{ width: size, height: size }}>
       <div
         className={`absolute -inset-0.5 rounded-full bg-conic from-agent via-sky-400 to-agent ${
           working ? "animate-spin opacity-100" : "opacity-0"
