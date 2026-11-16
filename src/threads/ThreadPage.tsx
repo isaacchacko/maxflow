@@ -3,16 +3,12 @@ import { Fragment, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import { NOW_AT, type Thread } from "@/mock";
+import type { Thread } from "@/mock";
 import { agentStore, objectiveStore, postToThread, setResolved, threadStore } from "@/store";
 import { Composer } from "./Composer";
-import { Author, Avatar, Markdown, RefChip, refsIn, urlsIn, type Ref } from "./Rich";
-
-function when(at: string) {
-  return at.slice(0, 10) === NOW_AT.slice(0, 10)
-    ? at.slice(11, 16)
-    : new Date(at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-}
+import { MessageRow, when } from "./MessageRow";
+import { markSeen } from "./seen";
+import { RefChip, refsIn, urlsIn, type Ref } from "./Rich";
 
 // Slack's grouping: a sender's next message within this long drops its picture and name.
 const GROUP_MS = 5 * 60_000;
@@ -27,7 +23,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 // The router's acknowledgement: one line while Isaac's last message waits on an answer, gone when it lands.
-function Pending({ pending, names }: { pending: NonNullable<Thread["pending"]>; names: string[] }) {
+export function Pending({ pending, names }: { pending: NonNullable<Thread["pending"]>; names: string[] }) {
   const who = `${names.length > 1 ? "routers" : "router"} ${names.join(", ")}`;
   if (pending.stale)
     return (
@@ -54,6 +50,10 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [thread?.messages.length, !!thread?.pending]);
+
+  useEffect(() => {
+    if (thread) markSeen(thread.id, thread.messages.length);
+  }, [thread?.id, thread?.messages.length]);
 
   if (!thread) return <p className="p-6 text-muted-foreground">No thread {id}.</p>;
 
@@ -89,22 +89,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
               return (
                 <Fragment key={i}>
                 {resolvedHere && <p className="my-2 border-t pt-1 text-center text-xs text-muted-foreground">new since resolved</p>}
-                <article className={cn("group -mx-2 flex gap-2.5 px-2 py-1 hover:bg-muted/40", !grouped && i > 0 && "mt-2.5")}>
-                  {grouped ? (
-                    <span className="invisible w-9 shrink-0 pt-0.5 text-right text-[10px] text-muted-foreground tabular-nums group-hover:visible">{m.at.slice(11, 16)}</span>
-                  ) : (
-                    <Avatar from={m.from} />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    {!grouped && (
-                      <div className="flex items-baseline gap-2">
-                        <Author from={m.from} />
-                        <span className="text-xs text-muted-foreground tabular-nums">{when(m.at)}</span>
-                      </div>
-                    )}
-                    <Markdown text={m.text} className="text-sm leading-relaxed" />
-                  </div>
-                </article>
+                <MessageRow from={m.from} at={m.at} text={m.text} grouped={grouped} className={cn(!grouped && i > 0 && "mt-2.5")} />
                 </Fragment>
               );
             })}

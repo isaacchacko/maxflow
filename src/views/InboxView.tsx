@@ -1,9 +1,13 @@
-import { Check, MessagesSquare } from "lucide-react";
+import { Check } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
-import { objectiveStore, startThread, threadStore } from "@/store";
+import { agentStore, objectiveStore, startThread, threadStore } from "@/store";
 import { Composer } from "@/threads/Composer";
+import { MessageRow } from "@/threads/MessageRow";
+import { Avatar } from "@/threads/Rich";
+import { seenCount } from "@/threads/seen";
+import { Pending } from "@/threads/ThreadPage";
 
 function ago(at: number) {
   const s = Math.round((Date.now() - at) / 1000);
@@ -17,7 +21,37 @@ function askedAt(t: Thread) {
   return ask ? Date.parse(ask.at) : null;
 }
 
-const plain = (text: string) => text.replace(/!\[[^\]]*\]\([^)]+\)/g, "[image]").replace(/\[\[\w+:([^\]]+)\]\]/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+/** Replies he hasn't had on screen; a thread this browser never opened counts what came after his last message. */
+function unseen(t: Thread) {
+  const seen = seenCount(t.id);
+  return seen === null ? t.messages.length - 1 - t.messages.findLastIndex(m => m.from === "isaac") : Math.max(0, t.messages.length - seen);
+}
+
+/** Under the opening message, as Slack does: who replied, how many, and when last; or the router still working on it. */
+function Replies({ t }: { t: Thread }) {
+  const agents = agentStore.use();
+  const replies = t.messages.slice(1);
+  const fresh = unseen(t);
+  const faces = [...new Set(replies.map(m => m.from).reverse())].slice(0, 4);
+  return (
+    <a href={`#thread/${t.id}`} data-agent={`inbox:${t.id}`} className="mt-1 flex w-fit items-center gap-2 border border-transparent py-0.5 pr-2 text-xs hover:border-border hover:bg-background">
+      {faces.length > 0 && (
+        <span className="flex gap-0.5">
+          {faces.map(f => (
+            <Avatar key={f} from={f} small />
+          ))}
+        </span>
+      )}
+      {replies.length > 0 ? <span className="font-semibold text-sky-400">{replies.length === 1 ? "1 reply" : `${replies.length} replies`}</span> : !t.pending && <span className="text-muted-foreground">No replies yet</span>}
+      {fresh > 0 && <span className="bg-rose-500/15 px-1 font-medium text-rose-400">{fresh} new</span>}
+      {t.pending ? (
+        <Pending pending={t.pending} names={t.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />
+      ) : (
+        replies.length > 0 && <span className="text-muted-foreground">Last reply {ago(Date.parse(replies.at(-1)!.at))} ago</span>
+      )}
+    </a>
+  );
+}
 
 export function InboxView() {
   const threads = threadStore.use();
@@ -39,18 +73,29 @@ export function InboxView() {
         </button>
       )}
       <ol className="flex max-w-4xl flex-col border empty:hidden">
-        {rows.map(({ t, asked, last }) => {
-          const latest = t.messages.at(-1);
+        {rows.map(({ t }) => {
+          // A thread a router opened before writing in it shows its title as the opening message.
+          const first = t.messages[0] ?? { from: t.routerIds[0] ?? t.objectiveId, at: "", text: t.title };
           return (
-            <li key={t.id} className="border-b last:border-b-0">
-              <a href={`#thread/${t.id}`} data-agent={`inbox:${t.id}`} className={cn("flex items-center gap-3 px-3 py-2 hover:bg-muted", (asked === null || t.resolved) && "opacity-50")}>
-                {t.resolved ? <Check className="size-3 shrink-0 text-muted-foreground" /> : <span className={cn("size-2 shrink-0", asked === null ? "bg-muted-foreground/40" : "bg-sky-400")} />}
-                <MessagesSquare className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="w-64 shrink-0 truncate text-sm">{t.title}</span>
-                <span className="w-40 shrink-0 truncate text-xs text-muted-foreground">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : "routing…"}</span>
-                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{latest && plain(latest.text)}</span>
-                <span className="w-10 shrink-0 text-right text-xs text-muted-foreground tabular-nums">{ago(asked ?? last)}</span>
-              </a>
+            <li key={t.id} className={cn("border-b px-3 py-2 last:border-b-0", t.resolved && "opacity-50")}>
+              <MessageRow
+                from={first.from}
+                at={first.at}
+                text={first.text}
+                className="cursor-pointer"
+                // A long opener or a pasted screenshot stays a preview here; the thread has it in full.
+                bodyClassName="max-h-36 overflow-hidden [&_img]:max-h-28"
+                // The whole row opens the thread, except the links and chips inside the message.
+                onClick={e => (e.target as Element).closest("a") || (location.hash = `thread/${t.id}`)}
+                meta={
+                  <span className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
+                    <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : "routing…"}</span>
+                    {t.resolved && <Check className="size-3 shrink-0 self-center" />}
+                  </span>
+                }
+              >
+                <Replies t={t} />
+              </MessageRow>
             </li>
           );
         })}

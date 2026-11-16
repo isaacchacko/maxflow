@@ -207,17 +207,18 @@ const tileOf = (id: string) => TILE[[...id].reduce((h, c) => (h * 31 + c.charCod
 const GITHUB_LOGIN = "isaacchacko";
 
 /** A message's sender as a 36px square, Slack-style: Isaac's GitHub picture, and agents in the sidebar's role and state language. */
-export function Avatar({ from }: { from: string }) {
+export function Avatar({ from, small }: { from: string; small?: boolean }) {
   const agents = agentStore.use();
   const objectives = objectiveStore.use();
   const sentries = sentryStore.use();
   const [broken, setBroken] = useState(false);
-  const tile = "relative flex size-9 shrink-0 items-center justify-center text-sm font-semibold";
+  // Small is the 20px face in a replies line, where a worker's state dot would crowd it.
+  const tile = cn("relative flex shrink-0 items-center justify-center font-semibold", small ? "size-5 text-[10px] [&>svg]:size-3" : "size-9 text-sm");
   if (from === "isaac")
     return broken ? (
       <span className={cn(tile, "bg-sky-600 text-white")}>IC</span>
     ) : (
-      <img src={`https://github.com/${GITHUB_LOGIN}.png?size=72`} alt="" onError={() => setBroken(true)} className="size-9 shrink-0 object-cover" />
+      <img src={`https://github.com/${GITHUB_LOGIN}.png?size=72`} alt="" onError={() => setBroken(true)} className={cn("shrink-0 object-cover", small ? "size-5" : "size-9")} />
     );
   if (objectives.some(o => o.id === from))
     return (
@@ -241,7 +242,7 @@ export function Avatar({ from }: { from: string }) {
   return (
     <span className={cn(tile, tileOf(from), "text-white")}>
       {(a.name ?? from).match(/[a-z0-9]/i)?.[0]?.toUpperCase()}
-      <span className={cn("absolute -right-0.5 -bottom-0.5 size-2.5 ring-2 ring-background", agentStateColor[a.state])} />
+      {!small && <span className={cn("absolute -right-0.5 -bottom-0.5 size-2.5 ring-2 ring-background", agentStateColor[a.state])} />}
     </span>
   );
 }
