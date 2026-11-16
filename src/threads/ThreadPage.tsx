@@ -2,16 +2,20 @@ import { ArrowLeft, ExternalLink, MessagesSquare, Network, Waypoints } from "luc
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import { NOW_AT, type Thread } from "@/mock";
 import { agentStore, objectiveStore, postToThread, threadStore } from "@/store";
 import { Composer } from "./Composer";
-import { Author, Markdown, RefChip, refsIn, urlsIn, type Ref } from "./Rich";
+import { Author, Avatar, Markdown, RefChip, refsIn, urlsIn, type Ref } from "./Rich";
 
 function when(at: string) {
   return at.slice(0, 10) === NOW_AT.slice(0, 10)
     ? at.slice(11, 16)
     : new Date(at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
+
+// Slack's grouping: a sender's next message within this long drops its picture and name.
+const GROUP_MS = 5 * 60_000;
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -72,15 +76,28 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
       <div className="flex min-h-0 flex-1 gap-4">
         <section className="flex min-h-0 min-w-0 flex-1 flex-col border">
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-            {thread.messages.map((m, i) => (
-              <article key={i} className="-mx-2 mb-3 px-2 py-1 hover:bg-muted/40">
-                <div className="mb-1 flex items-baseline gap-2">
-                  <Author from={m.from} />
-                  <span className="text-xs text-muted-foreground tabular-nums">{when(m.at)}</span>
-                </div>
-                <Markdown text={m.text} className="text-sm leading-relaxed" />
-              </article>
-            ))}
+            {thread.messages.map((m, i) => {
+              const prev = thread.messages[i - 1];
+              const grouped = prev?.from === m.from && Date.parse(m.at) - Date.parse(prev.at) <= GROUP_MS;
+              return (
+                <article key={i} className={cn("group -mx-2 flex gap-2.5 px-2 py-1 hover:bg-muted/40", !grouped && i > 0 && "mt-2.5")}>
+                  {grouped ? (
+                    <span className="invisible w-9 shrink-0 pt-0.5 text-right text-[10px] text-muted-foreground tabular-nums group-hover:visible">{m.at.slice(11, 16)}</span>
+                  ) : (
+                    <Avatar from={m.from} />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    {!grouped && (
+                      <div className="flex items-baseline gap-2">
+                        <Author from={m.from} />
+                        <span className="text-xs text-muted-foreground tabular-nums">{when(m.at)}</span>
+                      </div>
+                    )}
+                    <Markdown text={m.text} className="text-sm leading-relaxed" />
+                  </div>
+                </article>
+              );
+            })}
             {thread.pending && <Pending pending={thread.pending} names={thread.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />}
           </div>
           <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => postToThread(thread.id, "isaac", text)} className="border-t px-4 py-2.5" />

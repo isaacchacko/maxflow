@@ -1,9 +1,10 @@
-import { ExternalLink, GitPullRequest, Network, SquareKanban, User, Waypoints } from "lucide-react";
+import { ExternalLink, GitPullRequest, Network, Radar, SquareKanban, Waypoints } from "lucide-react";
+import { useState } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor } from "@/mock";
-import { agentStore, objectiveStore, prStore, taskStore } from "@/store";
+import { agentStore, objectiveStore, prStore, sentryStore, taskStore } from "@/store";
 
 export type Ref = { kind: "agent" | "router" | "task" | "objective"; id: string };
 type Part = { text: string } | { ref: Ref } | { url: string; label: string } | { image: string };
@@ -186,29 +187,66 @@ export function Markdown({ text, className }: { text: string; className?: string
   );
 }
 
+// A worker's tile keeps one color for its whole life, picked from its session id.
+const TILE = ["bg-sky-600", "bg-emerald-600", "bg-amber-600", "bg-rose-600", "bg-teal-600", "bg-indigo-600", "bg-orange-600", "bg-cyan-700"];
+const tileOf = (id: string) => TILE[[...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % TILE.length]!;
+const GITHUB_LOGIN = "isaacchacko";
+
+/** A message's sender as a 36px square, Slack-style: Isaac's GitHub picture, and agents in the sidebar's role and state language. */
+export function Avatar({ from }: { from: string }) {
+  const agents = agentStore.use();
+  const objectives = objectiveStore.use();
+  const sentries = sentryStore.use();
+  const [broken, setBroken] = useState(false);
+  const tile = "relative flex size-9 shrink-0 items-center justify-center text-sm font-semibold";
+  if (from === "isaac")
+    return broken ? (
+      <span className={cn(tile, "bg-sky-600 text-white")}>IC</span>
+    ) : (
+      <img src={`https://github.com/${GITHUB_LOGIN}.png?size=72`} alt="" onError={() => setBroken(true)} className="size-9 shrink-0 object-cover" />
+    );
+  if (objectives.some(o => o.id === from))
+    return (
+      <span className={cn(tile, "border bg-agent/15")}>
+        <Waypoints className="size-4 text-agent" />
+      </span>
+    );
+  if (sentries.some(x => x.id === from))
+    return (
+      <span className={cn(tile, "border bg-muted")}>
+        <Radar className="size-4 text-muted-foreground" />
+      </span>
+    );
+  const a = agents.find(x => x.id === from);
+  if (a?.role !== "worker")
+    return (
+      <span className={cn(tile, "border border-fuchsia-400/30 bg-fuchsia-500/15")}>
+        <Network className="size-4 text-fuchsia-400" />
+      </span>
+    );
+  return (
+    <span className={cn(tile, tileOf(from), "text-white")}>
+      {(a.name ?? from).match(/[a-z0-9]/i)?.[0]?.toUpperCase()}
+      <span className={cn("absolute -right-0.5 -bottom-0.5 size-2.5 ring-2 ring-background", agentStateColor[a.state])} />
+    </span>
+  );
+}
+
 export function Author({ from }: { from: string }) {
   const agents = agentStore.use();
   const objectives = objectiveStore.use();
-  if (from === "isaac")
-    return (
-      <span className="flex items-center gap-1.5 text-sm font-medium">
-        <User className="size-3.5 text-sky-400" />
-        you
-      </span>
-    );
+  const sentries = sentryStore.use();
+  if (from === "isaac") return <span className="text-sm font-semibold">you</span>;
   const o = objectives.find(x => x.id === from);
   if (o)
     return (
-      <a href={`#objective/${o.id}`} className="flex items-center gap-1.5 text-sm font-medium hover:underline">
-        <Waypoints className="size-3.5 text-agent" />
+      <a href={`#objective/${o.id}`} className="text-sm font-semibold hover:underline">
         {o.title}
       </a>
     );
-  const a = agents.find(x => x.id === from);
   return (
-    <a href={`#agent/${from}`} className="flex items-center gap-1.5 font-mono text-sm hover:underline">
-      {a?.role === "worker" ? <span className={cn("size-2", agentStateColor[a.state])} /> : <Network className="size-3.5 text-fuchsia-400" />}
-      {a?.name ?? from}
+    <a href={`#agent/${from}`} className="text-sm font-semibold hover:underline">
+      {agents.find(x => x.id === from)?.name ?? sentries.find(x => x.id === from)?.name ?? from}
     </a>
   );
 }
