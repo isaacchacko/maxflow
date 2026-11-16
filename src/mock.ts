@@ -354,6 +354,13 @@ export const signals: Signal[] = [
   { id: "s12", source: "isaac", at: "2026-11-03T10:00", target: "chat", text: "Get Festo sweeps under the prod tick, then backfill what we missed.", routedTo: ["r-festo"] },
 ];
 
+export const columns: { status: Status; label: string }[] = [
+  { status: "todo", label: "Todo" },
+  { status: "doing", label: "Doing" },
+  { status: "review", label: "Review" },
+  { status: "done", label: "Done" },
+];
+
 export const agentStateColor: Record<AgentState, string> = {
   working: "bg-sky-400",
   waiting: "bg-amber-400",
