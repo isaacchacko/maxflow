@@ -12,7 +12,7 @@ const usage = `usage:
   maxflow rename <id> <name...> | maxflow kill <id>
   maxflow notify <id> <text...> [--isaac]    deliver text once the session is idle at an empty claude prompt; --isaac as for send
   maxflow who router|parent|workers|objective   the agents around you, as mf-<id> names for SendMessage
-  maxflow ask <question...> [--re THREAD] [--default REC] [--new]   ask the user in a thread of yours, flagged as waiting on him; prints its id.
+  maxflow ask <question...> [--re THREAD] [--default REC] [--new] [--image PATH]   ask the user in a thread of yours, flagged as waiting on him; prints its id.
                                              Refused when an open ask on your objective reads the same: add to that one with --re, or --new if yours differs.
                                              --re: ask again in that thread; --default: your recommendation for a reversible step, which you go ahead with if he hasn't answered in 3h
   maxflow tasks [--all]                      the user's task board, with each task's timeline; --all adds done and dropped ones
@@ -31,6 +31,7 @@ const usage = `usage:
   maxflow route <signal seq> <objective id> [--kind command|conversation] | maxflow route <signal seq> --new <title> [--cwd DIR]   the funnel routing a signal from the event log
   maxflow thread new <title...> [--objective ID] | maxflow thread new --parent <thread id>:<message id> [text...]   a subthread under that message | maxflow thread post <thread id> <text...> | maxflow thread status <thread id> <line...> | maxflow threads
   maxflow thread done <thread id> <result...>   a command's one answer: closes the thread and its task
+                                             --image PATH on thread new/post/done and ask, repeatable: shows him that png/jpg/gif/webp inline
   maxflow thread kind <thread id> command|conversation   flip what a thread is
   maxflow thread merge <thread id> <into thread id>   fold a duplicate into another thread: messages, routers, ask and waits move, the duplicate leaves the inbox
   maxflow thread move <thread id> <objective id>   re-home a thread and its subthreads onto that objective and its routers
@@ -52,6 +53,21 @@ async function call(path: string, init?: RequestInit) {
 // Using a sentry through the CLI draws this session touching it in the graph; maxflow being down never fails the verb.
 const touchSentry = (sentry: string, kind: "read" | "write") =>
   caller && fetch(`${base}/api/touch`, { method: "POST", headers: caller, body: JSON.stringify({ sentry, kind }) }).catch(() => {});
+
+// An image an agent shows him goes into the same uploads store as his pasted ones, as the same markdown, so it renders inline.
+const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+const withoutImages = (args: string[]) => args.filter((a, i) => a !== "--image" && args[i - 1] !== "--image");
+async function withImages(text: string, args: string[]) {
+  const shown = [];
+  for (const file of args.filter((_, i) => args[i - 1] === "--image")) {
+    const type = IMAGE_TYPES[file.split(".").at(-1)!.toLowerCase()];
+    if (!type || !(await Bun.file(file).exists())) console.error(`--image ${file}: no png, jpg, gif or webp file there`), process.exit(1);
+    const res = await fetch(`${base}/api/uploads`, { method: "POST", headers: { ...caller, "content-type": type }, body: Bun.file(file) });
+    if (!res.ok) console.error(`--image ${file}: ${res.status} ${await res.text()}`), process.exit(1);
+    shown.push(`![image](${((await res.json()) as { path: string }).path})`);
+  }
+  return [text, ...shown].filter(Boolean).join("\n");
+}
 
 async function create(body: { name?: string; cmd?: string[]; cwd?: string; role?: string; objective?: string; parent?: string; scope?: string }) {
   const res = await fetch(`${base}/api/sessions`, { method: "POST", headers: caller, body: JSON.stringify(body) });
@@ -135,7 +151,7 @@ if (verb === "ls") {
   await call(`/api/sessions/${id}/notify`, { method: "POST", body: JSON.stringify({ text: words.join(" "), isaac: rest.includes("--isaac") }) });
 } else if (verb === "ask" && rest[0]) {
   if (!process.env.MAXFLOW_SESSION) console.error("ask works only inside a maxflow session"), process.exit(1);
-  const t = await call("/api/asks", { method: "POST", body: JSON.stringify({ text: positional(rest, ["--re", "--default"]).join(" "), re: flag(rest, "--re"), default: flag(rest, "--default"), new: rest.includes("--new") }) });
+  const t = await call("/api/asks", { method: "POST", body: JSON.stringify({ text: await withImages(positional(rest, ["--re", "--default", "--image"]).join(" "), rest), re: flag(rest, "--re"), default: flag(rest, "--default"), new: rest.includes("--new") }) });
   console.log(`${t.id}: asked in his inbox, flagged as waiting on him. Keep working; his reply arrives in your prompt. Once nothing is left that doesn't hang on it, run \`maxflow wait thread:${t.id}\` and end your turn.`);
 } else if (verb === "tasks") {
   for (const t of await call("/api/tasks"))
@@ -259,15 +275,16 @@ if (verb === "ls") {
   for (const t of await call("/api/threads")) console.log(`${t.id}  ${t.objective}  ${t.title}  (${t.messages.length} messages)`);
 } else if (verb === "thread" && rest[0] === "new" && flag(rest, "--parent")) {
   const [thread, message] = flag(rest, "--parent")!.split(":");
-  const t = await call("/api/threads", { method: "POST", body: JSON.stringify({ parent: { thread, message }, text: positional(rest.slice(1), ["--parent"]).join(" ") }) });
+  const t = await call("/api/threads", { method: "POST", body: JSON.stringify({ parent: { thread, message }, text: await withImages(positional(rest.slice(1), ["--parent", "--image"]).join(" "), rest) }) });
   console.log(t.id);
 } else if (verb === "thread" && rest[0] === "new" && rest[1]) {
-  const t = await call("/api/threads", { method: "POST", body: JSON.stringify({ title: positional(rest.slice(1), ["--objective"]).join(" "), objective: flag(rest, "--objective") }) });
+  const t = await call("/api/threads", { method: "POST", body: JSON.stringify({ title: positional(rest.slice(1), ["--objective", "--image"]).join(" "), objective: flag(rest, "--objective") }) });
+  if (rest.includes("--image")) await call(`/api/threads/${t.id}/messages`, { method: "POST", body: JSON.stringify({ text: await withImages("", rest) }) });
   console.log(t.id);
 } else if (verb === "thread" && rest[0] === "post" && rest[2]) {
-  await call(`/api/threads/${rest[1]}/messages`, { method: "POST", body: JSON.stringify({ text: rest.slice(2).join(" ") }) });
+  await call(`/api/threads/${rest[1]}/messages`, { method: "POST", body: JSON.stringify({ text: await withImages(withoutImages(rest.slice(2)).join(" "), rest) }) });
 } else if (verb === "thread" && rest[0] === "done" && rest[2]) {
-  await call(`/api/threads/${rest[1]}/messages`, { method: "POST", body: JSON.stringify({ text: rest.slice(2).join(" "), done: true }) });
+  await call(`/api/threads/${rest[1]}/messages`, { method: "POST", body: JSON.stringify({ text: await withImages(withoutImages(rest.slice(2)).join(" "), rest), done: true }) });
 } else if (verb === "thread" && rest[0] === "merge" && rest[2]) {
   const t = await call(`/api/threads/${rest[1]}/merge`, { method: "POST", body: JSON.stringify({ into: rest[2] }) });
   console.log(`${rest[1]} merged into ${t.id} (${t.messages.length} messages)`);

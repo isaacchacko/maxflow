@@ -109,6 +109,9 @@ export function Rich({ text, className, still }: { text: string; className?: str
 }
 
 // In markdown a chip is a link to ref:<kind>/<id>, so the link renderer draws it and refs never get parsed twice.
+// A file in the uploads dir draws like his pasted images even when an agent names it as a bare path on its own line or a file:// src.
+const showUploads = (text: string) =>
+  text.replace(/^(?:file:\/\/)?(\S*\/uploads\/[\w.-]+\.(?:png|jpe?g|gif|webp))$/gim, "![image]($1)").replace(/\]\(file:\/\/(\S*\/uploads\/)/g, "]($1");
 const asLinks = (text: string) => text.replace(/\[\[(agent|router|task|objective|thread|msg):([^\]]+)\]\]/g, (_, kind, id) => `[ref](ref:${kind}/${encodeURIComponent(id)})`);
 
 // A PR or Linear issue named in plain text becomes a link to pr:<owner/repo>/<n> or linear:<key>, so it draws as a chip.
@@ -238,7 +241,7 @@ export function Markdown({ text, className }: { text: string; className?: string
   return (
     <div className={cn("break-words", className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips, remarkBreaks]} components={md} urlTransform={keepRefs}>
-        {asLinks(text)}
+        {asLinks(showUploads(text))}
       </ReactMarkdown>
     </div>
   );
