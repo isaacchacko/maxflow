@@ -620,7 +620,7 @@ const KINDS: Kind[] = ["command", "conversation"];
 // parent: a subthread hangs off a message in another thread, which is its root; its messages are that message's replies, and
 // any of them can have a subthread of its own. A top thread's root is its first message, so replying to that posts in it.
 type Message = { id: string; from: string; at: number; text: string; re?: number };
-type Thread = { id: string; title: string; objective: string; routers: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; kind?: Kind; kindBy?: string; task?: number; done?: number; resolved?: { at: number }; asks?: Ask; q?: number };
+type Thread = { id: string; title: string; objective: string; routers: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; kind?: Kind; kindBy?: string; task?: number; done?: number; resolved?: { at: number }; asks?: Ask; q?: number; mergedInto?: string };
 const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
 const saveThreads = () => writeFileSync(THREADS, JSON.stringify(threads));
@@ -634,6 +634,31 @@ const ancestors = (t: Thread): Thread[] => {
   const up = t.parent && threads.find((x) => x.id === t.parent!.thread);
   return up ? [...ancestors(up), up] : [];
 };
+// A thread folded into another as a duplicate answers for that one.
+const live_thread = (t?: Thread): Thread | undefined => (t?.mergedInto ? live_thread(threads.find((x) => x.id === t.mergedInto)) : t);
+// Folding a duplicate into another thread: its messages join the other's in time order, its routers, open ask and subthreads
+// move with them, waits on it follow, and it leaves the inbox.
+function mergeThread(from: Thread, into: Thread) {
+  into.messages = [...into.messages, ...from.messages].sort((a, b) => a.at - b.at);
+  for (const id of from.routers) if (!into.routers.includes(id)) into.routers.push(id);
+  if (from.asks && !into.asks) into.asks = from.asks;
+  for (const t of threads) if (t.parent?.thread === from.id) t.parent.thread = into.id;
+  for (const s of sessions.values()) if (s.wait?.kind === "thread" && s.wait.ref === from.id) setWait(s, { ...s.wait, ref: into.id });
+  Object.assign(from, { mergedInto: into.id, asks: undefined, pending: undefined });
+  saveThreads();
+  for (const t of [from, into]) publish(`thread/${t.id}`, { thread: t.id, ...(t === from && { mergedInto: into.id }) });
+}
+// The last name each session went by, so a message from one that has ended reads as it rather than as a bare id.
+const NAMES = `${STATE_DIR}/names.json`;
+// Seeded on first run from the askers of the old question queue, some of which have ended.
+const names: Record<string, string> = (() => { try { return JSON.parse(readFileSync(NAMES, "utf8")); } catch {} try {
+  return Object.fromEntries((JSON.parse(readFileSync(`${STATE_DIR}/questions.json`, "utf8")) as { session: string; name: string }[]).map((q) => [q.session, q.name]));
+} catch { return {}; } })();
+function rememberNames() {
+  let changed = false;
+  for (const s of sessions.values()) if (names[s.id] !== s.name) (names[s.id] = s.name), (changed = true);
+  if (changed) writeFileSync(NAMES, JSON.stringify(names));
+}
 const pathTitle = (t: Thread) => [...ancestors(t), t].map((x) => x.title).join(" › ");
 // The subthread under a message, made on its first reply; a top thread's first message is the thread itself.
 function subthread(parent: Thread, messageId: string) {
@@ -876,12 +901,27 @@ const DEFAULT_AFTER_MS = Number(process.env.MAXFLOW_DEFAULT_AFTER_MS ?? 3 * 3_60
 const DEFAULT_AFTER_H = Math.round(DEFAULT_AFTER_MS / 3_600_000);
 // The standing rules the retired questions sentry distilled from his answers; the intro still hands them to every agent.
 const decisions: { rule?: string | null }[] = (() => { try { return JSON.parse(readFileSync(`${STATE_DIR}/decisions.json`, "utf8")); } catch { return []; } })();
-const threadOf = (ref: string) => (/^q?\d+$/.test(ref) ? threads.find((t) => t.q === Number(ref.replace(/^q/, ""))) : threads.find((t) => t.id === ref));
+const threadOf = (ref: string) => live_thread(/^q?\d+$/.test(ref) ? threads.find((t) => t.q === Number(ref.replace(/^q/, ""))) : threads.find((t) => t.id === ref));
+// An open ask on the same objective that reads like this one: most of the shorter one's words are in the other. Paraphrases
+// score low across all threads, so this only looks among the few asks still waiting on him.
+const STOPWORDS = new Set("the and for you that this with are not can but its once has have will what from was any into just your all".split(" "));
+const wordsOf = (text: string) => new Set((text.slice(0, 400).toLowerCase().match(/[a-z0-9]{3,}/g) ?? []).filter((w) => !STOPWORDS.has(w)));
+function sameAsk(objective: string, text: string) {
+  const mine = wordsOf(text);
+  return threads.find((t) => {
+    if (!t.asks || t.mergedInto || t.objective !== objective || !t.messages[0]) return false;
+    const theirs = wordsOf(t.messages[0].text);
+    return [...mine].filter((w) => theirs.has(w)).length / Math.min(mine.size, theirs.size || 1) >= 0.3;
+  });
+}
 
 // re: a thread id, or an old question's q<n>, to ask again in.
-function ask(s: Session, text: string, re?: string, dflt?: string) {
+// fresh: the agent saw sameAsk's match and asks anyway.
+function ask(s: Session, text: string, re?: string, dflt?: string, fresh?: boolean): Thread | null | { same: Thread } {
   let t = re ? threadOf(re) : undefined;
   if (re && !t) return null;
+  const same = !re && !fresh && sameAsk(s.role?.objective ?? "", text);
+  if (same) return { same };
   if (!t) {
     t = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: headline(text.replace(IMAGE, "")).slice(0, 80), objective: s.role?.objective ?? "", routers: [s.id], messages: [], kind: "conversation", kindBy: s.id };
     threads.push(t);
@@ -1171,7 +1211,7 @@ async function world() {
       events: t.timeline.map((e) => ({ from: e.session && sessions.get(e.session)?.role?.role === "router" ? "router" : e.session ? "agent" : "sentry", at: iso(e.at), text: e.text })),
       page: t.page ?? [],
     })),
-    threads: threads.map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), kind: t.kind ?? "conversation", kindBy: t.kindBy, ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since) } }), done: t.done && iso(t.done), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, re: m.re })) })),
+    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), kind: t.kind ?? "conversation", kindBy: t.kindBy, ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since) } }), done: t.done && iso(t.done), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, re: m.re })) })),
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({
       id: s.id,
@@ -1184,6 +1224,8 @@ async function world() {
       use: SENTRY_USES[s.name] ?? "",
     })),
     // Every PR the gh sentry polls, so a PR named in a message shows its title and state.
+    // Sessions that have ended, by the name they last went by.
+    names: (rememberNames(), Object.fromEntries(Object.entries(names).filter(([id]) => !live(sessions.get(id))))),
     prs: Object.fromEntries(Object.entries(ghStatus()).map(([key, { pr }]) => [key.toLowerCase(), { title: pr.title, state: pr.state.toLowerCase() }])),
   };
 }
@@ -1458,6 +1500,17 @@ Bun.serve<WsData>({
     }
     // Flipping a thread between command and conversation. His flip goes to its routers, and onto the bus as a label on the
     // classifier's call; a router's flip is its own call on his reply.
+    // Folding a duplicate thread into another; resolving stays his, so this is the way agents tidy his inbox.
+    const threadMerge = path.match(/^\/api\/threads\/([\w-]+)\/merge$/);
+    if (threadMerge && req.method === "POST") {
+      const from = threads.find((x) => x.id === threadMerge[1]);
+      const { into: id } = (await req.json().catch(() => ({}))) as { into?: string };
+      const into = live_thread(threads.find((x) => x.id === id));
+      if (!from || from.mergedInto) return new Response("no such thread, or it is merged already", { status: 404 });
+      if (!into || into === from) return new Response("into: another thread's id", { status: 400 });
+      mergeThread(from, into);
+      return Response.json(into);
+    }
     const threadKind = path.match(/^\/api\/threads\/([\w-]+)\/kind$/);
     if (threadKind && req.method === "POST") {
       const t = threads.find((x) => x.id === threadKind[1]);
@@ -1522,7 +1575,7 @@ Bun.serve<WsData>({
     }
     const threadPost = path.match(/^\/api\/threads\/([\w-]+)\/messages$/);
     if (threadPost && req.method === "POST") {
-      const t = threads.find((x) => x.id === threadPost[1]);
+      const t = live_thread(threads.find((x) => x.id === threadPost[1]));
       if (!t) return new Response("no such thread", { status: 404 });
       const body = (await req.json().catch(() => ({}))) as { text?: string; done?: boolean };
       const text = body.text?.trim();
@@ -1606,11 +1659,15 @@ Bun.serve<WsData>({
     }
     // `maxflow ask`: an agent's question to the user opens a thread from it, flagged as waiting on him.
     if (path === "/api/asks" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { text?: string; re?: string; default?: string };
+      const body = (await req.json().catch(() => ({}))) as { text?: string; re?: string; default?: string; new?: boolean };
       const s = sessions.get(req.headers.get("x-maxflow-from") ?? "");
       if (!s) return new Response("ask from inside a maxflow session ($MAXFLOW_SESSION)", { status: 400 });
       if (!body.text?.trim()) return new Response("text required", { status: 400 });
-      const t = ask(s, body.text.trim(), body.re?.trim() || undefined, body.default?.trim() || undefined);
+      const t = ask(s, body.text.trim(), body.re?.trim() || undefined, body.default?.trim() || undefined, body.new);
+      if (t && "same" in t) {
+        const by = t.same.asks!.session;
+        return new Response(`${t.same.id} already asks him something close, from ${sessions.get(by)?.name ?? names[by] ?? by}: "${t.same.title}". If it's the same ask, add to it with \`${CLI} ask --re ${t.same.id} '<text>'\` and wait on thread:${t.same.id}; if it really is different, ask again with --new.`, { status: 409 });
+      }
       return t ? Response.json(t, { status: 201 }) : new Response(`no thread ${body.re}`, { status: 404 });
     }
 

@@ -24,8 +24,9 @@ export function unseenDeep(t: Thread, all: Thread[]): number {
   return unseen(t) + all.filter(x => x.parentId === t.id).reduce((n, x) => n + unseenDeep(x, all), 0);
 }
 
-/** Replies he hasn't had on screen; a thread this browser never opened counts what came after his last message. */
+/** Replies he hasn't had on screen; a thread this browser never opened counts what came after his last message. A top thread's
+ * opening message is on its inbox row, so it counts as seen and a thread with no replies has nothing new. */
 export function unseen(t: Thread) {
-  const seen = seenCount(t.id);
-  return seen === null ? t.messages.length - 1 - t.messages.findLastIndex(m => m.from === "isaac") : Math.max(0, t.messages.length - seen);
+  const shown = Math.max(seenCount(t.id) ?? t.messages.findLastIndex(m => m.from === "isaac") + 1, t.parentId ? 0 : 1);
+  return Math.max(0, t.messages.length - shown);
 }

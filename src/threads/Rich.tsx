@@ -4,7 +4,7 @@ import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markd
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor } from "@/mock";
-import { agentStore, objectiveStore, prStore, sentryStore, taskStore, threadStore } from "@/store";
+import { agentStore, nameStore, objectiveStore, prStore, sentryStore, taskStore, threadStore } from "@/store";
 import { goToMessage } from "./jump";
 
 // A msg ref is <thread id>/<message id>: a quote's link back to where it came from.
@@ -254,6 +254,7 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
   const agents = agentStore.use();
   const objectives = objectiveStore.use();
   const sentries = sentryStore.use();
+  const names = nameStore.use();
   const [broken, setBroken] = useState(false);
   // Small is the 20px face in a replies line, where a worker's state dot would crowd it.
   const tile = cn("relative flex shrink-0 items-center justify-center font-semibold", small ? "size-5 text-[10px] [&>svg]:size-3" : "size-9 text-sm");
@@ -276,7 +277,7 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
       </span>
     );
   const a = agents.find(x => x.id === from);
-  if (a?.role !== "worker")
+  if (a?.role === "router")
     return (
       <span className={cn(tile, "border border-fuchsia-400/30 bg-fuchsia-500/15")}>
         <Network className="size-4 text-fuchsia-400" />
@@ -284,8 +285,8 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
     );
   return (
     <span className={cn(tile, tileOf(from), "text-white")}>
-      {(a.name ?? from).match(/[a-z0-9]/i)?.[0]?.toUpperCase()}
-      {!small && <span className={cn("absolute -right-0.5 -bottom-0.5 size-2.5 ring-2 ring-background", agentStateColor[a.state])} />}
+      {(a?.name ?? names[from] ?? from).match(/[a-z0-9]/i)?.[0]?.toUpperCase()}
+      {!small && a && <span className={cn("absolute -right-0.5 -bottom-0.5 size-2.5 ring-2 ring-background", agentStateColor[a.state])} />}
     </span>
   );
 }
@@ -294,6 +295,7 @@ export function Author({ from }: { from: string }) {
   const agents = agentStore.use();
   const objectives = objectiveStore.use();
   const sentries = sentryStore.use();
+  const names = nameStore.use();
   if (from === "isaac") return <span className="text-sm font-semibold">you</span>;
   const o = objectives.find(x => x.id === from);
   if (o)
@@ -304,7 +306,7 @@ export function Author({ from }: { from: string }) {
     );
   return (
     <a href={`#agent/${from}`} className="text-sm font-semibold hover:underline">
-      {agents.find(x => x.id === from)?.name ?? sentries.find(x => x.id === from)?.name ?? from}
+      {agents.find(x => x.id === from)?.name ?? sentries.find(x => x.id === from)?.name ?? names[from] ?? from}
     </a>
   );
 }

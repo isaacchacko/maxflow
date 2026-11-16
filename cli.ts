@@ -12,7 +12,8 @@ const usage = `usage:
   maxflow rename <id> <name...> | maxflow kill <id>
   maxflow notify <id> <text...> [--isaac]    deliver text once the session is idle at an empty claude prompt; --isaac as for send
   maxflow who router|parent|workers|objective   the agents around you, as mf-<id> names for SendMessage
-  maxflow ask <question...> [--re THREAD] [--default REC]   ask the user in a thread of yours, flagged as waiting on him; prints its id.
+  maxflow ask <question...> [--re THREAD] [--default REC] [--new]   ask the user in a thread of yours, flagged as waiting on him; prints its id.
+                                             Refused when an open ask on your objective reads the same: add to that one with --re, or --new if yours differs.
                                              --re: ask again in that thread; --default: your recommendation for a reversible step, which you go ahead with if he hasn't answered in 3h
   maxflow tasks [--all]                      the user's task board, with each task's timeline; --all adds done and dropped ones
   maxflow task new <title...> | maxflow task <id> [--title T] [--status todo|doing|you|waiting|blocked|done|dropped] [--question] [--answer A]
@@ -31,6 +32,7 @@ const usage = `usage:
   maxflow thread new <title...> [--objective ID] | maxflow thread new --parent <thread id>:<message id> [text...]   a subthread under that message | maxflow thread post <thread id> <text...> | maxflow thread status <thread id> <line...> | maxflow threads
   maxflow thread done <thread id> <result...>   a command's one answer: closes the thread and its task
   maxflow thread kind <thread id> command|conversation   flip what a thread is
+  maxflow thread merge <thread id> <into thread id>   fold a duplicate into another thread: messages, routers, ask and waits move, the duplicate leaves the inbox
   maxflow thread move <thread id> <objective id>   re-home a thread and its subthreads onto that objective and its routers
   maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
   maxflow install                            run this checkout as the login service and add its hooks to ~/.claude/settings.json`;
@@ -133,7 +135,7 @@ if (verb === "ls") {
   await call(`/api/sessions/${id}/notify`, { method: "POST", body: JSON.stringify({ text: words.join(" "), isaac: rest.includes("--isaac") }) });
 } else if (verb === "ask" && rest[0]) {
   if (!process.env.MAXFLOW_SESSION) console.error("ask works only inside a maxflow session"), process.exit(1);
-  const t = await call("/api/asks", { method: "POST", body: JSON.stringify({ text: positional(rest, ["--re", "--default"]).join(" "), re: flag(rest, "--re"), default: flag(rest, "--default") }) });
+  const t = await call("/api/asks", { method: "POST", body: JSON.stringify({ text: positional(rest, ["--re", "--default"]).join(" "), re: flag(rest, "--re"), default: flag(rest, "--default"), new: rest.includes("--new") }) });
   console.log(`${t.id}: asked in his inbox, flagged as waiting on him. Keep working; his reply arrives in your prompt. Once nothing is left that doesn't hang on it, run \`maxflow wait thread:${t.id}\` and end your turn.`);
 } else if (verb === "tasks") {
   for (const t of await call("/api/tasks"))
@@ -266,6 +268,9 @@ if (verb === "ls") {
   await call(`/api/threads/${rest[1]}/messages`, { method: "POST", body: JSON.stringify({ text: rest.slice(2).join(" ") }) });
 } else if (verb === "thread" && rest[0] === "done" && rest[2]) {
   await call(`/api/threads/${rest[1]}/messages`, { method: "POST", body: JSON.stringify({ text: rest.slice(2).join(" "), done: true }) });
+} else if (verb === "thread" && rest[0] === "merge" && rest[2]) {
+  const t = await call(`/api/threads/${rest[1]}/merge`, { method: "POST", body: JSON.stringify({ into: rest[2] }) });
+  console.log(`${rest[1]} merged into ${t.id} (${t.messages.length} messages)`);
 } else if (verb === "thread" && rest[0] === "kind" && rest[2]) {
   await call(`/api/threads/${rest[1]}/kind`, { method: "POST", body: JSON.stringify({ kind: rest[2] }) });
 } else if (verb === "thread" && rest[0] === "move" && rest[2]) {
