@@ -27,7 +27,7 @@ export function InboxView() {
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-4">
-      <Composer autoFocus agent="inbox-input" onSend={startThread} className="max-w-4xl border px-3 py-2.5" />
+      <Composer autoFocus agent="inbox-input" draftKey="inbox" onSend={startThread} className="max-w-4xl border px-3 py-2.5" />
       <ol className="flex max-w-4xl flex-col border empty:hidden">
         {rows.map(({ t, asked, last }) => {
           const latest = t.messages.at(-1);

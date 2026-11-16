@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { useState } from "react";
+import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { cn } from "@/lib/utils";
 
 /** The server keeps a pasted image as a file and returns its path, which the message carries as markdown for the agent to Read. */
@@ -13,8 +14,8 @@ async function upload(file: File) {
 const imagesIn = (files: FileList | undefined) => [...(files ?? [])].filter(f => f.type.startsWith("image/"));
 
 /** A one-line message box that also takes images pasted from the clipboard or dropped on it, previewed until sent. */
-export function Composer({ onSend, className, autoFocus, agent }: { onSend: (text: string) => unknown; className?: string; autoFocus?: boolean; agent: string }) {
-  const [draft, setDraft] = useState("");
+export function Composer({ onSend, className, autoFocus, agent, draftKey }: { onSend: (text: string) => unknown; className?: string; autoFocus?: boolean; agent: string; draftKey: string }) {
+  const [draft, setDraft] = usePersistentDraft(draftKey);
   const [images, setImages] = useState<{ file: File; preview: string }[]>([]);
   const [error, setError] = useState("");
 

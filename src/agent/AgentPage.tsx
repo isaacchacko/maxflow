@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { cn } from "@/lib/utils";
 import { NOW_AT, agentStateColor, statusColor, type Agent, type AgentState } from "@/mock";
 import { addSignal, agentStore, api, liveStore, objectiveStore, pathOf, questionStore, sentryStore, setArchived, settleQuestion, signalStore, spawnWorker, taskStore } from "@/store";
@@ -10,7 +11,7 @@ import { Terminal } from "./Terminal";
 import { closing, transcriptFor, typedStore, type Line } from "./transcript";
 
 function Tty({ agent, lines }: { agent: Agent; lines: Line[] }) {
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = usePersistentDraft(`tty:${agent.id}`);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -123,7 +124,7 @@ function when(at: string) {
 /** The agent's open question for Isaac, answered here; his words are typed into its prompt. */
 function OpenQuestion({ agentId }: { agentId: string }) {
   const q = questionStore.use().find(x => x.session === agentId && x.status === "pending");
-  const [answer, setAnswer] = useState("");
+  const [answer, setAnswer] = usePersistentDraft(`question:${agentId}`);
   if (!q) return null;
   const submit = (e: React.FormEvent) => {
     e.preventDefault();

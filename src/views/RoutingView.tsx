@@ -4,6 +4,7 @@ import { routeChat } from "@/agent/route";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { cn } from "@/lib/utils";
 import { ChipView, SearchPalette, hits, isActive, type Filter, type NodeMeta } from "@/views/SearchPalette";
 import { NOW_AT, agentStateColor, objectiveStatus, statusColor, type Agent, type Signal, type Source, type Thread } from "@/mock";
@@ -192,7 +193,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
   const [pos, setPos] = useState<Pos>({});
   const sentries = sourceStore.use();
   const [shown, setShown] = useState<Set<Source>>(new Set(["isaac", "gh", "slack", "agent", "sentry", "maxflow"]));
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = usePersistentDraft("log-composer");
   const [fresh, setFresh] = useState<string>();
   const [reading, setReading] = useState<string>();
   const [splitting, setSplitting] = useState<string>();
