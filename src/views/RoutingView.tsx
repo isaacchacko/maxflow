@@ -208,18 +208,20 @@ export function RoutingView() {
   const days = [...new Set(visible.map(s => day(s.at)))];
   const routers = agents.filter(a => a.role === "router");
 
+  const faded = (index: number) => index !== snap && index !== snap + 1;
+  const capture = (index: number) => (e: React.MouseEvent) => {
+    if (!faded(index)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    go(index > snap ? index - 1 : index);
+  };
+
   const column = (index: number, title: string, count: number, children: React.ReactNode, onScroll = true) => {
-    const inView = index === snap || index === snap + 1;
     return (
       <section
-        className={cn("relative flex min-h-0 shrink-0 flex-col gap-3 transition-opacity duration-500", !inView && "opacity-35")}
+        className={cn("relative flex min-h-0 shrink-0 flex-col gap-3 transition-opacity duration-500", faded(index) && "opacity-35")}
         style={{ width: col }}
-        onClickCapture={e => {
-          if (inView) return;
-          e.stopPropagation();
-          e.preventDefault();
-          go(index > snap ? index - 1 : index);
-        }}
+        onClickCapture={capture(index)}
       >
         <h2 className="flex items-baseline gap-2 text-sm font-medium">
           {title}
@@ -255,6 +257,7 @@ export function RoutingView() {
         >
           <svg className="pointer-events-none absolute inset-0 size-full overflow-visible">
             {edges.map(e => {
+              if (e.from.startsWith("router:")) return null;
               const a = e.watch ? pos.log : pos[e.from];
               const b = pos[e.to];
               if (!a || !b) return null;
@@ -406,85 +409,81 @@ export function RoutingView() {
             }),
           )}
 
-          {column(
-            2,
-            "Routers",
-            routers.length,
-            objectives.map(o => (
-              <div key={o.id} className="flex flex-col gap-1.5">
-                <p className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
-                  <Waypoints className="size-3 text-agent" />
-                  {o.title}
-                </p>
-                {routers.filter(r => r.objectiveId === o.id).map(r => {
-                  const id = `router:${r.id}`;
-                  const crew = agents.filter(w => w.parent === r.id).length;
-                  return (
-                    <Card
-                      key={r.id}
-                      {...node(id)}
-                      className={cn(
-                        "cursor-pointer gap-1 border-fuchsia-400/30 px-3 py-2.5 transition-opacity",
-                        dim(id) && "opacity-30",
-                        focus === id && "border-fuchsia-400",
-                        fresh === r.id && "agent-edited animate-in fade-in zoom-in-95",
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Network className="size-3.5 text-fuchsia-400" />
-                        <span className="font-mono text-xs">{r.id}</span>
-                        <span className={cn("size-1.5 rounded-full", agentStateColor[r.state])} />
-                        <span className="ml-auto text-xs text-muted-foreground">{crew} {crew === 1 ? "agent" : "agents"}</span>
-                      </div>
-                      <p className="text-sm">{r.scope}</p>
-                      <p className="truncate text-xs text-muted-foreground">{r.doing}</p>
-                    </Card>
-                  );
-                })}
-              </div>
-            )),
-          )}
-
-          {column(
-            3,
-            "Agents",
-            agents.length - routers.length,
-            objectives.flatMap(o => routers.filter(r => r.objectiveId === o.id)).map(r => {
-              const crew = agents.filter(w => w.parent === r.id);
-              return (
-                <div key={r.id} className="flex flex-col gap-1.5">
-                  <p className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
-                    <Network className="size-3 text-fuchsia-400" />
-                    <span className="font-mono">{r.id}</span>
-                    <span className="truncate">· {r.scope}</span>
+          <section className="relative flex min-h-0 shrink-0 flex-col gap-3" style={{ width: col * 2 + GAP }}>
+            <div className="flex" style={{ gap: GAP }}>
+              {(["Routers", "Agents"] as const).map((title, k) => (
+                <h2 key={title} className={cn("flex items-baseline gap-2 text-sm font-medium transition-opacity duration-500", faded(2 + k) && "opacity-35")} style={{ width: col }}>
+                  {title}
+                  <span className="text-xs text-muted-foreground">{k === 0 ? routers.length : agents.length - routers.length}</span>
+                </h2>
+              ))}
+            </div>
+            <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1" onScroll={measure}>
+              {objectives.map(o => (
+                <div key={o.id} className="flex flex-col gap-1.5">
+                  <p className={cn("flex items-center gap-1.5 px-1 text-xs text-muted-foreground transition-opacity duration-500", faded(2) && "opacity-35")} style={{ width: col }}>
+                    <Waypoints className="size-3 text-agent" />
+                    {o.title}
                   </p>
-                  {crew.length === 0 && (
-                    <p className="rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">No agents yet. The router spawns them when work is ready.</p>
-                  )}
-                  {crew.map(w => {
-                    const id = `agent:${w.id}`;
-                    const task = tasks.find(t => w.taskIds.includes(t.id) && t.status !== "done") ?? tasks.find(t => t.id === w.taskIds.at(-1));
+                  {routers.filter(r => r.objectiveId === o.id).map(r => {
+                    const id = `router:${r.id}`;
+                    const crew = agents.filter(w => w.parent === r.id);
                     return (
-                      <Card key={w.id} {...node(id)} className={cn("cursor-pointer gap-1 px-3 py-2.5 transition-opacity", dim(id) && "opacity-30", focus === id && "border-agent")}>
-                        <div className="flex items-center gap-2">
-                          <span className={cn("size-2 rounded-full", agentStateColor[w.state], w.state === "working" && "animate-pulse")} />
-                          <span className="font-mono text-xs">{w.id}</span>
-                          <span className="ml-auto text-xs text-muted-foreground">{w.state}</span>
+                      <div key={r.id} className="flex items-start" style={{ gap: GAP }}>
+                        <div className={cn("shrink-0 transition-opacity duration-500", faded(2) && "opacity-35")} style={{ width: col }} onClickCapture={capture(2)}>
+                          <Card
+                            {...node(id)}
+                            className={cn(
+                              "cursor-pointer gap-1 border-fuchsia-400/30 px-3 py-2.5 transition-opacity",
+                              dim(id) && "opacity-30",
+                              focus === id && "border-fuchsia-400",
+                              fresh === r.id && "agent-edited animate-in fade-in zoom-in-95",
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Network className="size-3.5 text-fuchsia-400" />
+                              <span className="font-mono text-xs">{r.id}</span>
+                              <span className={cn("size-1.5 rounded-full", agentStateColor[r.state])} />
+                              <span className="ml-auto text-xs text-muted-foreground">{crew.length} {crew.length === 1 ? "agent" : "agents"}</span>
+                            </div>
+                            <p className="text-sm">{r.scope}</p>
+                            <p className="truncate text-xs text-muted-foreground">{r.doing}</p>
+                          </Card>
                         </div>
-                        <p className="truncate text-xs text-muted-foreground">{w.doing}</p>
-                        {task && (
-                          <a href={`#task/${task.id}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 truncate text-xs hover:underline">
-                            <span className={cn("size-1.5 shrink-0 rounded-full", statusColor[task.status])} />
-                            {task.title}
-                          </a>
-                        )}
-                      </Card>
+                        <div className={cn("flex shrink-0 flex-col gap-1.5 transition-opacity duration-500", faded(3) && "opacity-35")} style={{ width: col }} onClickCapture={capture(3)}>
+                          {crew.length === 0 && (
+                            <p className={cn("rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground transition-opacity", dim(id) && "opacity-30")}>
+                              No agents yet. {r.id} spawns them when work is ready.
+                            </p>
+                          )}
+                          {crew.map(w => {
+                            const wid = `agent:${w.id}`;
+                            const task = tasks.find(t => w.taskIds.includes(t.id) && t.status !== "done") ?? tasks.find(t => t.id === w.taskIds.at(-1));
+                            return (
+                              <Card key={w.id} {...node(wid)} className={cn("cursor-pointer gap-1 px-3 py-2.5 transition-opacity", dim(wid) && "opacity-30", focus === wid && "border-agent")}>
+                                <div className="flex items-center gap-2">
+                                  <span className={cn("size-2 rounded-full", agentStateColor[w.state], w.state === "working" && "animate-pulse")} />
+                                  <span className="font-mono text-xs">{w.id}</span>
+                                  <span className="ml-auto text-xs text-muted-foreground">{w.state}</span>
+                                </div>
+                                <p className="truncate text-xs text-muted-foreground">{w.doing}</p>
+                                {task && (
+                                  <a href={`#task/${task.id}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 truncate text-xs hover:underline">
+                                    <span className={cn("size-1.5 shrink-0 rounded-full", statusColor[task.status])} />
+                                    {task.title}
+                                  </a>
+                                )}
+                              </Card>
+                            );
+                          })}
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
-              );
-            }),
-          )}
+              ))}
+            </div>
+          </section>
         </div>
       </div>
     </div>
