@@ -584,9 +584,10 @@ async function acceptTrust(s: Session) {
 
 // Threads are the routers' running notes to Isaac on an objective; his reply in one goes to its routers like any message.
 // signal: an inbox thread Isaac started, waiting on the funnel to route that signal to an objective.
+// resolved: Isaac marked it done, from the browser only; his next message in it reopens it.
 // pending: his last message was handed to these routers, and none has answered yet; status is the line a router set on it.
 type Pending = { routers: string[]; since: number; status?: string };
-type Thread = { id: string; title: string; objective: string; routers: string[]; messages: { from: string; at: number; text: string }[]; signal?: number; pending?: Pending };
+type Thread = { id: string; title: string; objective: string; routers: string[]; messages: { from: string; at: number; text: string }[]; signal?: number; pending?: Pending; resolved?: { at: number } };
 const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
 const saveThreads = () => writeFileSync(THREADS, JSON.stringify(threads));
@@ -1090,7 +1091,7 @@ async function world() {
       events: t.timeline.map((e) => ({ from: e.session && sessions.get(e.session)?.role?.role === "router" ? "router" : e.session ? "agent" : "sentry", at: iso(e.at), text: e.text })),
       page: t.page ?? [],
     })),
-    threads: threads.map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, routerIds: t.routers, pending: pendingOf(t.pending), messages: t.messages.map((m) => ({ from: m.from, at: iso(m.at), text: m.text })) })),
+    threads: threads.map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, routerIds: t.routers, pending: pendingOf(t.pending), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ from: m.from, at: iso(m.at), text: m.text })) })),
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({
       id: s.id,
@@ -1377,6 +1378,19 @@ Bun.serve<WsData>({
       publish(`thread/${t.id}`, { thread: t.id, status: t.pending.status ?? null });
       return Response.json(t);
     }
+    // Resolving a thread is Isaac's, from the browser; reopening it too.
+    const threadAct = path.match(/^\/api\/threads\/([\w-]+)$/);
+    if (threadAct && req.method === "PATCH") {
+      const t = threads.find((x) => x.id === threadAct[1]);
+      if (!t) return new Response("no such thread", { status: 404 });
+      if (!req.headers.get("user-agent")?.includes("Mozilla")) return new Response("resolving a thread is Isaac's, from the browser: answer in it and leave it to him", { status: 403 });
+      const { resolved } = (await req.json().catch(() => ({}))) as { resolved?: boolean };
+      if (typeof resolved !== "boolean") return new Response("resolved: true or false", { status: 400 });
+      t.resolved = resolved ? { at: Date.now() } : undefined;
+      saveThreads();
+      publish(`thread/${t.id}`, { thread: t.id, resolved });
+      return Response.json(t);
+    }
     const threadPost = path.match(/^\/api\/threads\/([\w-]+)\/messages$/);
     if (threadPost && req.method === "POST") {
       const t = threads.find((x) => x.id === threadPost[1]);
@@ -1389,6 +1403,7 @@ Bun.serve<WsData>({
       if (from?.role?.role === "router" && !t.routers.includes(from.id)) t.routers.push(from.id);
       // Isaac's reply goes to the thread's routers through the event log, like any message; an agent's post answers him.
       if (!from) {
+        t.resolved = undefined;
         const live_ = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(live);
         const to = live_.length ? live_ : routersOf(t.objective);
         dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${t.title}" (${t.id})] ${unforge(text)}\n[maxflow] Answer in the thread with \`${CLI} thread post ${t.id} '<text>'\`. While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line.` });

@@ -1,10 +1,10 @@
-import { ArrowLeft, ExternalLink, MessagesSquare, Network, Waypoints } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { ArrowLeft, Check, ExternalLink, MessagesSquare, Network, RotateCcw, Waypoints } from "lucide-react";
+import { Fragment, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { NOW_AT, type Thread } from "@/mock";
-import { agentStore, objectiveStore, postToThread, threadStore } from "@/store";
+import { agentStore, objectiveStore, postToThread, setResolved, threadStore } from "@/store";
 import { Composer } from "./Composer";
 import { Author, Avatar, Markdown, RefChip, refsIn, urlsIn, type Ref } from "./Rich";
 
@@ -70,7 +70,12 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
           </a>
         </Button>
         <MessagesSquare className="size-4 text-muted-foreground" />
-        <h1 className="text-lg font-semibold">{thread.title}</h1>
+        <h1 className={cn("text-lg font-semibold", thread.resolved && "text-muted-foreground")}>{thread.title}</h1>
+        {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
+        <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-resolve" onClick={() => setResolved(thread.id, !thread.resolved)}>
+          {thread.resolved ? <RotateCcw /> : <Check />}
+          {thread.resolved ? "Reopen" : "Resolve"}
+        </Button>
       </header>
 
       <div className="flex min-h-0 flex-1 gap-4">
@@ -79,8 +84,12 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
             {thread.messages.map((m, i) => {
               const prev = thread.messages[i - 1];
               const grouped = prev?.from === m.from && Date.parse(m.at) - Date.parse(prev.at) <= GROUP_MS;
+              // What agents posted after he resolved it sits below a line saying so.
+              const resolvedHere = thread.resolved && m.at > thread.resolved.at && !(prev && prev.at > thread.resolved.at);
               return (
-                <article key={i} className={cn("group -mx-2 flex gap-2.5 px-2 py-1 hover:bg-muted/40", !grouped && i > 0 && "mt-2.5")}>
+                <Fragment key={i}>
+                {resolvedHere && <p className="my-2 border-t pt-1 text-center text-xs text-muted-foreground">new since resolved</p>}
+                <article className={cn("group -mx-2 flex gap-2.5 px-2 py-1 hover:bg-muted/40", !grouped && i > 0 && "mt-2.5")}>
                   {grouped ? (
                     <span className="invisible w-9 shrink-0 pt-0.5 text-right text-[10px] text-muted-foreground tabular-nums group-hover:visible">{m.at.slice(11, 16)}</span>
                   ) : (
@@ -96,6 +105,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                     <Markdown text={m.text} className="text-sm leading-relaxed" />
                   </div>
                 </article>
+                </Fragment>
               );
             })}
             {thread.pending && <Pending pending={thread.pending} names={thread.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />}

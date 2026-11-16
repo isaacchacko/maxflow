@@ -48,6 +48,8 @@ export type Thread = {
   routerIds: string[];
   /** Isaac's last message is with these routers and none has answered; stale once none of them is still on it. */
   pending?: { routerIds: string[]; since: string; status?: string; stale: boolean };
+  /** Isaac marked it done; his next message reopens it. */
+  resolved?: { at: string };
   messages: { from: string; at: string; text: string }[];
 };
 

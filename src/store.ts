@@ -125,7 +125,13 @@ export function startThread(text: string) {
 
 export function postToThread(threadId: string, from: string, text: string) {
   if (isLive()) return void api(`/api/threads/${threadId}/messages`, { text });
-  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, messages: [...t.messages, { from, at: NOW_AT, text }] } : t)));
+  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: undefined, messages: [...t.messages, { from, at: NOW_AT, text }] } : t)));
+}
+
+/** Isaac marks a thread done, or reopens it; it stays readable and postable either way. */
+export function setResolved(threadId: string, resolved: boolean) {
+  if (isLive()) return void api(`/api/threads/${threadId}`, { resolved }, "PATCH");
+  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: resolved ? { at: NOW_AT } : undefined } : t)));
 }
 
 /** A blank worker under a router, which the router is told to brief. */
