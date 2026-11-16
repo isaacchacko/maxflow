@@ -1,16 +1,16 @@
-import { ExternalLink, GitPullRequest, Network, Radar, SquareKanban, Waypoints } from "lucide-react";
+import { ExternalLink, GitPullRequest, MessagesSquare, Network, Radar, SquareKanban, Waypoints } from "lucide-react";
 import { useState } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor } from "@/mock";
-import { agentStore, objectiveStore, prStore, sentryStore, taskStore } from "@/store";
+import { agentStore, objectiveStore, prStore, sentryStore, taskStore, threadStore } from "@/store";
 
-export type Ref = { kind: "agent" | "router" | "task" | "objective"; id: string };
+export type Ref = { kind: "agent" | "router" | "task" | "objective" | "thread"; id: string };
 type Part = { text: string } | { ref: Ref } | { url: string; label: string } | { image: string };
 
 // An image is markdown pointing at its file in the server's uploads dir, which the server serves by name.
-const TOKEN = /\[\[(agent|router|task|objective):([^\]]+)\]\]|!\[[^\]]*\]\(\S*\/uploads\/([\w.-]+)\)|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
+const TOKEN = /\[\[(agent|router|task|objective|thread):([^\]]+)\]\]|!\[[^\]]*\]\(\S*\/uploads\/([\w.-]+)\)|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
 
 export function parse(text: string): Part[] {
   const parts: Part[] = [];
@@ -32,35 +32,46 @@ export function urlsIn(text: string) {
   return parse(text).flatMap(p => ("url" in p ? [p] : []));
 }
 
+/** A link to a maxflow entity, opened in place; one that no longer exists is struck through and says so on hover. */
 export function RefChip({ r }: { r: Ref }) {
   const agents = agentStore.use();
   const tasks = taskStore.use();
   const objectives = objectiveStore.use();
+  const threads = threadStore.use();
+  const sentries = sentryStore.use();
+
+  const chip = (href: string, found: boolean, icon: React.ReactNode, label: string, mono = false) => (
+    <a
+      href={href}
+      onClick={e => e.stopPropagation()}
+      title={found ? undefined : `No ${r.kind} ${r.id} in maxflow now`}
+      className={cn("inline-flex items-center gap-1 border px-1 align-baseline hover:border-ring", mono ? "font-mono text-[0.85em]" : "text-[0.92em]", !found && "border-dashed text-muted-foreground line-through")}
+    >
+      {icon}
+      {label}
+    </a>
+  );
 
   if (r.kind === "task") {
     const t = tasks.find(x => x.id === r.id);
-    return (
-      <a href={`#task/${r.id}`} onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 border px-1 align-baseline text-[0.92em] hover:border-ring">
-        <span className={cn("size-1.5", t ? statusColor[t.status] : "bg-muted-foreground")} />
-        {t?.title ?? r.id}
-      </a>
-    );
+    return chip(`#task/${r.id}`, !!t, <span className={cn("size-1.5", t ? statusColor[t.status] : "bg-muted-foreground")} />, t?.title ?? r.id);
   }
   if (r.kind === "objective") {
     const o = objectives.find(x => x.id === r.id);
-    return (
-      <a href={`#objective/${r.id}`} onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 border px-1 align-baseline text-[0.92em] hover:border-ring">
-        <Waypoints className="size-3 text-agent" />
-        {o?.title ?? r.id}
-      </a>
-    );
+    return chip(`#objective/${r.id}`, !!o, <Waypoints className="size-3 text-agent" />, o?.title ?? r.id);
+  }
+  if (r.kind === "thread") {
+    const t = threads.find(x => x.id === r.id);
+    return chip(`#thread/${r.id}`, !!t, <MessagesSquare className="size-3 text-sky-400" />, t?.title ?? r.id);
   }
   const a = agents.find(x => x.id === r.id);
-  return (
-    <a href={`#agent/${r.id}`} onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 border px-1 align-baseline font-mono text-[0.85em] hover:border-ring">
-      {a?.role === "router" || r.kind === "router" ? <Network className="size-3 text-fuchsia-400" /> : <span className={cn("size-1.5", a ? agentStateColor[a.state] : "bg-muted-foreground")} />}
-      {a?.name ?? r.id}
-    </a>
+  const sentry = sentries.find(x => x.id === r.id);
+  return chip(
+    `#agent/${r.id}`,
+    !!(a ?? sentry),
+    a?.role === "router" || r.kind === "router" ? <Network className="size-3 text-fuchsia-400" /> : sentry ? <Radar className="size-3 text-muted-foreground" /> : <span className={cn("size-1.5", a ? agentStateColor[a.state] : "bg-muted-foreground")} />,
+    a?.name ?? sentry?.name ?? r.id,
+    true,
   );
 }
 
@@ -88,13 +99,13 @@ export function Rich({ text, className }: { text: string; className?: string }) 
 }
 
 // In markdown a chip is a link to ref:<kind>/<id>, so the link renderer draws it and refs never get parsed twice.
-const asLinks = (text: string) => text.replace(/\[\[(agent|router|task|objective):([^\]]+)\]\]/g, (_, kind, id) => `[ref](ref:${kind}/${encodeURIComponent(id)})`);
+const asLinks = (text: string) => text.replace(/\[\[(agent|router|task|objective|thread):([^\]]+)\]\]/g, (_, kind, id) => `[ref](ref:${kind}/${encodeURIComponent(id)})`);
 
 // A PR or Linear issue named in plain text becomes a link to pr:<owner/repo>/<n> or linear:<key>, so it draws as a chip.
 // Code and existing links are other node types, so nothing inside them changes.
 const LINEAR = "https://linear.app/dryftai/issue";
 const REPO = "dryft-ai/app";
-const NAMED = /(?<![\w/&#-])(?:([\w.-]+\/[\w.-]+)#(\d+)|#(\d{3,})|((?:PRO|DRY|TI)-\d+))\b/g;
+const NAMED = /(?<![\w/&#-])(?:([\w.-]+\/[\w.-]+)#(\d+)|#(\d{3,})|((?:PRO|DRY|TI)-\d+)|(th-[0-9a-f]{6})|(t\d+))\b/g;
 type Node = { type: string; value?: string; url?: string; children?: Node[] };
 function chipNamed(node: Node) {
   if (!node.children || node.type === "link" || node.type === "linkReference") return;
@@ -103,8 +114,10 @@ function chipNamed(node: Node) {
     const out: Node[] = [];
     let last = 0;
     for (const m of child.value!.matchAll(NAMED)) {
+      // A bare tN is a task only when one has that id; otherwise it stays text.
+      if (m[6] && !taskStore.get().some(t => t.id === m[6])) continue;
       if (m.index > last) out.push({ type: "text", value: child.value!.slice(last, m.index) });
-      out.push({ type: "link", url: m[4] ? `linear:${m[4]}` : `pr:${(m[1] ?? REPO).toLowerCase()}/${m[2] ?? m[3]}`, children: [{ type: "text", value: m[0] }] });
+      out.push({ type: "link", url: m[5] ? `ref:thread/${m[5]}` : m[6] ? `ref:task/${m[6]}` : m[4] ? `linear:${m[4]}` : `pr:${(m[1] ?? REPO).toLowerCase()}/${m[2] ?? m[3]}`, children: [{ type: "text", value: m[0] }] });
       last = m.index + m[0].length;
     }
     if (last < child.value!.length) out.push({ type: "text", value: child.value!.slice(last) });
@@ -151,7 +164,8 @@ const md: Components = {
   td: ({ children }) => <td className="border px-2 py-1">{children}</td>,
   hr: () => <hr className="my-3" />,
   a: ({ href = "", children }) => {
-    const ref = href.match(/^ref:(agent|router|task|objective)\/(.+)$/);
+    // [[kind:id]] and bare ids arrive as ref: links; a link to this app (#thread/th-…, or a localhost URL to one) opens in place.
+    const ref = href.match(/^ref:(agent|router|task|objective|thread)\/(.+)$/) ?? href.match(/^(?:https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?\/?)?#(agent|task|objective|thread)\/([^/?#]+)$/);
     if (ref) return <RefChip r={{ kind: ref[1] as Ref["kind"], id: decodeURIComponent(ref[2]!) }} />;
     const pr = href.match(/^pr:([\w.-]+\/[\w.-]+)\/(\d+)$/) ?? href.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/i);
     if (pr) return <PrChip repo={pr[1]!.toLowerCase()} n={pr[2]!} />;
