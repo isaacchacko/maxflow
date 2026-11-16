@@ -143,7 +143,7 @@ function RouterSidebar({ router }: { router: Agent }) {
     <>
       <Section title="Properties">
         <Row label="State">
-          <span className={cn("size-2", agentStateColor[router.state])} />
+          <span className={cn("size-2 rounded-full", agentStateColor[router.state])} />
           {router.state}
         </Row>
         {objective && (
@@ -166,7 +166,7 @@ function RouterSidebar({ router }: { router: Agent }) {
           return (
             <div key={state} className="flex flex-col">
               <p className="flex items-center gap-1.5 pt-1 pb-0.5 text-[11px] text-muted-foreground">
-                <span className={cn("size-1.5", agentStateColor[state])} />
+                <span className={cn("size-1.5 rounded-full", agentStateColor[state])} />
                 {state} · {group.length}
               </p>
               {group.map(a => {
@@ -273,7 +273,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
             <ArrowLeft />
           </a>
         </Button>
-        {agent.role === "router" ? <Network className="size-4 text-router" /> : <span className={cn("size-2.5", agentStateColor[agent.state])} />}
+        {agent.role === "router" ? <Network className="size-4 text-router" /> : <span className={cn("size-2.5 rounded-full", agentStateColor[agent.state])} />}
         <h1 className={cn("text-lg", !agent.name && "font-mono")}>{agent.name ?? agent.id}</h1>
         <Badge variant="outline">{agent.role}</Badge>
         {agent.role === "router" && <span className="truncate text-sm text-muted-foreground">{agent.scope}</span>}
@@ -283,7 +283,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
               const n = crew.filter(a => a.state === state).length;
               return n ? (
                 <span key={state} className="flex items-center gap-1">
-                  <span className={cn("size-1.5", agentStateColor[state])} />
+                  <span className={cn("size-1.5 rounded-full", agentStateColor[state])} />
                   {n} {state}
                 </span>
               ) : null;
@@ -322,7 +322,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
             <>
           <Section title="Properties">
             <Row label="State">
-              <span className={cn("size-2", agentStateColor[agent.state])} />
+              <span className={cn("size-2 rounded-full", agentStateColor[agent.state])} />
               {agent.state}
             </Row>
             <Row label="Role">{agent.role === "router" ? `router · ${crew.length} agents` : "worker"}</Row>
@@ -346,7 +346,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
             {task && (
               <Row label="Task">
                 <a href={`#task/${task.id}`} className="flex min-w-0 items-center gap-1.5 hover:underline">
-                  <span className={cn("size-2 shrink-0", statusColor[task.status])} />
+                  <span className={cn("size-2 shrink-0 rounded-full", statusColor[task.status])} />
                   <span className="truncate">{task.title}</span>
                 </a>
               </Row>
@@ -400,7 +400,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
             {(agent.role === "router" ? crew : siblings).length === 0 && <p className="text-xs text-muted-foreground">None</p>}
             {(agent.role === "router" ? crew : siblings).map(a => (
               <a key={a.id} href={`#agent/${a.id}`} className="flex items-center gap-2 px-1 py-1 text-sm hover:bg-muted">
-                <span className={cn("size-2 shrink-0", agentStateColor[a.state])} />
+                <span className={cn("size-2 shrink-0 rounded-full", agentStateColor[a.state])} />
                 <span className="shrink-0 font-mono text-xs">{a.name ?? a.id}</span>
                 <Rich still text={a.doing} className="truncate text-xs text-muted-foreground" />
               </a>
@@ -437,7 +437,7 @@ function SentryPage({ id, back }: { id: string; back: string }) {
         <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">
           <Section title="Properties">
             <Row label="State">
-              <span className={cn("size-2", sentry.running ? "bg-ok" : "bg-destructive")} />
+              <span className={cn("size-2 rounded-full", sentry.running ? "bg-ok" : "bg-destructive")} />
               {sentry.running ? "running" : "exited"}
             </Row>
             <Row label="Started">{new Date(sentry.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</Row>

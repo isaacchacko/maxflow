@@ -61,7 +61,7 @@ export function RefChip({ r, still }: { r: Ref; still?: boolean }) {
 
   if (r.kind === "task") {
     const t = tasks.find(x => x.id === r.id);
-    return chip(`#task/${r.id}`, !!t, <span className={cn("size-1.5", t ? statusColor[t.status] : "bg-muted-foreground")} />, t?.title ?? r.id);
+    return chip(`#task/${r.id}`, !!t, <span className={cn("size-1.5 rounded-full", t ? statusColor[t.status] : "bg-muted-foreground")} />, t?.title ?? r.id);
   }
   if (r.kind === "objective") {
     const o = objectives.find(x => x.id === r.id);
@@ -92,7 +92,7 @@ export function RefChip({ r, still }: { r: Ref; still?: boolean }) {
   return chip(
     `#agent/${r.id}`,
     !!(a ?? sentry),
-    a?.role === "router" || r.kind === "router" ? <Network className="size-3 text-router" /> : sentry ? <Radar className="size-3 text-muted-foreground" /> : <span className={cn("size-1.5", a ? agentStateColor[a.state] : "bg-muted-foreground")} />,
+    a?.role === "router" || r.kind === "router" ? <Network className="size-3 text-router" /> : sentry ? <Radar className="size-3 text-muted-foreground" /> : <span className={cn("size-1.5 rounded-full", a ? agentStateColor[a.state] : "bg-muted-foreground")} />,
     a?.name ?? sentry?.name ?? r.id,
     true,
   );
