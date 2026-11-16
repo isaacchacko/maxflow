@@ -19,6 +19,13 @@ export function threadUp(id: string, view: string) {
   goToMessage(t.parentId, t.parentMessageId);
 }
 
+/** Resolving is done with a thread, so it climbs a level as Escape does once the server has it; reopening stays put. */
+async function resolveOrReopen(thread: Thread, view: string) {
+  const resolving = !thread.resolved;
+  await setResolved(thread.id, resolving);
+  if (resolving) threadUp(thread.id, view);
+}
+
 // Text selected inside one message, with where to draw its Quote button.
 type Selected = { thread: string; message: string; text: string; x: number; y: number };
 
@@ -122,7 +129,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
         ))}
         <h1 className={cn("truncate text-lg font-semibold", thread.resolved && "text-muted-foreground")}>{thread.title}</h1>
         {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
-        <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-resolve" onClick={() => setResolved(thread.id, !thread.resolved)}>
+        <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-resolve" onClick={() => resolveOrReopen(thread, back)}>
           {thread.resolved ? <RotateCcw /> : <Check />}
           {thread.resolved ? "Reopen" : "Resolve"}
         </Button>

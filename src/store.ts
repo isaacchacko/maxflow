@@ -136,8 +136,8 @@ export async function openSubthread(threadId: string, messageId: string) {
 }
 
 /** Isaac marks a thread done, or reopens it; it stays readable and postable either way. */
-export function setResolved(threadId: string, resolved: boolean) {
-  if (isLive()) return void api(`/api/threads/${threadId}`, { resolved }, "PATCH");
+export async function setResolved(threadId: string, resolved: boolean) {
+  if (isLive()) return void (await api(`/api/threads/${threadId}`, { resolved }, "PATCH"));
   threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: resolved ? { at: NOW_AT } : undefined } : t)));
 }
 
