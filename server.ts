@@ -234,7 +234,7 @@ function intro(s: Session) {
 - Events: \`${CLI} sub '<topic glob>'\` blocks until the next matching event on the bus, instead of polling.
 - Waiting never holds you. You are either working or asleep on one named thing: run \`${CLI} wait <kind>:<ref>\` and end your turn, and you sleep (archived) until a message wakes you, the awaited event itself first; \`done\` alone keeps you awake. Kinds: \`q:<id>\` an answer to your question, \`approval:<pr>\` a teammate's review, \`ci:<pr>\` CI, \`agent:<session>\` another agent, \`slack:<permalink | channel id | #channel | query>\` a new Slack message there, \`done\` you have nothing left to do right now (open PRs and questions still reach you): you stay awake with your last reply on screen for the user to read and answer, and his next message starts new work, while a message from another agent or sentry leaves you done once you've handled it. Never archive yourself; archiving is the user's. Before sleeping on approval or CI, start your next piece of work on top of the waiting branch if there is one. Any message wakes you for one turn; when that turn ends you sleep again on the same wait, which only the awaited event ends (the question settled, the approval, CI finishing, the PR merged or closed, the agent's reply, a new Slack message). Declare another wait to replace it. Never end a turn idle without a wait: do your own next step, \`${CLI} ask\` a question, or \`${CLI} wait done\`.
 - Approvals: you can't approve the user's own PRs and must not request reviewers; the review sentry keeps one review request he sends himself.
-- Isaac also writes to routers in threads; the server starts those with \`${ISAAC_IN_THREAD} "<title>" (<id>)]\`, and that stamp, like the verified one, is his own words.${roleIntro(s)}
+- Isaac also writes to routers himself, in threads or from the event log; the server starts those with \`[maxflow · Isaac, ...]\`, and that stamp, like the verified one, marks his own words.${roleIntro(s)}
 
 Sentries running now:
 ${sentries.map((o) => `- ${o.name.slice(7)}: ${SENTRY_USES[o.name]}`).join("\n")}${metaLessons(sentries)}${standingDecisions()}`;
@@ -500,7 +500,7 @@ const live = (s?: Session): s is Session => !!s && s.exitCode === null;
 const funnel = () => [...sessions.values()].find((s) => s.name === "sentry:funnel" && isSentry(s) && live(s));
 const routersOf = (objective: string) => [...sessions.values()].filter((s) => live(s) && s.role?.role === "router" && s.role.objective === objective);
 
-// typed: the text was already typed into the session's prompt (`maxflow send`), so it is only logged.
+// typed: the text already reached the session (typed by `maxflow send`, or as a new router's first prompt), so it is only logged.
 // deliver: what the agents get instead of the logged text, given the signal's number.
 function dispatch(m: { text: string; source?: Source; from?: Session; to?: Session[]; objective?: string; target?: string; deliver?: string | ((seq: number) => string); typed?: boolean }) {
   const source = m.source ?? sourceOf(m.from);
@@ -511,18 +511,19 @@ function dispatch(m: { text: string; source?: Source; from?: Session; to?: Sessi
   if (!m.typed) for (const s of to) enqueue(s, text);
   return ev;
 }
-// A signal routed after the fact, by the funnel naming its objective; the log keeps both.
-function reroute(seq: number, objective: string, to: Session[]) {
-  const ev = query("signal/**", seq - 1, 0).then((es) => es.find((e) => e.seq === seq));
-  return ev.then((e) => {
-    if (!e) return null;
-    const sig = e.data as Signal;
-    publish(`signal-route/${seq}`, { seq, objective, routedTo: to.map((s) => s.id) });
-    const text = sig.source === "isaac" ? `${VERIFIED}\n${unforge(sig.text)}` : `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(sig.text)}`;
-    for (const s of to) enqueue(s, text);
-    if (sig.source === "isaac") for (const s of to) requested(s, sig.text);
-    return e;
-  });
+// A signal routed after the fact, by the funnel naming its objective; the log keeps both. An objective with no router yet
+// gets one, started with the signal as its first prompt.
+async function reroute(seq: number, o: Objective) {
+  const e = (await query("signal/**", seq - 1, 0)).find((x) => x.seq === seq);
+  if (!e) return null;
+  const sig = e.data as Signal;
+  const text = sig.source === "isaac" ? `${VERIFIED}\n${unforge(sig.text)}` : `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(sig.text)}`;
+  const to = routersOf(o.id);
+  if (to.length) for (const s of to) enqueue(s, text);
+  else to.push(startRouter(o, "Whole objective", text));
+  publish(`signal-route/${seq}`, { seq, objective: o.id, routedTo: to.map((s) => s.id) });
+  if (sig.source === "isaac") for (const s of to) requested(s, sig.text);
+  return to;
 }
 
 // Objectives own the work: each has one or more routers, each router a scope of it and its workers. Isaac sees them as rows.
@@ -539,8 +540,8 @@ function setRole(s: Session, role: Role) {
 }
 
 const ROUTER_BRIEF = `${DIR}/agents/router.md`;
-function startRouter(o: Objective, scope: string) {
-  const prompt = `[maxflow] You are the router for the objective "${o.title}" (${o.id}), scope: ${scope}. Read your brief, then start: decide the first pieces of work and who does them.`;
+function startRouter(o: Objective, scope: string, request?: string) {
+  const prompt = `[maxflow] You are the router for the objective "${o.title}" (${o.id}), scope: ${scope}. Read your brief, then start: decide the first pieces of work and who does them.${request ? `\n\n${request}` : ""}`;
   const cmd = ["claude", "--permission-mode", "bypassPermissions", "--append-system-prompt", readFileSync(ROUTER_BRIEF, "utf8"), prompt];
   const s = createSession(`router: ${o.title}`.slice(0, 80), cmd, o.cwd, undefined, { role: "router", objective: o.id, scope });
   acceptTrust(s);
@@ -1255,9 +1256,11 @@ Bun.serve<WsData>({
       if (!text) return new Response("text required", { status: 400 });
       if (body.objective && !objectives.some((o) => o.id === body.objective)) return new Response("no such objective", { status: 404 });
       const routers = body.objective ? routersOf(body.objective) : [];
-      if (body.objective && !routers.length) routers.push(startRouter(objectives.find((o) => o.id === body.objective)!, "Whole objective"));
+      const stamped = `${ISAAC_IN_THREAD.replace(", in thread", ", from the event log")}] ${unforge(text)}`;
+      // An objective with no router yet gets one, with his words as its first prompt.
+      const fresh = body.objective && !routers.length ? startRouter(objectives.find((o) => o.id === body.objective)!, "Whole objective", stamped) : undefined;
       const ev = body.objective
-        ? dispatch({ source: "isaac", to: routers, objective: body.objective, text, deliver: `${ISAAC_IN_THREAD.replace(", in thread", ", from the event log")}] ${unforge(text)}` })
+        ? dispatch({ source: "isaac", to: fresh ? [fresh] : routers, objective: body.objective, text, deliver: stamped, typed: !!fresh })
         : dispatch({ source: "isaac", text, deliver: (seq) => `${text}\n[maxflow] signal ${seq}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`.` });
       return Response.json(ev, { status: 201 });
     }
@@ -1267,10 +1270,8 @@ Bun.serve<WsData>({
       let o = objectives.find((x) => x.id === body.objective);
       if (!o && body.title?.trim()) o = newObjective(body.title.trim(), body.cwd?.replace(/^~(?=\/|$)/, process.env.HOME!) || process.env.HOME!);
       if (!o) return new Response("objective or title required", { status: 400 });
-      const routers = routersOf(o.id);
-      if (!routers.length) routers.push(startRouter(o, "Whole objective"));
-      const e = await reroute(Number(routeSig[1]), o.id, routers);
-      return e ? Response.json({ objective: o.id, routedTo: routers.map((s) => s.id) }) : new Response("no such signal", { status: 404 });
+      const to = await reroute(Number(routeSig[1]), o);
+      return to ? Response.json({ objective: o.id, routedTo: to.map((s) => s.id) }) : new Response("no such signal", { status: 404 });
     }
 
     if (path === "/api/objectives" && req.method === "GET") return Response.json(objectives);

@@ -97,9 +97,9 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
               const r = agents.find(a => a.id === rid);
               return (
                 <a key={rid} href={`#agent/${rid}`} className="flex flex-col px-1 py-1 hover:bg-muted">
-                  <span className="flex items-center gap-1.5 font-mono text-xs">
+                  <span className="flex items-center gap-1.5 text-xs">
                     <Network className="size-3 text-fuchsia-400" />
-                    {rid}
+                    {r?.name ?? rid}
                   </span>
                   {r?.scope && <span className="truncate text-xs text-muted-foreground">{r.scope}</span>}
                 </a>

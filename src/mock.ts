@@ -370,6 +370,9 @@ export const threads: Thread[] = [
   },
 ];
 
+/** A question an agent raised for Isaac through the questions sentry; pending ones wait on his answer. */
+export type Question = { id: number; session: string; name: string; status: "gating" | "pending"; at: number; thread: { from: "agent" | "user" | "sentry"; text: string; at: number }[] };
+
 /** A sentry session from the live server: one of main's sentries, run in tmux. */
 export type SentrySession = { id: string; name: string; running: boolean; status: string; lastOutputAt: number; createdAt: number; ties: { session: string; label: string }[]; use: string };
 

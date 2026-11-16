@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { NOW_AT, sentries as seedSources, threads as seedThreads, agents as seedAgents, signals as seedSignals, tasks as seedTasks, objectives as seedObjectives, type Block, type Event, type Agent, type SentrySession, type Signal, type Status } from "./mock";
+import { NOW_AT, sentries as seedSources, threads as seedThreads, agents as seedAgents, signals as seedSignals, tasks as seedTasks, objectives as seedObjectives, type Block, type Event, type Agent, type Question, type SentrySession, type Signal, type Status } from "./mock";
 
 export function createStore<T>(initial: T) {
   let state = initial;
@@ -26,6 +26,7 @@ export const threadStore = createStore(seedThreads);
 export const editedStore = createStore<Record<string, number>>({});
 export const sourceStore = createStore(seedSources);
 export const sentryStore = createStore<SentrySession[]>([]);
+export const questionStore = createStore<Question[]>([]);
 /** True once the server answered with real data; until then, or with no server, the stores hold the mock. */
 export const liveStore = createStore(false);
 const isLive = () => liveStore.get();
@@ -131,4 +132,9 @@ export function spawnWorker(router: Agent) {
 export function setArchived(id: string, archived: boolean) {
   if (isLive()) return void api(`/api/sessions/${id}`, { archived }, "PATCH");
   agentStore.set(all => all.map(a => (a.id === id ? { ...a, state: archived ? "asleep" : "working" } : a)));
+}
+
+/** Isaac answers or dismisses an agent's question; the answer is typed into its prompt. */
+export function settleQuestion(id: number, action: "reply" | "dismiss", text?: string) {
+  return api(`/api/questions/${id}`, { action, text });
 }
