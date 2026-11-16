@@ -1,5 +1,5 @@
 import type { ServerWebSocket, Subprocess } from "bun";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
@@ -1670,3 +1670,16 @@ Bun.serve<WsData>({
 });
 
 console.log(`maxflow listening on http://localhost:${PORT}`);
+
+// Bun's page bundler never sees a source file created after it started, so an import of one fails until a restart.
+// Exiting lets the service manager restart it; the tmux sessions outlive it.
+const known = new Set<string>();
+watch(`${DIR}/src`, { recursive: true }, (_, file) => {
+  if (!file || !/\.(tsx?|css)$/.test(file)) return;
+  const path = `${DIR}/src/${file}`;
+  if (known.has(path) || !existsSync(path)) return;
+  known.add(path);
+  console.log(`new source file ${file}, restarting so the bundler sees it`);
+  setTimeout(() => process.exit(0), 500);
+});
+for (const f of new Bun.Glob("**/*.{ts,tsx,css}").scanSync(`${DIR}/src`)) known.add(`${DIR}/src/${f}`);

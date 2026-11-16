@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { ChipView, SearchPalette, hits, isActive, type Filter, type NodeMeta } from "@/views/SearchPalette";
 import { NOW_AT, agentStateColor, objectiveStatus, statusColor, type Agent, type Signal, type Source, type Thread } from "@/mock";
+import { EventDrawer } from "@/views/EventDrawer";
 import { agentStore, objectiveStore, pathOf, signalStore, sourceStore, splitRouter, taskStore, threadStore } from "@/store";
 import { Rich } from "@/threads/Rich";
 
@@ -193,6 +194,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
   const [shown, setShown] = useState<Set<Source>>(new Set(["isaac", "gh", "slack", "agent", "sentry", "maxflow"]));
   const [draft, setDraft] = useState("");
   const [fresh, setFresh] = useState<string>();
+  const [reading, setReading] = useState<string>();
   const [splitting, setSplitting] = useState<string>();
   const [scope, setScope] = useState("");
 
@@ -719,8 +721,10 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
                         <li
                           key={s.id}
                           {...node(id)}
+                          onClick={() => setReading(s.id)}
                           className={cn(
-                            "flex items-center gap-3 rounded-lg border bg-card px-3 py-2 text-sm",
+                            "flex cursor-pointer items-center gap-3 rounded-lg border bg-card px-3 py-2 text-sm hover:border-ring",
+                            reading === s.id && "border-ring",
                             fresh === s.id && "agent-edited animate-in fade-in slide-in-from-top-2",
                           )}
                         >
@@ -776,6 +780,11 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
           </section>
         </div>
       </div>
+      {reading && signals.some(x => x.id === reading) && (
+        <div onClick={e => e.stopPropagation()}>
+          <EventDrawer signal={signals.find(x => x.id === reading)!} onClose={() => setReading(undefined)} />
+        </div>
+      )}
       <div onClick={e => e.stopPropagation()}>
         <SearchPalette
         open={palette}
