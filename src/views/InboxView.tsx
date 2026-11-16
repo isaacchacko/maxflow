@@ -23,40 +23,60 @@ function askedAt(t: Thread) {
 const firstLine = (text: string) => text.replace(/!\[[^\]]*\]\([^)]*\)/g, "").trim().split("\n")[0] ?? "";
 const today = (at: string) => new Date(at).toDateString() === new Date().toDateString();
 
-/** A command he gave: one line, ✻ while its router works and ✓ with the result its router posted; open, it shows the exchange. */
-function CommandRow({ t, active, open, menu, onToggle, onResolve }: { t: Thread; active: boolean; open: boolean; menu: (MenuItem | false | undefined)[]; onToggle(): void; onResolve(): void }) {
+/** Wide enough for the commands to have a column of their own beside the conversations. */
+const WIDE = "(min-width: 1100px)";
+function useWide() {
+  const [wide, setWide] = useState(() => matchMedia(WIDE).matches);
+  useEffect(() => {
+    const m = matchMedia(WIDE);
+    const on = () => setWide(m.matches);
+    m.addEventListener("change", on);
+    return () => m.removeEventListener("change", on);
+  }, []);
+  return wide;
+}
+
+/**
+ * A command he gave: one line, ✻ while its router works and ✓ with the result its router posted; open, it shows the exchange.
+ * Compact, in the sidebar, the line is the glyph, the ask and its age, with the result on hover and the buttons in place of the age.
+ */
+function CommandRow({ t, active, open, compact, menu, onToggle, onResolve }: { t: Thread; active: boolean; open: boolean; compact?: boolean; menu: (MenuItem | false | undefined)[]; onToggle(): void; onResolve(): void }) {
   const asked = t.messages.find(m => m.from === "isaac") ?? t.messages[0];
   const result = t.done ? (t.messages.findLast(m => m.re) ?? t.messages.at(-1)) : undefined;
   const last = t.messages.at(-1)?.at ?? "";
+  const status = result ? firstLine(result.text) : t.pending?.status ? `${t.pending.status}…` : "router working on it…";
   return (
     <RowMenu agent={t.id} items={menu}>
     <li {...vimRow(t.id)} className="group border-b last:border-b-0">
       <div
         data-agent={`command:${t.id}`}
         onClick={e => (e.target as Element).closest("a, button") || onToggle()}
+        title={compact ? status : undefined}
         className={cn("flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-sm hover:bg-muted/40", active && "bg-muted/40 shadow-[inset_2px_0_0_var(--color-sky-400)]", t.resolved && "opacity-50")}
       >
         {result ? <Check className="size-3.5 shrink-0 text-emerald-400" /> : <span className="inline-block w-3.5 shrink-0 animate-spin text-center text-agent">✻</span>}
-        <Rich still text={firstLine(asked?.text ?? t.title) || t.title} className="w-80 shrink-0 truncate" />
-        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-          {result ? <Rich still text={firstLine(result.text)} /> : t.pending?.status ? <Rich still text={`${t.pending.status}…`} /> : "router working on it…"}
-        </span>
+        <Rich still text={firstLine(asked?.text ?? t.title) || t.title} className={cn("truncate", compact ? "min-w-0 flex-1" : "w-80 shrink-0")} />
+        {!compact && (
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            <Rich still text={status} />
+          </span>
+        )}
         <button
           data-agent={`talk-it-through:${t.id}`}
           title="Make it a conversation: its router keeps the thread open and talks it through with you"
           onClick={() => setKind(t.id, "conversation")}
-          className="flex shrink-0 items-center gap-1 border px-1.5 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 hover:border-ring hover:text-foreground"
+          className={cn("flex shrink-0 items-center gap-1 border px-1.5 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 hover:border-ring hover:text-foreground", compact && "hidden py-0.5 group-hover:flex")}
         >
           <KINDS.conversation.icon className="size-3" />
-          talk it through
+          {!compact && "talk it through"}
         </button>
-        <button data-agent={`inbox-resolve:${t.id}`} title={t.resolved ? "Reopen" : "Resolve"} onClick={onResolve} className={cn("shrink-0 border p-0.5 hover:border-ring", t.resolved ? "text-emerald-400" : "text-muted-foreground opacity-0 group-hover:opacity-100")}>
+        <button data-agent={`inbox-resolve:${t.id}`} title={t.resolved ? "Reopen" : "Resolve"} onClick={onResolve} className={cn("shrink-0 border p-0.5 hover:border-ring", t.resolved ? "text-emerald-400" : "text-muted-foreground opacity-0 group-hover:opacity-100", compact && "hidden group-hover:block")}>
           <Check className="size-3" />
         </button>
-        <span className="w-8 shrink-0 text-right text-xs text-muted-foreground tabular-nums">{last && ago(Date.parse(last))}</span>
+        <span className={cn("w-8 shrink-0 text-right text-xs text-muted-foreground tabular-nums", compact && "group-hover:hidden")}>{last && ago(Date.parse(last))}</span>
       </div>
       {open && (
-        <div className="border-t bg-muted/15 px-5 py-2">
+        <div className={cn("border-t bg-muted/15 py-2", compact ? "px-3" : "px-5")}>
           <ShotScope.Provider value={shotsOf(t.messages)}>
             {t.messages.map((m, i) => (
               <MessageRow key={m.id ?? i} from={m.from} at={m.at} text={m.text} />
@@ -95,6 +115,10 @@ export function InboxView() {
   const allCommands = rows.filter(r => !r.t.asks && r.t.kind === "command");
   const commands = allCommands.filter(r => earlier || today(r.t.messages.at(-1)?.at ?? r.t.messages[0]?.at ?? ""));
   const conversations = rows.filter(r => !r.t.asks && r.t.kind !== "command");
+  // Wide, the commands sit in a sticky column on the right; narrow, in a strip above the conversations, its first 3 until he asks.
+  const wide = useWide();
+  const [more, setMore] = useState(false);
+  const shown = wide || more ? commands : commands.slice(0, 3);
   const toggle = (t: Thread) => (setKept(k => new Set(k).add(t.id)), setResolved(t.id, !t.resolved));
   // Drawing an ask flagged, on a page he has in front of him, starts the clock on its agent's default.
   const unshown = rows.filter(r => r.t.asks && !r.t.asks.shown).map(r => r.t.id);
@@ -107,7 +131,10 @@ export function InboxView() {
   const reply = (id: string) => (composeOnArrival(), (location.hash = `thread/${id}`));
   // Right-click offers what the keys do, on the row it was clicked on.
   const menu = (t: Thread) => threadItems(t, threads, { open: () => open(t.id), reply: () => reply(t.id), resolve: () => toggle(t) });
-  const vim = useVim("inbox", [...needsYou, ...commands, ...conversations].map(r => r.t.id), scrollRef, "first", {
+  // j/k walk the page in reading order: the asks, then the conversations and the commands' column, or the strip above them.
+  const main = [...needsYou, ...conversations].map(r => r.t.id);
+  const side = shown.map(r => r.t.id);
+  const vim = useVim("inbox", wide ? [...main, ...side] : [...needsYou.map(r => r.t.id), ...side, ...conversations.map(r => r.t.id)], scrollRef, "first", {
     compose: () => document.querySelector<HTMLElement>('[data-agent="inbox-input"]')?.focus(),
     open,
     reply,
@@ -115,6 +142,8 @@ export function InboxView() {
       const t = threads.find(x => x.id === id);
       if (t) toggle(t);
     },
+    // ] jumps to the commands, [ back to the asks and conversations.
+    section: dir => (dir > 0 ? side[0] : main[0]),
   });
 
   const conversationRow = (t: Thread) => {
@@ -170,39 +199,50 @@ export function InboxView() {
       );
   };
 
-  return (
-    <div ref={scrollRef} className="flex h-full flex-col gap-3 overflow-y-auto p-4">
-      {vim.panel}
-      <Composer autoFocus agent="inbox-input" draftKey="inbox" onSend={startThread} className="max-w-4xl border px-3 py-2.5" />
-      {resolved > 0 && (
-        <button data-agent="inbox-resolved" onClick={() => setShowResolved(v => !v)} className={cn("flex w-fit items-center gap-1.5 border px-2 py-0.5 text-xs text-muted-foreground hover:border-ring", showResolved && "border-ring text-foreground")}>
-          <Check className="size-3" />
-          Resolved ({resolved})
-        </button>
-      )}
-      {needsYou.length > 0 && <ol className="flex max-w-4xl flex-col border border-amber-400/40">{needsYou.map(({ t }) => conversationRow(t))}</ol>}
-      {allCommands.length > 0 && (
-        <section data-agent="inbox-commands" className="flex max-w-4xl flex-col gap-1">
-          <h2 className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-            <KINDS.command.icon className="size-3 text-amber-400" />
-            Commands · {earlier ? "all" : "today"}
-            {allCommands.length > commands.length || earlier ? (
-              <button data-agent="inbox-commands-earlier" onClick={() => setEarlier(v => !v)} className="font-normal tracking-normal normal-case hover:text-foreground">
-                {earlier ? "today only" : `+ ${allCommands.length - commands.length} earlier`}
-              </button>
-            ) : null}
-          </h2>
-          <ol className="flex flex-col border empty:hidden">
-            {commands.map(({ t }) => (
-              <CommandRow key={t.id} t={t} active={vim.cursor === t.id} open={opened === t.id} menu={menu(t)} onToggle={() => setOpened(o => (o === t.id ? undefined : t.id))} onResolve={() => toggle(t)} />
-            ))}
-          </ol>
-        </section>
-      )}
-      {allCommands.length > 0 && conversations.length > 0 && <h2 className="max-w-4xl text-xs font-semibold tracking-wide text-muted-foreground uppercase">Conversations</h2>}
-      <ol className="flex max-w-4xl flex-col border empty:hidden">
-        {conversations.map(({ t }) => conversationRow(t))}
+  const strip = allCommands.length > 0 && (
+    <section data-agent="inbox-commands" className="flex flex-col gap-1">
+      <h2 className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        <KINDS.command.icon className="size-3 text-amber-400" />
+        Commands · {earlier ? "all" : "today"}
+      </h2>
+      <ol className="flex flex-col border empty:hidden">
+        {shown.map(({ t }) => (
+          <CommandRow key={t.id} t={t} compact={wide} active={vim.cursor === t.id} open={opened === t.id} menu={menu(t)} onToggle={() => setOpened(o => (o === t.id ? undefined : t.id))} onResolve={() => toggle(t)} />
+        ))}
       </ol>
+      <p className="flex gap-3 text-xs text-muted-foreground empty:hidden">
+        {!wide && commands.length > 3 && (
+          <button data-agent="inbox-commands-more" onClick={() => setMore(v => !v)} className="hover:text-foreground">
+            {more ? "show 3" : `+ ${commands.length - 3} more`}
+          </button>
+        )}
+        {(allCommands.length > commands.length || earlier) && (
+          <button data-agent="inbox-commands-earlier" onClick={() => setEarlier(v => !v)} className="hover:text-foreground">
+            {earlier ? "today only" : `+ ${allCommands.length - commands.length} earlier`}
+          </button>
+        )}
+      </p>
+    </section>
+  );
+
+  return (
+    <div ref={scrollRef} className="flex h-full gap-6 overflow-y-auto p-4">
+      {vim.panel}
+      <div className="flex max-w-4xl min-w-0 flex-1 flex-col gap-3">
+        <Composer autoFocus agent="inbox-input" draftKey="inbox" onSend={startThread} className="border px-3 py-2.5" />
+        {resolved > 0 && (
+          <button data-agent="inbox-resolved" onClick={() => setShowResolved(v => !v)} className={cn("flex w-fit items-center gap-1.5 border px-2 py-0.5 text-xs text-muted-foreground hover:border-ring", showResolved && "border-ring text-foreground")}>
+            <Check className="size-3" />
+            Resolved ({resolved})
+          </button>
+        )}
+        {needsYou.length > 0 && <ol className="flex flex-col border border-amber-400/40">{needsYou.map(({ t }) => conversationRow(t))}</ol>}
+        {!wide && strip}
+        {!wide && strip && conversations.length > 0 && <h2 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Conversations</h2>}
+        <ol className="flex flex-col border empty:hidden">{conversations.map(({ t }) => conversationRow(t))}</ol>
+      </div>
+      {/* Sticky, so the commands stay in view while the conversations scroll under them. */}
+      {wide && strip && <aside className="sticky top-0 max-h-[calc(100dvh-6rem)] w-80 shrink-0 self-start overflow-y-auto">{strip}</aside>}
     </div>
   );
 }
