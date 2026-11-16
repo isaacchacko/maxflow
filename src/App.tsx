@@ -7,10 +7,12 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { TaskPage } from "@/page/TaskPage";
 import { GraphView } from "@/views/GraphView";
 import { KanbanView } from "@/views/KanbanView";
+import { TimelineView } from "@/views/TimelineView";
 
 const views = [
   { id: "graph", label: "Graph", key: "1", View: GraphView },
   { id: "kanban", label: "Kanban", key: "2", View: KanbanView },
+  { id: "timeline", label: "Timeline", key: "3", View: TimelineView },
 ] as const;
 
 type ViewId = (typeof views)[number]["id"];

@@ -44,9 +44,9 @@ const pinned = new Set<Block["kind"]>(["status", "activity", "question"]);
 
 async function openTask(task: Task) {
   if (location.hash === `#task/${task.id}`) return;
-  const view = location.hash.startsWith("#graph") ? "graph" : "kanban";
+  const view = (["graph", "timeline"] as const).find(v => location.hash.startsWith(`#${v}`)) ?? "kanban";
   if (!location.hash.startsWith(`#${view}`)) await click(`tab:${view}`);
-  await click(`${view === "graph" ? "node" : "card"}:${task.id}`);
+  await click(`${{ graph: "node", kanban: "card", timeline: "bar" }[view]}:${task.id}`);
 }
 
 async function editPage(task: Task, draft: Draft, say: (s: string) => void) {

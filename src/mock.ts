@@ -26,9 +26,15 @@ export type Task = {
   agent?: string;
   pr?: number;
   dependsOn: string[];
+  start: string;
+  end?: string;
   events: Event[];
   page: Block[];
 };
+
+export type Thread = { id: string; title: string; taskIds: string[] };
+
+export const NOW = new Date("2026-11-15T14:00:00");
 
 export const GRID_COLS = 12;
 export const GRID_ROWS = 6;
@@ -41,6 +47,7 @@ export const tasks: Task[] = [
     agent: "mf-1",
     pr: 6250,
     dependsOn: [],
+    start: "2026-11-10T09:00",
     events: [
       { from: "isaac", at: "09:12", text: "$skip+$top is quadratic on the big tenants. Swap it for keyset." },
       { from: "agent", at: "09:40", text: "Count-gated hybrid in: $skip under 5k rows, keyset above." },
@@ -69,6 +76,7 @@ export const tasks: Task[] = [
     title: "Backfill exception intake after pagination lands",
     status: "todo",
     dependsOn: ["t1"],
+    start: "2026-11-15T09:15",
     events: [{ from: "isaac", at: "09:15", text: "Once #6250 merges, re-run intake for the last 30 days." }],
     page: [
       { id: "b1", kind: "status", w: 6, h: 2, summary: "Blocked on #6250. Re-runs intake for the last 30 days once the pager merges." },
@@ -81,6 +89,7 @@ export const tasks: Task[] = [
     status: "doing",
     agent: "mf-2",
     dependsOn: [],
+    start: "2026-11-13T08:50",
     events: [
       { from: "isaac", at: "08:50", text: "Why do overdue cases stay open after SAP clears them?" },
       { from: "agent", at: "09:30", text: "full_snapshot is false for Festo, so the close path never sees 'cleared'." },
@@ -102,6 +111,7 @@ export const tasks: Task[] = [
     title: "Close-path reconciler",
     status: "todo",
     dependsOn: ["t3"],
+    start: "2026-11-15T10:00",
     events: [],
     page: [{ id: "b1", kind: "status", w: 6, h: 2, summary: "Waiting on the decision in the overdue-cases task." }],
   },
@@ -112,6 +122,8 @@ export const tasks: Task[] = [
     agent: "mf-3",
     pr: 42,
     dependsOn: [],
+    start: "2026-11-11T11:00",
+    end: "2026-11-14T16:00",
     events: [{ from: "agent", at: "Yesterday", text: "Merged. Card badge reads open / draft / merged from the gh sentry." }],
     page: [
       { id: "b1", kind: "status", w: 6, h: 2, summary: "Merged. Cards show open, draft or merged from the gh sentry." },
@@ -126,6 +138,7 @@ export const tasks: Task[] = [
     agent: "mf-4",
     pr: 7149,
     dependsOn: [],
+    start: "2026-11-14T15:00",
     events: [{ from: "agent", at: "10:20", text: "Style commit pushed. Two judgment calls drafted as review comments." }],
     page: [
       { id: "b1", kind: "status", w: 4, h: 2, summary: "Style commit pushed. Two judgment calls are drafted and need your OK before the review goes out." },
@@ -136,6 +149,51 @@ export const tasks: Task[] = [
       { id: "b4", kind: "activity", w: 12, h: 2 },
     ],
   },
+  {
+    id: "t7",
+    title: "Measure $skip cost per page",
+    status: "done",
+    agent: "mf-1",
+    dependsOn: [],
+    start: "2026-11-03T10:00",
+    end: "2026-11-06T17:00",
+    events: [{ from: "agent", at: "Nov 6", text: "Page cost grows linearly with $skip: 0.2s at page 1, 9.8s at page 200." }],
+    page: [
+      { id: "b1", kind: "status", w: 6, h: 2, summary: "Measured: each page re-reads every row before it, so a full sweep is quadratic." },
+      { id: "b2", kind: "chart", w: 6, h: 2, title: "Seconds per page by page number", style: "line", unit: "s", points: [0.2, 1.1, 2.3, 3.6, 4.8, 6.1, 7.4, 8.6, 9.8] },
+      { id: "b3", kind: "activity", w: 12, h: 2 },
+    ],
+  },
+  {
+    id: "t8",
+    title: "Review #7102 for style",
+    status: "done",
+    agent: "mf-4",
+    pr: 7102,
+    dependsOn: [],
+    start: "2026-11-05T13:00",
+    end: "2026-11-07T11:00",
+    events: [{ from: "agent", at: "Nov 7", text: "Approved with two nits." }],
+    page: [{ id: "b1", kind: "status", w: 6, h: 2, summary: "Approved with two nits after one style commit." }, { id: "b2", kind: "activity", w: 6, h: 2 }],
+  },
+  {
+    id: "t9",
+    title: "Trace why overdue cases pile up",
+    status: "done",
+    agent: "mf-2",
+    dependsOn: [],
+    start: "2026-11-08T09:00",
+    end: "2026-11-12T18:00",
+    events: [{ from: "agent", at: "Nov 12", text: "Cases close only on full snapshots. Handed off to the closing fix." }],
+    page: [{ id: "b1", kind: "status", w: 6, h: 2, summary: "Overdue cases only close on full-snapshot runs, and Festo never sends one." }, { id: "b2", kind: "activity", w: 6, h: 2 }],
+  },
+];
+
+export const threads: Thread[] = [
+  { id: "festo-perf", title: "Festo gateway performance", taskIds: ["t7", "t1", "t2"] },
+  { id: "overdue", title: "Overdue cases never close", taskIds: ["t9", "t3", "t4"] },
+  { id: "board", title: "maxflow board", taskIds: ["t5"] },
+  { id: "reviews", title: "Style reviews", taskIds: ["t8", "t6"] },
 ];
 
 export const columns: { status: Status; label: string }[] = [
