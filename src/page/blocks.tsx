@@ -251,11 +251,11 @@ function TasksBlock({ subject }: Props<"tasks">) {
 export function AgentRow({ id, indent }: { id: string; indent?: boolean }) {
   const agent = agentStore.use().find(a => a.id === id)!;
   return (
-    <div data-agent={`agent:${id}`} className={cn("flex items-center gap-2 py-1 text-sm", indent && "ml-3 border-l pl-4")}>
+    <a href={`#agent/${id}`} data-agent={`agent:${id}`} className={cn("flex items-center gap-2 py-1 text-sm hover:bg-muted", indent && "ml-3 border-l pl-4")}>
       {agent.role === "router" ? <Network className="size-3.5 shrink-0 text-fuchsia-400" /> : <span className={cn("ml-1 size-2 shrink-0 rounded-full", agentStateColor[agent.state])} />}
       <span className="shrink-0 font-mono text-xs">{agent.id}</span>
       <span className="truncate text-muted-foreground">{agent.doing}</span>
-    </div>
+    </a>
   );
 }
 

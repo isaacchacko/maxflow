@@ -489,7 +489,9 @@ export function RoutingView() {
       >
         <div className="flex items-center gap-2">
           <Network className="size-3.5 text-fuchsia-400" />
-          <span className="font-mono text-xs">{r.id}</span>
+          <a href={`#agent/${r.id}`} onClick={e => e.stopPropagation()} className="font-mono text-xs hover:underline">
+            {r.id}
+          </a>
           <span className={cn("size-1.5 rounded-full", agentStateColor[r.state])} />
           <span className="ml-auto text-xs text-muted-foreground">{crew} {crew === 1 ? "agent" : "agents"}</span>
         </div>
@@ -506,7 +508,9 @@ export function RoutingView() {
       <Card {...node(id)} className={cn("cursor-pointer gap-1 px-3 py-2.5 transition-opacity", dim(id) && "opacity-30", focus === id && "border-agent")}>
         <div className="flex items-center gap-2">
           <span className={cn("size-2 rounded-full", agentStateColor[w.state], w.state === "working" && "animate-pulse")} />
-          <span className="font-mono text-xs">{w.id}</span>
+          <a href={`#agent/${w.id}`} onClick={e => e.stopPropagation()} className="font-mono text-xs hover:underline">
+            {w.id}
+          </a>
           <span className="ml-auto text-xs text-muted-foreground">{w.state}</span>
         </div>
         <p className="truncate text-xs text-muted-foreground">{w.doing}</p>

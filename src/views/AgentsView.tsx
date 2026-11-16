@@ -10,7 +10,7 @@ function WorkerCard({ agent }: { agent: Agent }) {
   const current = tasks.find(t => agent.taskIds.includes(t.id) && t.status !== "done") ?? tasks.find(t => t.id === agent.taskIds.at(-1));
   return (
     <div className="relative ml-4 pl-4 before:absolute before:top-0 before:left-0 before:h-1/2 before:w-3 before:rounded-bl-md before:border-b before:border-l">
-      <Card data-agent={`agent:${agent.id}`} className="gap-1 px-3 py-2.5">
+      <Card data-agent={`agent:${agent.id}`} onClick={() => (location.hash = `agent/${agent.id}`)} className="cursor-pointer gap-1 px-3 py-2.5 hover:border-ring">
         <div className="flex items-center gap-2">
           <span className={cn("size-2 rounded-full", agentStateColor[agent.state], agent.state === "working" && "animate-pulse")} />
           <span className="font-mono text-xs">{agent.id}</span>
@@ -58,7 +58,7 @@ export function AgentsView() {
               </a>
               {routers.map(router => (
                 <div key={router.id} className="flex flex-col gap-2">
-                  <Card data-agent={`agent:${router.id}`} className="gap-1 border-fuchsia-400/30 px-3 py-2.5">
+                  <Card data-agent={`agent:${router.id}`} onClick={() => (location.hash = `agent/${router.id}`)} className="cursor-pointer gap-1 border-fuchsia-400/30 px-3 py-2.5 hover:border-fuchsia-400">
                     <div className="flex items-center gap-2">
                       <Network className="size-3.5 text-fuchsia-400" />
                       <span className="font-mono text-xs">{router.id}</span>

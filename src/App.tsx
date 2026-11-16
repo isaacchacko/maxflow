@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AgentChat } from "@/agent/AgentChat";
 import { AgentCursor } from "@/agent/AgentCursor";
+import { AgentPage } from "@/agent/AgentPage";
 import { Kbd } from "@/components/ui/kbd";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -19,7 +20,7 @@ const views = [
 ] as const;
 
 type ViewId = (typeof views)[number]["id"];
-type Route = { view: ViewId; page?: PageRef };
+type Route = { view: ViewId; page?: PageRef; agent?: string };
 
 function lastView(): ViewId {
   try {
@@ -32,6 +33,7 @@ function lastView(): ViewId {
 function routeFromHash(): Route {
   const [first, id] = location.hash.slice(1).split("/");
   if ((first === "task" || first === "objective") && id) return { view: lastView(), page: `${first}/${id}` as PageRef };
+  if (first === "agent" && id) return { view: lastView(), agent: id };
   const view = views.find(v => v.id === first)?.id ?? "routing";
   try {
     sessionStorage.setItem("view", view);
@@ -46,7 +48,7 @@ export function App() {
     const onHash = () => setRoute(routeFromHash());
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === "Escape" && routeFromHash().page) location.hash = route.view;
+      if (e.key === "Escape" && (routeFromHash().page || routeFromHash().agent)) location.hash = route.view;
       const match = views.find(v => v.key === e.key);
       if (match) location.hash = match.id;
     };
@@ -65,7 +67,7 @@ export function App() {
       <div className="flex h-full flex-col">
         <header className="flex items-center gap-6 border-b px-4 py-2">
           <span className="font-semibold tracking-tight">maxflow</span>
-          <Tabs value={route.page ? "" : route.view} onValueChange={v => (location.hash = v)}>
+          <Tabs value={route.page || route.agent ? "" : route.view} onValueChange={v => (location.hash = v)}>
             <TabsList>
               {views.map(v => (
                 <TabsTrigger key={v.id} value={v.id} data-agent={`tab:${v.id}`} className="gap-2">
@@ -77,7 +79,13 @@ export function App() {
           </Tabs>
         </header>
         <main className="min-h-0 flex-1 overflow-hidden">
-          {route.page ? <Page key={route.page} pageRef={route.page} back={route.view} /> : <View />}
+          {route.agent ? (
+            <AgentPage key={route.agent} id={route.agent} back={route.view} />
+          ) : route.page ? (
+            <Page key={route.page} pageRef={route.page} back={route.view} />
+          ) : (
+            <View />
+          )}
         </main>
         <AgentChat />
         <AgentCursor />
