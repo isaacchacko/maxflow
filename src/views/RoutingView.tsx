@@ -88,6 +88,62 @@ function trace(focus: string, signals: Signal[], paths: Map<string, Path>, agent
   return { lit, nodes };
 }
 
+const ROW_GAP = 20;
+const STACK_GAP = 6;
+
+/**
+ * Where each card in the objectives, routers and agents columns sits for a view. Each pair of columns in view
+ * is laid out as rows: a parent beside its stacked children, top-aligned, so a big stack pushes the next row down.
+ */
+function layoutStructure(snap: number, objectives: { id: string }[], routers: Agent[], agents: Agent[], height: (id: string) => number) {
+  const y = new Map<string, number>();
+  const bottoms: number[] = [];
+
+  const byObjective = () => {
+    let top = 0;
+    for (const o of objectives) {
+      y.set(`obj:${o.id}`, top);
+      let stack = top;
+      for (const r of routers.filter(r => r.objectiveId === o.id)) {
+        y.set(`router:${r.id}`, stack);
+        stack += height(`router:${r.id}`) + STACK_GAP;
+      }
+      top = Math.max(top + height(`obj:${o.id}`), stack - STACK_GAP) + ROW_GAP;
+    }
+    bottoms.push(top);
+  };
+
+  const byRouter = (placeRouters: boolean) => {
+    let top = 0;
+    for (const o of objectives) {
+      for (const r of routers.filter(r => r.objectiveId === o.id)) {
+        if (placeRouters) y.set(`router:${r.id}`, top);
+        const crew = agents.filter(w => w.parent === r.id).map(w => `agent:${w.id}`);
+        let stack = top;
+        for (const id of crew.length ? crew : [`empty:${r.id}`]) {
+          y.set(id, stack);
+          stack += height(id) + STACK_GAP;
+        }
+        top = Math.max(top + (placeRouters ? height(`router:${r.id}`) : 0), stack - STACK_GAP) + STACK_GAP * 2;
+      }
+      top += ROW_GAP - STACK_GAP * 2;
+    }
+    bottoms.push(top);
+  };
+
+  byObjective();
+  if (snap === 0) {
+    let top = 0;
+    for (const o of objectives) {
+      y.set(`obj:${o.id}`, top);
+      top += height(`obj:${o.id}`) + STACK_GAP * 2;
+    }
+  }
+  byRouter(snap === 2);
+
+  return { y, height: Math.max(...bottoms), signature: `${snap}:${[...y.values()].join(",")}` };
+}
+
 function lastSnap() {
   try {
     return Number(sessionStorage.getItem("routing-snap") ?? 0);
@@ -244,6 +300,151 @@ export function RoutingView() {
     go(index > snap ? index - 1 : index);
   };
 
+  const heights = useRef(new Map<string, number>());
+  const [, setHeightsVersion] = useState(0);
+  const sizer = useRef<ResizeObserver>(undefined);
+  sizer.current ??= new ResizeObserver(entries => {
+    let changed = false;
+    for (const entry of entries) {
+      const id = (entry.target as HTMLElement).dataset.place!;
+      const h = Math.round(entry.contentRect.height);
+      if (heights.current.get(id) !== h) {
+        heights.current.set(id, h);
+        changed = true;
+      }
+    }
+    if (changed) setHeightsVersion(v => v + 1);
+  });
+
+  const placed = layoutStructure(snap, objectives, routers, agents, id => heights.current.get(id) ?? 96);
+
+  useEffect(() => {
+    let frame = 0;
+    const until = performance.now() + 650;
+    const tick = () => {
+      measure();
+      if (performance.now() < until) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [measure, placed.signature]);
+
+  const place = (id: string, column: number, card: React.ReactNode) => (
+    <div
+      key={id}
+      data-place={id}
+      ref={el => {
+        if (el) sizer.current!.observe(el);
+      }}
+      onClickCapture={capture(1 + column)}
+      className={cn("absolute top-0 transition-[transform,opacity] duration-500 ease-in-out", faded(1 + column) && "opacity-35")}
+      style={{ width: col, left: column * (col + GAP), transform: `translateY(${placed.y.get(id) ?? 0}px)` }}
+    >
+      {card}
+    </div>
+  );
+
+  const objectiveCard = (o: (typeof objectives)[number]) => {
+    const id = `obj:${o.id}`;
+    const own = tasks.filter(t => o.taskIds.includes(t.id));
+    const status = objectiveStatus(own.map(t => t.status));
+    const vision = o.page.find(b => b.kind === "vision");
+    const count = routers.filter(r => r.objectiveId === o.id).length;
+    return (
+      <Card {...node(id)} className={cn("cursor-pointer gap-2 px-4 py-3 transition-opacity", dim(id) && "opacity-30", focus === id && "border-agent")}>
+        <div className="flex items-center gap-2">
+          <Waypoints className="size-4 shrink-0 text-agent" />
+          <span className="truncate font-medium">{o.title}</span>
+          <a href={`#objective/${o.id}`} data-agent={`objective:${o.id}`} onClick={e => e.stopPropagation()} className="ml-auto text-muted-foreground hover:text-foreground">
+            <SquareArrowOutUpRight className="size-3.5" />
+          </a>
+        </div>
+        {vision?.kind === "vision" && <p className="line-clamp-2 text-xs text-muted-foreground">{vision.goal}</p>}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className={cn("size-1.5 rounded-full", statusColor[status])} />
+          {status} · {own.filter(t => t.status === "done").length}/{own.length} tasks
+          <Badge variant="outline" className="ml-auto text-[10px]">
+            {count === 1 ? "1 router" : `split · ${count} routers`}
+          </Badge>
+        </div>
+        {splitting === o.id ? (
+          <form onSubmit={e => split(e, o.id)} onClick={e => e.stopPropagation()}>
+            <Input
+              autoFocus
+              value={scope}
+              onChange={e => setScope(e.target.value)}
+              onKeyDown={e => e.key === "Escape" && setSplitting(undefined)}
+              placeholder="Subcomponent the new router owns…"
+              className="h-7 text-xs"
+            />
+          </form>
+        ) : (
+          <button
+            onClick={e => {
+              e.stopPropagation();
+              setSplitting(o.id);
+            }}
+            className="flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground"
+          >
+            <Plus className="size-3" /> Split router
+          </button>
+        )}
+      </Card>
+    );
+  };
+
+  const routerCard = (r: Agent) => {
+    const id = `router:${r.id}`;
+    const crew = agents.filter(w => w.parent === r.id).length;
+    return (
+      <Card
+        {...node(id)}
+        className={cn(
+          "cursor-pointer gap-1 border-fuchsia-400/30 px-3 py-2.5 transition-opacity",
+          dim(id) && "opacity-30",
+          focus === id && "border-fuchsia-400",
+          fresh === r.id && "agent-edited animate-in fade-in zoom-in-95",
+        )}
+      >
+        <div className="flex items-center gap-2">
+          <Network className="size-3.5 text-fuchsia-400" />
+          <span className="font-mono text-xs">{r.id}</span>
+          <span className={cn("size-1.5 rounded-full", agentStateColor[r.state])} />
+          <span className="ml-auto text-xs text-muted-foreground">{crew} {crew === 1 ? "agent" : "agents"}</span>
+        </div>
+        <p className="text-sm">{r.scope}</p>
+        <p className="truncate text-xs text-muted-foreground">{r.doing}</p>
+      </Card>
+    );
+  };
+
+  const agentCard = (w: Agent) => {
+    const id = `agent:${w.id}`;
+    const task = tasks.find(t => w.taskIds.includes(t.id) && t.status !== "done") ?? tasks.find(t => t.id === w.taskIds.at(-1));
+    return (
+      <Card {...node(id)} className={cn("cursor-pointer gap-1 px-3 py-2.5 transition-opacity", dim(id) && "opacity-30", focus === id && "border-agent")}>
+        <div className="flex items-center gap-2">
+          <span className={cn("size-2 rounded-full", agentStateColor[w.state], w.state === "working" && "animate-pulse")} />
+          <span className="font-mono text-xs">{w.id}</span>
+          <span className="ml-auto text-xs text-muted-foreground">{w.state}</span>
+        </div>
+        <p className="truncate text-xs text-muted-foreground">{w.doing}</p>
+        {task && (
+          <a href={`#task/${task.id}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 truncate text-xs hover:underline">
+            <span className={cn("size-1.5 shrink-0 rounded-full", statusColor[task.status])} />
+            {task.title}
+          </a>
+        )}
+      </Card>
+    );
+  };
+
+  const emptyCard = (r: Agent) => (
+    <p className={cn("rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground transition-opacity", dim(`router:${r.id}`) && "opacity-30")}>
+      No agents yet. {r.id} spawns them when work is ready.
+    </p>
+  );
+
   const column = (index: number, title: string, count: number, children: React.ReactNode, onScroll = true) => {
     return (
       <section
@@ -285,7 +486,6 @@ export function RoutingView() {
         >
           <svg className="pointer-events-none absolute inset-0 size-full overflow-visible">
             {edges.map(e => {
-              if (e.from.startsWith("router:")) return null;
               const a = e.watch ? pos.log : pos[e.from];
               const b = pos[e.to];
               if (!a || !b) return null;
@@ -383,133 +583,30 @@ export function RoutingView() {
             </>,
           )}
 
-          {column(
-            1,
-            "Objectives",
-            objectives.length,
-            objectives.map(o => {
-              const id = `obj:${o.id}`;
-              const own = tasks.filter(t => o.taskIds.includes(t.id));
-              const status = objectiveStatus(own.map(t => t.status));
-              const vision = o.page.find(b => b.kind === "vision");
-              const count = routers.filter(r => r.objectiveId === o.id).length;
-              return (
-                <Card key={o.id} {...node(id)} className={cn("cursor-pointer gap-2 px-4 py-3 transition-opacity", dim(id) && "opacity-30", focus === id && "border-agent")}>
-                  <div className="flex items-center gap-2">
-                    <Waypoints className="size-4 shrink-0 text-agent" />
-                    <span className="truncate font-medium">{o.title}</span>
-                    <a href={`#objective/${o.id}`} data-agent={`objective:${o.id}`} onClick={e => e.stopPropagation()} className="ml-auto text-muted-foreground hover:text-foreground">
-                      <SquareArrowOutUpRight className="size-3.5" />
-                    </a>
-                  </div>
-                  {vision?.kind === "vision" && <p className="line-clamp-2 text-xs text-muted-foreground">{vision.goal}</p>}
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className={cn("size-1.5 rounded-full", statusColor[status])} />
-                    {status} · {own.filter(t => t.status === "done").length}/{own.length} tasks
-                    <Badge variant="outline" className="ml-auto text-[10px]">
-                      {count === 1 ? "1 router" : `split · ${count} routers`}
-                    </Badge>
-                  </div>
-                  {splitting === o.id ? (
-                    <form onSubmit={e => split(e, o.id)} onClick={e => e.stopPropagation()}>
-                      <Input
-                        autoFocus
-                        value={scope}
-                        onChange={e => setScope(e.target.value)}
-                        onKeyDown={e => e.key === "Escape" && setSplitting(undefined)}
-                        placeholder="Subcomponent the new router owns…"
-                        className="h-7 text-xs"
-                      />
-                    </form>
-                  ) : (
-                    <button
-                      onClick={e => {
-                        e.stopPropagation();
-                        setSplitting(o.id);
-                      }}
-                      className="flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      <Plus className="size-3" /> Split router
-                    </button>
-                  )}
-                </Card>
-              );
-            }),
-          )}
-
-          <section className="relative flex min-h-0 shrink-0 flex-col gap-3" style={{ width: col * 2 + GAP }}>
+          <section className="relative flex min-h-0 shrink-0 flex-col gap-3" style={{ width: col * 3 + GAP * 2 }}>
             <div className="flex" style={{ gap: GAP }}>
-              {(["Routers", "Agents"] as const).map((title, k) => (
-                <h2 key={title} className={cn("flex items-baseline gap-2 text-sm font-medium transition-opacity duration-500", faded(2 + k) && "opacity-35")} style={{ width: col }}>
+              {(
+                [
+                  ["Objectives", objectives.length],
+                  ["Routers", routers.length],
+                  ["Agents", agents.length - routers.length],
+                ] as const
+              ).map(([title, count], k) => (
+                <h2 key={title} className={cn("flex items-baseline gap-2 text-sm font-medium transition-opacity duration-500", faded(1 + k) && "opacity-35")} style={{ width: col }}>
                   {title}
-                  <span className="text-xs text-muted-foreground">{k === 0 ? routers.length : agents.length - routers.length}</span>
+                  <span className="text-xs text-muted-foreground">{count}</span>
                 </h2>
               ))}
             </div>
-            <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1" onScroll={measure}>
-              {objectives.map(o => (
-                <div key={o.id} className="flex flex-col gap-1.5">
-                  <p className={cn("flex items-center gap-1.5 px-1 text-xs text-muted-foreground transition-opacity duration-500", faded(2) && "opacity-35")} style={{ width: col }}>
-                    <Waypoints className="size-3 text-agent" />
-                    {o.title}
-                  </p>
-                  {routers.filter(r => r.objectiveId === o.id).map(r => {
-                    const id = `router:${r.id}`;
-                    const crew = agents.filter(w => w.parent === r.id);
-                    return (
-                      <div key={r.id} className="flex items-start" style={{ gap: GAP }}>
-                        <div className={cn("shrink-0 transition-opacity duration-500", faded(2) && "opacity-35")} style={{ width: col }} onClickCapture={capture(2)}>
-                          <Card
-                            {...node(id)}
-                            className={cn(
-                              "cursor-pointer gap-1 border-fuchsia-400/30 px-3 py-2.5 transition-opacity",
-                              dim(id) && "opacity-30",
-                              focus === id && "border-fuchsia-400",
-                              fresh === r.id && "agent-edited animate-in fade-in zoom-in-95",
-                            )}
-                          >
-                            <div className="flex items-center gap-2">
-                              <Network className="size-3.5 text-fuchsia-400" />
-                              <span className="font-mono text-xs">{r.id}</span>
-                              <span className={cn("size-1.5 rounded-full", agentStateColor[r.state])} />
-                              <span className="ml-auto text-xs text-muted-foreground">{crew.length} {crew.length === 1 ? "agent" : "agents"}</span>
-                            </div>
-                            <p className="text-sm">{r.scope}</p>
-                            <p className="truncate text-xs text-muted-foreground">{r.doing}</p>
-                          </Card>
-                        </div>
-                        <div className={cn("flex shrink-0 flex-col gap-1.5 transition-opacity duration-500", faded(3) && "opacity-35")} style={{ width: col }} onClickCapture={capture(3)}>
-                          {crew.length === 0 && (
-                            <p className={cn("rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground transition-opacity", dim(id) && "opacity-30")}>
-                              No agents yet. {r.id} spawns them when work is ready.
-                            </p>
-                          )}
-                          {crew.map(w => {
-                            const wid = `agent:${w.id}`;
-                            const task = tasks.find(t => w.taskIds.includes(t.id) && t.status !== "done") ?? tasks.find(t => t.id === w.taskIds.at(-1));
-                            return (
-                              <Card key={w.id} {...node(wid)} className={cn("cursor-pointer gap-1 px-3 py-2.5 transition-opacity", dim(wid) && "opacity-30", focus === wid && "border-agent")}>
-                                <div className="flex items-center gap-2">
-                                  <span className={cn("size-2 rounded-full", agentStateColor[w.state], w.state === "working" && "animate-pulse")} />
-                                  <span className="font-mono text-xs">{w.id}</span>
-                                  <span className="ml-auto text-xs text-muted-foreground">{w.state}</span>
-                                </div>
-                                <p className="truncate text-xs text-muted-foreground">{w.doing}</p>
-                                {task && (
-                                  <a href={`#task/${task.id}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 truncate text-xs hover:underline">
-                                    <span className={cn("size-1.5 shrink-0 rounded-full", statusColor[task.status])} />
-                                    {task.title}
-                                  </a>
-                                )}
-                              </Card>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
+            <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1" onScroll={measure}>
+              <div className="relative" style={{ height: placed.height }}>
+                {objectives.map(o => place(`obj:${o.id}`, 0, objectiveCard(o)))}
+                {routers.map(r => place(`router:${r.id}`, 1, routerCard(r)))}
+                {routers.flatMap(r => {
+                  const crew = agents.filter(w => w.parent === r.id);
+                  return crew.length ? crew.map(w => place(`agent:${w.id}`, 2, agentCard(w))) : [place(`empty:${r.id}`, 2, emptyCard(r))];
+                })}
+              </div>
             </div>
           </section>
         </div>
