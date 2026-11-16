@@ -204,3 +204,6 @@
 @media (prefers-reduced-motion: reduce) {
   .working-ring, .working-pill::before, .shimmer { animation: none; }
 }
+/* While the image viewer is open nothing under its scrim moves: a turning ring repaints the page beneath every frame, and with it
+   re-rasters the inbox's full-size image previews, which made zooming crawl. */
+:root[data-viewing] #root *, :root[data-viewing] #root *::before, :root[data-viewing] #root *::after { animation-play-state: paused !important; }

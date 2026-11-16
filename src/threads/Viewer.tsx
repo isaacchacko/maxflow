@@ -63,6 +63,8 @@ export function Viewer() {
   const reset = (ease = false) => ((zoom.current = { s: 1, x: 0, y: 0 }), apply(ease));
   useEffect(() => reset(), [shot?.url, open?.at]);
   useEffect(() => () => (cancelAnimationFrame(frame.current), clearTimeout(settle.current)), []);
+  // The page under the scrim holds still while it is open (index.css), so the GPU spends its frames on the image.
+  useEffect(() => void document.documentElement.toggleAttribute("data-viewing", !!shot), [!!shot]);
 
   // Zoom keeps the point under the pointer (or the middle, from the keys) where it is.
   const zoomBy = (k: number, px = 0, py = 0, ease = false) => {
