@@ -1,4 +1,6 @@
 import { ExternalLink, Network, User, Waypoints } from "lucide-react";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor } from "@/mock";
 import { agentStore, objectiveStore, taskStore } from "@/store";
@@ -81,6 +83,58 @@ export function Rich({ text, className }: { text: string; className?: string }) 
         ),
       )}
     </span>
+  );
+}
+
+// In markdown a chip is a link to ref:<kind>/<id>, so the link renderer draws it and refs never get parsed twice.
+const asLinks = (text: string) => text.replace(/\[\[(agent|router|task|objective):([^\]]+)\]\]/g, (_, kind, id) => `[ref](ref:${kind}/${encodeURIComponent(id)})`);
+
+const md: Components = {
+  p: ({ children }) => <p className="my-1.5 first:mt-0 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="my-1.5 list-disc pl-5">{children}</ul>,
+  ol: ({ children, start }) => <ol start={start} className="my-1.5 list-decimal pl-6">{children}</ol>,
+  li: ({ children }) => <li className="my-0.5 pl-0.5">{children}</li>,
+  h1: ({ children }) => <h1 className="mt-3 mb-1.5 text-base font-semibold first:mt-0">{children}</h1>,
+  h2: ({ children }) => <h2 className="mt-3 mb-1.5 text-sm font-semibold first:mt-0">{children}</h2>,
+  h3: ({ children }) => <h3 className="mt-2.5 mb-1 text-sm font-semibold first:mt-0">{children}</h3>,
+  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+  blockquote: ({ children }) => <blockquote className="my-1.5 border-l-2 pl-3 text-muted-foreground">{children}</blockquote>,
+  code: ({ children, className }) => <code className={cn("bg-muted px-1 font-mono text-[0.9em]", className)}>{children}</code>,
+  pre: ({ children }) => <pre className="my-1.5 overflow-x-auto bg-muted p-2.5 text-xs [&>code]:bg-transparent [&>code]:p-0">{children}</pre>,
+  table: ({ children }) => <table className="my-1.5 border-collapse text-xs">{children}</table>,
+  th: ({ children }) => <th className="border px-2 py-1 text-left font-medium">{children}</th>,
+  td: ({ children }) => <td className="border px-2 py-1">{children}</td>,
+  hr: () => <hr className="my-3" />,
+  a: ({ href = "", children }) => {
+    const ref = href.match(/^ref:(agent|router|task|objective)\/(.+)$/);
+    if (ref) return <RefChip r={{ kind: ref[1] as Ref["kind"], id: decodeURIComponent(ref[2]!) }} />;
+    return (
+      <a href={href} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-0.5 text-sky-400 hover:underline">
+        {children}
+        <ExternalLink className="size-3" />
+      </a>
+    );
+  },
+  img: ({ src = "" }) => {
+    const name = typeof src === "string" && src.match(/\/uploads\/([\w.-]+)$/)?.[1];
+    if (!name) return null;
+    const url = `/api/uploads/${name}`;
+    return (
+      <a href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="my-1 block w-fit">
+        <img src={url} alt="" className="max-h-80 max-w-full border" />
+      </a>
+    );
+  },
+};
+
+/** A whole message as GitHub-flavored markdown, with Rich's chips, links and pasted images inside it. */
+export function Markdown({ text, className }: { text: string; className?: string }) {
+  return (
+    <div className={cn("break-words", className)}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={md} urlTransform={url => (url.startsWith("ref:") ? url : defaultUrlTransform(url))}>
+        {asLinks(text)}
+      </ReactMarkdown>
+    </div>
   );
 }
 

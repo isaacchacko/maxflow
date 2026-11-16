@@ -1,7 +1,7 @@
 import { Bot, Network, Waypoints, X } from "lucide-react";
 import { useEffect } from "react";
 import type { Signal } from "@/mock";
-import { Rich } from "@/threads/Rich";
+import { Markdown } from "@/threads/Rich";
 import { agentStore, objectiveStore, pathOf } from "@/store";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -64,7 +64,7 @@ export function EventDrawer({ signal, onClose }: { signal: Signal; onClose: () =
           </Field>
         )}
         <div className="border-t pt-4">
-          <Rich text={signal.text} className="text-sm leading-relaxed whitespace-pre-wrap break-words" />
+          <Markdown text={signal.text} className="text-sm leading-relaxed" />
         </div>
       </aside>
     </div>
