@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Claude Code hook: in maxflow a question to the user goes through `maxflow ask` and the questions sentry, never the chat,
-// and a message to another agent through `maxflow notify`. PreToolUse(AskUserQuestion|SendMessage) denies the tool; Stop sends back a turn that ends on a question, once.
+// and a SendMessage to another agent is logged, or queued by maxflow when the agent is asleep. PreToolUse(AskUserQuestion) denies the tool; Stop sends back a turn that ends on a question, once.
 import { readFileSync } from "node:fs";
 
 if (!process.env.MAXFLOW_SESSION) process.exit(0);
@@ -20,14 +20,27 @@ if (input.hook_event_name === "PreToolUse" && input.tool_name === "AskUserQuesti
 }
 
 // One chokepoint: agents reach each other through maxflow's event log, so the user sees every message.
+// A native SendMessage to another maxflow agent is logged in the event log; an asleep one has no claude to take it, so
+// maxflow queues it and wakes the agent, and the native send is stopped.
 if (input.hook_event_name === "PreToolUse" && input.tool_name === "SendMessage") {
-  console.log(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: `In maxflow, agents message each other through its event log: run \`${cli} notify <maxflow session id> '<text>'\` instead (\`${cli} ls\` lists the sessions). It is typed into that agent's prompt once it is idle, and its reply reaches you the same way.`,
-    },
-  }));
+  const to = String(input.tool_input?.to ?? "");
+  // A reply goes to the sender's socket (uds:/…/<pid>.sock); its pid names the session.
+  const pid = Number(to.match(/^uds:.*\/(\d+)\.sock$/)?.[1]);
+  const name = pid ? JSON.parse(Bun.spawnSync(["claude", "agents", "--json"]).stdout.toString() || "[]").find((a: { pid: number }) => a.pid === pid)?.name ?? "" : to;
+  const target = String(name).match(/^mf-([\w-]+)/)?.[1];
+  const text = String(input.tool_input?.message ?? "");
+  if (target && text) {
+    const res = await fetch(`http://localhost:${process.env.MAXFLOW_PORT ?? 4949}/api/sessions/${target}/peer`, { method: "POST", headers: { "x-maxflow-from": process.env.MAXFLOW_SESSION! }, body: JSON.stringify({ text }) }).catch(() => null);
+    const { queued } = res?.ok ? await res.json() : { queued: false };
+    if (queued)
+      console.log(JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: `Delivered another way: mf-${target} was asleep, so maxflow queued your message and is waking it. Don't resend. Its reply reaches you as a message.`,
+        },
+      }));
+  }
   process.exit(0);
 }
 

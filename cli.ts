@@ -11,6 +11,7 @@ const usage = `usage:
   maxflow wait q:<id> | approval:<pr> | ci:<pr> | agent:<id> | slack:<permalink | channel | #channel | query> | done   declare what you wait on; you sleep from your turn's end until a message wakes you
   maxflow rename <id> <name...> | maxflow kill <id>
   maxflow notify <id> <text...> [--isaac]    deliver text once the session is idle at an empty claude prompt; --isaac as for send
+  maxflow who router|parent|workers|objective   the agents around you, as mf-<id> names for SendMessage
   maxflow ask <question...> [--re QID] [--default REC]   raise a question to the user through sentry:questions; returns at once.
                                              --default: your recommendation for a reversible step, which you go ahead with if he hasn't answered in 3h
   maxflow questions [--all]                  the user's question queue
@@ -108,6 +109,21 @@ if (verb === "ls") {
   await call(`/api/sessions/${rest[0]}`, { method: "PATCH", body: JSON.stringify({ name: rest.slice(1).join(" ") }) });
 } else if (verb === "kill" && rest[0]) {
   await call(`/api/sessions/${rest[0]}`, { method: "DELETE" });
+} else if (verb === "who" && rest[0]) {
+  // The agents around the caller by role, as the mf-<id> names SendMessage takes.
+  const all = await (await fetch(`${base}/api/sessions`)).json();
+  const me = all.find((s: { id: string }) => s.id === process.env.MAXFLOW_SESSION);
+  if (!me?.role) console.error("who works only inside a maxflow agent with a role (router or worker)"), process.exit(1);
+  const live = all.filter((s: { running: boolean; id: string; role?: { objective: string } }) => s.running && s.id !== me.id && s.role?.objective === me.role.objective);
+  const routerOf = me.role.role === "router" ? undefined : me.role.parent;
+  const pick: Record<string, (s: { id: string; role: { role: string; parent?: string } }) => boolean> = {
+    router: (s) => s.role.role === "router" && (!routerOf || s.id === routerOf),
+    parent: (s) => s.id === routerOf,
+    workers: (s) => s.role.parent === me.id,
+    objective: () => true,
+  };
+  if (!pick[rest[0]]) console.error("who router|parent|workers|objective"), process.exit(1);
+  for (const s of live.filter(pick[rest[0]])) console.log(`mf-${s.id}  ${s.role.role.padEnd(6)}  ${s.status.padEnd(7)}  ${s.name}`);
 } else if (verb === "notify" && rest[1]) {
   const [id, ...words] = positional(rest, []);
   await call(`/api/sessions/${id}/notify`, { method: "POST", body: JSON.stringify({ text: words.join(" "), isaac: rest.includes("--isaac") }) });
