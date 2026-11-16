@@ -2,7 +2,7 @@ import { Check } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
-import { agentStore, objectiveStore, startThread, threadStore } from "@/store";
+import { agentStore, objectiveStore, setResolved, startThread, threadStore } from "@/store";
 import { Composer } from "@/threads/Composer";
 import { MessageRow } from "@/threads/MessageRow";
 import { Avatar } from "@/threads/Rich";
@@ -57,9 +57,11 @@ export function InboxView() {
   const threads = threadStore.use();
   const objectives = objectiveStore.use();
   const [showResolved, setShowResolved] = useState(false);
+  // Resolved from this list, a row stays put until he leaves the inbox, so a second click undoes an accidental resolve.
+  const [kept, setKept] = useState<Set<string>>(() => new Set());
   const resolved = threads.filter(t => t.resolved).length;
   const rows = threads
-    .filter(t => showResolved || !t.resolved)
+    .filter(t => showResolved || !t.resolved || kept.has(t.id))
     .map(t => ({ t, asked: askedAt(t), last: Date.parse(t.messages.at(-1)?.at ?? "") || 0 }))
     .sort((a, b) => (a.asked ?? Infinity) - (b.asked ?? Infinity) || b.last - a.last);
 
@@ -77,25 +79,35 @@ export function InboxView() {
           // A thread a router opened before writing in it shows its title as the opening message.
           const first = t.messages[0] ?? { from: t.routerIds[0] ?? t.objectiveId, at: "", text: t.title };
           return (
-            <li key={t.id} className={cn("border-b px-3 py-2 last:border-b-0", t.resolved && "opacity-50")}>
-              <MessageRow
-                from={first.from}
-                at={first.at}
-                text={first.text}
-                className="cursor-pointer"
-                // A long opener or a pasted screenshot stays a preview here; the thread has it in full.
-                bodyClassName="max-h-36 overflow-hidden [&_img]:max-h-28"
-                // The whole row opens the thread, except the links and chips inside the message.
-                onClick={e => (e.target as Element).closest("a") || (location.hash = `thread/${t.id}`)}
-                meta={
-                  <span className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
-                    <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : "routing…"}</span>
-                    {t.resolved && <Check className="size-3 shrink-0 self-center" />}
-                  </span>
-                }
+            <li key={t.id} className="group relative border-b px-3 py-2 last:border-b-0">
+              <button
+                data-agent={`inbox-resolve:${t.id}`}
+                title={t.resolved ? "Reopen" : "Resolve"}
+                onClick={() => (setKept(k => new Set(k).add(t.id)), setResolved(t.id, !t.resolved))}
+                className={cn("absolute top-2 right-3 z-10 border p-1 hover:border-ring", t.resolved ? "text-emerald-400" : "bg-background text-muted-foreground opacity-0 group-hover:opacity-100")}
               >
-                <Replies t={t} />
-              </MessageRow>
+                <Check className="size-3.5" />
+              </button>
+              <div className={cn(t.resolved && "opacity-50")}>
+                <MessageRow
+                  from={first.from}
+                  at={first.at}
+                  text={first.text}
+                  className="cursor-pointer"
+                  // A long opener or a pasted screenshot stays a preview here; the thread has it in full.
+                  bodyClassName="max-h-36 overflow-hidden [&_img]:max-h-28"
+                  // The whole row opens the thread, except the links and chips inside the message.
+                  onClick={e => (e.target as Element).closest("a") || (location.hash = `thread/${t.id}`)}
+                  meta={
+                    <span className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
+                      <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : "routing…"}</span>
+                      {t.resolved && <Check className="size-3 shrink-0 self-center" />}
+                    </span>
+                  }
+                >
+                  <Replies t={t} />
+                </MessageRow>
+              </div>
             </li>
           );
         })}
