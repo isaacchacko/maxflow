@@ -61,11 +61,17 @@ export type Agent = {
   taskIds: string[];
   state: AgentState;
   doing: string;
+  /** Live agents only: the session's title, folder, the links it surfaced and what it sleeps on. */
+  name?: string;
+  cwd?: string;
+  links?: string[];
+  wait?: { kind: string; ref: string; at: number } | null;
 };
 
-export type Source = "isaac" | "gh" | "slack";
+/** Where a signal came from: Isaac, a GitHub or Slack sentry, another agent, another sentry, or maxflow itself. */
+export type Source = "isaac" | "gh" | "slack" | "agent" | "sentry" | "maxflow";
 
-export type Signal = { id: string; source: Source; at: string; target: string; text: string; routedTo: string[] };
+export type Signal = { id: string; source: Source; at: string; target: string; text: string; routedTo: string[]; from?: string };
 
 export type Sentry = {
   id: Source;
@@ -76,7 +82,9 @@ export type Sentry = {
   watching: { target: string; what: string; routedTo: string[] }[];
 };
 
-export const NOW_AT = "2026-11-15T14:00";
+/** Local wall-clock time as the data writes it, "YYYY-MM-DDTHH:MM". */
+export const localAt = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+export const NOW_AT = localAt();
 export const NOW = new Date(NOW_AT);
 
 export const GRID_COLS = 12;
@@ -361,6 +369,9 @@ export const threads: Thread[] = [
     ],
   },
 ];
+
+/** A sentry session from the live server: one of main's sentries, run in tmux. */
+export type SentrySession = { id: string; name: string; running: boolean; status: string; lastOutputAt: number; createdAt: number; ties: { session: string; label: string }[]; use: string };
 
 export const sentries: Sentry[] = [
   {

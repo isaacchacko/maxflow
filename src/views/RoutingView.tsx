@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, GitPullRequest, Hash, MessagesSquare, Network, Plus, Search, SquareArrowOutUpRight, User, Waypoints } from "lucide-react";
+import { Bot, ChevronLeft, ChevronRight, GitPullRequest, Hash, MessagesSquare, Network, Plus, Radar, Search, SquareArrowOutUpRight, User, Waypoints } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { routeChat } from "@/agent/route";
 import { Badge } from "@/components/ui/badge";
@@ -6,14 +6,17 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { ChipView, SearchPalette, hits, isActive, type Filter, type NodeMeta } from "@/views/SearchPalette";
-import { NOW_AT, agentStateColor, objectiveStatus, sentries, statusColor, type Agent, type Signal, type Source, type Thread } from "@/mock";
-import { agentStore, objectiveStore, pathOf, signalStore, splitRouter, taskStore, threadStore } from "@/store";
+import { NOW_AT, agentStateColor, objectiveStatus, statusColor, type Agent, type Signal, type Source, type Thread } from "@/mock";
+import { agentStore, objectiveStore, pathOf, signalStore, sourceStore, splitRouter, taskStore, threadStore } from "@/store";
 import { Rich } from "@/threads/Rich";
 
 const look: Record<Source, { icon: typeof User; text: string; stroke: string; ring: string }> = {
   isaac: { icon: User, text: "text-sky-400", stroke: "stroke-sky-400", ring: "border-sky-400/60" },
   gh: { icon: GitPullRequest, text: "text-emerald-400", stroke: "stroke-emerald-400", ring: "border-emerald-400/60" },
   slack: { icon: Hash, text: "text-amber-400", stroke: "stroke-amber-400", ring: "border-amber-400/60" },
+  agent: { icon: Bot, text: "text-agent", stroke: "stroke-agent", ring: "border-agent/60" },
+  sentry: { icon: Radar, text: "text-orange-400", stroke: "stroke-orange-400", ring: "border-orange-400/60" },
+  maxflow: { icon: Waypoints, text: "text-muted-foreground", stroke: "stroke-muted-foreground", ring: "border-muted-foreground/60" },
 };
 
 const GAP = 160;
@@ -51,6 +54,7 @@ function buildEdges(signals: Signal[], paths: Map<string, Path>, agents: Agent[]
 
 /** Everything upstream and downstream of a node along the routes signals actually took. */
 function trace(focus: string, signals: Signal[], paths: Map<string, Path>, agents: Agent[]) {
+  const sentries = sourceStore.get();
   const lit = new Set<string>();
   const byId = new Map(agents.map(a => [a.id, a]));
   const routerEdge = (r: string) => lit.add(`obj:${byId.get(r)!.objectiveId}>router:${r}`);
@@ -67,7 +71,7 @@ function trace(focus: string, signals: Signal[], paths: Map<string, Path>, agent
   if (kind === "sig") fullPath(signals.find(s => s.id === id)!);
   if (kind === "src") {
     signals.filter(s => s.source === id).forEach(fullPath);
-    const watched = sentries.find(x => x.id === id)!.watching.flatMap(w => w.routedTo);
+    const watched = sentries.find(x => x.id === id)?.watching.flatMap(w => w.routedTo) ?? [];
     for (const o of new Set(watched.map(a => byId.get(a)?.objectiveId).filter(Boolean))) lit.add(`src:${id}~obj:${o}`);
   }
   if (kind === "obj") {
@@ -185,7 +189,8 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
   const canvasRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(1200);
   const [pos, setPos] = useState<Pos>({});
-  const [shown, setShown] = useState<Set<Source>>(new Set(["isaac", "gh", "slack"]));
+  const sentries = sourceStore.use();
+  const [shown, setShown] = useState<Set<Source>>(new Set(["isaac", "gh", "slack", "agent", "sentry", "maxflow"]));
   const [draft, setDraft] = useState("");
   const [fresh, setFresh] = useState<string>();
   const [splitting, setSplitting] = useState<string>();
@@ -239,9 +244,9 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
       return {
         id: `${a.role === "router" ? "router" : "agent"}:${a.id}`,
         kind: a.role === "router" ? ("router" as const) : ("agent" as const),
-        label: a.id,
+        label: a.name ?? a.id,
         detail: a.role === "router" ? `${a.scope} · ${a.doing}` : `${a.doing}${task ? ` · ${task.title}` : ""}`,
-        text: `${a.id} ${a.scope ?? ""} ${a.doing} ${task?.title ?? ""} ${task?.pr ?? ""}`,
+        text: `${a.id} ${a.name ?? ""} ${a.scope ?? ""} ${a.doing} ${task?.title ?? ""} ${task?.pr ?? ""}`,
         state: a.state,
         status: task?.status,
         objectives: [objectiveOfAgent.get(a.id)!],
@@ -512,7 +517,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
       >
         <div className="flex items-center gap-2">
           <Network className="size-3.5 text-fuchsia-400" />
-          <span className="font-mono text-xs">{r.id}</span>
+          <span className={cn("truncate text-xs", !r.name && "font-mono")}>{r.name ?? r.id}</span>
           <span className={cn("size-1.5 rounded-full", agentStateColor[r.state])} />
           <span className="ml-auto text-xs text-muted-foreground">{crew} {crew === 1 ? "agent" : "agents"}</span>
         </div>
@@ -528,7 +533,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
       <Card {...node(id)} onClick={open(`agent/${w.id}`)} className="cursor-pointer gap-1 px-3 py-2.5 hover:border-ring">
         <div className="flex items-center gap-2">
           <span className={cn("size-2 rounded-full", agentStateColor[w.state], w.state === "working" && "animate-pulse")} />
-          <span className="font-mono text-xs">{w.id}</span>
+          <span className={cn("truncate text-xs", !w.name && "font-mono")}>{w.name ?? w.id}</span>
           <span className="ml-auto text-xs text-muted-foreground">{w.state}</span>
         </div>
         {task && (

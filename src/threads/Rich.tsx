@@ -55,7 +55,7 @@ export function RefChip({ r }: { r: Ref }) {
   return (
     <a href={`#agent/${r.id}`} onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 border px-1 align-baseline font-mono text-[0.85em] hover:border-ring">
       {a?.role === "router" || r.kind === "router" ? <Network className="size-3 text-fuchsia-400" /> : <span className={cn("size-1.5", a ? agentStateColor[a.state] : "bg-muted-foreground")} />}
-      {r.id}
+      {a?.name ?? r.id}
     </a>
   );
 }
@@ -101,7 +101,7 @@ export function Author({ from }: { from: string }) {
   return (
     <a href={`#agent/${from}`} className="flex items-center gap-1.5 font-mono text-sm hover:underline">
       {a?.role === "worker" ? <span className={cn("size-2", agentStateColor[a.state])} /> : <Network className="size-3.5 text-fuchsia-400" />}
-      {from}
+      {a?.name ?? from}
     </a>
   );
 }

@@ -253,7 +253,7 @@ export function AgentRow({ id, indent }: { id: string; indent?: boolean }) {
   return (
     <a href={`#agent/${id}`} data-agent={`agent:${id}`} className={cn("flex items-center gap-2 py-1 text-sm hover:bg-muted", indent && "ml-3 border-l pl-4")}>
       {agent.role === "router" ? <Network className="size-3.5 shrink-0 text-fuchsia-400" /> : <span className={cn("ml-1 size-2 shrink-0 rounded-full", agentStateColor[agent.state])} />}
-      <span className="shrink-0 font-mono text-xs">{agent.id}</span>
+      <span className="shrink-0 truncate text-xs">{agent.name ?? agent.id}</span>
       <span className="truncate text-muted-foreground">{agent.doing}</span>
     </a>
   );

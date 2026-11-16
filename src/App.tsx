@@ -7,13 +7,17 @@ import { Page } from "@/page/Page";
 import type { PageRef } from "@/store";
 import { ThreadPage } from "@/threads/ThreadPage";
 import { RoutingView } from "@/views/RoutingView";
+import { SentriesView } from "@/views/SentriesView";
 
 export const views = [
   { id: "events", label: "Events", key: "1" },
   { id: "objectives", label: "Objectives", key: "2" },
   { id: "agents", label: "Agents", key: "3" },
   { id: "threads", label: "Threads", key: "4" },
+  { id: "sentries", label: "Sentries", key: "5" },
 ] as const;
+/** The first four are views of one routing canvas; the rest are pages of their own. */
+const ROUTING = 4;
 
 type ViewId = (typeof views)[number]["id"];
 type Detail = { kind: "page"; ref: PageRef } | { kind: "agent" | "thread"; id: string };
@@ -84,8 +88,10 @@ export function App() {
             <ThreadPage key={detail.id} id={detail.id} back={route.view} />
           ) : detail?.kind === "page" ? (
             <Page key={detail.ref} pageRef={detail.ref} back={route.view} />
+          ) : snap >= ROUTING ? (
+            <SentriesView />
           ) : (
-            <RoutingView snap={snap} onSnap={n => (location.hash = views[Math.max(0, Math.min(views.length - 1, n))]!.id)} />
+            <RoutingView snap={snap} onSnap={n => (location.hash = views[Math.max(0, Math.min(ROUTING - 1, n))]!.id)} />
           )}
         </main>
       </div>

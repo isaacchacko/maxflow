@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "@xterm/xterm/css/xterm.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -77,3 +78,5 @@
   from { box-shadow: 0 0 0 2px var(--agent), 0 0 24px var(--agent); }
   to { box-shadow: 0 0 0 0 transparent; }
 }
+
+.xterm .xterm-viewport { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }

@@ -1,4 +1,4 @@
-import { GitPullRequest, Hash, MessagesSquare, Network, Search, User, Waypoints, X } from "lucide-react";
+import { Bot, GitPullRequest, Hash, MessagesSquare, Network, Radar, Search, User, Waypoints, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -31,7 +31,7 @@ const fixedValues: Record<Exclude<ChipKey, "in">, string[]> = {
 const chipKeys = Object.keys(fixedValues).concat("in") as ChipKey[];
 
 const kindIcon: Record<Kind, typeof User> = { event: Hash, objective: Waypoints, router: Network, agent: User, thread: MessagesSquare };
-const sourceIcon: Record<string, typeof User> = { isaac: User, gh: GitPullRequest, slack: Hash };
+const sourceIcon: Record<string, typeof User> = { isaac: User, gh: GitPullRequest, slack: Hash, agent: Bot, sentry: Radar, maxflow: Waypoints };
 
 function valuesFor(key: ChipKey, objectiveIds: string[]) {
   return key === "in" ? objectiveIds : fixedValues[key];

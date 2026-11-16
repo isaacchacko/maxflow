@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { NOW_AT, threads as seedThreads, agents as seedAgents, signals as seedSignals, tasks as seedTasks, objectives as seedObjectives, type Block, type Event, type Agent, type Signal, type Status } from "./mock";
+import { NOW_AT, sentries as seedSources, threads as seedThreads, agents as seedAgents, signals as seedSignals, tasks as seedTasks, objectives as seedObjectives, type Block, type Event, type Agent, type SentrySession, type Signal, type Status } from "./mock";
 
 export function createStore<T>(initial: T) {
   let state = initial;
@@ -24,6 +24,20 @@ export const agentStore = createStore(seedAgents);
 export const signalStore = createStore(seedSignals);
 export const threadStore = createStore(seedThreads);
 export const editedStore = createStore<Record<string, number>>({});
+export const sourceStore = createStore(seedSources);
+export const sentryStore = createStore<SentrySession[]>([]);
+/** True once the server answered with real data; until then, or with no server, the stores hold the mock. */
+export const liveStore = createStore(false);
+const isLive = () => liveStore.get();
+/** Set by live.ts: refetches the world, so a change made through the API shows at once. */
+export const refreshed: { current?: () => Promise<void> } = {};
+
+export async function api(path: string, body?: unknown, method = "POST") {
+  const res = await fetch(path, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  await refreshed.current?.();
+  return res.status === 204 ? null : res.json();
+}
 
 /** A page is addressed the same way as its route: "task/t1" or "objective/overdue". */
 export type PageRef = `task/${string}` | `objective/${string}`;
@@ -43,6 +57,7 @@ export function addEvent(ref: PageRef, event: Event) {
 }
 
 export function putBlock(ref: PageRef, block: Block) {
+  if (isLive()) void api("/api/pages", { ref, block });
   update(ref, s => {
     const exists = s.page.some(b => b.id === block.id);
     return { ...s, page: exists ? s.page.map(b => (b.id === block.id ? block : b)) : [...s.page, block] };
@@ -52,6 +67,11 @@ export function putBlock(ref: PageRef, block: Block) {
 
 export function removeBlock(ref: PageRef, blockId: string) {
   update(ref, s => ({ ...s, page: s.page.filter(b => b.id !== blockId) }));
+}
+
+/** Isaac's chat from the event log: the server logs it and hands it to the funnel to route. */
+export function sendChat(text: string) {
+  void api("/api/signals", { text });
 }
 
 export function addSignal(signal: Omit<Signal, "id" | "at">) {
@@ -65,12 +85,13 @@ export function pathOf(signal: Signal, agents: Agent[]) {
   const byId = new Map(agents.map(a => [a.id, a]));
   const reached = signal.routedTo.map(id => byId.get(id)).filter((a): a is Agent => !!a);
   const workers = reached.filter(a => a.role === "worker");
-  const routers = new Set([...reached.filter(a => a.role === "router").map(a => a.id), ...workers.map(w => w.parent!).filter(Boolean)]);
+  const routers = new Set([...reached.filter(a => a.role === "router").map(a => a.id), ...workers.map(w => w.parent!).filter(id => byId.has(id))]);
   const objectives = new Set([...routers].map(r => byId.get(r)!.objectiveId));
   return { objectives: [...objectives], routers: [...routers], agents: workers.map(w => w.id) };
 }
 
 export function splitRouter(objectiveId: string, scope: string) {
+  if (isLive()) return void api(`/api/objectives/${objectiveId}/routers`, { scope });
   const all = agentStore.get();
   const n = all.filter(a => a.objectiveId === objectiveId && a.role === "router").length + 1;
   const id = `r-${objectiveId.split("-")[0]}-${n}`;
@@ -81,6 +102,7 @@ export function splitRouter(objectiveId: string, scope: string) {
 
 /** Swaps in mock.local.json when the server has one: real work that stays out of the public repo. */
 export async function loadLocalMock() {
+  if (isLive()) return;
   const res = await fetch("/mock.local.json").catch(() => undefined);
   if (!res?.ok) return;
   const local = await res.json().catch((e: unknown) => console.warn("mock.local.json unreadable, using built-in mock", e));
@@ -93,5 +115,20 @@ export async function loadLocalMock() {
 }
 
 export function postToThread(threadId: string, from: string, text: string) {
+  if (isLive()) return void api(`/api/threads/${threadId}/messages`, { text });
   threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, messages: [...t.messages, { from, at: NOW_AT, text }] } : t)));
+}
+
+/** A blank worker under a router, which the router is told to brief. */
+export function spawnWorker(router: Agent) {
+  if (isLive()) return void api("/api/sessions", { name: "new worker", parent: router.id, cwd: router.cwd, cmd: ["claude", "--permission-mode", "bypassPermissions"] });
+  const n = agentStore.get().filter(a => a.parent === router.id).length + 1;
+  const id = `${router.id.replace(/^r-/, "")}-${n}`;
+  agentStore.set(all => [...all, { id, role: "worker", objectiveId: router.objectiveId, parent: router.id, taskIds: [], state: "idle", doing: "Waiting for a brief" }]);
+}
+
+/** Archiving stops an agent's claude between turns to free its memory; unarchiving resumes the chat. */
+export function setArchived(id: string, archived: boolean) {
+  if (isLive()) return void api(`/api/sessions/${id}`, { archived }, "PATCH");
+  agentStore.set(all => all.map(a => (a.id === id ? { ...a, state: archived ? "asleep" : "working" } : a)));
 }

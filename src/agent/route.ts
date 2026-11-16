@@ -1,4 +1,4 @@
-import { addSignal, agentStore, objectiveStore, taskStore, type PageRef } from "@/store";
+import { addSignal, agentStore, liveStore, objectiveStore, sendChat, taskStore, type PageRef } from "@/store";
 
 function bestMatch<T extends { title: string }>(text: string, items: T[]) {
   const words = new Set(text.split(/\W+/).filter(w => w.length > 3));
@@ -20,6 +20,7 @@ function pickTarget(text: string): PageRef | undefined {
 
 /** A message typed into the event log goes to whoever owns what it mentions, else stays unrouted. */
 export function routeChat(request: string) {
+  if (liveStore.get()) return void sendChat(request);
   const ref = pickTarget(request.toLowerCase());
   if (!ref) return addSignal({ source: "isaac", target: "chat", text: request, routedTo: [] });
   const [type, id] = ref.split("/");

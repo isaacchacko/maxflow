@@ -1,11 +1,12 @@
-import { Archive, ArrowLeft, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Hash, Network, Pause, Play, Plus, User, Waypoints } from "lucide-react";
+import { Archive, ArrowLeft, Bot, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Hash, Link2, Network, Pause, Play, Plus, Radar, User, Waypoints } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { NOW_AT, agentStateColor, statusColor, type Agent, type AgentState } from "@/mock";
-import { addSignal, agentStore, objectiveStore, pathOf, signalStore, taskStore } from "@/store";
+import { addSignal, agentStore, api, liveStore, objectiveStore, pathOf, sentryStore, setArchived, signalStore, spawnWorker, taskStore } from "@/store";
+import { Terminal } from "./Terminal";
 import { closing, transcriptFor, typedStore, type Line } from "./transcript";
 
 function Tty({ agent, lines }: { agent: Agent; lines: Line[] }) {
@@ -111,7 +112,7 @@ function LinkRow({ icon: Icon, label, detail, href }: { icon: typeof User; label
   );
 }
 
-const sourceIcon = { isaac: User, gh: GitPullRequest, slack: Hash };
+const sourceIcon = { isaac: User, gh: GitPullRequest, slack: Hash, agent: Bot, sentry: Radar, maxflow: Waypoints };
 
 const stateOrder: AgentState[] = ["working", "waiting", "idle", "asleep"];
 
@@ -134,11 +135,7 @@ function RouterSidebar({ router }: { router: Agent }) {
     .filter(s => pathOf(s, agents).routers.includes(router.id))
     .map(s => ({ signal: s, to: s.routedTo.filter(id => crewIds.has(id)) }));
 
-  const spawn = () => {
-    const n = crew.length + 1;
-    const id = `${router.id.replace(/^r-/, "")}-${n}`;
-    agentStore.set(all => [...all, { id, role: "worker", objectiveId: router.objectiveId, parent: router.id, taskIds: [], state: "idle", doing: "Waiting for a brief" }]);
-  };
+  const spawn = () => spawnWorker(router);
 
   return (
     <>
@@ -174,7 +171,7 @@ function RouterSidebar({ router }: { router: Agent }) {
                 const task = tasks.find(t => a.taskIds.includes(t.id));
                 return (
                   <a key={a.id} href={`#agent/${a.id}`} className="flex flex-col px-1 py-1 hover:bg-muted">
-                    <span className="font-mono text-xs">{a.id}</span>
+                    <span className="font-mono text-xs">{a.name ?? a.id}</span>
                     <span className="truncate text-xs text-muted-foreground">{task ? task.title : a.doing}</span>
                   </a>
                 );
@@ -239,12 +236,15 @@ function RouterSidebar({ router }: { router: Agent }) {
 
 export function AgentPage({ id, back }: { id: string; back: string }) {
   const agents = agentStore.use();
+  const live = liveStore.use();
+  const sentry = sentryStore.use().find(s => s.id === id);
   const tasks = taskStore.use();
   const objectives = objectiveStore.use();
   const signals = signalStore.use();
   const typed = typedStore.use()[id] ?? [];
 
   const agent = agents.find(a => a.id === id);
+  if (!agent && sentry) return <SentryPage id={id} back={back} />;
   if (!agent) return <p className="p-6 text-muted-foreground">No agent {id}.</p>;
 
   const parent = agents.find(a => a.id === agent.parent);
@@ -260,7 +260,8 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
   const history = routedHere.filter(s => !(s.source === "isaac" && typedHere.has(s.text))).reverse();
   const lines = [...transcriptFor(agent, crew, parent, task, history), ...typed, closing[agent.state](agent)];
 
-  const setState = (state: AgentState) => agentStore.set(all => all.map(a => (a.id === agent.id ? { ...a, state } : a)));
+  // Pause interrupts the turn in progress, as Esc does in the terminal.
+  const pause = () => (live ? void api(`/api/sessions/${agent.id}/input`, { keys: ["Escape"] }) : agentStore.set(all => all.map(a => (a.id === agent.id ? { ...a, state: "idle" } : a))));
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-hidden p-4">
@@ -271,7 +272,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
           </a>
         </Button>
         {agent.role === "router" ? <Network className="size-4 text-fuchsia-400" /> : <span className={cn("size-2.5", agentStateColor[agent.state])} />}
-        <h1 className="font-mono text-lg">{agent.id}</h1>
+        <h1 className={cn("text-lg", !agent.name && "font-mono")}>{agent.name ?? agent.id}</h1>
         <Badge variant="outline">{agent.role}</Badge>
         {agent.role === "router" && <span className="truncate text-sm text-muted-foreground">{agent.scope}</span>}
         {agent.role === "router" && (
@@ -288,23 +289,29 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
           </span>
         )}
         <div className="ml-auto flex gap-1.5">
-          {agent.state === "idle" || agent.state === "asleep" ? (
-            <Button variant="outline" size="sm" onClick={() => setState("working")}>
+          {agent.state === "asleep" ? (
+            <Button variant="outline" size="sm" onClick={() => setArchived(agent.id, false)}>
               <Play /> Resume
             </Button>
           ) : (
-            <Button variant="outline" size="sm" onClick={() => setState("idle")}>
+            <Button variant="outline" size="sm" onClick={pause} disabled={agent.state !== "working"}>
               <Pause /> Pause
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={() => setState("asleep")} disabled={agent.state === "asleep"}>
+          <Button variant="outline" size="sm" onClick={() => setArchived(agent.id, true)} disabled={agent.state === "asleep"}>
             <Archive /> Archive
           </Button>
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1 gap-4">
-        <Tty agent={agent} lines={lines} />
+        {live ? (
+          <section className="min-h-0 min-w-0 flex-1 border bg-background p-2">
+            <Terminal key={agent.id} id={agent.id} />
+          </section>
+        ) : (
+          <Tty agent={agent} lines={lines} />
+        )}
 
         <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">
           {agent.role === "router" ? (
@@ -348,10 +355,21 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
           <Separator />
 
           <Section title="Links">
-            {task?.pr && <LinkRow icon={GitPullRequest} label={`#${task.pr}`} detail={task.title} href="#" />}
-            {agent.role === "worker" && <LinkRow icon={GitBranch} label={`isaac/${agent.id}`} detail="branch" href="#" />}
-            {agent.role === "worker" && <LinkRow icon={FolderGit2} label={`~/Worktrees/${agent.id}`} detail="worktree" href="#" />}
-            {routedHere.filter(s => s.source === "slack").slice(0, 2).map(s => (
+            {live ? (
+              <>
+                {agent.cwd && <LinkRow icon={FolderGit2} label={agent.cwd.replace(/^\/(home|Users)\/[^/]+/, "~")} detail="folder" href={`#agent/${agent.id}`} />}
+                {agent.links?.map(url => (
+                  <LinkRow key={url} icon={/\/pull\/\d+$/.test(url) ? GitPullRequest : Link2} label={url.replace(/^https?:\/\/(www\.)?/, "")} href={url} />
+                ))}
+              </>
+            ) : (
+              <>
+                {task?.pr && <LinkRow icon={GitPullRequest} label={`#${task.pr}`} detail={task.title} href="#" />}
+                {agent.role === "worker" && <LinkRow icon={GitBranch} label={`isaac/${agent.id}`} detail="branch" href="#" />}
+                {agent.role === "worker" && <LinkRow icon={FolderGit2} label={`~/Worktrees/${agent.id}`} detail="worktree" href="#" />}
+              </>
+            )}
+            {!live && routedHere.filter(s => s.source === "slack").slice(0, 2).map(s => (
               <LinkRow key={s.id} icon={Hash} label={s.target} detail="Slack thread" href="#" />
             ))}
           </Section>
@@ -381,13 +399,58 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
             {(agent.role === "router" ? crew : siblings).map(a => (
               <a key={a.id} href={`#agent/${a.id}`} className="flex items-center gap-2 px-1 py-1 text-sm hover:bg-muted">
                 <span className={cn("size-2 shrink-0", agentStateColor[a.state])} />
-                <span className="shrink-0 font-mono text-xs">{a.id}</span>
+                <span className="shrink-0 font-mono text-xs">{a.name ?? a.id}</span>
                 <span className="truncate text-xs text-muted-foreground">{a.doing}</span>
               </a>
             ))}
           </Section>
             </>
           )}
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+/** A sentry's page: its terminal, what it does and which sessions it is tied to. */
+function SentryPage({ id, back }: { id: string; back: string }) {
+  const sentry = sentryStore.use().find(s => s.id === id)!;
+  const agents = agentStore.use();
+  return (
+    <div className="flex h-full flex-col gap-3 overflow-hidden p-4">
+      <header className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" asChild>
+          <a href={`#${back}`}>
+            <ArrowLeft />
+          </a>
+        </Button>
+        <Radar className="size-4 text-amber-400" />
+        <h1 className="text-lg">{sentry.name}</h1>
+        <Badge variant="outline">sentry</Badge>
+      </header>
+      <div className="flex min-h-0 flex-1 gap-4">
+        <section className="min-h-0 min-w-0 flex-1 border bg-background p-2">
+          <Terminal key={sentry.id} id={sentry.id} />
+        </section>
+        <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">
+          <Section title="Properties">
+            <Row label="State">
+              <span className={cn("size-2", sentry.running ? "bg-emerald-400" : "bg-red-400")} />
+              {sentry.running ? "running" : "exited"}
+            </Row>
+            <Row label="Started">{new Date(sentry.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</Row>
+            <Row label="Last output">{new Date(sentry.lastOutputAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" })}</Row>
+          </Section>
+          <Separator />
+          <Section title={`Tied to · ${sentry.ties.length}`}>
+            {sentry.ties.length === 0 && <p className="text-xs text-muted-foreground">None</p>}
+            {sentry.ties.map(t => (
+              <a key={`${t.session}:${t.label}`} href={`#agent/${t.session}`} className="flex items-center gap-2 px-1 py-1 text-sm hover:bg-muted">
+                <span className="shrink-0 text-xs">{agents.find(a => a.id === t.session)?.name ?? t.session}</span>
+                <span className="truncate font-mono text-xs text-muted-foreground">{t.label}</span>
+              </a>
+            ))}
+          </Section>
         </aside>
       </div>
     </div>
