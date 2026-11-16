@@ -9,9 +9,11 @@ import { Avatar } from "@/threads/Rich";
 import { unseen } from "@/threads/seen";
 
 type Item = { kind: Kind; href: string; label: string; detail?: string; icon: React.ReactNode; text: string; rank: number };
-type Kind = "Recent" | "Threads" | "Agents" | "Objectives" | "Tasks" | "Views";
-const ORDER: Kind[] = ["Recent", "Threads", "Agents", "Objectives", "Tasks", "Views"];
+type Kind = "Unread" | "Recent" | "Threads" | "Agents" | "Objectives" | "Tasks" | "Views";
+const ORDER: Kind[] = ["Unread", "Recent", "Threads", "Agents", "Objectives", "Tasks", "Views"];
 const PER_KIND = 6;
+// A thread's rank: when it last moved, lifted above every read thread while it has replies he hasn't seen.
+const UNREAD = 1e13;
 
 // Where Isaac went last, newest first, so an empty query starts there.
 const RECENT = "switcher:recent";
@@ -63,7 +65,7 @@ function useItems(views: readonly { id: string; label: string }[]) {
         icon: <Avatar from={first?.from ?? t.routerIds[0] ?? ""} small />,
         text: `${t.title} ${opener}`,
         // Unread first, then whatever moved last.
-        rank: (fresh > 0 ? 1e13 : 0) + (Date.parse(t.messages.at(-1)?.at ?? "") || 0),
+        rank: (fresh > 0 ? UNREAD : 0) + (Date.parse(t.messages.at(-1)?.at ?? "") || 0),
       };
     });
     const agent = [...agents.map(a => ({ id: a.id, name: a.name ?? a.id, detail: a.doing })), ...sentries.map(s => ({ id: s.id, name: `sentry: ${s.name}`, detail: s.status }))].map(a => ({
@@ -118,9 +120,13 @@ export function QuickSwitcher({ views }: { views: readonly { id: string; label: 
     if (!q) {
       const byHref = new Map(items.map(i => [i.href, i]));
       const here = location.hash;
-      const recents = recent().filter(h => h !== here).flatMap(h => (byHref.has(h) ? [{ ...byHref.get(h)!, kind: "Recent" as const }] : [])).slice(0, 5);
-      const threads = items.filter(i => i.kind === "Threads" && !recents.some(r => r.href === i.href)).sort((a, b) => b.rank - a.rank).slice(0, PER_KIND);
-      return [...recents, ...threads, ...items.filter(i => i.kind === "Views")];
+      // Unread threads first, then where he went last, then the threads that moved most recently.
+      const threads = items.filter(i => i.kind === "Threads").sort((a, b) => b.rank - a.rank);
+      const unread = threads.filter(i => i.rank >= UNREAD).map(i => ({ ...i, kind: "Unread" as const }));
+      const listed = new Set(unread.map(i => i.href));
+      const recents = recent().filter(h => h !== here && !listed.has(h)).flatMap(h => (byHref.has(h) ? [{ ...byHref.get(h)!, kind: "Recent" as const }] : [])).slice(0, 5);
+      for (const r of recents) listed.add(r.href);
+      return [...unread, ...recents, ...threads.filter(i => !listed.has(i.href)).slice(0, PER_KIND), ...items.filter(i => i.kind === "Views")];
     }
     const scored = items.flatMap(i => {
       // A thread's opening message matches only as a run, and ranks under a match in its title.
@@ -171,7 +177,7 @@ export function QuickSwitcher({ views }: { views: readonly { id: string; label: 
           {shown.length === 0 && <p className="px-4 py-6 text-center text-sm text-muted-foreground">Nothing matches “{query}”</p>}
           {shown.map((item, n) => (
             <div key={`${item.kind}:${item.href}`}>
-              {item.kind !== shown[n - 1]?.kind && <p className="px-4 pt-2 pb-1 text-[11px] font-medium text-muted-foreground">{!query.trim() && item.kind === "Threads" ? "Threads, unread first" : item.kind}</p>}
+              {item.kind !== shown[n - 1]?.kind && <p className="px-4 pt-2 pb-1 text-[11px] font-medium text-muted-foreground">{item.kind}</p>}
               <button
                 data-index={n}
                 onMouseMove={() => setActive(n)}
