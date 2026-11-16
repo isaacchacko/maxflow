@@ -14,8 +14,14 @@ async function upload(file: File) {
 
 const preview = (path: string) => `/api/uploads/${path.split("/").at(-1)}`;
 
-/** Adds a quote (markdown) to a composer's draft, ahead of what he types; the composer with that draft key takes it and focuses. */
-export const quoteInto = (draftKey: string, markdown: string) => dispatchEvent(new CustomEvent("composer-quote", { detail: { draftKey, markdown } }));
+/**
+ * Adds a quote (markdown) to a composer's draft, ahead of what he types; the composer with that draft key takes it and focuses.
+ * With no such composer drawn yet (a subthread still opening), the quote waits for it.
+ */
+const waiting = new Map<string, string>();
+export function quoteInto(draftKey: string, markdown: string) {
+  if (dispatchEvent(new CustomEvent("composer-quote", { detail: { draftKey, markdown }, cancelable: true }))) waiting.set(draftKey, [waiting.get(draftKey), markdown].filter(Boolean).join("\n\n"));
+}
 
 const imagesIn = (files: FileList | undefined) => [...(files ?? [])].filter(f => f.type.startsWith("image/"));
 
@@ -36,12 +42,26 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools 
     el.style.height = `${Math.min(el.scrollHeight, innerHeight * 0.4)}px`;
   }, [draft]);
   useEffect(() => {
+    // Quoted, he types next: the box takes focus with the caret after his text, and takes it again a frame later in case the
+    // click that quoted (a menu closing, a selection clearing) hands focus back to where it came from.
+    const take = (markdown: string) => {
+      setQuote(prev => [prev, markdown].filter(Boolean).join("\n\n"));
+      const focusEnd = () => {
+        const el = input.current;
+        el?.focus();
+        el?.setSelectionRange(el.value.length, el.value.length);
+      };
+      focusEnd();
+      requestAnimationFrame(focusEnd);
+    };
     const onQuote = (e: Event) => {
       const { detail } = e as CustomEvent<{ draftKey: string; markdown: string }>;
       if (detail.draftKey !== draftKey) return;
-      setQuote(prev => [prev, detail.markdown].filter(Boolean).join("\n\n"));
-      input.current?.focus();
+      e.preventDefault();
+      take(detail.markdown);
     };
+    const pending = waiting.get(draftKey);
+    if (pending) waiting.delete(draftKey), take(pending);
     addEventListener("composer-quote", onQuote);
     return () => removeEventListener("composer-quote", onQuote);
   }, [draftKey]);

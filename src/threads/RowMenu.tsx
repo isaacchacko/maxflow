@@ -22,8 +22,9 @@ export function RowMenu({ items, agent, children }: { items: (MenuItem | false |
         {children}
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
-        {/* Its keys are its own: Escape closes the menu without also climbing a level, and the view keys don't switch views. */}
-        <ContextMenu.Content data-agent={`menu:${agent}`} onEscapeKeyDown={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()} className="z-50 min-w-48 border bg-background p-1 text-sm shadow-lg">
+        {/* Its keys are its own: Escape closes the menu without also climbing a level, and the view keys don't switch views.
+            Closing leaves focus where the chosen item put it (the box, for Quote), not back on the row. */}
+        <ContextMenu.Content data-agent={`menu:${agent}`} onEscapeKeyDown={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()} onCloseAutoFocus={e => e.preventDefault()} className="z-50 min-w-48 border bg-background p-1 text-sm shadow-lg">
           {shown.map((x, i) =>
             x === "-" ? (
               <ContextMenu.Separator key={i} className="my-1 h-px bg-border" />
