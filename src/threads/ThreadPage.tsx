@@ -1,16 +1,17 @@
-import { ArrowLeft, Check, ChevronRight, ExternalLink, MessageSquareReply, MessagesSquare, Network, Quote, RotateCcw, Waypoints, Zap } from "lucide-react";
+import { ArrowLeft, Check, ChevronRight, ExternalLink, MessageSquareReply, MessagesSquare, Network, Quote, RotateCcw, Waypoints } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
-import { agentStore, answerHere, objectiveStore, openSubthread, postToThread, setKind, setResolved, threadStore } from "@/store";
+import { agentStore, answerHere, objectiveStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
 import { Composer, quoteInto } from "./Composer";
 import { composeOnArrival, flashMessage, goToMessage, takeCompose } from "./jump";
 import { MessageRow, when } from "./MessageRow";
 import { Replies, repliesOf } from "./Replies";
 import { markSeen } from "./seen";
 import { RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
+import { KindMenu } from "./KindMenu";
 import { useVim, vimRow } from "./vim";
 
 /** Escape climbs one level: a subthread goes to its parent at the message it hangs off, a top thread to the view it came from. */
@@ -179,7 +180,8 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
             <ArrowLeft />
           </a>
         </Button>
-        <MessagesSquare className="size-4 text-muted-foreground" />
+        {/* A top thread's glyph is its kind, and picks it; a subthread's is just a thread's. */}
+        {thread.parentId ? <MessagesSquare className="size-4 text-muted-foreground" /> : <KindMenu thread={thread} />}
         {ancestors.map(a => (
           <Fragment key={a.id}>
             <a href={`#thread/${a.id}`} data-agent={`thread-up:${a.id}`} className="max-w-56 truncate text-sm text-muted-foreground hover:text-foreground">
@@ -190,22 +192,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
         ))}
         <h1 className={cn("truncate text-lg font-semibold", thread.resolved && "text-muted-foreground")}>{thread.title}</h1>
         {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
-        {!thread.parentId && (
-          <div data-agent="thread-kind" className="ml-auto flex border text-xs" title="A command gets an ack and one result; a conversation is talked through">
-            {(["conversation", "command"] as const).map(k => (
-              <button
-                key={k}
-                data-agent={`thread-kind:${k}`}
-                onClick={() => (thread.kind ?? "conversation") !== k && setKind(thread.id, k)}
-                className={cn("flex items-center gap-1 px-2 py-1", (thread.kind ?? "conversation") === k ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
-              >
-                {k === "command" ? <Zap className="size-3" /> : <MessagesSquare className="size-3" />}
-                {k}
-              </button>
-            ))}
-          </div>
-        )}
-        <Button variant="outline" size="sm" className={cn(thread.parentId && "ml-auto")} data-agent="thread-resolve" onClick={() => resolveOrReopen(thread, back)}>
+        <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-resolve" onClick={() => resolveOrReopen(thread, back)}>
           {thread.resolved ? <RotateCcw /> : <Check />}
           {thread.resolved ? "Reopen" : "Resolve"}
         </Button>

@@ -1,4 +1,4 @@
-import { Check, MessagesSquare, Zap } from "lucide-react";
+import { Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
@@ -6,6 +6,7 @@ import { markAskShown, objectiveStore, setKind, setResolved, startThread, thread
 import { Composer } from "@/threads/Composer";
 import { composeOnArrival } from "@/threads/jump";
 import { MessageRow, when } from "@/threads/MessageRow";
+import { KINDS } from "@/threads/KindMenu";
 import { ago, Replies } from "@/threads/Replies";
 import { Rich } from "@/threads/Rich";
 import { useVim, vimRow } from "@/threads/vim";
@@ -43,7 +44,7 @@ function CommandRow({ t, active, open, onToggle, onResolve }: { t: Thread; activ
           onClick={() => setKind(t.id, "conversation")}
           className="flex shrink-0 items-center gap-1 border px-1.5 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 hover:border-ring hover:text-foreground"
         >
-          <MessagesSquare className="size-3" />
+          <KINDS.conversation.icon className="size-3" />
           talk it through
         </button>
         <button data-agent={`inbox-resolve:${t.id}`} title={t.resolved ? "Reopen" : "Resolve"} onClick={onResolve} className={cn("shrink-0 border p-0.5 hover:border-ring", t.resolved ? "text-emerald-400" : "text-muted-foreground opacity-0 group-hover:opacity-100")}>
@@ -125,7 +126,7 @@ export function InboxView() {
             onClick={() => setKind(t.id, "command")}
             className="absolute top-2 right-11 z-10 flex items-center gap-1 border bg-background px-1.5 py-0.5 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 hover:border-ring hover:text-foreground"
           >
-            <Zap className="size-3" />
+            <KINDS.command.icon className="size-3 text-amber-400" />
             just do it
           </button>
           <div className={cn(t.resolved && "opacity-50")}>
@@ -168,6 +169,7 @@ export function InboxView() {
       {allCommands.length > 0 && (
         <section data-agent="inbox-commands" className="flex max-w-4xl flex-col gap-1">
           <h2 className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            <KINDS.command.icon className="size-3 text-amber-400" />
             Commands · {earlier ? "all" : "today"}
             {allCommands.length > commands.length || earlier ? (
               <button data-agent="inbox-commands-earlier" onClick={() => setEarlier(v => !v)} className="font-normal tracking-normal normal-case hover:text-foreground">
