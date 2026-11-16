@@ -1,7 +1,8 @@
 import { MessagesSquare } from "lucide-react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
-import { objectiveStore, threadStore } from "@/store";
+import { objectiveStore, startThread, threadStore } from "@/store";
 
 function ago(at: number) {
   const s = Math.round((Date.now() - at) / 1000);
@@ -24,9 +25,27 @@ export function InboxView() {
     .map(t => ({ t, asked: askedAt(t), last: Date.parse(t.messages.at(-1)?.at ?? "") || 0 }))
     .sort((a, b) => (a.asked ?? Infinity) - (b.asked ?? Infinity) || b.last - a.last);
 
+  const [draft, setDraft] = useState("");
+  function send(e: React.FormEvent) {
+    e.preventDefault();
+    if (!draft.trim()) return;
+    void startThread(draft.trim());
+    setDraft("");
+  }
+
   return (
-    <div className="h-full overflow-y-auto p-4">
-      <ol className="flex max-w-4xl flex-col border">
+    <div className="flex h-full flex-col gap-3 overflow-y-auto p-4">
+      <form onSubmit={send} className="max-w-4xl border px-3 py-2.5">
+        <input
+          autoFocus
+          data-agent="inbox-input"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          placeholder="Message"
+          className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
+        />
+      </form>
+      <ol className="flex max-w-4xl flex-col border empty:hidden">
         {rows.map(({ t, asked, last }) => {
           const latest = t.messages.at(-1);
           return (
@@ -35,7 +54,7 @@ export function InboxView() {
                 <span className={cn("size-2 shrink-0", asked === null ? "bg-muted-foreground/40" : "bg-sky-400")} />
                 <MessagesSquare className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="w-64 shrink-0 truncate text-sm">{t.title}</span>
-                <span className="w-40 shrink-0 truncate text-xs text-muted-foreground">{objectives.find(o => o.id === t.objectiveId)?.title}</span>
+                <span className="w-40 shrink-0 truncate text-xs text-muted-foreground">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : "routing…"}</span>
                 <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{latest && plain(latest.text)}</span>
                 <span className="w-10 shrink-0 text-right text-xs text-muted-foreground tabular-nums">{ago(asked ?? last)}</span>
               </a>

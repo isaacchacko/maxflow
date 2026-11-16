@@ -520,10 +520,15 @@ async function reroute(seq: number, o: Objective) {
   const e = (await query("signal/**", seq - 1, 0)).find((x) => x.seq === seq);
   if (!e) return null;
   const sig = e.data as Signal;
-  const text = sig.source === "isaac" ? `${VERIFIED}\n${unforge(sig.text)}` : `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(sig.text)}`;
+  // From the inbox: the router takes over the thread, gets everything he wrote in it so far, and answers him there.
+  const thread = threads.find((t) => t.signal === seq);
+  const said = thread ? thread.messages.filter((m) => m.from === "isaac").map((m) => m.text).join("\n\n") : sig.text;
+  const text = (sig.source === "isaac" ? `${VERIFIED}\n${unforge(said)}` : `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(said)}`) +
+    (thread ? `\n[maxflow] He wrote this in his inbox as thread "${thread.title}" (${thread.id}), which is yours now. Answer him there with \`${CLI} thread post ${thread.id} '<text>'\`.` : "");
   const to = routersOf(o.id);
   if (to.length) for (const s of to) enqueue(s, text);
   else to.push(startRouter(o, "Whole objective", text));
+  if (thread) Object.assign(thread, { objective: o.id, routers: to.map((s) => s.id), signal: undefined }), saveThreads();
   publish(`signal-route/${seq}`, { seq, objective: o.id, routedTo: to.map((s) => s.id) });
   if (sig.source === "isaac") for (const s of to) requested(s, sig.text);
   return to;
@@ -572,7 +577,8 @@ async function acceptTrust(s: Session) {
 }
 
 // Threads are the routers' running notes to Isaac on an objective; his reply in one goes to its routers like any message.
-type Thread = { id: string; title: string; objective: string; routers: string[]; messages: { from: string; at: number; text: string }[] };
+// signal: an inbox thread Isaac started, waiting on the funnel to route that signal to an objective.
+type Thread = { id: string; title: string; objective: string; routers: string[]; messages: { from: string; at: number; text: string }[]; signal?: number };
 const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
 const saveThreads = () => writeFileSync(THREADS, JSON.stringify(threads));
@@ -1311,7 +1317,17 @@ Bun.serve<WsData>({
     if (path === "/api/threads" && req.method === "GET") return Response.json(threads);
     if (path === "/api/threads" && req.method === "POST") {
       const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-      const body = (await req.json().catch(() => ({}))) as { title?: string; objective?: string };
+      const body = (await req.json().catch(() => ({}))) as { title?: string; objective?: string; text?: string };
+      // Isaac's inbox: each message starts a thread, and the funnel picks the router that owns it.
+      if (!from && body.text?.trim()) {
+        const text = body.text.trim();
+        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: text.split("\n")[0].slice(0, 80), objective: "", routers: [], messages: [{ from: "isaac", at: Date.now(), text }] };
+        const ev = dispatch({ source: "isaac", target: t.title, text, deliver: (seq) => `${text}\n[maxflow] signal ${seq}, his inbox thread ${t.id}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`. Always route an inbox thread, small talk included: its router answers him there.` });
+        t.signal = ev.seq;
+        threads.push(t);
+        saveThreads();
+        return Response.json(t, { status: 201 });
+      }
       const objective = body.objective ?? from?.role?.objective;
       if (!body.title?.trim() || !objective) return new Response("title required, and an objective (a router's own by default)", { status: 400 });
       const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: body.title.trim(), objective, routers: from?.role?.role === "router" ? [from.id] : routersOf(objective).map((r) => r.id), messages: [] };

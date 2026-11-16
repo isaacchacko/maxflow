@@ -11,15 +11,15 @@ import { RoutingView } from "@/views/RoutingView";
 import { SentriesView } from "@/views/SentriesView";
 
 export const views = [
-  { id: "events", label: "Events", key: "1" },
-  { id: "objectives", label: "Objectives", key: "2" },
-  { id: "agents", label: "Agents", key: "3" },
-  { id: "threads", label: "Threads", key: "4" },
-  { id: "sentries", label: "Sentries", key: "5" },
-  { id: "inbox", label: "Inbox", key: "6" },
+  { id: "inbox", label: "Inbox", key: "1" },
+  { id: "events", label: "Events", key: "2" },
+  { id: "objectives", label: "Objectives", key: "3" },
+  { id: "agents", label: "Agents", key: "4" },
+  { id: "threads", label: "Threads", key: "5" },
+  { id: "sentries", label: "Sentries", key: "6" },
 ] as const;
-/** The first four are views of one routing canvas; the rest are pages of their own. */
-const ROUTING = 4;
+/** Views of one routing canvas, in snap order; the rest are pages of their own. */
+const ROUTING: readonly string[] = ["events", "objectives", "agents", "threads"];
 
 type ViewId = (typeof views)[number]["id"];
 type Detail = { kind: "page"; ref: PageRef } | { kind: "agent" | "thread"; id: string };
@@ -28,9 +28,9 @@ type Route = { view: ViewId; detail?: Detail };
 function lastView(): ViewId {
   try {
     const v = sessionStorage.getItem("view");
-    return views.find(x => x.id === v)?.id ?? "events";
+    return views.find(x => x.id === v)?.id ?? "inbox";
   } catch {
-    return "events";
+    return "inbox";
   }
 }
 
@@ -64,7 +64,7 @@ export function App() {
     };
   }, [route.view]);
 
-  const snap = views.findIndex(v => v.id === route.view);
+  const snap = ROUTING.indexOf(route.view);
   const { detail } = route;
 
   return (
@@ -92,10 +92,10 @@ export function App() {
             <Page key={detail.ref} pageRef={detail.ref} back={route.view} />
           ) : route.view === "inbox" ? (
             <InboxView />
-          ) : snap >= ROUTING ? (
+          ) : route.view === "sentries" ? (
             <SentriesView />
           ) : (
-            <RoutingView snap={snap} onSnap={n => (location.hash = views[Math.max(0, Math.min(ROUTING - 1, n))]!.id)} />
+            <RoutingView snap={snap} onSnap={n => (location.hash = ROUTING[Math.max(0, Math.min(ROUTING.length - 1, n))]!)} />
           )}
         </main>
       </div>

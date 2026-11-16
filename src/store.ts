@@ -115,6 +115,11 @@ export async function loadLocalMock() {
   if (local.threads) threadStore.set(local.threads);
 }
 
+/** Isaac's inbox: each message starts a thread, which the funnel hands to the router that should own it. */
+export function startThread(text: string) {
+  return api("/api/threads", { text });
+}
+
 export function postToThread(threadId: string, from: string, text: string) {
   if (isLive()) return void api(`/api/threads/${threadId}/messages`, { text });
   threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, messages: [...t.messages, { from, at: NOW_AT, text }] } : t)));
