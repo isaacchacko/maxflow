@@ -1338,7 +1338,8 @@ Bun.serve<WsData>({
       }
       // Merging: the target takes the source's agents, threads, tasks and signals; its routers keep the source's title as their scope.
       if (objAct[2] === "merge" && req.method === "POST") {
-        const into = objectives.find((x) => x.id === ((await req.json().catch(() => ({}))) as { into?: string }).into);
+        const body = (await req.json().catch(() => ({}))) as { into?: string };
+        const into = objectives.find((x) => x.id === body.into);
         if (!into || into.id === o.id || into.closed) return new Response("into: an open objective other than this one", { status: 400 });
         const moved = [...sessions.values()].filter((s) => s.role?.objective === o.id);
         for (const s of moved) setRole(s, { ...s.role!, objective: into.id, ...(s.role!.role === "router" && { scope: o.title, merged: true }) });
