@@ -65,35 +65,9 @@
 @layer base {
   * { @apply border-border outline-ring/50; }
   *, *::before, *::after { border-radius: 0 !important; }
-  [data-face], [data-face] *, .agent-ripple { border-radius: 9999px !important; }
   html, body, #root { @apply h-full; }
   html, body { overscroll-behavior-x: none; }
   body { @apply bg-background text-foreground antialiased; }
-}
-
-.agent-blink {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: agent-blink 5s infinite;
-}
-@keyframes agent-blink {
-  0%, 92%, 100% { transform: scaleY(1); }
-  95% { transform: scaleY(0.1); }
-}
-
-.agent-ripple {
-  position: absolute;
-  left: -14px;
-  top: -14px;
-  width: 28px;
-  height: 28px;
-  border-radius: 9999px;
-  border: 2px solid var(--agent);
-  animation: agent-ripple 500ms ease-out forwards;
-}
-@keyframes agent-ripple {
-  from { transform: scale(0.3); opacity: 1; }
-  to { transform: scale(1.4); opacity: 0; }
 }
 
 .agent-edited {

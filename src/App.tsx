@@ -1,6 +1,4 @@
 import { useEffect, useState } from "react";
-import { AgentChat } from "@/agent/AgentChat";
-import { AgentCursor } from "@/agent/AgentCursor";
 import { AgentPage } from "@/agent/AgentPage";
 import { Kbd } from "@/components/ui/kbd";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -87,8 +85,6 @@ export function App() {
             <View />
           )}
         </main>
-        <AgentChat />
-        <AgentCursor />
       </div>
     </TooltipProvider>
   );

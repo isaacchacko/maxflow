@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, GitPullRequest, Hash, Network, Plus, Search, SquareArrowOutUpRight, User, Waypoints } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { routeChat } from "@/agent/plan";
+import { routeChat } from "@/agent/route";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
