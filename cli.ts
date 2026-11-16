@@ -29,7 +29,7 @@ const usage = `usage:
   maxflow objectives | maxflow objective new <title...> [--cwd DIR] [--scope S]   an objective and its first router
   maxflow objective merge <from id> <into id>   the target takes the source's agents, threads, tasks and signals; the source closes
   maxflow route <signal seq> <objective id> [--kind command|conversation] | maxflow route <signal seq> --new <title> [--cwd DIR]   the funnel routing a signal from the event log
-  maxflow thread new <title...> [--objective ID] | maxflow thread post <thread id> <text...> | maxflow thread status <thread id> <line...> | maxflow threads
+  maxflow thread new <title...> [--objective ID] | maxflow thread new --parent <thread id>:<message id> [text...]   a subthread under that message | maxflow thread post <thread id> <text...> | maxflow thread status <thread id> <line...> | maxflow threads
   maxflow thread done <thread id> <result...>   a command's one answer: closes the thread and its task
   maxflow thread kind <thread id> command|conversation   flip what a thread is
   maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
@@ -259,6 +259,10 @@ if (verb === "ls") {
   console.log(`signal ${rest[0]} → objective ${r.objective}${kind ? ` as a ${kind}` : ""} (routers ${r.routedTo.join(", ")})`);
 } else if (verb === "threads") {
   for (const t of await call("/api/threads")) console.log(`${t.id}  ${t.objective}  ${t.title}  (${t.messages.length} messages)`);
+} else if (verb === "thread" && rest[0] === "new" && flag(rest, "--parent")) {
+  const [thread, message] = flag(rest, "--parent")!.split(":");
+  const t = await call("/api/threads", { method: "POST", body: JSON.stringify({ parent: { thread, message }, text: positional(rest.slice(1), ["--parent"]).join(" ") }) });
+  console.log(t.id);
 } else if (verb === "thread" && rest[0] === "new" && rest[1]) {
   const t = await call("/api/threads", { method: "POST", body: JSON.stringify({ title: positional(rest.slice(1), ["--objective"]).join(" "), objective: flag(rest, "--objective") }) });
   console.log(t.id);

@@ -598,10 +598,36 @@ type Pending = { routers: string[]; since: number; status?: string };
 // when a router posts its result; done: when that was. A message's re: the index of his message a router's result answers.
 type Kind = "command" | "conversation";
 const KINDS: Kind[] = ["command", "conversation"];
-type Thread = { id: string; title: string; objective: string; routers: string[]; messages: { from: string; at: number; text: string; re?: number }[]; signal?: number; pending?: Pending; kind?: Kind; kindBy?: string; task?: number; done?: number; resolved?: { at: number } };
+// parent: a subthread hangs off a message in another thread, which is its root; its messages are that message's replies, and
+// any of them can have a subthread of its own. A top thread's root is its first message, so replying to that posts in it.
+type Message = { id: string; from: string; at: number; text: string; re?: number };
+type Thread = { id: string; title: string; objective: string; routers: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; kind?: Kind; kindBy?: string; task?: number; done?: number; resolved?: { at: number } };
 const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
 const saveThreads = () => writeFileSync(THREADS, JSON.stringify(threads));
+const message = (from: string, text: string): Message => ({ id: `m-${crypto.randomUUID().slice(0, 6)}`, from, at: Date.now(), text });
+// Messages from before subthreads get their ids once.
+if (threads.some((t) => t.messages.some((m) => !m.id))) {
+  for (const t of threads) for (const m of t.messages) m.id ??= `m-${crypto.randomUUID().slice(0, 6)}`;
+  saveThreads();
+}
+const ancestors = (t: Thread): Thread[] => {
+  const up = t.parent && threads.find((x) => x.id === t.parent!.thread);
+  return up ? [...ancestors(up), up] : [];
+};
+const pathTitle = (t: Thread) => [...ancestors(t), t].map((x) => x.title).join(" › ");
+// The subthread under a message, made on its first reply; a top thread's first message is the thread itself.
+function subthread(parent: Thread, messageId: string) {
+  const m = parent.messages.find((x) => x.id === messageId);
+  if (!m) return null;
+  if (!parent.parent && parent.messages[0] === m) return parent;
+  const found = threads.find((t) => t.parent?.thread === parent.id && t.parent.message === m.id);
+  if (found) return found;
+  const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: (m.text.replace(IMAGE, "").trim().split("\n")[0] || "image").slice(0, 80), objective: parent.objective, routers: [...parent.routers], messages: [], parent: { thread: parent.id, message: m.id } };
+  threads.push(t);
+  saveThreads();
+  return t;
+}
 const ISAAC_IN_THREAD = "[maxflow · Isaac, in thread";
 // An image pasted into a thread is markdown pointing at its file in UPLOADS, so the agent reading the text can Read the path.
 const IMAGE = /!\[[^\]]*\]\([^)\s]+\)/g;
@@ -609,6 +635,33 @@ const IMAGE = /!\[[^\]]*\]\([^)\s]+\)/g;
 const PENDING_GRACE_MS = 30_000;
 const onIt = (s?: Session) => live(s) && (s.inbox.length > 0 || agentState(s) === "working");
 const pendingOf = (p?: Pending) => p && { routerIds: p.routers, since: iso(p.since), status: p.status, stale: Date.now() - p.since > PENDING_GRACE_MS && !p.routers.some((id) => onIt(sessions.get(id))) };
+
+// A message into a thread at any level: Isaac's goes to its routers and waits on them, an agent's answers him.
+function postIn(t: Thread, from: Session | undefined, text: string, done?: boolean) {
+  // A command's result answers his last message, and in a command thread closes it and its task; his follow-up reopens it.
+  const re = done ? t.messages.findLastIndex((m) => m.from === "isaac") : -1;
+  const m = message(from?.id ?? "isaac", text);
+  t.messages.push(re >= 0 ? { ...m, re } : m);
+  if (done && t.kind === "command") {
+    t.done = Date.now();
+    const task = tasks.find((x) => x.id === t.task);
+    if (task && task.status !== "done") editTask(task, { status: "done", session: from!.id, event: `done: ${headline(text)}` });
+  }
+  if (!from) t.done = undefined;
+  if (from?.role?.role === "router" && !t.routers.includes(from.id)) t.routers.push(from.id);
+  // Isaac's reply goes to the thread's routers through the event log, like any message; an agent's post answers him.
+  if (!from) {
+    t.resolved = undefined;
+    // A subthread with no live router of its own goes to the nearest ancestor's.
+    const live_ = [t, ...ancestors(t).reverse()].map((x) => x.routers.flatMap((id) => sessions.get(id) ?? []).filter(live)).find((r) => r.length) ?? [];
+    const to = live_.length ? live_ : routersOf(t.objective);
+    dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] Answer in the thread with \`${CLI} thread post ${t.id} '<text>'\`. While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line. To answer one message in a subthread of its own, \`${CLI} thread new --parent ${t.id}:<message id> '<text>'\`.` });
+    if (to.length) t.pending = { routers: to.map((s) => s.id), since: Date.now() };
+  } else t.pending = undefined;
+  saveThreads();
+  publish(`thread/${t.id}`, { thread: t.id, from: from?.id ?? "isaac" });
+  return m;
+}
 
 // A page (an objective's or a task's) is a grid of cards its agents keep current.
 function pageOf(ref: string): { page: Block[]; save: () => void } | null {
@@ -1102,7 +1155,7 @@ async function world() {
       events: t.timeline.map((e) => ({ from: e.session && sessions.get(e.session)?.role?.role === "router" ? "router" : e.session ? "agent" : "sentry", at: iso(e.at), text: e.text })),
       page: t.page ?? [],
     })),
-    threads: threads.map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, routerIds: t.routers, pending: pendingOf(t.pending), kind: t.kind ?? "conversation", kindBy: t.kindBy, done: t.done && iso(t.done), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ from: m.from, at: iso(m.at), text: m.text, re: m.re })) })),
+    threads: threads.map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), kind: t.kind ?? "conversation", kindBy: t.kindBy, done: t.done && iso(t.done), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, re: m.re })) })),
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({
       id: s.id,
@@ -1362,11 +1415,19 @@ Bun.serve<WsData>({
     if (path === "/api/threads" && req.method === "GET") return Response.json(threads);
     if (path === "/api/threads" && req.method === "POST") {
       const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-      const body = (await req.json().catch(() => ({}))) as { title?: string; objective?: string; text?: string };
+      const body = (await req.json().catch(() => ({}))) as { title?: string; objective?: string; text?: string; parent?: { thread?: string; message?: string } };
+      // A subthread: got or made under a message, and the first reply in it posted like any other.
+      if (body.parent) {
+        const parent = threads.find((x) => x.id === body.parent!.thread);
+        const t = parent && subthread(parent, body.parent.message ?? "");
+        if (!t) return new Response("parent: {thread, message} naming a message in that thread", { status: 404 });
+        if (body.text?.trim()) postIn(t, from, body.text.trim());
+        return Response.json(t, { status: 201 });
+      }
       // Isaac's inbox: each message starts a thread, and the funnel picks the router that owns it.
       if (!from && body.text?.trim()) {
         const text = body.text.trim();
-        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: (text.replace(IMAGE, "").trim().split("\n")[0] || "image").slice(0, 80), objective: "", routers: [], messages: [{ from: "isaac", at: Date.now(), text }] };
+        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: (text.replace(IMAGE, "").trim().split("\n")[0] || "image").slice(0, 80), objective: "", routers: [], messages: [message("isaac", text)] };
         const ev = dispatch({ source: "isaac", target: t.title, text, deliver: (seq) => `${text}\n[maxflow] signal ${seq}, his inbox thread ${t.id}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`. Always route an inbox thread, small talk included: its router answers him there.` });
         t.signal = ev.seq;
         threads.push(t);
@@ -1438,26 +1499,7 @@ Bun.serve<WsData>({
       if (!text) return new Response("text required", { status: 400 });
       const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
       if (body.done && !from) return new Response("only an agent posts a command's result", { status: 400 });
-      // A command's result answers his last message, and in a command thread closes it and its task; his follow-up reopens it.
-      const re = body.done ? t.messages.findLastIndex((m) => m.from === "isaac") : -1;
-      t.messages.push({ from: from?.id ?? "isaac", at: Date.now(), text, ...(re >= 0 && { re }) });
-      if (body.done && t.kind === "command") {
-        t.done = Date.now();
-        const task = tasks.find((x) => x.id === t.task);
-        if (task && task.status !== "done") editTask(task, { status: "done", session: from!.id, event: `done: ${headline(text)}` });
-      }
-      if (!from) t.done = undefined;
-      if (from?.role?.role === "router" && !t.routers.includes(from.id)) t.routers.push(from.id);
-      // Isaac's reply goes to the thread's routers through the event log, like any message; an agent's post answers him.
-      if (!from) {
-        t.resolved = undefined;
-        const live_ = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(live);
-        const to = live_.length ? live_ : routersOf(t.objective);
-        dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${t.title}" (${t.id})] ${unforge(text)}\n[maxflow] Answer in the thread with \`${CLI} thread post ${t.id} '<text>'\`. While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line.` });
-        if (to.length) t.pending = { routers: to.map((s) => s.id), since: Date.now() };
-      } else t.pending = undefined;
-      saveThreads();
-      publish(`thread/${t.id}`, { thread: t.id, from: from?.id ?? "isaac" });
+      postIn(t, from, text, body.done);
       return Response.json(t, { status: 201 });
     }
 

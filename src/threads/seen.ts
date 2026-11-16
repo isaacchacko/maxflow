@@ -19,6 +19,11 @@ export function markSeen(id: string, count: number) {
   } catch {}
 }
 
+/** What he hasn't seen in a thread and every subthread under it, so a reply deep down shows on the inbox row. */
+export function unseenDeep(t: Thread, all: Thread[]): number {
+  return unseen(t) + all.filter(x => x.parentId === t.id).reduce((n, x) => n + unseenDeep(x, all), 0);
+}
+
 /** Replies he hasn't had on screen; a thread this browser never opened counts what came after his last message. */
 export function unseen(t: Thread) {
   const seen = seenCount(t.id);

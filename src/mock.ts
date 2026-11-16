@@ -50,7 +50,10 @@ export type Thread = {
   pending?: { routerIds: string[]; since: string; status?: string; stale: boolean };
   /** Isaac marked it done; his next message reopens it. */
   resolved?: { at: string };
-  messages: { from: string; at: string; text: string }[];
+  /** A subthread's root is this message in its parent thread; its own messages are that message's replies. */
+  parentId?: string;
+  parentMessageId?: string;
+  messages: { id?: string; from: string; at: string; text: string }[];
 };
 
 export type AgentState = "working" | "waiting" | "idle" | "asleep";

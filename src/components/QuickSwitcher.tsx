@@ -57,10 +57,13 @@ function useItems(views: readonly { id: string; label: string }[]) {
       const first = t.messages[0];
       const fresh = unseen(t);
       const opener = first ? plain(first.text) : "";
+      // A subthread shows the threads above it, so it reads as where it sits.
+      const up: string[] = [];
+      for (let p = threads.find(x => x.id === t.parentId); p; p = threads.find(x => x.id === p!.parentId)) up.unshift(p.title);
       return {
         kind: "Threads" as const,
         href: `#thread/${t.id}`,
-        label: t.title,
+        label: [...up, t.title].join(" › "),
         detail: fresh > 0 ? `${fresh} new` : opener.startsWith(t.title) ? undefined : opener,
         icon: <Avatar from={first?.from ?? t.routerIds[0] ?? ""} small />,
         text: `${t.title} ${opener}`,

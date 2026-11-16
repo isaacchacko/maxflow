@@ -1,12 +1,13 @@
-import { ArrowLeft, Check, ExternalLink, MessagesSquare, Network, RotateCcw, Waypoints } from "lucide-react";
+import { ArrowLeft, Check, ChevronRight, ExternalLink, MessageSquareReply, MessagesSquare, Network, RotateCcw, Waypoints } from "lucide-react";
 import { Fragment, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
-import { agentStore, objectiveStore, postToThread, setResolved, threadStore } from "@/store";
+import { agentStore, objectiveStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
 import { Composer } from "./Composer";
 import { MessageRow, when } from "./MessageRow";
+import { Replies, repliesOf } from "./Replies";
 import { markSeen } from "./seen";
 import { RefChip, refsIn, urlsIn, type Ref } from "./Rich";
 
@@ -41,7 +42,8 @@ export function Pending({ pending, names }: { pending: NonNullable<Thread["pendi
 }
 
 export function ThreadPage({ id, back }: { id: string; back: string }) {
-  const thread = threadStore.use().find(t => t.id === id);
+  const all = threadStore.use();
+  const thread = all.find(t => t.id === id);
   const agents = agentStore.use();
   const objective = objectiveStore.use().find(o => o.id === thread?.objectiveId);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -57,6 +59,13 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
 
   if (!thread) return <p className="p-6 text-muted-foreground">No thread {id}.</p>;
 
+  // A subthread's root is a message in its parent; the breadcrumb climbs back up through every ancestor.
+  const ancestors: Thread[] = [];
+  for (let up = all.find(t => t.id === thread.parentId); up; up = all.find(t => t.id === up!.parentId)) ancestors.unshift(up);
+  const root = thread.parentId ? ancestors.at(-1)?.messages.find(m => m.id === thread.parentMessageId) : thread.messages[0];
+  const replies = repliesOf(thread);
+  const subOf = (messageId?: string) => all.find(t => t.parentId === thread.id && t.parentMessageId === messageId);
+
   const mentioned = new Map<string, Ref>();
   for (const m of thread.messages) for (const r of refsIn(m.text)) mentioned.set(`${r.kind}:${r.id}`, r);
   const links = new Map(thread.messages.flatMap(m => urlsIn(m.text)).map(l => [l.url, l]));
@@ -65,12 +74,20 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
     <div className="flex h-full flex-col gap-3 overflow-hidden p-4">
       <header className="flex items-center gap-3">
         <Button variant="ghost" size="icon" asChild data-agent="back">
-          <a href={`#${back}`}>
+          <a href={thread.parentId ? `#thread/${thread.parentId}` : `#${back}`}>
             <ArrowLeft />
           </a>
         </Button>
         <MessagesSquare className="size-4 text-muted-foreground" />
-        <h1 className={cn("text-lg font-semibold", thread.resolved && "text-muted-foreground")}>{thread.title}</h1>
+        {ancestors.map(a => (
+          <Fragment key={a.id}>
+            <a href={`#thread/${a.id}`} data-agent={`thread-up:${a.id}`} className="max-w-56 truncate text-sm text-muted-foreground hover:text-foreground">
+              {a.title}
+            </a>
+            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+          </Fragment>
+        ))}
+        <h1 className={cn("truncate text-lg font-semibold", thread.resolved && "text-muted-foreground")}>{thread.title}</h1>
         {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
         <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-resolve" onClick={() => setResolved(thread.id, !thread.resolved)}>
           {thread.resolved ? <RotateCcw /> : <Check />}
@@ -81,15 +98,37 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
       <div className="flex min-h-0 flex-1 gap-4">
         <section className="flex min-h-0 min-w-0 flex-1 flex-col border">
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-            {thread.messages.map((m, i) => {
-              const prev = thread.messages[i - 1];
+            {root && <MessageRow from={root.from} at={root.at} text={root.text} />}
+            {root && replies.length > 0 && (
+              <p className="my-2 flex items-center gap-2 text-xs text-muted-foreground">
+                {replies.length === 1 ? "1 reply" : `${replies.length} replies`}
+                <span className="h-px flex-1 bg-border" />
+              </p>
+            )}
+            {replies.map((m, i) => {
+              const prev = replies[i - 1];
+              const sub = subOf(m.id);
               const grouped = prev?.from === m.from && Date.parse(m.at) - Date.parse(prev.at) <= GROUP_MS;
               // What agents posted after he resolved it sits below a line saying so.
               const resolvedHere = thread.resolved && m.at > thread.resolved.at && !(prev && prev.at > thread.resolved.at);
               return (
                 <Fragment key={i}>
                 {resolvedHere && <p className="my-2 border-t pt-1 text-center text-xs text-muted-foreground">new since resolved</p>}
-                <MessageRow from={m.from} at={m.at} text={m.text} grouped={grouped} className={cn(!grouped && i > 0 && "mt-2.5")} />
+                <div className="group/msg relative">
+                  <MessageRow from={m.from} at={m.at} text={m.text} grouped={grouped} className={cn(!grouped && i > 0 && "mt-2.5")}>
+                    {sub && (sub.messages.length > 0 || sub.pending) && <Replies t={sub} />}
+                  </MessageRow>
+                  {m.id && (
+                    <button
+                      data-agent={`reply-in-thread:${m.id}`}
+                      title="Reply in thread"
+                      onClick={() => openSubthread(thread.id, m.id!)}
+                      className="absolute top-0 right-0 border bg-background p-1 text-muted-foreground opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
+                    >
+                      <MessageSquareReply className="size-3.5" />
+                    </button>
+                  )}
+                </div>
                 </Fragment>
               );
             })}

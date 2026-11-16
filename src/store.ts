@@ -128,6 +128,12 @@ export function postToThread(threadId: string, from: string, text: string) {
   threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: undefined, messages: [...t.messages, { from, at: NOW_AT, text }] } : t)));
 }
 
+/** Opens the subthread under a message, making it on the first visit; a top thread's first message is the thread itself. */
+export async function openSubthread(threadId: string, messageId: string) {
+  const t = isLive() ? await api("/api/threads", { parent: { thread: threadId, message: messageId } }) : threadStore.get().find(x => x.parentId === threadId && x.parentMessageId === messageId);
+  if (t) location.hash = `thread/${t.id}`;
+}
+
 /** Isaac marks a thread done, or reopens it; it stays readable and postable either way. */
 export function setResolved(threadId: string, resolved: boolean) {
   if (isLive()) return void api(`/api/threads/${threadId}`, { resolved }, "PATCH");

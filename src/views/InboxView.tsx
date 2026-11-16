@@ -2,17 +2,10 @@ import { Check } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
-import { agentStore, objectiveStore, setResolved, startThread, threadStore } from "@/store";
+import { objectiveStore, setResolved, startThread, threadStore } from "@/store";
 import { Composer } from "@/threads/Composer";
 import { MessageRow } from "@/threads/MessageRow";
-import { Avatar } from "@/threads/Rich";
-import { unseen } from "@/threads/seen";
-import { Pending } from "@/threads/ThreadPage";
-
-function ago(at: number) {
-  const s = Math.round((Date.now() - at) / 1000);
-  return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`;
-}
+import { Replies } from "@/threads/Replies";
 
 /** A thread asks for Isaac from the first message after his last reply; null once he has answered everything in it. */
 function askedAt(t: Thread) {
@@ -21,40 +14,16 @@ function askedAt(t: Thread) {
   return ask ? Date.parse(ask.at) : null;
 }
 
-/** Under the opening message, as Slack does: who replied, how many, and when last; or the router still working on it. */
-function Replies({ t }: { t: Thread }) {
-  const agents = agentStore.use();
-  const replies = t.messages.slice(1);
-  const fresh = unseen(t);
-  const faces = [...new Set(replies.map(m => m.from).reverse())].slice(0, 4);
-  return (
-    <a href={`#thread/${t.id}`} data-agent={`inbox:${t.id}`} className="mt-1 flex w-fit items-center gap-2 border border-transparent py-0.5 pr-2 text-xs hover:border-border hover:bg-background">
-      {faces.length > 0 && (
-        <span className="flex gap-0.5">
-          {faces.map(f => (
-            <Avatar key={f} from={f} small />
-          ))}
-        </span>
-      )}
-      {replies.length > 0 ? <span className="font-semibold text-sky-400">{replies.length === 1 ? "1 reply" : `${replies.length} replies`}</span> : !t.pending && <span className="text-muted-foreground">No replies yet</span>}
-      {fresh > 0 && <span className="bg-rose-500/15 px-1 font-medium text-rose-400">{fresh} new</span>}
-      {t.pending ? (
-        <Pending pending={t.pending} names={t.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />
-      ) : (
-        replies.length > 0 && <span className="text-muted-foreground">Last reply {ago(Date.parse(replies.at(-1)!.at))} ago</span>
-      )}
-    </a>
-  );
-}
-
 export function InboxView() {
   const threads = threadStore.use();
   const objectives = objectiveStore.use();
   const [showResolved, setShowResolved] = useState(false);
   // Resolved from this list, a row stays put until he leaves the inbox, so a second click undoes an accidental resolve.
   const [kept, setKept] = useState<Set<string>>(() => new Set());
-  const resolved = threads.filter(t => t.resolved).length;
-  const rows = threads
+  // Subthreads live under their message, not in the inbox.
+  const tops = threads.filter(t => !t.parentId);
+  const resolved = tops.filter(t => t.resolved).length;
+  const rows = tops
     .filter(t => showResolved || !t.resolved || kept.has(t.id))
     .map(t => ({ t, asked: askedAt(t), last: Date.parse(t.messages.at(-1)?.at ?? "") || 0 }))
     .sort((a, b) => (a.asked ?? Infinity) - (b.asked ?? Infinity) || b.last - a.last);
