@@ -218,7 +218,7 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
     return broken ? (
       <span className={cn(tile, "bg-sky-600 text-white")}>IC</span>
     ) : (
-      <img src={`https://github.com/${GITHUB_LOGIN}.png?size=72`} alt="" onError={() => setBroken(true)} className={cn("shrink-0 object-cover", small ? "size-5" : "size-9")} />
+      <img src={`https://avatars.githubusercontent.com/${GITHUB_LOGIN}?s=72`} alt="" onError={() => setBroken(true)} className={cn("shrink-0 object-cover", small ? "size-5" : "size-9")} />
     );
   if (objectives.some(o => o.id === from))
     return (

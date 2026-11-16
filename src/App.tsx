@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AgentPage } from "@/agent/AgentPage";
+import { Capture } from "@/components/Capture";
 import { QuickSwitcher } from "@/components/QuickSwitcher";
 import { Kbd } from "@/components/ui/kbd";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -84,6 +85,9 @@ export function App() {
               ))}
             </TabsList>
           </Tabs>
+          <span className="ml-auto">
+            <Capture />
+          </span>
         </header>
         <main className="min-h-0 flex-1 overflow-hidden">
           {detail?.kind === "agent" ? (
