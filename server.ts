@@ -528,7 +528,7 @@ async function reroute(seq: number, o: Objective) {
   const to = routersOf(o.id);
   if (to.length) for (const s of to) enqueue(s, text);
   else to.push(startRouter(o, "Whole objective", text));
-  if (thread) Object.assign(thread, { objective: o.id, routers: to.map((s) => s.id), signal: undefined }), saveThreads();
+  if (thread) Object.assign(thread, { objective: o.id, routers: to.map((s) => s.id), signal: undefined, pending: { routers: to.map((s) => s.id), since: Date.now() } }), saveThreads(), publish(`thread/${thread.id}`, { thread: thread.id, pending: true });
   publish(`signal-route/${seq}`, { seq, objective: o.id, routedTo: to.map((s) => s.id) });
   if (sig.source === "isaac") for (const s of to) requested(s, sig.text);
   return to;
@@ -536,7 +536,8 @@ async function reroute(seq: number, o: Objective) {
 
 // Objectives own the work: each has one or more routers, each router a scope of it and its workers. Isaac sees them as rows.
 type Block = { id: string; kind: string; w: number; h: number; [k: string]: unknown };
-type Objective = { id: string; title: string; cwd: string; at: number; page: Block[]; closed?: boolean };
+// mergedInto: closed by merging it into another objective, which now owns its agents, threads, tasks and signals.
+type Objective = { id: string; title: string; cwd: string; at: number; page: Block[]; closed?: boolean; mergedInto?: string };
 const OBJECTIVES = `${STATE_DIR}/objectives.json`;
 const objectives: Objective[] = (() => { try { return JSON.parse(readFileSync(OBJECTIVES, "utf8")); } catch { return []; } })();
 const saveObjectives = () => writeFileSync(OBJECTIVES, JSON.stringify(objectives, null, 2));
@@ -578,13 +579,19 @@ async function acceptTrust(s: Session) {
 
 // Threads are the routers' running notes to Isaac on an objective; his reply in one goes to its routers like any message.
 // signal: an inbox thread Isaac started, waiting on the funnel to route that signal to an objective.
-type Thread = { id: string; title: string; objective: string; routers: string[]; messages: { from: string; at: number; text: string }[]; signal?: number };
+// pending: his last message was handed to these routers, and none has answered yet; status is the line a router set on it.
+type Pending = { routers: string[]; since: number; status?: string };
+type Thread = { id: string; title: string; objective: string; routers: string[]; messages: { from: string; at: number; text: string }[]; signal?: number; pending?: Pending };
 const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
 const saveThreads = () => writeFileSync(THREADS, JSON.stringify(threads));
 const ISAAC_IN_THREAD = "[maxflow · Isaac, in thread";
 // An image pasted into a thread is markdown pointing at its file in UPLOADS, so the agent reading the text can Read the path.
 const IMAGE = /!\[[^\]]*\]\([^)\s]+\)/g;
+// A pending thread goes stale once no router it waits on is working or has the message still queued, past a grace for delivery.
+const PENDING_GRACE_MS = 30_000;
+const onIt = (s?: Session) => live(s) && (s.inbox.length > 0 || agentState(s) === "working");
+const pendingOf = (p?: Pending) => p && { routerIds: p.routers, since: iso(p.since), status: p.status, stale: Date.now() - p.since > PENDING_GRACE_MS && !p.routers.some((id) => onIt(sessions.get(id))) };
 
 // A page (an objective's or a task's) is a grid of cards its agents keep current.
 function pageOf(ref: string): { page: Block[]; save: () => void } | null {
@@ -1049,7 +1056,8 @@ async function world() {
     const r = routes.get(e.seq);
     return { id: `s${e.seq}`, seq: e.seq, source: d.source, at: iso(e.at), target: d.target, text: d.text, from: d.from, routedTo: r ? [...d.routedTo, ...r.routedTo] : d.routedTo, objective: r?.objective ?? d.objective };
   });
-  const objectiveOf = (sig: (typeof signals)[number]) => sig.objective ?? sig.routedTo.map((id) => sessions.get(id)?.role?.objective).find(Boolean);
+  const mergedInto = (id?: string): string | undefined => { const o = objectives.find((x) => x.id === id); return o?.mergedInto ? mergedInto(o.mergedInto) : id; };
+  const objectiveOf = (sig: (typeof signals)[number]) => mergedInto(sig.objective ?? sig.routedTo.map((id) => sessions.get(id)?.role?.objective).find(Boolean));
   const fromKind = (sig: (typeof signals)[number]) => (sig.source === "isaac" ? "isaac" : sig.from && sessions.get(sig.from)?.role?.role === "router" ? "router" : sig.source === "agent" ? "agent" : "sentry");
   const os = objectives.filter((o) => !o.closed).map((o) => ({
     id: o.id,
@@ -1077,7 +1085,7 @@ async function world() {
       events: t.timeline.map((e) => ({ from: e.session && sessions.get(e.session)?.role?.role === "router" ? "router" : e.session ? "agent" : "sentry", at: iso(e.at), text: e.text })),
       page: t.page ?? [],
     })),
-    threads: threads.map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, routerIds: t.routers, messages: t.messages.map((m) => ({ from: m.from, at: iso(m.at), text: m.text })) })),
+    threads: threads.map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, routerIds: t.routers, pending: pendingOf(t.pending), messages: t.messages.map((m) => ({ from: m.from, at: iso(m.at), text: m.text })) })),
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({
       id: s.id,
@@ -1294,7 +1302,7 @@ Bun.serve<WsData>({
       const r = startRouter(o, body.scope?.trim() || "Whole objective");
       return Response.json({ ...o, router: r.id }, { status: 201 });
     }
-    const objAct = path.match(/^\/api\/objectives\/([\w-]+)(?:\/(routers))?$/);
+    const objAct = path.match(/^\/api\/objectives\/([\w-]+)(?:\/(routers|merge))?$/);
     if (objAct) {
       const o = objectives.find((x) => x.id === objAct[1]);
       if (!o) return new Response("no such objective", { status: 404 });
@@ -1308,6 +1316,19 @@ Bun.serve<WsData>({
           dispatch({ to: [r], target: o.id, text: `[maxflow] The user split the objective "${o.title}": a new router now owns "${scope}". Your scope is now: ${r.role!.scope}. Hand it anything of yours that falls in that scope.` });
         }
         return Response.json(describe(startRouter(o, scope)), { status: 201 });
+      }
+      // Merging: the target takes the source's agents, threads, tasks and signals; its routers keep the source's title as their scope.
+      if (objAct[2] === "merge" && req.method === "POST") {
+        const into = objectives.find((x) => x.id === ((await req.json().catch(() => ({}))) as { into?: string }).into);
+        if (!into || into.id === o.id || into.closed) return new Response("into: an open objective other than this one", { status: 400 });
+        const moved = [...sessions.values()].filter((s) => s.role?.objective === o.id);
+        for (const s of moved) setRole(s, { ...s.role!, objective: into.id, ...(s.role!.role === "router" && { scope: o.title }) });
+        for (const t of threads) if (t.objective === o.id) t.objective = into.id;
+        for (const t of tasks) if (t.objective === o.id) t.objective = into.id;
+        Object.assign(o, { closed: true, mergedInto: into.id, page: [] });
+        saveObjectives(), saveThreads(), saveTasks();
+        publish(`objective/${o.id}`, { id: o.id, mergedInto: into.id });
+        return Response.json({ from: o.id, into: into.id, sessions: moved.map((s) => s.id) });
       }
       if (req.method === "PATCH") {
         const body = (await req.json().catch(() => ({}))) as { title?: string; closed?: boolean };
@@ -1339,6 +1360,18 @@ Bun.serve<WsData>({
       saveThreads();
       return Response.json(t, { status: 201 });
     }
+    // A router says what it is doing on the answer he waits for; the line goes with the pending state.
+    const threadStatus = path.match(/^\/api\/threads\/([\w-]+)\/status$/);
+    if (threadStatus && req.method === "POST") {
+      const t = threads.find((x) => x.id === threadStatus[1]);
+      if (!t) return new Response("no such thread", { status: 404 });
+      const text = ((await req.json().catch(() => ({}))) as { text?: string }).text?.trim();
+      if (!t.pending) return new Response("nothing pending in this thread: he isn't waiting on an answer", { status: 409 });
+      t.pending.status = text?.slice(0, 160) || undefined;
+      saveThreads();
+      publish(`thread/${t.id}`, { thread: t.id, status: t.pending.status ?? null });
+      return Response.json(t);
+    }
     const threadPost = path.match(/^\/api\/threads\/([\w-]+)\/messages$/);
     if (threadPost && req.method === "POST") {
       const t = threads.find((x) => x.id === threadPost[1]);
@@ -1349,13 +1382,15 @@ Bun.serve<WsData>({
       const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
       t.messages.push({ from: from?.id ?? "isaac", at: Date.now(), text });
       if (from?.role?.role === "router" && !t.routers.includes(from.id)) t.routers.push(from.id);
+      // Isaac's reply goes to the thread's routers through the event log, like any message; an agent's post answers him.
+      if (!from) {
+        const live_ = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(live);
+        const to = live_.length ? live_ : routersOf(t.objective);
+        dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${t.title}" (${t.id})] ${unforge(text)}\n[maxflow] Answer in the thread with \`${CLI} thread post ${t.id} '<text>'\`. While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line.` });
+        if (to.length) t.pending = { routers: to.map((s) => s.id), since: Date.now() };
+      } else t.pending = undefined;
       saveThreads();
       publish(`thread/${t.id}`, { thread: t.id, from: from?.id ?? "isaac" });
-      // Isaac's reply goes to the thread's routers through the event log, like any message.
-      if (!from) {
-        const to = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(live);
-        dispatch({ source: "isaac", to: to.length ? to : routersOf(t.objective), objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${t.title}" (${t.id})] ${unforge(text)}\n[maxflow] Answer in the thread with \`${CLI} thread post ${t.id} '<text>'\`.` });
-      }
       return Response.json(t, { status: 201 });
     }
 
