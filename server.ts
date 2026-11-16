@@ -1486,6 +1486,21 @@ Bun.serve<WsData>({
       publish(`thread/${t.id}`, { thread: t.id, status: t.pending.status ?? null });
       return Response.json(t);
     }
+    // Re-homing a thread: it and every subthread under it go to the objective and its routers.
+    const threadMove = path.match(/^\/api\/threads\/([\w-]+)\/objective$/);
+    if (threadMove && req.method === "POST") {
+      const t = threads.find((x) => x.id === threadMove[1]);
+      if (!t) return new Response("no such thread", { status: 404 });
+      const id = ((await req.json().catch(() => ({}))) as { objective?: string }).objective;
+      const o = objectives.find((x) => x.id === id);
+      if (!o || o.closed) return new Response("objective: an open objective's id", { status: 400 });
+      const moved = threads.filter((x) => x === t || ancestors(x).includes(t));
+      const routers = routersOf(o.id).map((r) => r.id);
+      for (const x of moved) Object.assign(x, { objective: o.id, routers });
+      saveThreads();
+      for (const x of moved) publish(`thread/${x.id}`, { thread: x.id, objective: o.id });
+      return Response.json({ objective: o.id, routers, threads: moved.map((x) => x.id) });
+    }
     // Resolving a thread is Isaac's, from the browser; reopening it too.
     const threadAct = path.match(/^\/api\/threads\/([\w-]+)$/);
     if (threadAct && req.method === "PATCH") {

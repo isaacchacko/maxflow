@@ -32,6 +32,7 @@ const usage = `usage:
   maxflow thread new <title...> [--objective ID] | maxflow thread new --parent <thread id>:<message id> [text...]   a subthread under that message | maxflow thread post <thread id> <text...> | maxflow thread status <thread id> <line...> | maxflow threads
   maxflow thread done <thread id> <result...>   a command's one answer: closes the thread and its task
   maxflow thread kind <thread id> command|conversation   flip what a thread is
+  maxflow thread move <thread id> <objective id>   re-home a thread and its subthreads onto that objective and its routers
   maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
   maxflow install                            run this checkout as the login service and add its hooks to ~/.claude/settings.json`;
 import { fetchPrs, links, parsePr, readStatus, readWatches, render, writeWatches } from "./sentries/gh";
@@ -272,6 +273,9 @@ if (verb === "ls") {
   await call(`/api/threads/${rest[1]}/messages`, { method: "POST", body: JSON.stringify({ text: rest.slice(2).join(" "), done: true }) });
 } else if (verb === "thread" && rest[0] === "kind" && rest[2]) {
   await call(`/api/threads/${rest[1]}/kind`, { method: "POST", body: JSON.stringify({ kind: rest[2] }) });
+} else if (verb === "thread" && rest[0] === "move" && rest[2]) {
+  const r = await call(`/api/threads/${rest[1]}/objective`, { method: "POST", body: JSON.stringify({ objective: rest[2] }) });
+  console.log(`moved ${r.threads.join(" ")} to ${r.objective} (routers ${r.routers.join(" ") || "none"})`);
 } else if (verb === "thread" && rest[0] === "status" && rest[2]) {
   await call(`/api/threads/${rest[1]}/status`, { method: "POST", body: JSON.stringify({ text: rest.slice(2).join(" ") }) });
 } else if (verb === "page" && (rest[0] === "put" || rest[0] === "rm") && rest[2]) {
