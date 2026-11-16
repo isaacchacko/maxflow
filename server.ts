@@ -534,7 +534,10 @@ function dispatch(m: { text: string; source?: Source; from?: Session; to?: Sessi
   const signal: Signal = { source, ...(m.from && { from: m.from.id }), target: m.target ?? targetOf(source, m.text, m.from), text: m.text, routedTo: to.map((s) => s.id), ...(m.objective && { objective: m.objective }) };
   const ev = publish(`signal/${source}`, signal);
   const text = typeof m.deliver === "function" ? m.deliver(ev.seq) : (m.deliver ?? m.text);
-  if (!m.typed) for (const s of to) enqueue(s, text);
+  // Claude Code takes a prompt starting with ! as a shell command, / as a slash command and # as a memory, so a delivery that
+  // starts with one (an image-only inbox message is "![image](…)") gets a space ahead. Only his own words typed into a pane keep theirs.
+  const delivered = /^[!/#]/.test(text) && !(source === "isaac" && !m.deliver) ? ` ${text}` : text;
+  if (!m.typed) for (const s of to) enqueue(s, delivered);
   return ev;
 }
 // A signal routed after the fact, by the funnel naming its objective; the log keeps both. An objective with no router yet
