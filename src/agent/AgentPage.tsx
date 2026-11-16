@@ -6,7 +6,7 @@ import { Separator } from "@/components/ui/separator";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { cn } from "@/lib/utils";
 import { NOW_AT, agentStateColor, statusColor, type Agent, type AgentState } from "@/mock";
-import { addSignal, agentStore, api, liveStore, objectiveStore, pathOf, questionStore, sentryStore, setArchived, settleQuestion, signalStore, spawnWorker, taskStore } from "@/store";
+import { addSignal, agentStore, api, liveStore, objectiveStore, pathOf, sentryStore, setArchived, signalStore, spawnWorker, taskStore } from "@/store";
 import { Rich } from "@/threads/Rich";
 import { Terminal } from "./Terminal";
 import { closing, transcriptFor, typedStore, type Line } from "./transcript";
@@ -120,42 +120,6 @@ const stateOrder: AgentState[] = ["working", "waiting", "idle", "asleep"];
 
 function when(at: string) {
   return at.slice(0, 10) === NOW_AT.slice(0, 10) ? at.slice(11, 16) : new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-/** The agent's open question for Isaac, answered here; his words are typed into its prompt. */
-function OpenQuestion({ agentId }: { agentId: string }) {
-  const q = questionStore.use().find(x => x.session === agentId && x.status === "pending");
-  const [answer, setAnswer] = usePersistentDraft(`question:${agentId}`);
-  if (!q) return null;
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!answer.trim()) return;
-    void settleQuestion(q.id, "reply", answer.trim());
-    setAnswer("");
-  };
-  return (
-    <>
-      <Section title={`Question q${q.id}`}>
-        {q.thread.map((m, i) => (
-          <p key={i} className={cn("text-sm whitespace-pre-wrap", m.from === "user" ? "text-sky-300" : m.from === "sentry" && "text-muted-foreground")}>
-            {m.text}
-          </p>
-        ))}
-        <form onSubmit={submit} className="flex flex-col gap-1.5">
-          <textarea value={answer} onChange={e => setAnswer(e.target.value)} rows={3} className="w-full resize-y border bg-transparent px-2 py-1.5 text-sm outline-none focus:border-ring" />
-          <div className="flex gap-1.5">
-            <Button type="submit" size="sm" disabled={!answer.trim()}>
-              Answer
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => void settleQuestion(q.id, "dismiss")}>
-              Dismiss
-            </Button>
-          </div>
-        </form>
-      </Section>
-      <Separator />
-    </>
-  );
 }
 
 /** A router's page is about its scope: who it runs, what it handed to whom, and who shares the objective. */
@@ -352,7 +316,6 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
         )}
 
         <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">
-          <OpenQuestion agentId={agent.id} />
           {agent.role === "router" ? (
             <RouterSidebar router={agent} />
           ) : (

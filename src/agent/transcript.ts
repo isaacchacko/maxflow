@@ -21,7 +21,7 @@ export function transcriptFor(agent: Agent, crew: Agent[], parent: Agent | undef
   const lines: Line[] = [{ kind: "system", text: `maxflow · ${agent.id} · ${agent.role}${parent ? ` · spawned by ${parent.id}` : ""}` }];
 
   if (agent.role === "router") {
-    lines.push({ kind: "router", text: `You route "${agent.scope}". Keep your agents busy, ask Isaac only through the question sentry.` });
+    lines.push({ kind: "router", text: `You route "${agent.scope}". Keep your agents busy, ask Isaac only in a thread, about decisions truly his.` });
     lines.push({ kind: "tool", name: "Read", arg: "objective.md", result: "Read 42 lines" });
     for (const w of crew) {
       lines.push({ kind: "tool", name: "Spawn", arg: w.id, result: `${w.id} started` });

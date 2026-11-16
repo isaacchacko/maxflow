@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { agentStore, sentryStore } from "@/store";
 
 /** Every sentry main maxflow runs. vis-factory is no session of its own: it is the workers the review sentry starts on its queue. */
-const SENTRIES = ["funnel", "assistant", "review", "meta", "questions", "inbox", "gh", "slack", "graph", "rename", "ram", "health", "vis-factory"];
+const SENTRIES = ["funnel", "assistant", "review", "meta", "inbox", "gh", "slack", "graph", "rename", "ram", "health", "vis-factory"];
 const AGENTS = new Set(["funnel", "assistant", "review", "meta"]);
 
 function ago(at: number) {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // assistant sentry's feed: runs beside the assistant agent (sentries/assistant.md) in its pane. Every minute it reads the part of each
 // session's transcript it hasn't read yet for the user's own prompts (sentries' panes included, so what he types to the funnel counts)
-// and the reply each agent ended its turn on, and the bus for question, wait, intent and PR events. It hands the assistant a digest
+// and the reply each agent ended its turn on, and the bus for ask, wait, intent and PR events. It hands the assistant a digest
 // within a minute of anything the user asked, and otherwise every 10 minutes, and looks up the state of every PR the open tasks link,
 // which the server reads to settle each task's column. Exits with the agent.
 import { existsSync, openSync, readSync, closeSync, statSync, readFileSync, writeFileSync } from "node:fs";
@@ -19,7 +19,6 @@ const BACKFILL_MS = Number(process.env.ASSISTANT_BACKFILL_MS ?? 24 * 3_600_000);
 const NOTIFY_CHARS = 8_000;
 
 type Session = { id: string; name: string; sentry: boolean; agent: boolean; status: string; transcript?: string; asleep?: boolean; wait: { kind: string; ref: string } | null };
-type Question = { id: number; session: string; name: string; status: string; thread: { from: string; text: string }[] };
 type Event = { seq: number; at: number; topic: string; data: any };
 type Mark = { offset: number; reply?: string };
 type Prompt = { at: string; session: string; title: string; sentry: boolean; text: string; task?: number };
@@ -84,12 +83,12 @@ function lastReply(lines: string[]) {
   return "";
 }
 
-// The events that move a task: a question raised or settled, an agent starting or ending a wait, the funnel routing one of the user's
+// The events that move a task: an agent asking the user in a thread, an agent starting or ending a wait, the funnel routing one of the user's
 // requests, the server settling a task's column from its agents' waits, the inbox sentry putting a Slack message or PR on the
 // board, and a PR's milestones.
-const MOVES = /^(question\/\w+\/\d+|wait\/\w+|intent\/\w+|inbox\/\w+|task\/\d+|gh\/.+\/pr\/\d+\/(opened|merged|closed|review|ci|decision))$/;
-// What can't wait for the next digest: something the user asked, a question to or from him, the funnel routing his request.
-const URGENT = /^(question|intent)\//;
+const MOVES = /^(ask\/[\w-]+|wait\/\w+|intent\/\w+|inbox\/\w+|task\/\d+|gh\/.+\/pr\/\d+\/(opened|merged|closed|review|ci|decision))$/;
+// What can't wait for the next digest: something the user asked, an agent asking him, the funnel routing his request.
+const URGENT = /^(ask|intent)\//;
 
 const pending = state.pending;
 
@@ -125,11 +124,9 @@ async function read() {
 
   const fresh = await get<Event[]>(`/api/events?topic=**&after=${state.seq}`);
   const tasks = fresh.some((e) => e.topic.startsWith("intent/")) ? await get<Task[]>("/api/tasks") : [];
-  const questions = new Map((await get<Question[]>("/api/questions")).map((q) => [q.id, q]));
   for (const e of fresh.filter((e) => MOVES.test(e.topic) && e.at >= state.since)) {
-    const q = e.topic.startsWith("question/") ? questions.get(e.data?.id) : undefined;
     const who = e.data?.session && `${e.data.session} (${name.get(e.data.session) ?? "?"})`;
-    const what = q ? `${q.name}: ${clip(q.thread[0].text, 600)}${q.thread.length > 1 ? ` ↳ ${q.thread.at(-1)!.from}: ${clip(q.thread.at(-1)!.text, 600)}` : ""}` : clip(JSON.stringify(e.data), 600);
+    const what = clip(JSON.stringify(e.data), 600);
     const made = e.topic.startsWith("intent/") && typeof e.data?.request === "string" ? askedIn(tasks, e.data.request) : undefined;
     pending.events.push(`${new Date(e.at).toISOString()} ${e.topic}${who ? ` ${who}` : ""} ${what}${made ? ` (the server filed it as T-${made})` : ""}`);
     if (URGENT.test(e.topic)) pending.urgent = true;

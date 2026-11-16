@@ -1,19 +1,19 @@
 #!/usr/bin/env bun
-// Claude Code hook: in maxflow a question to the user goes through `maxflow ask` and the questions sentry, never the chat,
+// Claude Code hook: in maxflow a question to the user goes through `maxflow ask`, which opens a thread in his inbox, never the chat,
 // and a SendMessage to another agent is logged, or queued by maxflow when the agent is asleep. PreToolUse(AskUserQuestion) denies the tool; Stop sends back a turn that ends on a question, once.
 import { readFileSync } from "node:fs";
 
 if (!process.env.MAXFLOW_SESSION) process.exit(0);
 const input = JSON.parse(await Bun.stdin.text());
 const cli = process.env.MAXFLOW_CLI ?? new URL("../cli.ts", import.meta.url).pathname;
-const how = `run \`${cli} ask '<question>' [--default '<rec>']\`, making it stand on its own (what you found, the options, your recommendation; --default only when the step is reversible), keep working on whatever doesn't hang on the answer, then \`${cli} wait q:<id>\`; his answer is typed into your prompt as a [maxflow] message`;
+const how = `ask only for a decision truly his, and decide the rest yourself. Run \`${cli} ask '<question>' [--default '<rec>']\`, which opens a thread in his inbox flagged as waiting on him and prints its id. Make it stand on its own (what you found, the options, your recommendation; --default only when the step is reversible), keep working on whatever doesn't hang on the answer, then \`${cli} wait thread:<id>\`; his reply is typed into your prompt as a [maxflow] message`;
 
 if (input.hook_event_name === "PreToolUse" && input.tool_name === "AskUserQuestion") {
   console.log(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: `In maxflow nobody watches this dialog. Raise it with the questions sentry instead: ${how}.`,
+      permissionDecisionReason: `In maxflow nobody watches this dialog. Ask him in a thread instead: ${how}.`,
     },
   }));
   process.exit(0);

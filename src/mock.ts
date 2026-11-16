@@ -50,6 +50,8 @@ export type Thread = {
   pending?: { routerIds: string[]; since: string; status?: string; stale: boolean };
   /** Isaac marked it done; his next message reopens it. */
   resolved?: { at: string };
+  /** An agent asked him here with `maxflow ask` and sleeps until he replies. */
+  asks?: { sessionId: string; since: string };
   /** A subthread's root is this message in its parent thread; its own messages are that message's replies. */
   parentId?: string;
   parentMessageId?: string;
@@ -391,8 +393,6 @@ export const threads: Thread[] = [
   },
 ];
 
-/** A question an agent raised for Isaac through the questions sentry; pending ones wait on his answer. */
-export type Question = { id: number; session: string; name: string; status: "gating" | "pending"; at: number; thread: { from: "agent" | "user" | "sentry"; text: string; at: number }[] };
 
 /** A sentry session from the live server: one of main's sentries, run in tmux. */
 export type SentrySession = { id: string; name: string; running: boolean; status: string; lastOutputAt: number; createdAt: number; ties: { session: string; label: string }[]; use: string };

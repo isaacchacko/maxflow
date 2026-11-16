@@ -26,7 +26,8 @@ export function InboxView() {
   const rows = tops
     .filter(t => showResolved || !t.resolved || kept.has(t.id))
     .map(t => ({ t, asked: askedAt(t), last: Date.parse(t.messages.at(-1)?.at ?? "") || 0 }))
-    .sort((a, b) => (a.asked ?? Infinity) - (b.asked ?? Infinity) || b.last - a.last);
+    // An agent waiting on him comes first, longest-waiting on top.
+    .sort((a, b) => Number(!a.t.asks) - Number(!b.t.asks) || (a.asked ?? Infinity) - (b.asked ?? Infinity) || b.last - a.last);
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-4">
@@ -63,7 +64,8 @@ export function InboxView() {
                   onClick={e => (e.target as Element).closest("a") || (location.hash = `thread/${t.id}`)}
                   meta={
                     <span className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
-                      <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : "routing…"}</span>
+                      {t.asks && <span className="shrink-0 font-medium text-amber-400">needs you</span>}
+                      <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : t.asks ? "" : "routing…"}</span>
                       {t.resolved && <Check className="size-3 shrink-0 self-center" />}
                     </span>
                   }

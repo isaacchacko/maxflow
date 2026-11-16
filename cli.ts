@@ -8,13 +8,12 @@ const usage = `usage:
   maxflow keys <id> <key...>                 tmux key names: Enter Escape C-c Up BTab ...
   maxflow screen <id> [--history N]          print the screen as plain text
   maxflow wait <id> [--idle MS] [--match RE] [--timeout MS]   block until quiet / RE on screen / exit, print screen
-  maxflow wait q:<id> | approval:<pr> | ci:<pr> | agent:<id> | slack:<permalink | channel | #channel | query> | done   declare what you wait on; you sleep from your turn's end until a message wakes you
+  maxflow wait thread:<id> | approval:<pr> | ci:<pr> | agent:<id> | slack:<permalink | channel | #channel | query> | done   declare what you wait on; you sleep from your turn's end until a message wakes you
   maxflow rename <id> <name...> | maxflow kill <id>
   maxflow notify <id> <text...> [--isaac]    deliver text once the session is idle at an empty claude prompt; --isaac as for send
   maxflow who router|parent|workers|objective   the agents around you, as mf-<id> names for SendMessage
-  maxflow ask <question...> [--re QID] [--default REC]   raise a question to the user through sentry:questions; returns at once.
-                                             --default: your recommendation for a reversible step, which you go ahead with if he hasn't answered in 3h
-  maxflow questions [--all]                  the user's question queue
+  maxflow ask <question...> [--re THREAD] [--default REC]   ask the user in a thread of yours, flagged as waiting on him; prints its id.
+                                             --re: ask again in that thread; --default: your recommendation for a reversible step, which you go ahead with if he hasn't answered in 3h
   maxflow tasks [--all]                      the user's task board, with each task's timeline; --all adds done and dropped ones
   maxflow task new <title...> | maxflow task <id> [--title T] [--status todo|doing|you|waiting|blocked|done|dropped] [--question] [--answer A]
                                              [--session ID] [--link URL] [--event TEXT] [--at TIME]   sentry:assistant's edits to the board
@@ -80,7 +79,7 @@ if (verb === "ls") {
   await call(`/api/sessions/${rest[0]}/input`, { method: "POST", body: JSON.stringify({ keys: rest.slice(1) }) });
 } else if (verb === "screen" && rest[0]) {
   console.log((await call(`/api/sessions/${rest[0]}/screen?history=${flag(rest, "--history") ?? 0}`)).screen);
-} else if (verb === "wait" && /^(q|approval|ci|agent|slack):.|^done$/.test(rest[0] ?? "")) {
+} else if (verb === "wait" && /^(thread|q|approval|ci|agent|slack):.|^done$/.test(rest[0] ?? "")) {
   const me = process.env.MAXFLOW_SESSION;
   if (!me) console.error("wait works only inside a maxflow session"), process.exit(1);
   const [kind, ...ref] = rest[0].split(":");
@@ -101,8 +100,9 @@ if (verb === "ls") {
     const prev = slack.readWatches().find((w) => w.target === found)?.sessions ?? [];
     slack.writeWatches([...slack.readWatches().filter((w) => w.target !== found), { target: found, sessions: [...new Set([...prev, me])] }]);
   }
-  await call(`/api/sessions/${me}/await`, { method: "POST", body: JSON.stringify({ kind, ref: target }) });
-  console.log(kind === "done" ? "done. End your turn now; you stay awake with your last reply on screen." : `waiting on ${kind}:${target}. End your turn now; you sleep until a message wakes you.`);
+  // The server may name the wait differently: q:<n> is the thread that question moved into.
+  const { wait } = await call(`/api/sessions/${me}/await`, { method: "POST", body: JSON.stringify({ kind, ref: target }) });
+  console.log(kind === "done" ? "done. End your turn now; you stay awake with your last reply on screen." : `waiting on ${wait.kind}:${wait.ref}. End your turn now; you sleep until a message wakes you.`);
 } else if (verb === "wait" && rest[0]) {
   const q = new URLSearchParams(Object.entries({ idle: flag(rest, "--idle"), match: flag(rest, "--match"), timeout: flag(rest, "--timeout") }).filter(([, v]) => v) as [string, string][]);
   const r = await call(`/api/sessions/${rest[0]}/wait?${q}`);
@@ -133,13 +133,8 @@ if (verb === "ls") {
   await call(`/api/sessions/${id}/notify`, { method: "POST", body: JSON.stringify({ text: words.join(" "), isaac: rest.includes("--isaac") }) });
 } else if (verb === "ask" && rest[0]) {
   if (!process.env.MAXFLOW_SESSION) console.error("ask works only inside a maxflow session"), process.exit(1);
-  const re = flag(rest, "--re");
-  const q = await call("/api/questions", { method: "POST", body: JSON.stringify({ text: positional(rest, ["--re", "--default"]).join(" "), re: re ? Number(re.replace(/^q/, "")) : undefined, default: flag(rest, "--default") }) });
-  console.log(`q${q.id} ${q.thread.length > 1 ? "updated" : "queued"} (${q.status}). Keep working; the answer arrives in your prompt. Once nothing is left that doesn't hang on it, run \`maxflow wait q:${q.id}\` and end your turn.`);
-} else if (verb === "questions") {
-  for (const q of await call("/api/questions"))
-    if (rest.includes("--all") || q.status === "gating" || q.status === "pending")
-      console.log(`q${q.id}  ${q.status.padEnd(9)}  ${q.name} (${q.session})\n${q.thread.map((m: { from: string; text: string }) => `  ${m.from}: ${m.text}`).join("\n")}\n`);
+  const t = await call("/api/asks", { method: "POST", body: JSON.stringify({ text: positional(rest, ["--re", "--default"]).join(" "), re: flag(rest, "--re"), default: flag(rest, "--default") }) });
+  console.log(`${t.id}: asked in his inbox, flagged as waiting on him. Keep working; his reply arrives in your prompt. Once nothing is left that doesn't hang on it, run \`maxflow wait thread:${t.id}\` and end your turn.`);
 } else if (verb === "tasks") {
   for (const t of await call("/api/tasks"))
     if (rest.includes("--all") || (t.status !== "done" && t.status !== "dropped"))
