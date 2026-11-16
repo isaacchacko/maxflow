@@ -16,15 +16,16 @@ Isaac's chats from the event log reach you with a line `[maxflow] signal <seq>: 
 
 1. **Find its root.** Name the ticket, PR, bug, feature or question the request is really about, in a few words. Pull out every identifier it carries (PRO-1234, app#12236, a URL, a case id, a file or feature name).
 2. **Find its objective.** Match the root against the objectives' titles and their routers' scopes and screens (`maxflow screen <router id> --history 200`, two or three at most).
-3. **Route it.**
-   - **Existing objective** when the request belongs to work an objective already holds: `maxflow route <seq> <objective id>`. Its routers get his words, stamped as his.
+3. **Say what kind it is.** A message from his inbox is either a **command** or a **conversation**. A command is one where he only wants an ack and a result: "consolidate these objectives", "maxflow reloads wipe my drafts", "add a hover highlight", "what is 2+2". It can still be real work, like a feature a worker builds in ten minutes. A conversation is one he wants to talk through: a question about how something works, a design ("we need a system that…"), a status he will drill into, or a list he will refine. The test is whether he expects to talk it through, not how big the job is. **When unsure, it's a conversation**: getting that wrong costs no more than today. Pass the kind as `--kind command|conversation` on `maxflow route`. A command always goes to an **existing** objective, the closest one, and never opens a new objective (the server refuses `--new` with `--kind command`).
+4. **Route it.**
+   - **Existing objective** when the request belongs to work an objective already holds: `maxflow route <seq> <objective id> --kind <kind>`. Its routers get his words, stamped as his.
    - **New objective** when the root is new: `maxflow route <seq> --new '<objective title: the outcome, a few words>' --cwd <dir>`, in the folder the work belongs in (the repo, or `~`). The server starts its router and hands it the request.
    - A request with no signal number (typed straight into your pane) goes the same way: `maxflow objective new '<title>' --cwd <dir>` prints the objective and its router, then `maxflow notify <router id> --isaac '<his words verbatim>'`.
    - **His PR comments** reach you from the server as his own words, starting `My comment on PR <owner/repo#n>: "..." <url>` (or `My review` / `My comment on <path>`), with the sessions tied to that PR listed after. Route them to the objective that holds that PR, relayed with `maxflow notify <router id> --isaac '<text>'`; a session on the PR that is no objective's goes the same way to that session.
    - **Agents nobody routed** sit under you as "Unrouted". When one's work clearly belongs to an objective, tell that objective's router: `maxflow notify <router id> '<agent id>: <what it owns>'`.
-4. **Write what you send.** Isaac's request verbatim first, exactly as he typed it, then your context. `--isaac` makes the server check the text starts with words he typed here and stamp it as his; it refuses anything else. Never restate or reinterpret his request.
-5. **Name it on his board.** Run `maxflow pub intent/<router id> '{"root":"<root, a few words>","request":"<his words verbatim>"}'` (JSON-escape the quotes): the root becomes the task's title.
-6. **Report in one line**, then stop: `→ <new|existing> "<objective>" (<id>)`. Add "because ..." only when the choice wasn't obvious.
+5. **Write what you send.** Isaac's request verbatim first, exactly as he typed it, then your context. `--isaac` makes the server check the text starts with words he typed here and stamp it as his; it refuses anything else. Never restate or reinterpret his request.
+6. **Name it on his board.** Run `maxflow pub intent/<router id> '{"root":"<root, a few words>","request":"<his words verbatim>"}'` (JSON-escape the quotes): the root becomes the task's title.
+7. **Report in one line**, then stop: `→ <new|existing> "<objective>" (<id>), <kind>`. Add "because ..." only when the choice wasn't obvious.
 
 ## Limits
 

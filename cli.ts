@@ -28,8 +28,10 @@ const usage = `usage:
   maxflow chats [query] | maxflow resume <claude-session-id> [--safe] [--force]
   maxflow objectives | maxflow objective new <title...> [--cwd DIR] [--scope S]   an objective and its first router
   maxflow objective merge <from id> <into id>   the target takes the source's agents, threads, tasks and signals; the source closes
-  maxflow route <signal seq> <objective id> | maxflow route <signal seq> --new <title> [--cwd DIR]   the funnel routing a signal from the event log
+  maxflow route <signal seq> <objective id> [--kind command|conversation] | maxflow route <signal seq> --new <title> [--cwd DIR]   the funnel routing a signal from the event log
   maxflow thread new <title...> [--objective ID] | maxflow thread post <thread id> <text...> | maxflow thread status <thread id> <line...> | maxflow threads
+  maxflow thread done <thread id> <result...>   a command's one answer: closes the thread and its task
+  maxflow thread kind <thread id> command|conversation   flip what a thread is
   maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
   maxflow install                            run this checkout as the login service and add its hooks to ~/.claude/settings.json`;
 import { fetchPrs, links, parsePr, readStatus, readWatches, render, writeWatches } from "./sentries/gh";
@@ -252,8 +254,9 @@ if (verb === "ls") {
   console.log(`objective ${r.from} merged into ${r.into} (moved ${r.sessions.length} sessions)`);
 } else if (verb === "route" && rest[1]) {
   const title = flag(rest, "--new");
-  const r = await call(`/api/signals/${rest[0]}/route`, { method: "POST", body: JSON.stringify(title ? { title, cwd: flag(rest, "--cwd") ?? process.cwd() } : { objective: rest[1] }) });
-  console.log(`signal ${rest[0]} → objective ${r.objective} (routers ${r.routedTo.join(", ")})`);
+  const kind = flag(rest, "--kind");
+  const r = await call(`/api/signals/${rest[0]}/route`, { method: "POST", body: JSON.stringify(title ? { title, cwd: flag(rest, "--cwd") ?? process.cwd(), kind } : { objective: rest[1], kind }) });
+  console.log(`signal ${rest[0]} → objective ${r.objective}${kind ? ` as a ${kind}` : ""} (routers ${r.routedTo.join(", ")})`);
 } else if (verb === "threads") {
   for (const t of await call("/api/threads")) console.log(`${t.id}  ${t.objective}  ${t.title}  (${t.messages.length} messages)`);
 } else if (verb === "thread" && rest[0] === "new" && rest[1]) {
@@ -261,6 +264,10 @@ if (verb === "ls") {
   console.log(t.id);
 } else if (verb === "thread" && rest[0] === "post" && rest[2]) {
   await call(`/api/threads/${rest[1]}/messages`, { method: "POST", body: JSON.stringify({ text: rest.slice(2).join(" ") }) });
+} else if (verb === "thread" && rest[0] === "done" && rest[2]) {
+  await call(`/api/threads/${rest[1]}/messages`, { method: "POST", body: JSON.stringify({ text: rest.slice(2).join(" "), done: true }) });
+} else if (verb === "thread" && rest[0] === "kind" && rest[2]) {
+  await call(`/api/threads/${rest[1]}/kind`, { method: "POST", body: JSON.stringify({ kind: rest[2] }) });
 } else if (verb === "thread" && rest[0] === "status" && rest[2]) {
   await call(`/api/threads/${rest[1]}/status`, { method: "POST", body: JSON.stringify({ text: rest.slice(2).join(" ") }) });
 } else if (verb === "page" && (rest[0] === "put" || rest[0] === "rm") && rest[2]) {

@@ -521,7 +521,7 @@ function dispatch(m: { text: string; source?: Source; from?: Session; to?: Sessi
 }
 // A signal routed after the fact, by the funnel naming its objective; the log keeps both. An objective with no router yet
 // gets one, started with the signal as its first prompt.
-async function reroute(seq: number, o: Objective) {
+async function reroute(seq: number, o: Objective, kind?: Kind) {
   const e = (await query("signal/**", seq - 1, 0)).find((x) => x.seq === seq);
   if (!e) return null;
   const sig = e.data as Signal;
@@ -529,13 +529,19 @@ async function reroute(seq: number, o: Objective) {
   const thread = threads.find((t) => t.signal === seq);
   const said = thread ? thread.messages.filter((m) => m.from === "isaac").map((m) => m.text).join("\n\n") : sig.text;
   const text = (sig.source === "isaac" ? `${VERIFIED}\n${unforge(said)}` : `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(said)}`) +
-    (thread ? `\n[maxflow] He wrote this in his inbox as thread "${thread.title}" (${thread.id}), which is yours now. Answer him there with \`${CLI} thread post ${thread.id} '<text>'\`.` : "");
+    (thread ? `\n[maxflow] He wrote this in his inbox as thread "${thread.title}" (${thread.id}), which is yours now. Answer him there with \`${CLI} thread post ${thread.id} '<text>'\`.` : "") +
+    (kind === "command" ? `\n[maxflow] The funnel judged this a command: do it, or have one worker do it, then answer once${thread ? ` with \`${CLI} thread done ${thread.id} '<result>'\`, which closes its task. If it needs talking through after all, \`${CLI} thread kind ${thread.id} conversation\`` : ""}. No "on it" post and no task of your own for it.` : "");
   const to = routersOf(o.id);
   if (to.length) for (const s of to) enqueue(s, text);
   else to.push(startRouter(o, "Whole objective", text));
-  if (thread) Object.assign(thread, { objective: o.id, routers: to.map((s) => s.id), signal: undefined, pending: { routers: to.map((s) => s.id), since: Date.now() } }), saveThreads(), publish(`thread/${thread.id}`, { thread: thread.id, pending: true });
-  publish(`signal-route/${seq}`, { seq, objective: o.id, routedTo: to.map((s) => s.id) });
-  if (sig.source === "isaac") for (const s of to) requested(s, sig.text);
+  if (thread) Object.assign(thread, { objective: o.id, routers: to.map((s) => s.id), signal: undefined, pending: { routers: to.map((s) => s.id), since: Date.now() }, ...(kind && { kind, kindBy: "funnel" }) });
+  publish(`signal-route/${seq}`, { seq, objective: o.id, routedTo: to.map((s) => s.id), ...(kind && { kind }) });
+  // A command gets a task of its own, which its result closes; the funnel's intent still names it, as the router's newest open task.
+  if (sig.source === "isaac" && kind === "command" && thread) {
+    const made = editTask(undefined, { title: headline(sig.text), status: "doing", session: to[0].id, objective: o.id, event: `asked: ${headline(sig.text)}` });
+    if (typeof made !== "string") (made.drafted = true), (thread.task = made.id), saveTasks();
+  } else if (sig.source === "isaac") for (const s of to) requested(s, sig.text);
+  if (thread) saveThreads(), publish(`thread/${thread.id}`, { thread: thread.id, pending: true });
   return to;
 }
 
@@ -587,7 +593,12 @@ async function acceptTrust(s: Session) {
 // resolved: Isaac marked it done, from the browser only; his next message in it reopens it.
 // pending: his last message was handed to these routers, and none has answered yet; status is the line a router set on it.
 type Pending = { routers: string[]; since: number; status?: string };
-type Thread = { id: string; title: string; objective: string; routers: string[]; messages: { from: string; at: number; text: string }[]; signal?: number; pending?: Pending; resolved?: { at: number } };
+// kind: a command wants an ack and one result, a conversation (the default) is talked through. kindBy: who last set it, the
+// funnel, a router or "isaac", so his flips are labelled data on the classifier. task: a command's own board task, which closes
+// when a router posts its result; done: when that was. A message's re: the index of his message a router's result answers.
+type Kind = "command" | "conversation";
+const KINDS: Kind[] = ["command", "conversation"];
+type Thread = { id: string; title: string; objective: string; routers: string[]; messages: { from: string; at: number; text: string; re?: number }[]; signal?: number; pending?: Pending; kind?: Kind; kindBy?: string; task?: number; done?: number; resolved?: { at: number } };
 const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
 const saveThreads = () => writeFileSync(THREADS, JSON.stringify(threads));
@@ -1091,7 +1102,7 @@ async function world() {
       events: t.timeline.map((e) => ({ from: e.session && sessions.get(e.session)?.role?.role === "router" ? "router" : e.session ? "agent" : "sentry", at: iso(e.at), text: e.text })),
       page: t.page ?? [],
     })),
-    threads: threads.map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, routerIds: t.routers, pending: pendingOf(t.pending), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ from: m.from, at: iso(m.at), text: m.text })) })),
+    threads: threads.map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, routerIds: t.routers, pending: pendingOf(t.pending), kind: t.kind ?? "conversation", kindBy: t.kindBy, done: t.done && iso(t.done), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ from: m.from, at: iso(m.at), text: m.text, re: m.re })) })),
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({
       id: s.id,
@@ -1292,11 +1303,13 @@ Bun.serve<WsData>({
     }
     const routeSig = path.match(/^\/api\/signals\/(\d+)\/route$/);
     if (routeSig && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { objective?: string; title?: string; cwd?: string };
+      const body = (await req.json().catch(() => ({}))) as { objective?: string; title?: string; cwd?: string; kind?: Kind };
+      if (body.kind && !KINDS.includes(body.kind)) return new Response(`kind is one of ${KINDS.join(", ")}`, { status: 400 });
+      if (body.kind === "command" && !body.objective) return new Response("a command goes to an existing objective: never open one for it", { status: 400 });
       let o = objectives.find((x) => x.id === body.objective);
       if (!o && body.title?.trim()) o = newObjective(body.title.trim(), body.cwd?.replace(/^~(?=\/|$)/, process.env.HOME!) || process.env.HOME!);
       if (!o) return new Response("objective or title required", { status: 400 });
-      const to = await reroute(Number(routeSig[1]), o);
+      const to = await reroute(Number(routeSig[1]), o, body.kind);
       return to ? Response.json({ objective: o.id, routedTo: to.map((s) => s.id) }) : new Response("no such signal", { status: 404 });
     }
 
@@ -1366,6 +1379,30 @@ Bun.serve<WsData>({
       saveThreads();
       return Response.json(t, { status: 201 });
     }
+    // Flipping a thread between command and conversation. His flip goes to its routers, and onto the bus as a label on the
+    // classifier's call; a router's flip is its own call on his reply.
+    const threadKind = path.match(/^\/api\/threads\/([\w-]+)\/kind$/);
+    if (threadKind && req.method === "POST") {
+      const t = threads.find((x) => x.id === threadKind[1]);
+      if (!t) return new Response("no such thread", { status: 404 });
+      const kind = ((await req.json().catch(() => ({}))) as { kind?: Kind }).kind;
+      if (!kind || !KINDS.includes(kind)) return new Response(`kind is one of ${KINDS.join(", ")}`, { status: 400 });
+      const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
+      const was = t.kind ?? "conversation", by = from?.id ?? "isaac";
+      Object.assign(t, { kind, kindBy: by });
+      if (kind === "conversation") t.done = undefined;
+      saveThreads();
+      const asked = t.messages.findLast((m) => m.from === "isaac")?.text;
+      publish(`thread-kind/${t.id}`, { thread: t.id, was, kind, by, ...(asked && { text: asked }) });
+      if (!from && was !== kind) {
+        const to = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(live);
+        dispatch({ to: to.length ? to : routersOf(t.objective), objective: t.objective, target: t.title, text: kind === "command"
+          ? `[maxflow] Isaac flipped thread "${t.title}" (${t.id}) to a command: just do it, then answer once with \`${CLI} thread done ${t.id} '<result>'\`.`
+          : `[maxflow] Isaac flipped thread "${t.title}" (${t.id}) to a conversation: he wants to talk it through. Keep it open and answer with \`${CLI} thread post ${t.id} '<text>'\`.` });
+      }
+      publish(`thread/${t.id}`, { thread: t.id, kind });
+      return Response.json(t);
+    }
     // A router says what it is doing on the answer he waits for; the line goes with the pending state.
     const threadStatus = path.match(/^\/api\/threads\/([\w-]+)\/status$/);
     if (threadStatus && req.method === "POST") {
@@ -1395,11 +1432,20 @@ Bun.serve<WsData>({
     if (threadPost && req.method === "POST") {
       const t = threads.find((x) => x.id === threadPost[1]);
       if (!t) return new Response("no such thread", { status: 404 });
-      const body = (await req.json().catch(() => ({}))) as { text?: string };
+      const body = (await req.json().catch(() => ({}))) as { text?: string; done?: boolean };
       const text = body.text?.trim();
       if (!text) return new Response("text required", { status: 400 });
       const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-      t.messages.push({ from: from?.id ?? "isaac", at: Date.now(), text });
+      if (body.done && !from) return new Response("only an agent posts a command's result", { status: 400 });
+      // A command's result answers his last message, and in a command thread closes it and its task; his follow-up reopens it.
+      const re = body.done ? t.messages.findLastIndex((m) => m.from === "isaac") : -1;
+      t.messages.push({ from: from?.id ?? "isaac", at: Date.now(), text, ...(re >= 0 && { re }) });
+      if (body.done && t.kind === "command") {
+        t.done = Date.now();
+        const task = tasks.find((x) => x.id === t.task);
+        if (task && task.status !== "done") editTask(task, { status: "done", session: from!.id, event: `done: ${headline(text)}` });
+      }
+      if (!from) t.done = undefined;
       if (from?.role?.role === "router" && !t.routers.includes(from.id)) t.routers.push(from.id);
       // Isaac's reply goes to the thread's routers through the event log, like any message; an agent's post answers him.
       if (!from) {
