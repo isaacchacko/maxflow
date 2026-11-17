@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, ChevronRight, ExternalLink, GitBranch, MessageSquareReply, MessagesSquare, Network, Quote, RotateCcw, Waypoints } from "lucide-react";
+import { AlarmClock, ArrowLeft, Check, ChevronRight, ExternalLink, GitBranch, MessageSquareReply, MessagesSquare, Network, Quote, RotateCcw, Waypoints } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -18,6 +18,7 @@ import { RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
 import { FeedTag } from "./FeedTag";
 import { KindMenu } from "./KindMenu";
 import { ShotScope, shotsOf } from "./Viewer";
+import { openPause, pausedLabel } from "./Pause";
 import { useVim, vimRow, type VimActions } from "./vim";
 
 /** Escape climbs one level: a subthread goes to its parent at the message it hangs off, a top thread to the view it came from. */
@@ -147,6 +148,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
     compose: composer,
     up: () => threadUp(id, back),
     resolve: () => thread && resolveOrReopen(thread, back),
+    pause: () => thread && !thread.parentId && openPause(id),
     open: k => {
       const sub = all.find(t => t.parentId === id && t.parentMessageId === k);
       if (sub && (sub.messages.length > 0 || sub.pending)) location.hash = `thread/${sub.id}`;
@@ -233,7 +235,14 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
         <h1 className={cn("truncate text-xl font-semibold tracking-tight", thread.resolved && "text-muted-foreground")}>{thread.title}</h1>
         {thread.feed && <span className="text-xs"><FeedTag feed={thread.feed} /></span>}
         {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
-        <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-resolve" onClick={() => resolveOrReopen(thread, back)}>
+        {thread.paused && <span data-agent="thread-paused" className="text-xs whitespace-nowrap text-muted-foreground">paused {pausedLabel(thread.paused)}</span>}
+        {!thread.parentId && (
+          <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-pause" title="Pause until a time (p)" onClick={() => openPause(thread.id)}>
+            <AlarmClock />
+            {thread.paused ? "Paused" : "Pause"}
+          </Button>
+        )}
+        <Button variant="outline" size="sm" className={cn(thread.parentId && "ml-auto")} data-agent="thread-resolve" onClick={() => resolveOrReopen(thread, back)}>
           {thread.resolved ? <RotateCcw /> : <Check />}
           {thread.resolved ? "Reopen" : "Resolve"}
         </Button>

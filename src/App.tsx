@@ -4,6 +4,7 @@ import { Capture } from "@/components/Capture";
 import { Mark } from "@/components/Mark";
 import { QuickSwitcher } from "@/components/QuickSwitcher";
 import { Viewer } from "@/threads/Viewer";
+import { PauseDialog, useResurfacing } from "@/threads/Pause";
 import { Kbd } from "@/components/ui/kbd";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -51,6 +52,7 @@ function routeFromHash(): Route {
 
 export function App() {
   const [route, setRoute] = useState(routeFromHash);
+  useResurfacing();
 
   useEffect(() => {
     const onHash = () => setRoute(routeFromHash());
@@ -77,6 +79,7 @@ export function App() {
     <TooltipProvider>
       <QuickSwitcher views={views} />
       <Viewer />
+      <PauseDialog />
       <div className="flex h-full flex-col">
         <header className="flex items-center gap-6 border-b px-4 py-2">
           <Mark />

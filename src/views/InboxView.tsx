@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { AlarmClock, Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AgentFace } from "@/components/AgentFace";
 import { card, surface } from "@/lib/surface";
@@ -14,6 +14,8 @@ import { ago, Replies } from "@/threads/Replies";
 import { Rich } from "@/threads/Rich";
 import { RowMenu, threadItems, type MenuItem } from "@/threads/RowMenu";
 import { ShotScope, shotsOf } from "@/threads/Viewer";
+import { freshlyBack, openPause, pausedLabel } from "@/threads/Pause";
+import { unseenDeep, useSeen } from "@/threads/seen";
 import { useVim, vimRow } from "@/threads/vim";
 
 /** A thread asks for Isaac from the first message after his last reply; null once he has answered everything in it. */
@@ -55,7 +57,7 @@ function CommandRow({ t, active, open, compact, menu, onToggle, onResolve }: { t
         data-agent={`command:${t.id}`}
         onClick={e => (e.target as Element).closest("a, button") || onToggle()}
         title={compact ? status : undefined}
-        className={cn("flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 text-sm hover:bg-muted/50", active && "bg-muted/60 shadow-[inset_2px_0_0_var(--color-link)]", t.resolved && "opacity-50")}
+        className={cn("flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 text-sm hover:bg-muted/50", active && "bg-muted/60 shadow-[inset_2px_0_0_var(--color-link)]", (t.resolved || t.paused) && "opacity-50")}
       >
         {result ? <Check className="size-3.5 shrink-0 text-ok" /> : <AgentFace id={t.routerIds[0] ?? t.id} expression="thinking" small className="size-5" />}
         {/* In the column, the result shares the line with the ask once the column is 28rem wide, and is on hover until then. */}
@@ -104,11 +106,15 @@ export function InboxView() {
   // Subthreads live under their message, not in the inbox.
   const tops = threads.filter(t => !t.parentId);
   const resolved = tops.filter(t => t.resolved).length;
+  // Paused, a thread is out of the inbox behind its own toggle until its time comes round, as resolved ones are.
+  const [showPaused, setShowPaused] = useState(false);
+  const paused = tops.filter(t => t.paused).length;
+  useSeen();
   const rows = tops
-    .filter(t => showResolved || !t.resolved || kept.has(t.id))
-    .map(t => ({ t, asked: askedAt(t), last: Date.parse(t.messages.at(-1)?.at ?? "") || 0 }))
-    // An agent waiting on him comes first, longest-waiting on top.
-    .sort((a, b) => Number(!a.t.asks) - Number(!b.t.asks) || (a.asked ?? Infinity) - (b.asked ?? Infinity) || b.last - a.last);
+    .filter(t => (showResolved || !t.resolved || kept.has(t.id)) && (showPaused || !t.paused || kept.has(t.id)))
+    .map(t => ({ t, asked: askedAt(t), last: Date.parse(t.messages.at(-1)?.at ?? "") || 0, back: freshlyBack(t, unseenDeep(t, threads)) }))
+    // An agent waiting on him comes first, longest-waiting on top, then what just came back from a pause.
+    .sort((a, b) => Number(!a.t.asks) - Number(!b.t.asks) || Number(!a.back) - Number(!b.back) || (a.asked ?? Infinity) - (b.asked ?? Infinity) || b.last - a.last);
   // Commands sit in a strip of their own above the conversations, today's in view and older ones behind a toggle.
   const [earlier, setEarlier] = useState(false);
   const [opened, setOpened] = useState<string>();
@@ -132,7 +138,9 @@ export function InboxView() {
   const open = (id: string) => (commands.some(r => r.t.id === id) ? setOpened(o => (o === id ? undefined : id)) : (location.hash = `thread/${id}`));
   const reply = (id: string) => (composeOnArrival(), (location.hash = `thread/${id}`));
   // Right-click offers what the keys do, on the row it was clicked on.
-  const menu = (t: Thread) => threadItems(t, threads, { open: () => open(t.id), reply: () => reply(t.id), resolve: () => toggle(t) });
+  // Paused from this list, a row stays put like a resolved one, so he sees it took.
+  const pause = (id: string) => (setKept(k => new Set(k).add(id)), openPause(id));
+  const menu = (t: Thread) => threadItems(t, threads, { open: () => open(t.id), reply: () => reply(t.id), resolve: () => toggle(t), pause: () => pause(t.id) });
   // j/k walk the page in reading order: the asks, then the conversations and the commands' column, or the strip above them.
   const main = [...needsYou, ...conversations].map(r => r.t.id);
   const side = shown.map(r => r.t.id);
@@ -144,6 +152,7 @@ export function InboxView() {
       const t = threads.find(x => x.id === id);
       if (t) toggle(t);
     },
+    pause: id => id && pause(id),
     // ] jumps to the commands, [ back to the asks and conversations.
     section: dir => (dir > 0 ? side[0] : main[0]),
   });
@@ -171,7 +180,7 @@ export function InboxView() {
             <KINDS.command.icon className="size-3 text-command" />
             just do it
           </button>
-          <div className={cn(t.resolved && "opacity-50")}>
+          <div className={cn((t.resolved || t.paused) && "opacity-50")}>
             {/* An image in the preview opens the viewer over the whole thread's. */}
             <ShotScope.Provider value={shotsOf(t.messages)}>
             <MessageRow
@@ -190,6 +199,12 @@ export function InboxView() {
                   {t.feed && <FeedTag feed={t.feed} />}
                   <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : t.asks ? "" : "routing…"}</span>
                   {t.resolved && <Check className="size-3 shrink-0 self-center" />}
+                  {t.paused && (
+                    <span data-agent={`inbox-paused:${t.id}`} className="flex shrink-0 items-center gap-1 whitespace-nowrap">
+                      <AlarmClock className="size-3 self-center" />
+                      {pausedLabel(t.paused)}
+                    </span>
+                  )}
                 </span>
               }
             >
@@ -233,11 +248,21 @@ export function InboxView() {
       {vim.panel}
       <div className="flex max-w-4xl min-w-0 shrink basis-4xl flex-col gap-3">
         <Composer autoFocus agent="inbox-input" draftKey="inbox" onSend={startThread} className="rounded-2xl border bg-card px-3.5 py-3 shadow-raised" />
+        {(resolved > 0 || paused > 0) && (
+        <div className="flex gap-2">
         {resolved > 0 && (
           <button data-agent="inbox-resolved" onClick={() => setShowResolved(v => !v)} className={cn("flex w-fit items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring", showResolved && "border-ring text-foreground")}>
             <Check className="size-3" />
             Resolved ({resolved})
           </button>
+        )}
+        {paused > 0 && (
+          <button data-agent="inbox-paused" onClick={() => setShowPaused(v => !v)} className={cn("flex w-fit items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring", showPaused && "border-ring text-foreground")}>
+            <AlarmClock className="size-3" />
+            Paused ({paused})
+          </button>
+        )}
+        </div>
         )}
         {needsYou.length > 0 && <ol className={cn(surface, "bg-warn-soft/70")}>{needsYou.map(({ t }) => conversationRow(t))}</ol>}
         {!wide && strip}

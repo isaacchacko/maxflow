@@ -50,6 +50,10 @@ export type Thread = {
   pending?: { routerIds: string[]; since: string; status?: string; stale: boolean };
   /** Isaac marked it done; his next message reopens it. */
   resolved?: { at: string };
+  /** He put it away until a time, in his words (said); agents' posts since (posts) leave it paused, his own brings it back. */
+  paused?: { until: string; at: string; said: string; posts: number };
+  /** Its pause ran out at `at`: it is unread from message `from`, the count it had when he paused it. */
+  resurfaced?: { at: string; from: number };
   /** Started by maxflow itself from his event feed (a Slack DM or mention, a PR comment, a CI failure), not by him. */
   feed?: { source: string; who: string; link: string };
   /** An agent asked him here with `maxflow ask` and sleeps until he replies. */

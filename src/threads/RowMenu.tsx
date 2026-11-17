@@ -1,8 +1,9 @@
-import { Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, MessagesSquare, Quote, RotateCcw, Zap, type LucideIcon } from "lucide-react";
+import { AlarmClock, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, MessagesSquare, Play, Quote, RotateCcw, Zap, type LucideIcon } from "lucide-react";
 import { ContextMenu } from "radix-ui";
 import { Kbd } from "@/components/ui/kbd";
 import type { Thread } from "@/mock";
-import { setKind } from "@/store";
+import { setKind, setPaused } from "@/store";
+import { openPause } from "./Pause";
 import { repliesOf } from "./Replies";
 import { markRead, markUnread, unseenDeep } from "./seen";
 
@@ -49,9 +50,10 @@ export function RowMenu({ items, agent, children }: { items: (MenuItem | false |
 
 /**
  * What a thread offers wherever it is drawn (an inbox row, its own header): `open` and `reply` where it isn't already open, and
- * `resolve` as the page resolves it, so the inbox keeps the row in place and the header climbs a level.
+ * `resolve` as the page resolves it, so the inbox keeps the row in place and the header climbs a level. Only a top thread pauses, and
+ * `pause` opens its popover where the inbox has more to do first.
  */
-export function threadItems(t: Thread, all: Thread[], on: { open?(): void; reply?(): void; resolve(): void }): (MenuItem | false | undefined)[] {
+export function threadItems(t: Thread, all: Thread[], on: { open?(): void; reply?(): void; resolve(): void; pause?(): void }): (MenuItem | false | undefined)[] {
   // A command has no new-replies count anywhere, so read and unread are only a conversation's.
   const talk = t.kind !== "command";
   return [
@@ -62,6 +64,8 @@ export function threadItems(t: Thread, all: Thread[], on: { open?(): void; reply
     talk && unseenDeep(t, all) === 0 && repliesOf(t).length > 0 && { label: "Mark unread", icon: Mail, run: () => markUnread(t), agent: `mark-unread:${t.id}` },
     !t.parentId && (talk ? { label: "Convert to command", icon: Zap, run: () => setKind(t.id, "command") } : { label: "Convert to conversation", icon: MessagesSquare, run: () => setKind(t.id, "conversation") }),
     { label: t.resolved ? "Reopen" : "Resolve", icon: t.resolved ? RotateCcw : Check, keys: "x", run: on.resolve, agent: `menu-resolve:${t.id}` },
+    !t.parentId && { label: t.paused ? "Pause again…" : "Pause…", icon: AlarmClock, keys: "p", run: on.pause ?? (() => openPause(t.id)), agent: `menu-pause:${t.id}` },
+    t.paused && { label: "Unpause", icon: Play, run: () => void setPaused(t.id, null), agent: `menu-unpause:${t.id}` },
     "-",
     { label: "Copy link", icon: Link, run: () => copy(threadLink(t.id)) },
     { label: "Copy text", icon: Copy, run: () => copy(t.messages[0]?.text ?? t.title) },

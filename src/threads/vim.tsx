@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Kbd } from "@/components/ui/kbd";
 
 /** What the keys do to the item under the cursor; a page leaves out what it has no use for. */
-export type VimActions = { open?(key: string): void; up?(): void; compose(): void; reply?(key: string): void; quote?(key: string): void; resolve?(key?: string): void; section?(dir: 1 | -1, key?: string): string | undefined };
+export type VimActions = { open?(key: string): void; up?(): void; compose(): void; reply?(key: string): void; quote?(key: string): void; resolve?(key?: string): void; pause?(key?: string): void; section?(dir: 1 | -1, key?: string): string | undefined };
 
 const HELP: [string, string][] = [
   ["j k", "next, previous"],
@@ -14,6 +14,7 @@ const HELP: [string, string][] = [
   ["r", "reply in thread"],
   ["y q", "quote"],
   ["x", "resolve, reopen"],
+  ["p", "pause until a time"],
   ["[ ]", "inbox: conversations, commands"],
   ["/", "jump anywhere (⌘K)"],
   ["?", "these keys"],
@@ -102,6 +103,7 @@ export function useVim(scope: string, items: string[], scroller: React.RefObject
         y: () => cursor && actions.quote?.(cursor),
         q: () => cursor && actions.quote?.(cursor),
         x: () => actions.resolve?.(cursor),
+        p: () => actions.pause?.(cursor),
         "]": () => move(actions.section?.(1, cursor)),
         "[": () => move(actions.section?.(-1, cursor)),
         "/": () => dispatchEvent(new Event("quick-switcher-open")),

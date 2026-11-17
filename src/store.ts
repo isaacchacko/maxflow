@@ -126,7 +126,7 @@ export function startThread(text: string) {
 
 export function postToThread(threadId: string, from: string, text: string, nudge?: "subthread") {
   if (isLive()) return void api(`/api/threads/${threadId}/messages`, { text, nudge });
-  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: undefined, messages: [...t.messages, { from, at: NOW_AT, text, nudge }] } : t)));
+  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: undefined, paused: undefined, messages: [...t.messages, { from, at: NOW_AT, text, nudge }] } : t)));
 }
 
 /** Opens the subthread under a message, making it on the first visit; a top thread's first message is the thread itself. */
@@ -139,6 +139,12 @@ export async function openSubthread(threadId: string, messageId: string) {
 export async function setResolved(threadId: string, resolved: boolean) {
   if (isLive()) return void (await api(`/api/threads/${threadId}`, { resolved }, "PATCH"));
   threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: resolved ? { at: NOW_AT } : undefined } : t)));
+}
+
+/** Isaac puts a thread away until a time, or brings it back now (null); his own message in it brings it back too. */
+export async function setPaused(threadId: string, paused: { until: number; said: string } | null) {
+  if (isLive()) return void (await api(`/api/threads/${threadId}`, { paused }, "PATCH"));
+  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: undefined, paused: paused ? { until: new Date(paused.until).toISOString(), at: NOW_AT, said: paused.said, posts: 0 } : undefined } : t)));
 }
 
 /** Flips a thread between a command (an ack and one result) and a conversation; its routers hear of it. */
