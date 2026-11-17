@@ -8,7 +8,7 @@ const usage = `usage:
   maxflow keys <id> <key...>                 tmux key names: Enter Escape C-c Up BTab ...
   maxflow screen <id> [--history N]          print the screen as plain text
   maxflow wait <id> [--idle MS] [--match RE] [--timeout MS]   block until quiet / RE on screen / exit, print screen
-  maxflow wait thread:<id> | approval:<pr> | ci:<pr> | agent:<id> | slack:<permalink | channel | #channel | query> | done   declare what you wait on; you sleep from your turn's end until a message wakes you
+  maxflow wait thread:<id> | approval:<pr> | ci:<pr> | agent:<id> [agent:<id>…] | slack:<permalink | channel | #channel | query> | done   declare what you wait on; you sleep from your turn's end until a message wakes you
   maxflow rename <id> <name...> | maxflow kill <id>
   maxflow notify <id> <text...> [--isaac]    deliver text once the session is idle at an empty claude prompt; --isaac as for send
   maxflow who router|parent|workers|objective   the agents around you, as mf-<id> names for SendMessage
@@ -103,6 +103,8 @@ if (verb === "ls") {
   if (!me) console.error("wait works only inside a maxflow session"), process.exit(1);
   const [kind, ...ref] = rest[0].split(":");
   let target = ref.join(":");
+  // Several agents: whichever messages or finishes first ends the wait.
+  if (kind === "agent") target = [target, ...rest.slice(1).filter((a) => a.startsWith("agent:")).map((a) => a.slice(6))].join(",");
   // A PR wait ties the session to the PR, so gh sentry's notice of the review or CI is what wakes it.
   if (kind === "approval" || kind === "ci") {
     const pr = parsePr(target, process.cwd());
