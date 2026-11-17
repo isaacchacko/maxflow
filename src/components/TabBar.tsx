@@ -1,4 +1,4 @@
-import { Activity, Bot, Inbox, MessagesSquare, Plus, Radar, SquareKanban, Waypoints, X, type LucideIcon } from "lucide-react";
+import { Activity, Bot, CircleCheckBig, Inbox, MessagesSquare, Plus, Radar, SquareKanban, Waypoints, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AgentFace, expressionOf } from "@/components/AgentFace";
 import { cn } from "@/lib/utils";
@@ -7,11 +7,12 @@ import { closeTab, cycleTab, moveTab, openTab, placeOf, switchTab, switchToIndex
 import { unseenDeep, useSeen } from "@/threads/seen";
 
 const VIEWS: Record<string, [string, LucideIcon]> = {
-  inbox: ["Inbox", Inbox],
+  todo: ["Todo", CircleCheckBig],
+  inbox: ["Threads", Inbox],
   events: ["Events", Activity],
   objectives: ["Objectives", Waypoints],
   agents: ["Agents", Bot],
-  threads: ["Threads", MessagesSquare],
+  threads: ["Thread map", MessagesSquare],
   sentries: ["Sentries", Radar],
 };
 

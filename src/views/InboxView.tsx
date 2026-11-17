@@ -186,8 +186,8 @@ export function InboxView() {
   );
 
   return (
-    <div className="flex h-full justify-center p-4">
-      <div className="flex max-w-4xl min-w-0 flex-1 flex-col gap-2">
+    <div className="flex h-full p-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
         {(resolved > 0 || paused > 0 || replied.length > 0) && (
           <div className="flex shrink-0 items-center gap-2">
             {replied.length > 0 && (

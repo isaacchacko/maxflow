@@ -180,7 +180,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   const mentionedIn = all.filter(t => t.id !== thread.id && t.messages.some(m => m.text.includes(`[[thread:${thread.id}]]`)));
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-hidden p-4">
+    <div className="flex h-full flex-col gap-3 overflow-hidden p-3">
       <RowMenu agent="thread-header" items={threadItems(thread, all, { resolve: () => resolveOrReopen(thread, back), pause: () => openPause(thread.id, () => threadUp(thread.id, back)) })}>
       <header className="flex items-center gap-3">
         <Button variant="ghost" size="icon" asChild data-agent="back">

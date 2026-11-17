@@ -17,7 +17,7 @@ export function SentriesView() {
 
   return (
     <div className="h-full overflow-y-auto p-4">
-      <ol className="flex max-w-4xl flex-col border">
+      <ol className="flex flex-col border">
         {SENTRIES.map(name => {
           const s = sentries.find(x => x.name === name);
           const workers = name === "vis-factory" ? agents.filter(a => a.name === "vis factory worker") : [];

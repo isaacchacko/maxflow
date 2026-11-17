@@ -35,7 +35,8 @@ function apply(w: World) {
 let pending = 0;
 function setTitle() {
   const view = location.hash.slice(1).split("/")[0] || "inbox";
-  document.title = `${pending ? `(${pending}) ` : ""}yarn · ${view[0]!.toUpperCase()}${view.slice(1)}`;
+  const name = view === "inbox" ? "Threads" : view === "threads" ? "Thread map" : `${view[0]!.toUpperCase()}${view.slice(1)}`;
+  document.title = `${pending ? `(${pending}) ` : ""}yarn · ${name}`;
 }
 addEventListener("route", setTitle);
 

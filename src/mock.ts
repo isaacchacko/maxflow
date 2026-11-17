@@ -26,6 +26,9 @@ export type Task = {
   id: string;
   title: string;
   status: Status;
+  /** Where it sits on his board: you (on him), todo, doing, waiting, blocked or done. */
+  board?: string;
+  links?: string[];
   agent?: string;
   pr?: number;
   dependsOn: string[];

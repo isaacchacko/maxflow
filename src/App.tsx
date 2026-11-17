@@ -5,6 +5,7 @@ import { Mark } from "@/components/Mark";
 import { QuickSwitcher } from "@/components/QuickSwitcher";
 import { Viewer } from "@/threads/Viewer";
 import { PauseDialog, useResurfacing } from "@/threads/Pause";
+import { Sidebar } from "@/components/Sidebar";
 import { TabBar } from "@/components/TabBar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Page } from "@/page/Page";
@@ -15,13 +16,15 @@ import { arrive } from "@/threads/jump";
 import { InboxView } from "@/views/InboxView";
 import { RoutingView } from "@/views/RoutingView";
 import { SentriesView } from "@/views/SentriesView";
+import { TodoView } from "@/views/TodoView";
 
 export const views = [
-  { id: "inbox", label: "Inbox", key: "1" },
+  { id: "todo", label: "Todo", key: "0" },
+  { id: "inbox", label: "Threads", key: "1" },
   { id: "events", label: "Events", key: "2" },
   { id: "objectives", label: "Objectives", key: "3" },
   { id: "agents", label: "Agents", key: "4" },
-  { id: "threads", label: "Threads", key: "5" },
+  { id: "threads", label: "Thread map", key: "5" },
   { id: "sentries", label: "Sentries", key: "6" },
 ] as const;
 /** Views of one routing canvas, in snap order; the rest are pages of their own. */
@@ -89,7 +92,9 @@ export function App() {
           <Capture />
         </header>
         {/* Keyed by tab, so each tab's pages mount as its own and put back its own scroll. */}
-        <main key={tab} className="min-h-0 flex-1 overflow-hidden">
+        <div className="flex min-h-0 flex-1">
+        <Sidebar view={detail ? "" : route.view} />
+        <main key={tab} className="min-h-0 min-w-0 flex-1 overflow-hidden">
           {detail?.kind === "agent" ? (
             <AgentPage key={detail.id} id={detail.id} back={route.view} />
           ) : detail?.kind === "thread" ? (
@@ -98,12 +103,15 @@ export function App() {
             <Page key={detail.ref} pageRef={detail.ref} back={route.view} />
           ) : route.view === "inbox" ? (
             <InboxView />
+          ) : route.view === "todo" ? (
+            <TodoView />
           ) : route.view === "sentries" ? (
             <SentriesView />
           ) : (
             <RoutingView snap={snap} onSnap={n => (location.hash = ROUTING[Math.max(0, Math.min(ROUTING.length - 1, n))]!)} />
           )}
         </main>
+        </div>
       </div>
     </TooltipProvider>
   );

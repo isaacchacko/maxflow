@@ -25,7 +25,7 @@ export function MessageRow({ from, at, text, grouped, active, meta, children, cl
             {meta}
           </div>
         )}
-        <Markdown text={text} className={cn("text-sm leading-relaxed", bodyClassName)} />
+        <Markdown text={text} className={cn("max-w-[80ch] text-sm leading-relaxed", bodyClassName)} />
         {children}
       </div>
     </article>
