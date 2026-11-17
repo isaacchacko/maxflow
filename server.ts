@@ -274,7 +274,7 @@ function intro(s: Session) {
 - Events: \`${CLI} sub '<topic glob>'\` blocks until the next matching event on the bus, instead of polling.
 - Waiting never holds you. You are either working or asleep on one named thing: run \`${CLI} wait <kind>:<ref>\` and end your turn, and you sleep (archived) until a message wakes you, the awaited event itself first; \`done\` alone keeps you awake. Kinds: \`thread:<id>\` his reply in a thread you asked him in, \`approval:<pr>\` a teammate's review, \`ci:<pr>\` CI, \`agent:<session>\` another agent (several, \`agent:<a> agent:<b>\`, end on whichever comes first), \`slack:<permalink | channel id | #channel | query>\` a new Slack message there, \`done\` you have nothing left to do right now (open PRs and his replies still reach you): you stay awake with your last reply on screen for the user to read and answer, and his next message starts new work, while a message from another agent or sentry leaves you done once you've handled it. Never archive yourself; archiving is the user's. Before sleeping on approval or CI, start your next piece of work on top of the waiting branch if there is one. Any message wakes you for one turn; when that turn ends you sleep again on the same wait, which only the awaited event ends (his reply in the thread, the approval, CI finishing, the PR merged or closed, the agent's reply, a new Slack message). Declare another wait to replace it. Never end a turn idle without a wait: do your own next step, \`${CLI} ask\` him, or \`${CLI} wait done\`. A turn that ends with none counts as done, unless a background shell you started is still running.
 - Asking the user: only for a decision truly his (spending money, an outward-facing or hard-to-undo step he hasn't asked for, a product call customers will see with no clear best); decide everything else yourself. Never end a turn on a question or wait in chat for him: \`${CLI} ask '<question>'\` opens a thread in his inbox, from you and flagged as waiting on him, and prints its id. Make it stand on its own: what you found, the options, your recommendation, with \`--default '<rec>'\` for a reversible step you take if he hasn't answered in ${Math.round(DEFAULT_AFTER_MS / 3_600_000)}h. Keep working on whatever doesn't hang on it, then \`${CLI} wait thread:<id>\`: his reply is typed into your prompt and ends the wait. Answer him with \`${CLI} thread post <id> '<text>'\`; \`${CLI} ask --re <id> '<text>'\` asks again in it.
-- Images: to show the user a screenshot or picture, add \`--image <path>\` (repeatable; png, jpg, gif or webp) to \`${CLI} thread post\`, \`thread done\`, \`thread new\` or \`ask\`. It renders inline in the thread like his pasted ones; a path to a file anywhere else shows only as text.
+- Images: to show the user a screenshot or picture, add \`--image <path>\` (repeatable; png, jpg, gif or webp) to \`${CLI} thread post\`, \`thread new\` or \`ask\`. It renders inline in the thread like his pasted ones; a path to a file anywhere else shows only as text.
 - Approvals: you can't approve the user's own PRs and must not request reviewers; the review sentry keeps one review request he sends himself.
 - Processes: never stop processes by pattern (\`pkill -f\`, \`killall\`, \`lsof -ti :<port> | xargs kill\`). They match the live maxflow, other agents' work and the user's Chrome. Kill only a PID you started yourself, and stop a dev instance with \`./dev.sh stop <instance>\`.
 - Testing: try UI flows on your own dev instance (\`MAXFLOW_INSTANCE=<name> MAXFLOW_PORT=<port> ./dev.sh\`), never with scratch threads in the user's live inbox. If only live can show it, say so to your router first, and resolve or merge away what you made.
@@ -1058,6 +1058,28 @@ function tellWaiters(on: Session, what: string) {
   for (const w of sessions.values())
     if (w !== on && waitsOn(w, on.id) && w.exitCode === null) endWait(w, `"${on.name}" (session ${on.id}) ${what}`);
 }
+// An agent's finish is told to each agent waiting on it once: when it goes into done (not each turn it ends while done, which a peer's
+// message starts), or at once when the wait is declared on an agent already done. toldDone keeps, per waiter and agent, the done
+// (that agent's wait.at) it was told of, so a waiter that waits again on the same finish sleeps until the next one.
+const toldDone = new Map<string, number>();
+function tellDone(on: Session) {
+  for (const w of sessions.values()) {
+    if (w === on || !waitsOn(w, on.id) || w.exitCode !== null || toldDone.get(`${w.id}>${on.id}`) === on.wait?.at) continue;
+    toldDone.set(`${w.id}>${on.id}`, on.wait!.at);
+    endWait(w, `"${on.name}" (session ${on.id}) is now done`);
+  }
+}
+// Waiting on agents of which one is already done with a finish this waiter wasn't told of: that is its answer.
+function alreadyDone(w: Session) {
+  for (const id of w.wait?.kind === "agent" ? w.wait.ref.split(",") : []) {
+    const o = sessions.get(id);
+    if (o?.wait?.kind !== "done" || toldDone.get(`${w.id}>${id}`) === o.wait.at) continue;
+    toldDone.set(`${w.id}>${id}`, o.wait.at);
+    endWait(w, `"${o.name}" (session ${o.id}) is already done`);
+    return true;
+  }
+  return false;
+}
 const waitsOn = (w: Session, id?: string | null) => w.wait?.kind === "agent" && !!id && w.wait.ref.split(",").includes(id);
 const waitLabel = (w: Wait) => (w.kind === "done" ? "done" : `${w.kind}:${w.ref}`);
 
@@ -1090,8 +1112,13 @@ function declareWait(s: Session, kind: string, ref: string): string | null {
     if (bad) return `no other running session ${bad}`;
     ref = ids.join(",");
   }
-  setWait(s, { kind: kind as Wait["kind"], ref: kind === "done" ? "" : ref, at: Date.now() });
-  tellWaiters(s, `is now ${kind === "done" ? "done" : `waiting on ${waitLabel(s.wait!)}`}`);
+  // Done again while done is the same finish: it keeps its time, and nobody is told again.
+  const was = s.wait;
+  const again = kind === "done" && was?.kind === "done";
+  setWait(s, { kind: kind as Wait["kind"], ref: kind === "done" ? "" : ref, at: again ? was.at : Date.now() });
+  if (kind === "done") again || tellDone(s);
+  else if (!was || waitLabel(was) !== waitLabel(s.wait!)) tellWaiters(s, `is now waiting on ${waitLabel(s.wait!)}`);
+  if (kind === "agent" && alreadyDone(s)) return null;
   // Declared between turns, it sleeps at once; mid-turn, the Stop hook puts it to sleep.
   if (kind !== "done" && s.claude?.state !== "working") setArchived(s, true);
   return null;
@@ -1559,7 +1586,7 @@ async function resync() {
       if (background || s.wait) continue;
       setWait(s, { kind: "done", ref: "", at: Date.now(), auto: true });
       publish(`claude-resync/${s.id}`, { session: s.id, idle: true });
-      tellWaiters(s, "is now done");
+      tellDone(s);
     }
   }
 }
@@ -1579,7 +1606,7 @@ function afterTurn(s: Session) {
     if (end.cutOff && end.cutOff !== s.cutOff) return void ((s.cutOff = end.cutOff), carryOn(s, at));
     if (s.wait || s.archived || end.background) return;
     setWait(s, { kind: "done", ref: "", at: Date.now(), auto: true });
-    tellWaiters(s, "is now done");
+    tellDone(s);
   }, SLEEP_AFTER_STOP_MS);
 }
 // What the end of a transcript says about the turn that just ended: the uuid of its last reply when that is the API error the Mac

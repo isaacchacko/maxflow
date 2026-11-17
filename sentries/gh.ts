@@ -159,7 +159,9 @@ function diff(pr: Pr, prev: PrState | undefined, me: string, byAgent: (body: str
   const ci = `${pr.headRefOid}:${rollup?.state ?? ""}`;
   if (ci !== prev.ci && (rollup?.state === "SUCCESS" || FAILED.has(rollup?.state ?? ""))) {
     const failed = rollup!.contexts.nodes.filter((c) => FAILED.has(c.conclusion ?? c.state ?? "")).map((c) => c.name ?? c.context!);
-    changes.push(["ci", { state: rollup!.state, sha: pr.headRefOid, failed }, rollup!.state === "SUCCESS" ? "CI passed" : `CI failed: ${failed.join(", ") || rollup!.state}`]);
+    // Named by its commit, so CI on each new push doesn't read as the same notice twice.
+    const on = pr.headRefOid.slice(0, 7);
+    changes.push(["ci", { state: rollup!.state, sha: pr.headRefOid, failed }, rollup!.state === "SUCCESS" ? `CI passed on ${on}` : `CI failed on ${on}: ${failed.join(", ") || rollup!.state}`]);
   }
   if (pr.state !== prev.state) changes.push([pr.state.toLowerCase(), { url: pr.url }, pr.state === "OPEN" ? "reopened" : pr.state.toLowerCase()]);
   if (pr.mergeable === "CONFLICTING" && prev.mergeable !== "CONFLICTING") changes.push(["conflict", {}, "now conflicts with its base branch"]);
@@ -192,14 +194,15 @@ function hasOwnNew(pr: Pr, prev: PrState, me: string) {
 }
 
 // ci keeps the last finished result announced, so a rollup that dips back to pending on the same head (a re-run, a late check) and lands
-// on the same result isn't announced again.
+// on the same result isn't announced again. mergeable keeps the last known answer through UNKNOWN, which GitHub gives while it
+// recomputes after the base moves: otherwise every merge to main announced each conflicting PR's conflict again.
 function snapshot(pr: Pr, prev?: PrState): PrState {
   const ci = pr.commits.nodes[0]?.commit.statusCheckRollup?.state ?? "";
   return {
     head: pr.headRefOid,
     ci: ci === "SUCCESS" || FAILED.has(ci) ? `${pr.headRefOid}:${ci}` : (prev?.ci ?? ""),
     state: pr.state,
-    mergeable: pr.mergeable,
+    mergeable: pr.mergeable === "UNKNOWN" ? (prev?.mergeable ?? "UNKNOWN") : pr.mergeable,
     decision: pr.reviewDecision ?? "",
     seen: [...pr.reviews.nodes.map((r) => r.id), ...pr.comments.nodes.map((c) => c.id), ...pr.reviewThreads.nodes.flatMap((t) => t.comments.nodes.map((c) => c.id))],
   };
