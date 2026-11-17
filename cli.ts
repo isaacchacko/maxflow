@@ -121,7 +121,12 @@ if (verb === "ls") {
   }
   // The server may name the wait differently: q:<n> is the thread that question moved into.
   const { wait } = await call(`/api/sessions/${me}/await`, { method: "POST", body: JSON.stringify({ kind, ref: target }) });
-  console.log(kind === "done" ? "done. End your turn now; you stay awake with your last reply on screen." : `waiting on ${wait.kind}:${wait.ref}. End your turn now; you sleep until a message wakes you.`);
+  // A wait on an agent already done is answered at once and leaves no wait.
+  console.log(
+    kind === "done" ? "done. End your turn now; you stay awake with your last reply on screen."
+    : !wait ? `${kind}:${target} is already done; nothing to wait on.`
+    : `waiting on ${wait.kind}:${wait.ref}. End your turn now; you sleep until a message wakes you.`,
+  );
 } else if (verb === "wait" && rest[0]) {
   const q = new URLSearchParams(Object.entries({ idle: flag(rest, "--idle"), match: flag(rest, "--match"), timeout: flag(rest, "--timeout") }).filter(([, v]) => v) as [string, string][]);
   const r = await call(`/api/sessions/${rest[0]}/wait?${q}`);
