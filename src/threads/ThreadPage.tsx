@@ -15,6 +15,7 @@ import { Replies, repliesOf } from "./Replies";
 import { RowMenu, messageItems, threadItems } from "./RowMenu";
 import { firstUnseen, markSeen, setSeen } from "./seen";
 import { RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
+import { FeedTag } from "./FeedTag";
 import { KindMenu } from "./KindMenu";
 import { ShotScope, shotsOf } from "./Viewer";
 import { useVim, vimRow, type VimActions } from "./vim";
@@ -230,6 +231,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
           </Fragment>
         ))}
         <h1 className={cn("truncate text-xl font-semibold tracking-tight", thread.resolved && "text-muted-foreground")}>{thread.title}</h1>
+        {thread.feed && <span className="text-xs"><FeedTag feed={thread.feed} /></span>}
         {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
         <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-resolve" onClick={() => resolveOrReopen(thread, back)}>
           {thread.resolved ? <RotateCcw /> : <Check />}

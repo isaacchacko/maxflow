@@ -8,6 +8,7 @@ import { markAskShown, objectiveStore, setKind, setResolved, startThread, thread
 import { Composer } from "@/threads/Composer";
 import { composeOnArrival } from "@/threads/jump";
 import { MessageRow, when } from "@/threads/MessageRow";
+import { FeedTag } from "@/threads/FeedTag";
 import { KINDS } from "@/threads/KindMenu";
 import { ago, Replies } from "@/threads/Replies";
 import { Rich } from "@/threads/Rich";
@@ -186,6 +187,7 @@ export function InboxView() {
               meta={
                 <span className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
                   {t.asks && <span className="shrink-0 rounded-full bg-warn-soft px-2 font-medium text-warn">needs you</span>}
+                  {t.feed && <FeedTag feed={t.feed} />}
                   <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : t.asks ? "" : "routing…"}</span>
                   {t.resolved && <Check className="size-3 shrink-0 self-center" />}
                 </span>

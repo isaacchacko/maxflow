@@ -18,8 +18,8 @@ const CLI = new URL("../cli.ts", import.meta.url).pathname;
 const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 const PRS_MS = Number(process.env.INBOX_PRS_MS ?? 5 * 60_000);
 const STALL_MS = Number(process.env.INBOX_STALL_MS ?? 15 * 60_000);
-// A burst of Slack messages for the funnel goes as one message, this long after the first.
-const BATCH_MS = Number(process.env.INBOX_BATCH_MS ?? 3 * 60_000);
+// What reaches him that no agent owns goes to the funnel this long after the first of a burst, so a few DMs in a row are one item.
+const BATCH_MS = Number(process.env.INBOX_BATCH_MS ?? 10_000);
 const QUESTION_STALL_MS = 3 * 3_600_000;
 const REVIEW_STALL_MS = 24 * 3_600_000;
 const IDLE_STALL_MS = 3 * 86_400_000;
@@ -32,7 +32,8 @@ const MAX_AGENTS = 2;
 type ReviewPr = { url: string; title: string; author: string; why: "review" | "assigned"; requested: number; updated: number; gone?: number; agent?: string; risk?: string };
 // at: when this sentry first saw it, which the stall clock counts from, so a backlog read late isn't flagged at once.
 type Question = { key: string; at: number; who: string; text: string; link: string };
-type Routed = { task: number; who: string; where: string; text: string; link: string };
+// source: slack, slack bot, ci, github or review request.
+type Routed = { task: number; source: string; who: string; where: string; text: string; link: string };
 type State = {
   seq: number;
   // The board task each Slack thread, DM or PR is on.
@@ -49,11 +50,15 @@ type State = {
   open: Record<string, string>;
   reruns: string[];
   batch: Routed[];
+  // When the oldest item in batch came, so a restart doesn't restart its debounce.
+  batchAt: number;
+  // The feed thread each board task went to the funnel as, so more on that task goes to whoever took it.
+  fed: Record<number, string>;
   prsAt: number;
   stallAt: number;
 };
 const state: State = {
-  seq: 0, tasks: {}, prs: {}, questions: {}, answered: {}, seen: [], flagged: [], alerts: {}, open: {}, reruns: [], batch: [], prsAt: 0, stallAt: 0,
+  seq: 0, tasks: {}, prs: {}, questions: {}, answered: {}, seen: [], flagged: [], alerts: {}, open: {}, reruns: [], batch: [], batchAt: 0, fed: {}, prsAt: 0, stallAt: 0,
   ...(existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {}),
 };
 const save = () => writeFileSync(STATE_FILE, JSON.stringify(state));
@@ -168,8 +173,8 @@ async function onSlack(topic: string, d: any, me: string) {
   });
   if (task) state.open[d.ts] = key;
   if (/\?/.test(text)) state.questions[d.ts] = { key, at: Date.now(), who: d.from, text, link: d.link };
-  // A mention or DM nobody owns goes to the funnel, which decides whether an agent can move it forward; thread replies stay on the board.
-  if (!owner && task && kind !== "reply") state.batch.push({ task, who: d.from, where, text: short(text, 200), link: d.link });
+  // A mention or DM nobody owns goes to the funnel, which starts an agent on it; thread replies stay on the board.
+  if (!owner && task && kind !== "reply") feed({ task, source: "slack", who: d.from, where, text: short(text, 500), link: d.link });
 }
 
 // A bot's mention of him ("a run on main is red", a skipped deploy) is one task per kind of alert, however often it repeats: its text
@@ -186,7 +191,7 @@ async function onBotAlert(d: any) {
   const event = open ? `${alert.count} more since the last note, latest ${url ?? d.link}` : `${d.from} in ${where}: "${short(d.text, 120)}" ${url ?? ""}`;
   const task = await onBoard(tag, d.link, event, { title: `${d.from} alert: "${short(d.text.replace(/\d+/g, "#"), 60)}"`, status: "you" });
   Object.assign(alert, { count: 0, noted: Date.now() });
-  if (task && !open) state.batch.push({ task, who: d.from, where, text: short(d.text, 200) + (url ? ` ${url}` : ""), link: d.link });
+  if (task && !open) feed({ task, source: "slack bot", who: d.from, where, text: short(d.text, 500) + (url ? ` ${url}` : ""), link: d.link });
 }
 
 // Whether the user put an emoji reaction on a message.
@@ -213,18 +218,36 @@ async function handled(me: string) {
   }
 }
 
+const feed = (item: Routed) => (state.batch.push(item), (state.batchAt ||= Date.now()));
+
+// Each board task in the batch becomes a feed thread in his inbox, which the funnel routes to an agent; more on a task already
+// routed goes into its thread and to the routers that took it.
 async function flushBatch() {
   // What he handled in the meantime isn't routed.
   const tasks = await getTasks();
   state.batch = state.batch.filter((i) => OPEN(tasks.find((t) => t.id === i.task)));
-  if (!state.batch.length) return;
-  const funnel = (await sessions()).find((s) => s.sentry && s.name === "sentry:funnel" && s.running);
-  if (!funnel) return;
-  const items = state.batch.splice(0);
-  await post(`/api/sessions/${funnel.id}/notify`, {
-    text: `[maxflow inbox] ${items.length} Slack message${items.length > 1 ? "s" : ""} to the user that no agent owns, each already a task on his board:\n${items.map((i) => `- T-${i.task} ${i.who} in ${i.where}: "${i.text}" ${i.link}`).join("\n")}\nRoute only those an agent can move forward on its own (look something up, fix what they report, draft a reply for him), and tell that agent its task id; leave the rest on the board. No agent replies on Slack as him without his say-so. Keep it brief.`,
-  });
-  log(`funnel: ${items.length} Slack messages`);
+  if (!state.batch.length) return void (state.batchAt = 0);
+  if (!(await sessions()).some((s) => s.sentry && s.name === "sentry:funnel" && s.running)) return log("funnel isn't running; holding the batch");
+  const byTask = new Map<number, Routed[]>();
+  for (const i of state.batch) byTask.set(i.task, [...(byTask.get(i.task) ?? []), i]);
+  for (const [task, items] of byTask) {
+    const [i] = items;
+    const text = `${i.who} in ${i.where}:\n${items.map((x) => `> ${x.text.replace(/\n/g, "\n> ")}`).join("\n")}\n${[...new Set(items.map((x) => x.link))].join("\n")}`;
+    const thread = state.fed[task] && ((await (await fetch(`${base}/api/threads`)).json()) as { id: string; routers: string[]; mergedInto?: string }[]).find((t) => t.id === state.fed[task]);
+    if (thread) {
+      await post(`/api/threads/${thread.id}/messages`, { text: `More from the feed: ${text}` });
+      for (const r of thread.routers) await post(`/api/sessions/${r}/notify`, { text: `[maxflow inbox] More on board task T-${task}, your feed thread ${thread.id}: ${text}` });
+      log(`T-${task}: more into ${thread.id}`);
+      continue;
+    }
+    const res = await post("/api/threads", { text, feed: { source: i.source, who: i.who, link: i.link, task } });
+    if (!res.ok) { log(`feed thread for T-${task} failed: ${await res.text()}`); continue; }
+    state.fed[task] = ((await res.json()) as { id: string }).id;
+    log(`funnel: T-${task} as feed thread ${state.fed[task]}`);
+  }
+  for (const t of Object.keys(state.fed).map(Number)) if (!OPEN(tasks.find((x) => x.id === t))) delete state.fed[t];
+  state.batch = [];
+  state.batchAt = 0;
 }
 
 // ---- GitHub
@@ -299,10 +322,12 @@ async function refreshPrs(ghMe: string) {
     if (r) state.prs[key].risk = r;
     const agent = r ? await startReviewer(key, state.prs[key]) : null;
     if (agent) state.prs[key].agent = agent;
-    await onBoard(key, pr.url, `${ask}${agent ? `; review agent ${agent} reading it (${r})` : ""}`, {
+    const task = await onBoard(key, pr.url, `${ask}${agent ? `; review agent ${agent} reading it (${r})` : ""}`, {
       title: why === "review" ? `Review ${key.split("/")[1]}: ${short(pr.title, 60)}` : `${key.split("/")[1]} assigned to you: ${short(pr.title, 50)}`,
       status: "you",
     });
+    // A review agent already reads the risky ones; the rest go to the funnel too, for an agent to read ahead of him.
+    if (task && !agent && !first) feed({ task, source: "review request", who: pr.author?.login ?? "?", where: key, text: `${ask}: "${pr.title}"`, link: pr.url });
   }
   for (const [key, pr] of Object.entries(state.prs))
     if (!now.has(key) && !pr.gone) {
@@ -341,7 +366,11 @@ async function onGh(topic: string, d: any) {
   const url = reviewing?.url ?? `https://github.com/${key.replace("#", "/pull/")}`;
   if (kind === "ci" && d.state !== "SUCCESS" && mine) {
     const rerun = rerunFlaky(key, d);
-    if (!d.told?.length) await onBoard(key, url, rerun ?? `CI failed: ${(d.failed ?? []).join(", ") || d.state}`, {});
+    if (d.told?.length) return;
+    const failed = `CI failed: ${(d.failed ?? []).join(", ") || d.state}`;
+    const task = await onBoard(key, url, rerun ?? failed, { title: `CI failing on ${key.split("/")[1]}` });
+    // A known flake re-run once fixes itself; a real failure no session heard goes to an agent.
+    if (task && !rerun) feed({ task, source: "ci", who: "CI", where: key, text: failed, link: url });
     return;
   }
   if (reviewing && (kind === "merged" || kind === "closed")) return closeTask(key, `the PR was ${kind}`);
@@ -349,7 +378,8 @@ async function onGh(topic: string, d: any) {
   // a task he already has; on a PR he reviews, it puts the task back on him.
   if (!["comment", "review", "thread"].includes(kind) || d.told?.length || !d.who || d.who.startsWith("the user") || d.author?.endsWith("[bot]")) return;
   const what = kind === "review" ? `${d.who} reviewed (${String(d.state).toLowerCase().replace("_", " ")})` : `${d.who} commented${d.path ? ` on ${d.path}` : ""}`;
-  await onBoard(key, url, `${what}: "${short(d.body ?? "", 120)}"`, mine ? {} : { status: "you" });
+  const task = await onBoard(key, url, `${what}: "${short(d.body ?? "", 120)}"`, { title: `${what} on ${key.split("/")[1]}`, ...(!mine && { status: "you" }) });
+  if (task) feed({ task, source: "github", who: d.who, where: key, text: `${what}: "${short(d.body ?? "", 500)}"${d.path ? ` (${d.path})` : ""}`, link: d.url ?? url });
 }
 
 // ---- Stalls, raised once each as a board task, never as a ping.
@@ -385,7 +415,7 @@ if (import.meta.main) {
   while (!(await fetch(`${base}/api/sessions`).then((r) => r.ok, () => false))) await Bun.sleep(2_000);
   if (!state.seq) state.seq = Number((await fetch(`${base}/api/events?topic=none&after=now`)).headers.get("x-maxflow-seq") ?? 0);
   log(`inbox sentry as ${ghMe || "?"} / ${me || "?"}`);
-  let batchSince = 0, handledAt = 0;
+  let handledAt = 0;
   // Reply tasks opened before reactions were checked: watch their thread's first message.
   for (const [key, id] of Object.entries(state.tasks)) if (/^[CDG]\w+\/[\d.]+$/.test(key) && !Object.values(state.open).includes(key) && id) state.open[key.split("/")[1]] = key;
   for (;;) {
@@ -393,14 +423,15 @@ if (import.meta.main) {
       if (Date.now() - handledAt >= HANDLED_MS) (await handled(me), (handledAt = Date.now()));
       if (Date.now() - state.prsAt >= PRS_MS) await refreshPrs(ghMe);
       if (Date.now() - state.stallAt >= STALL_MS) await stalls();
-      const events = (await (await fetch(`${base}/api/events?topic=**&after=${state.seq}&wait=60000`)).json()) as { seq: number; topic: string; data: any }[];
+      // While a batch waits, the long poll ends when its debounce does.
+      const wait = state.batch.length ? Math.max(1_000, state.batchAt + BATCH_MS - Date.now()) : 60_000;
+      const events = (await (await fetch(`${base}/api/events?topic=**&after=${state.seq}&wait=${wait}`)).json()) as { seq: number; topic: string; data: any }[];
       for (const e of events) {
         state.seq = e.seq;
         if (e.topic.startsWith("slack/")) await onSlack(e.topic, e.data, me);
         else if (e.topic.startsWith("gh/")) await onGh(e.topic, e.data);
       }
-      if (state.batch.length && !batchSince) batchSince = Date.now();
-      if (batchSince && Date.now() - batchSince >= BATCH_MS) (await flushBatch(), (batchSince = 0));
+      if (state.batch.length && Date.now() - (state.batchAt ||= Date.now()) >= BATCH_MS) await flushBatch();
       save();
     } catch (e) {
       log(`tick failed: ${e}`);

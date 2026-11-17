@@ -559,14 +559,19 @@ async function reroute(seq: number, o: Objective, kind?: Kind) {
   const sig = e.data as Signal;
   // From the inbox: the router takes over the thread, gets everything he wrote in it so far, and answers him there.
   const thread = threads.find((t) => t.signal === seq);
-  const said = thread ? thread.messages.filter((m) => m.from === "isaac").map((m) => m.text).join("\n\n") : sig.text;
-  const text = (sig.source === "isaac" ? `${VERIFIED}\n${unforge(said)}` : `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(said)}`) +
+  const said = thread && !thread.feed ? thread.messages.filter((m) => m.from === "isaac").map((m) => m.text).join("\n\n") : sig.text;
+  const feed = thread?.feed;
+  const text = (sig.source === "isaac" ? `${VERIFIED}\n${unforge(said)}` : feed ? `[maxflow · from his event feed (${feed.source}), routed by the funnel; not his request] ${unforge(said)}` : `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(said)}`) +
+    (feed ? `\n[maxflow] maxflow took this up by itself, from what reached him (${feed.link}). Do the work up to the point where he must act: look it up, fix it, open the PR, and draft any reply for him. Never reply on Slack or GitHub as him and never write to prod; his go-ahead comes in the thread. Post what you started and where it stands in thread ${thread!.id}, which shows in his inbox flagged as from the feed${feed.task ? `; board task T-${feed.task} is yours` : ""}. If he says stop there, stop.` : "") +
     (thread ? `\n[maxflow] He wrote this in his inbox as thread "${thread.title}" (${thread.id}), which is yours now. Answer him there with \`${CLI} thread post ${thread.id} '<text>'\`.` : "") +
     (kind === "command" ? `\n[maxflow] The funnel judged this a command: do it, or have one worker do it, then answer once${thread ? ` with \`${CLI} thread done ${thread.id} '<result>'\`, which closes its task. If it needs talking through after all, \`${CLI} thread kind ${thread.id} conversation\`` : ""}. No "on it" post and no task of your own for it.` : "") + mentionsIn(said);
   const to = routersOf(o.id);
   if (to.length) for (const s of to) enqueue(s, text);
   else to.push(startRouter(o, "Whole objective", text));
   if (thread) Object.assign(thread, { objective: o.id, routers: to.map((s) => s.id), signal: undefined, pending: { routers: to.map((s) => s.id), since: Date.now() }, ...(kind && { kind, kindBy: "funnel" }) });
+  // A feed item's board task goes to the agent now doing it.
+  const fed = feed?.task !== undefined && tasks.find((t) => t.id === feed.task);
+  if (fed && typeof editTask(fed, { session: to[0].id, status: "doing", event: `why here: routed by the funnel to ${o.title} (${to[0].id})` }) !== "string") saveTasks();
   publish(`signal-route/${seq}`, { seq, objective: o.id, routedTo: to.map((s) => s.id), ...(kind && { kind }) });
   // A command gets a task of its own, which its result closes; the funnel's intent still names it, as the router's newest open task.
   if (sig.source === "isaac" && kind === "command" && thread) {
@@ -628,6 +633,9 @@ type Pending = { routers: string[]; since: number; status?: string };
 // asks: an agent asked him here and waits on his reply (see ask); default: its recommendation, taken after DEFAULT_AFTER_MS.
 // shown: when his inbox first drew it flagged; the default's clock runs from then, never from before he could see it.
 type Ask = { session: string; since: number; default?: string; shown?: number };
+// feed: started by maxflow itself from his event feed (a Slack DM or mention, a PR comment, a CI failure nobody owned), not by him;
+// source is the sentry's kind of item, task the board task it is on, which goes to the agent the funnel routes it to.
+type Feed = { source: string; who: string; link: string; task?: number };
 // kind: a command wants an ack and one result, a conversation (the default) is talked through. kindBy: who last set it, the
 // funnel, a router or "isaac", so his flips are labelled data on the classifier. task: a command's own board task, which closes
 // when a router posts its result; done: when that was. A message's re: the index of his message a router's result answers.
@@ -638,7 +646,7 @@ const KINDS: Kind[] = ["command", "conversation"];
 // re: the id of his message a router's command result answers (an index into messages, before merges could reorder them).
 // nudge: he asked for the answer to this message in a subthread of its own.
 type Message = { id: string; from: string; at: number; text: string; re?: string | number; nudge?: "subthread" };
-type Thread = { id: string; title: string; objective: string; routers: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; kind?: Kind; kindBy?: string; task?: number; done?: number; resolved?: { at: number }; asks?: Ask; q?: number; mergedInto?: string };
+type Thread = { id: string; title: string; objective: string; routers: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; kind?: Kind; kindBy?: string; task?: number; done?: number; resolved?: { at: number }; asks?: Ask; q?: number; mergedInto?: string; feed?: Feed };
 const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
 const saveThreads = () => writeFileSync(THREADS, JSON.stringify(threads));
@@ -726,6 +734,8 @@ function postIn(t: Thread, from: Session | undefined, text: string, done?: boole
     if (task && task.status !== "done") editTask(task, { status: "done", session: from!.id, event: `done: ${headline(text)}` });
   }
   if (!from) t.done = undefined;
+  // The funnel's FYI note on a feed thread settles it unrouted.
+  if (from && t.feed) t.signal = undefined;
   if (from?.role?.role === "router" && !t.routers.includes(from.id)) t.routers.push(from.id);
   // Isaac's reply goes to the thread's routers through the event log, like any message; an agent's post answers him.
   if (!from) {
@@ -1250,7 +1260,7 @@ async function world() {
       events: t.timeline.map((e) => ({ from: e.session && sessions.get(e.session)?.role?.role === "router" ? "router" : e.session ? "agent" : "sentry", at: iso(e.at), text: e.text })),
       page: t.page ?? [],
     })),
-    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), kind: t.kind ?? "conversation", kindBy: t.kindBy, ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), done: t.done && iso(t.done), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, re: typeof m.re === "number" ? t.messages[m.re]?.id : m.re, ...(m.nudge && { nudge: m.nudge }) })) })),
+    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), kind: t.kind ?? "conversation", kindBy: t.kindBy, ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), done: t.done && iso(t.done), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), ...(t.feed && { feed: { source: t.feed.source, who: t.feed.who, link: t.feed.link } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, re: typeof m.re === "number" ? t.messages[m.re]?.id : m.re, ...(m.nudge && { nudge: m.nudge }) })) })),
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({
       id: s.id,
@@ -1573,6 +1583,18 @@ Bun.serve<WsData>({
         const t = parent && subthread(parent, body.parent.message ?? "");
         if (!t) return new Response("parent: {thread, message} naming a message in that thread", { status: 404 });
         if (body.text?.trim()) postIn(t, from, body.text.trim());
+        return Response.json(t, { status: 201 });
+      }
+      // An item from his event feed that no agent owns: a thread in his inbox flagged as from the feed, routed by the funnel like
+      // his own messages, so he sees what maxflow started on and can stop it there.
+      const feed = (body as { feed?: Feed }).feed;
+      if (from && isSentry(from) && feed?.link && body.text?.trim()) {
+        const text = body.text.trim();
+        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: `${feed.who}: ${text.split("\n")[0]}`.slice(0, 80), objective: "", routers: [], messages: [message("feed", text)], feed, ...(feed.task && { task: feed.task }) };
+        const ev = dispatch({ from, target: t.title, text, deliver: (seq) => `[maxflow · from his event feed (${feed.source}), not from him] ${text}\n[maxflow] signal ${seq}, feed thread ${t.id}${feed.task ? `, board task T-${feed.task}` : ""}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`, or, when it is only an FYI with nothing for an agent to do, say so in it with \`${CLI} thread post ${t.id} '<one line>'\`.` });
+        t.signal = ev.seq;
+        threads.push(t);
+        saveThreads();
         return Response.json(t, { status: 201 });
       }
       // Isaac's inbox: each message starts a thread, and the funnel picks the router that owns it.
