@@ -1475,7 +1475,9 @@ function behindDraft(s: Session, draft: string) {
 // it is awake, and a turn that ended with no wait declared is done, as if the agent ran `wait done`, unless a background shell
 // it started is still running (that shell's exit re-invokes it).
 function afterTurn(s: Session) {
-  const at = s.claude!.at;
+  // checkClaude can clear s.claude between the Stop hook and here.
+  const at = s.claude?.at;
+  if (at === undefined) return;
   setTimeout(async () => {
     if (s.claude?.state !== "idle" || s.claude.at !== at || s.exitCode !== null || s.inbox.length) return;
     const end = await turnEnd(s);
@@ -2146,7 +2148,7 @@ Bun.serve<WsData>({
         // Only a finished turn puts it back to sleep, not the idle of a claude just resumed by a wake.
         // It sleeps a moment after the Stop, not at once: a Stop hook can block the stop (the questions hook does), and the turn then goes on.
         else if (s.wait && s.wait.kind !== "done" && state === "idle" && (was === "working" || was === "waiting") && !s.archived && !s.inbox.length) {
-          const at = s.claude!.at;
+          const at = s.claude?.at;
           setTimeout(() => {
             if (!s.wait || s.wait.kind === "done" || s.archived || s.inbox.length || s.claude?.state !== "idle" || s.claude.at !== at) return;
             setWait(s, { ...s.wait, awake: false });
