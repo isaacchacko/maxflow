@@ -29,6 +29,8 @@ const DOMAIN = process.env.SLACK_DOMAIN ?? "dryftai";
 // The DM conversations read each tick: the ones that moved in the last DM_TIE_MS, at most DM_READS of them.
 const DM_TIE_MS = Number(process.env.SLACK_DM_TIE_MS ?? 3 * 86_400_000);
 const DM_READS = Number(process.env.SLACK_DM_READS ?? 8);
+// Those DMs get their own faster loop, since a DM sent while Slack is focused raises no notification to hurry it.
+const DM_INTERVAL_MS = Number(process.env.SLACK_DM_INTERVAL ?? 20_000);
 const CLI = new URL("../cli.ts", import.meta.url).pathname;
 // Sent with each call that touches a session, so the graph draws this sentry doing it.
 const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
@@ -269,6 +271,8 @@ async function tick(me: string, state: State, only?: Set<string>) {
   const direct = (published ??= new Set(state.direct));
   for (const [target, sessions] of listeners) {
     if (only && !only.has(target)) continue;
+    // The DM loop reads his DMs; the full tick only keeps them listened to.
+    if (!only && state.dms[target]) continue;
     // A thread only the user's own post ties is read every OWN_READ_MS, not every tick.
     if (!only && state.own[target] && ![...sessions].some(Boolean) && Date.now() - (state.readAt[target] ?? 0) < OWN_READ_MS) continue;
     // A notification's read and a tick's never read the same conversation at once.
@@ -415,6 +419,12 @@ if (import.meta.main) {
   // SLACK_NOTICES_SINCE=<record id> replays the notifications after it, for a test.
   const notices = watchNotices((n) => void onNotice(n, me, state).catch((e) => console.error(`${new Date().toLocaleTimeString()}  notice failed:`, e)), Number(process.env.SLACK_NOTICES_SINCE) || undefined);
   console.log(`slack sentry as ${me || "?"}, every ${INTERVAL_MS / 1000}s; notifications ${notices ? "watched" : "unreadable, polling only"}`);
+  void (async () => {
+    for (;;) {
+      await Bun.sleep(DM_INTERVAL_MS);
+      await tick(me, state, new Set(liveDms(state))).catch((e) => console.error(`${new Date().toLocaleTimeString()}  DM read failed:`, e));
+    }
+  })();
   for (;;) {
     try {
       const n = await tick(me, state);
