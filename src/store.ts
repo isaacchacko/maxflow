@@ -147,18 +147,6 @@ export async function setPaused(threadId: string, paused: { until: number; said:
   threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: undefined, paused: paused ? { until: new Date(paused.until).toISOString(), at: NOW_AT, said: paused.said, posts: 0 } : undefined } : t)));
 }
 
-/** Flips a thread between a command (an ack and one result) and a conversation; its routers hear of it. */
-export async function setKind(threadId: string, kind: "command" | "conversation") {
-  if (isLive()) return void (await api(`/api/threads/${threadId}/kind`, { kind }));
-  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, kind } : t)));
-}
-
-/** A command result on one of his messages becomes an ordinary reply, and the routers are told to talk that message through. */
-export async function answerHere(threadId: string, messageId: string) {
-  if (isLive()) return void (await api(`/api/threads/${threadId}/messages/${messageId}/conversation`));
-  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, messages: t.messages.map(m => (m.re === messageId ? { ...m, re: undefined } : m)) } : t)));
-}
-
 /** His inbox drew an ask flagged: its agent's 3h default counts from the first time it did. */
 export function markAskShown(threadId: string) {
   if (isLive()) void fetch(`/api/threads/${threadId}/shown`, { method: "POST" });

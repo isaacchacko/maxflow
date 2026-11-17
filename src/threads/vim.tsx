@@ -16,7 +16,6 @@ const HELP: [string, string][] = [
   ["y q", "quote"],
   ["x", "resolve, reopen"],
   ["p", "pause until a time"],
-  ["[ ]", "inbox: conversations, commands"],
   ["/", "jump anywhere (⌘K)"],
   ["?", "these keys"],
 ];

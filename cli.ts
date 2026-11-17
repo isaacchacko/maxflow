@@ -28,12 +28,10 @@ const usage = `usage:
   maxflow chats [query] | maxflow resume <claude-session-id> [--safe] [--force]
   maxflow objectives | maxflow objective new <title...> [--cwd DIR] [--scope S]   an objective and its first router
   maxflow objective merge <from id> <into id>   the target takes the source's agents, threads, tasks and signals; the source closes
-  maxflow route <signal seq> <objective id> [--kind command|conversation] | maxflow route <signal seq> --new <title> [--cwd DIR]   the funnel routing a signal from the event log
+  maxflow route <signal seq> <objective id> | maxflow route <signal seq> --new <title> [--cwd DIR]   the funnel routing a signal from the event log
   maxflow thread new <title...> [--objective ID] | maxflow thread new --parent <thread id>:<message id> [text...]   a subthread under that message | maxflow thread post <thread id> <text...> | maxflow thread status <thread id> <line...> | maxflow threads
   maxflow thread read <thread id> [--last N]   print a thread's messages as text, e.g. one he @-mentions
-  maxflow thread done <thread id> <result...>   a command's one answer: closes the thread and its task
                                              --image PATH on thread new/post/done and ask, repeatable: shows him that png/jpg/gif/webp inline
-  maxflow thread kind <thread id> command|conversation   flip what a thread is
   maxflow thread merge <thread id> <into thread id>   fold a duplicate into another thread: messages, routers, ask and waits move, the duplicate leaves the inbox
   maxflow thread move <thread id> <objective id>   re-home a thread and its subthreads onto that objective and its routers
   maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
@@ -271,9 +269,8 @@ if (verb === "ls") {
   console.log(`objective ${r.from} merged into ${r.into} (moved ${r.sessions.length} sessions)`);
 } else if (verb === "route" && rest[1]) {
   const title = flag(rest, "--new");
-  const kind = flag(rest, "--kind");
-  const r = await call(`/api/signals/${rest[0]}/route`, { method: "POST", body: JSON.stringify(title ? { title, cwd: flag(rest, "--cwd") ?? process.cwd(), kind } : { objective: rest[1], kind }) });
-  console.log(`signal ${rest[0]} → objective ${r.objective}${kind ? ` as a ${kind}` : ""} (routers ${r.routedTo.join(", ")})`);
+  const r = await call(`/api/signals/${rest[0]}/route`, { method: "POST", body: JSON.stringify(title ? { title, cwd: flag(rest, "--cwd") ?? process.cwd() } : { objective: rest[1] }) });
+  console.log(`signal ${rest[0]} → objective ${r.objective} (routers ${r.routedTo.join(", ")})`);
 } else if (verb === "threads") {
   for (const t of await call("/api/threads")) console.log(`${t.id}  ${t.objective}  ${t.title}  (${t.messages.length} messages)`);
 } else if (verb === "thread" && rest[0] === "new" && flag(rest, "--parent")) {
@@ -295,15 +292,12 @@ if (verb === "ls") {
   const shown = last > 0 ? t.messages.slice(-last) : t.messages;
   console.log(`${t.id} "${t.title}"${t.objective ? ` on ${t.objective}` : ""}${t.parent ? `, a subthread of ${t.parent.thread} under ${t.parent.message}` : ""}: ${t.messages.length} messages${shown.length < t.messages.length ? `, the last ${shown.length} below` : ""}`);
   for (const m of shown) console.log(`\n${m.id}  ${new Date(m.at).toLocaleString()}  ${m.from === "isaac" ? "Isaac" : (who.get(m.from) ?? m.from)}\n${m.text}`);
-} else if (verb === "thread" && rest[0] === "post" && rest[2]) {
+} else if (verb === "thread" && (rest[0] === "post" || rest[0] === "done") && rest[2]) {
+  // done: what commands answered with, kept as a plain post for agents that still run it.
   await call(`/api/threads/${rest[1]}/messages`, { method: "POST", body: JSON.stringify({ text: await withImages(withoutImages(rest.slice(2)).join(" "), rest) }) });
-} else if (verb === "thread" && rest[0] === "done" && rest[2]) {
-  await call(`/api/threads/${rest[1]}/messages`, { method: "POST", body: JSON.stringify({ text: await withImages(withoutImages(rest.slice(2)).join(" "), rest), done: true }) });
 } else if (verb === "thread" && rest[0] === "merge" && rest[2]) {
   const t = await call(`/api/threads/${rest[1]}/merge`, { method: "POST", body: JSON.stringify({ into: rest[2] }) });
   console.log(`${rest[1]} merged into ${t.id} (${t.messages.length} messages)`);
-} else if (verb === "thread" && rest[0] === "kind" && rest[2]) {
-  await call(`/api/threads/${rest[1]}/kind`, { method: "POST", body: JSON.stringify({ kind: rest[2] }) });
 } else if (verb === "thread" && rest[0] === "move" && rest[2]) {
   const r = await call(`/api/threads/${rest[1]}/objective`, { method: "POST", body: JSON.stringify({ objective: rest[2] }) });
   console.log(`moved ${r.threads.join(" ")} to ${r.objective} (routers ${r.routers.join(" ") || "none"})`);

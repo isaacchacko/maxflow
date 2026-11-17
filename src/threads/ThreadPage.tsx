@@ -4,10 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { AgentFace } from "@/components/AgentFace";
-import { Working } from "@/components/Working";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
-import { agentStore, answerHere, objectiveStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
+import { agentStore, objectiveStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
 import { Composer, quoteInto } from "./Composer";
 import { composeOnArrival, flashMessage, goToMessage, takeCompose, useLayerScroll } from "./jump";
 import { MessageRow, when } from "./MessageRow";
@@ -16,7 +15,6 @@ import { RowMenu, messageItems, threadItems } from "./RowMenu";
 import { firstUnseen, markSeen, setSeen } from "./seen";
 import { RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
 import { FeedTag } from "./FeedTag";
-import { KindMenu } from "./KindMenu";
 import { ShotScope, shotsOf } from "./Viewer";
 import { openPause, pausedLabel } from "./Pause";
 import { useVim, vimRow, type VimActions } from "./vim";
@@ -73,36 +71,6 @@ export function Pending({ pending, names }: { pending: NonNullable<Thread["pendi
   );
 }
 
-/**
- * A command he gave, under his message: its router's result on one line (open, in full), or that it is still running, with a
- * way to have the message talked through instead.
- */
-function CommandStatus({ threadId, messageId, result }: { threadId: string; messageId?: string; result?: Thread["messages"][number] }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div data-agent={`command-status:${messageId}`} className="mt-1 ml-11.5 flex flex-col gap-1">
-      <p className="flex min-w-0 items-center gap-2 text-xs">
-        {result ? <Check className="size-3 shrink-0 text-ok" /> : <Working className="size-3" />}
-        <button onClick={() => result && setOpen(v => !v)} className={cn("min-w-0 truncate text-left text-muted-foreground", result && "hover:text-foreground")}>
-          {result ? (
-            <>
-              ran as a command · <Rich still text={result.text.split("\n")[0]} />
-            </>
-          ) : (
-            "running as a command…"
-          )}
-        </button>
-        {result && messageId && (
-          <button data-agent={`answer-here:${messageId}`} onClick={() => answerHere(threadId, messageId)} className="shrink-0 rounded-full border bg-card px-2 text-muted-foreground hover:border-ring hover:text-foreground">
-            ↗ answer here instead
-          </button>
-        )}
-      </p>
-      {open && result && <MessageRow from={result.from} at={result.at} text={result.text} />}
-    </div>
-  );
-}
-
 export function ThreadPage({ id, back }: { id: string; back: string }) {
   const all = threadStore.use();
   const thread = all.find(t => t.id === id);
@@ -136,14 +104,9 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   const composer = () => document.querySelector<HTMLElement>('[data-agent="thread-input"]')?.focus();
   // The keyboard cursor walks the root, then the replies: each by its id, or its place for an old message without one.
   const root = thread?.parentId ? all.find(t => t.id === thread.parentId)?.messages.find(m => m.id === thread.parentMessageId) : thread?.messages[0];
-  // A router's command result draws under the message it answers, not as a reply of its own.
-  const replies = thread ? repliesOf(thread).filter(m => !m.re) : [];
+  const replies = thread ? repliesOf(thread) : [];
   // Whether his next message here asks for its answer in a subthread; each thread remembers it, as it does a draft.
   const [nudge, setNudge] = usePersistentDraft(`thread:${id}:nudge`);
-  const resultFor = (m?: { id?: string }) => (m?.id ? thread?.messages.findLast(x => x.re === m.id) : undefined);
-  // In a command thread his last message runs until its router posts the result.
-  const lastMine = thread?.messages.findLast(m => m.from === "isaac");
-  const running = thread?.kind === "command" && !thread.done && !resultFor(lastMine) ? lastMine : undefined;
   const keyOf = (m: { id?: string }, i: number) => m.id ?? `#${i}`;
   const keys = [...(root ? [keyOf(root, -1)] : []), ...replies.map(keyOf)];
   const byKey = (k: string) => (root && k === keyOf(root, -1) ? root : replies.find((m, i) => keyOf(m, i) === k));
@@ -225,8 +188,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
             <ArrowLeft />
           </a>
         </Button>
-        {/* A top thread's glyph is its kind, and picks it; a subthread's is just a thread's. */}
-        {thread.parentId ? <MessagesSquare className="size-4 text-muted-foreground" /> : <KindMenu thread={thread} />}
+        <MessagesSquare className="size-4 text-muted-foreground" />
         {ancestors.map(a => (
           <Fragment key={a.id}>
             <a href={`#thread/${a.id}`} data-agent={`thread-up:${a.id}`} className="max-w-56 truncate text-sm text-muted-foreground hover:text-foreground">
@@ -263,7 +225,6 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                 <MessageRow from={root.from} at={root.at} text={root.text} active={vim.cursor === keyOf(root, -1)}>
                   {root.nudge && <NudgeMark />}
                 </MessageRow>
-                {(resultFor(root) || running === root) && <CommandStatus threadId={thread.parentId ?? thread.id} messageId={root.id} result={resultFor(root)} />}
               </div>
               </RowMenu>
             )}
@@ -307,7 +268,6 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                     {m.nudge && <NudgeMark />}
                     {sub && (sub.messages.length > 0 || sub.pending) && <Replies t={sub} />}
                   </MessageRow>
-                  {(resultFor(m) || running === m) && <CommandStatus threadId={thread.id} messageId={m.id} result={resultFor(m)} />}
                   {m.id && (
                     <button
                       data-agent={`reply-in-thread:${m.id}`}
@@ -333,7 +293,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                 </Fragment>
               );
             })}
-            {thread.pending && !running && <Pending pending={thread.pending} names={thread.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />}
+            {thread.pending && <Pending pending={thread.pending} names={thread.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />}
           </div>
           </ShotScope.Provider>
           {vim.panel}

@@ -1,8 +1,8 @@
-import { AlarmClock, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, MessagesSquare, Play, Quote, RotateCcw, Zap, type LucideIcon } from "lucide-react";
+import { AlarmClock, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, Play, Quote, RotateCcw, type LucideIcon } from "lucide-react";
 import { ContextMenu } from "radix-ui";
 import { Kbd } from "@/components/ui/kbd";
 import type { Thread } from "@/mock";
-import { setKind, setPaused } from "@/store";
+import { setPaused } from "@/store";
 import { openPause } from "./Pause";
 import { repliesOf } from "./Replies";
 import { markRead, markUnread, unseenDeep } from "./seen";
@@ -54,15 +54,12 @@ export function RowMenu({ items, agent, children }: { items: (MenuItem | false |
  * `pause` opens its popover where the inbox has more to do first.
  */
 export function threadItems(t: Thread, all: Thread[], on: { open?(): void; reply?(): void; resolve(): void; pause?(): void }): (MenuItem | false | undefined)[] {
-  // A command has no new-replies count anywhere, so read and unread are only a conversation's.
-  const talk = t.kind !== "command";
   return [
     on.open && { label: "Open", icon: ExternalLink, keys: "Enter", run: on.open },
     on.reply && { label: "Reply", icon: MessageSquareReply, keys: "r", run: on.reply },
     "-",
-    talk && unseenDeep(t, all) > 0 && { label: "Mark read", icon: MailOpen, run: () => markRead(t, all), agent: `mark-read:${t.id}` },
-    talk && unseenDeep(t, all) === 0 && repliesOf(t).length > 0 && { label: "Mark unread", icon: Mail, run: () => markUnread(t), agent: `mark-unread:${t.id}` },
-    !t.parentId && (talk ? { label: "Convert to command", icon: Zap, run: () => setKind(t.id, "command") } : { label: "Convert to conversation", icon: MessagesSquare, run: () => setKind(t.id, "conversation") }),
+    unseenDeep(t, all) > 0 && { label: "Mark read", icon: MailOpen, run: () => markRead(t, all), agent: `mark-read:${t.id}` },
+    unseenDeep(t, all) === 0 && repliesOf(t).length > 0 && { label: "Mark unread", icon: Mail, run: () => markUnread(t), agent: `mark-unread:${t.id}` },
     { label: t.resolved ? "Reopen" : "Resolve", icon: t.resolved ? RotateCcw : Check, keys: "x", run: on.resolve, agent: `menu-resolve:${t.id}` },
     !t.parentId && { label: t.paused ? "Pause again…" : "Pause…", icon: AlarmClock, keys: "p", run: on.pause ?? (() => openPause(t.id)), agent: `menu-pause:${t.id}` },
     t.paused && { label: "Unpause", icon: Play, run: () => void setPaused(t.id, null), agent: `menu-unpause:${t.id}` },
