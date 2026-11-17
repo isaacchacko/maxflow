@@ -37,7 +37,7 @@ function setTitle() {
   const view = location.hash.slice(1).split("/")[0] || "inbox";
   document.title = `${pending ? `(${pending}) ` : ""}yarn · ${view[0]!.toUpperCase()}${view.slice(1)}`;
 }
-addEventListener("hashchange", setTitle);
+addEventListener("route", setTitle);
 
 // The health sentry answers in the server's place while it is down; reloading lands on its "Oh no!" page.
 let misses = 0;

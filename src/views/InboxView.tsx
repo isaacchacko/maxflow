@@ -2,6 +2,7 @@ import { AlarmClock, Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { card, surface } from "@/lib/surface";
 import { cn } from "@/lib/utils";
+import { openTab } from "@/tabs";
 import type { Thread } from "@/mock";
 import { markAskShown, objectiveStore, setResolved, startThread, threadStore } from "@/store";
 import { Composer } from "@/threads/Composer";
@@ -60,6 +61,7 @@ export function InboxView() {
   const vim = useVim("inbox", [...needsYou, ...others].map(r => r.t.id), scrollRef, "first", {
     compose: () => document.querySelector<HTMLElement>('[data-agent="inbox-input"]')?.focus(),
     open,
+    tab: id => openTab(`thread/${id}`, true),
     reply,
     resolve: id => {
       const t = threads.find(x => x.id === id);

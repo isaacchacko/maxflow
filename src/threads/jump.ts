@@ -1,10 +1,11 @@
 import { useLayoutEffect, useRef } from "react";
 import { threadStore } from "@/store";
+import { activeTabId } from "@/tabs";
 
 // Landing on a message: scrolled to and flashed once, whether by climbing out of its subthread or clicking a quote's link to it.
 const arriving: { message?: string; compose?: boolean } = {};
 
-// Where he was in each layer (the inbox, its commands column, each thread), kept as he scrolls, so coming back lands there.
+// Where he was in each layer (the inbox, its commands column, each thread) of each tab, kept as he scrolls, so coming back lands there.
 const SCROLLS = "layer-scroll";
 const scrolls: Record<string, number> = (() => {
   try {
@@ -49,13 +50,14 @@ export function useLayerScroll(layer: string, ref: React.RefObject<HTMLElement |
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    restored.current = arrival.restore && scrolls[layer] !== undefined;
-    if (restored.current) el.scrollTop = scrolls[layer]!;
+    const key = `${activeTabId()}:${layer}`;
+    restored.current = arrival.restore && scrolls[key] !== undefined;
+    if (restored.current) el.scrollTop = scrolls[key]!;
     let frame = 0;
     const onScroll = () =>
       (frame ||= requestAnimationFrame(() => {
         frame = 0;
-        scrolls[layer] = el.scrollTop;
+        scrolls[key] = el.scrollTop;
         try {
           sessionStorage.setItem(SCROLLS, JSON.stringify(scrolls));
         } catch {}
