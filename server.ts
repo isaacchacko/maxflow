@@ -32,6 +32,8 @@ type Session = {
   archived?: boolean;
   // The chat an archived agent was stopped in to free its memory; unarchiving resumes it.
   asleep?: string;
+  // Whether claude itself runs in the pane, from the process table (checkClaude); unset until the first check.
+  claudeUp?: boolean;
   sentry?: boolean;
   // What the agent declared it waits on with `maxflow wait`; it sleeps (archived) from the end of its turn until a message wakes it.
   wait?: Wait;
@@ -315,6 +317,9 @@ function touchFrom(req: Request, s: Session, kind: "read" | "write", held = fals
   if (from && from !== s) publish(`touch/${from.id}/${s.id}`, { from: from.id, to: s.id, kind, held });
 }
 const isAgent = (s: Session) => !!s.claude || !!s.chatId || !!s.asleep || s.cmd[0] === "claude";
+const chatOf = (s: Session) => s.chatId ?? s.transcript?.match(/([0-9a-f-]{36})\.jsonl$/)?.[1];
+// Agents stopAgent is reading the box of, so two callers don't stop one twice.
+const stopping = new Set<string>();
 // An archived agent with messages queued wakes to take them; the rest stay stopped.
 for (const s of sessions.values()) {
   if (s.inbox.length && (s.archived || s.asleep) && !isSentry(s)) wake(s);
@@ -332,6 +337,8 @@ const BUSY_MS = 4000, SPINNER_GAP_MS = 10_000, DIALOG_SETTLE_MS = 2000;
 function status(s: Session) {
   if (s.exitCode !== null) return "exited";
   if (isSentry(s)) return "idle";
+  // With its claude stopped (asleep) or gone from the process table, an agent's pane prints only a placeholder: never working.
+  if (s.asleep || (s.claudeUp === false && (s.cmd[0] === "claude" || !!chatOf(s)))) return "idle";
   const quiet = Date.now() - s.lastOutputAt;
   if (!s.claude) return quiet < BUSY_MS ? "working" : "idle";
   if (s.claude.state === "working") return quiet < SPINNER_GAP_MS ? "working" : "idle";
@@ -851,9 +858,22 @@ function setArchived(s: Session, archived: boolean) {
   else resumeAgent(s);
 }
 // An archived agent between turns has its claude stopped, keeping the tmux session, so it holds no memory until it is unarchived.
-function stopAgent(s: Session) {
-  const chat = s.chatId ?? s.transcript?.match(/([0-9a-f-]{36})\.jsonl$/)?.[1];
-  if (s.asleep || !chat || isSentry(s) || !isAgent(s) || s.exitCode !== null || s.claude?.state === "working" || s.claude?.state === "waiting") return;
+// Not while its box holds text: what he typed and hasn't sent (or a paste whose Enter didn't take) would die with the claude, as his
+// "run a test draft on 7d6e474d" did in bedd13e5. It stays up, and checkClaude stops it once the box is empty.
+async function stopAgent(s: Session) {
+  const chat = chatOf(s);
+  const stoppable = () => s.archived && !s.asleep && !!chat && !isSentry(s) && isAgent(s) && s.exitCode === null && s.claude?.state !== "working" && s.claude?.state !== "waiting";
+  if (!stoppable() || stopping.has(s.id)) return;
+  stopping.add(s.id);
+  try {
+    const box = await inputBox(s);
+    if (!box?.empty || !stoppable()) return;
+    putToSleep(s, chat!);
+  } finally {
+    stopping.delete(s.id);
+  }
+}
+function putToSleep(s: Session, chat: string) {
   // The respawn keeps the pane's history but wipes its screen, which holds the chat's last reply, so the placeholder prints that screen back first.
   const screen = `${STATE_DIR}/asleep-${s.id}.ans`;
   writeFileSync(screen, tmux("capture-pane", "-p", "-e", "-J", "-t", tmuxName(s.id)).out.trimEnd() + "\x1b[0m\n");
@@ -875,6 +895,41 @@ function setWait(s: Session, wait?: Wait) {
   publish(`wait/${s.id}`, { session: s.id, wait: wait ?? null });
   settleTasks();
 }
+// Whether claude itself runs in each agent's pane, read from the process table rather than the screen: a stop, a crash or a kill
+// can leave the pane at the asleep prompt or a shell while the session still reads as claude's. A claude found gone takes its
+// hook state with it, so the session can't stay "working"; an archived one kept up by a draft is stopped once the box is empty.
+const CLAUDE_CHECK_MS = 5000;
+async function checkClaude() {
+  // By command line, so a claude run through node counts too; a false match only spares a pane a resume.
+  const kids = new Map<number, number[]>(), args = new Map<number, string>();
+  for (const line of Bun.spawnSync(["ps", "-Ao", "pid=,ppid=,args="]).stdout.toString().split("\n")) {
+    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
+    if (m) args.set(+m[1], m[3].trim()), kids.set(+m[2], [...(kids.get(+m[2]) ?? []), +m[1]]);
+  }
+  for (const line of (await tmuxAsync("list-panes", "-a", "-F", "#{session_name} #{pane_pid}")).out.split("\n")) {
+    const [name, pid] = line.split(" ");
+    const s = sessions.get(name?.replace(/^mf-/, "") ?? "");
+    if (!s || !pid || isSentry(s) || !isAgent(s) || s.exitCode !== null) continue;
+    const tree = [+pid];
+    for (let i = 0; i < tree.length && tree.length < 500; i++) tree.push(...(kids.get(tree[i]) ?? []));
+    s.claudeUp = tree.some((p) => /^(\S*\/)?claude(\s|$)|claude-code|@anthropic-ai\/claude/.test(args.get(p) ?? ""));
+    if (!s.claudeUp && s.claude) setClaudeState(s, "gone");
+    if (s.claudeUp && s.archived && !s.asleep && s.claude?.state === "idle") void stopAgent(s);
+  }
+}
+setInterval(() => void checkClaude().catch((e) => console.error("checkClaude", e)), CLAUDE_CHECK_MS);
+// A message for an agent whose claude isn't running and wasn't stopped by us (killed, crashed, or the asleep mark lost) resumes its chat
+// the way a wake does; false with no chat to resume.
+function revive(s: Session) {
+  const chat = chatOf(s);
+  if (!chat) return false;
+  console.log(`${s.id}: claude isn't running in its pane; resuming chat ${chat} to deliver ${s.inbox.length} message(s)`);
+  s.asleep = chat;
+  s.claudeUp = undefined;
+  resumeAgent(s);
+  return true;
+}
+
 // Waiting is sleeping: a waiting agent is archived once its turn ends, and the first message queued to it wakes it for a turn.
 // Only the awaited event ends the wait: a question settled, an approval, CI finishing, the PR merged or closed, the agent's reply, a new Slack message.
 // Any message wakes it, whatever put it to sleep (a wait, done, archived by hand): it needs a live claude to land in.
@@ -1543,6 +1598,7 @@ async function deliver(s: Session) {
   if (s.exitCode !== null) return;
   // A stopped claude has no prompt to deliver to, so a queued message that finds one asleep resumes it.
   if (s.inbox.length && (s.archived || s.asleep) && !isSentry(s)) return wake(s);
+  if (s.inbox.length && s.claudeUp === false && !isSentry(s) && revive(s)) return;
   if (s.sending && (await confirmSending(s))) return;
   if (Date.now() - activeAt(s) < DELIVER_IDLE_MS) return;
   // Only sessions with a message pending or a recent paste are read, so idle ones cost no capture each second.
