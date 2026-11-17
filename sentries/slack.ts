@@ -235,6 +235,14 @@ const own = (me: string) => ({ [`search:<@${me}>`]: "slack/mention", [`search:to
 const threadOf = (link: string) => link.match(/archives\/(\w+)\/p(\d{10})(\d{6})(?:\?thread_ts=([\d.]+))?/)?.slice(1);
 const targetOf = (link: string) => { const t = threadOf(link); return t && `${t[0]}/${t[3] ?? `${t[1]}.${t[2]}`}`; };
 
+// Working out the ties reads agents' transcripts synchronously, which stalls the notification watcher meanwhile, so only the full
+// tick does it; a DM read or a notification takes the full tick's answer while it is under a minute old.
+let lastTies: { at: number; got: Awaited<ReturnType<typeof ties>> } | undefined;
+async function tiesNow(full: boolean) {
+  if (full || !lastTies || Date.now() - lastTies.at > 60_000) lastTies = { at: Date.now(), got: await ties() };
+  return lastTies.got;
+}
+
 // The ts of each DM and own post published, shared by ticks and notifications so neither publishes one twice.
 let published: Set<string> | undefined;
 const reading = new Map<string, Promise<unknown>>();
@@ -259,7 +267,7 @@ const liveDms = (state: State) =>
 
 // Every tick reads all it listens to; `only` reads just those targets now, for a notification, and leaves the rest for the next tick.
 async function tick(me: string, state: State, only?: Set<string>) {
-  const { ties: all, posted } = await ties();
+  const { ties: all, posted } = await tiesNow(!only);
   const listeners = new Map<string, Set<string>>();
   for (const t of all) (listeners.get(t.target) ?? listeners.set(t.target, new Set()).get(t.target)!).add(t.session);
   const searches = me ? own(me) : {};
@@ -406,7 +414,7 @@ async function onNotice(n: Notice, me: string, state: State) {
     return;
   }
   if (!m) {
-    const { ties: tied } = await ties();
+    const { ties: tied } = await tiesNow(false);
     const here = new Set([...tied.map((t) => t.target), ...Object.keys(state.own)].filter((t) => t.startsWith(`${place}/`)));
     if (here.size) await tick(me, state, here);
   }
