@@ -1,64 +1,94 @@
-import { AlarmClock, Check } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { card, surface } from "@/lib/surface";
+import { AlarmClock, Check, ChevronDown } from "lucide-react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { openTab } from "@/tabs";
-import type { Thread } from "@/mock";
+import { localAt, type Thread } from "@/mock";
 import { markAskShown, objectiveStore, setResolved, startThread, threadStore } from "@/store";
 import { Composer } from "@/threads/Composer";
 import { arrivedFrom, composeOnArrival, flash, useLayerScroll } from "@/threads/jump";
 import { MessageRow } from "@/threads/MessageRow";
 import { FeedTag } from "@/threads/FeedTag";
 import { Replies } from "@/threads/Replies";
+import { Avatar, Rich } from "@/threads/Rich";
 import { RowMenu, threadItems } from "@/threads/RowMenu";
 import { ShotScope, shotsOf } from "@/threads/Viewer";
-import { freshlyBack, openPause, pausedLabel } from "@/threads/Pause";
+import { openPause, pausedLabel } from "@/threads/Pause";
 import { unseenDeep, useSeen } from "@/threads/seen";
 import { useVim, vimRow } from "@/threads/vim";
 
-/** A thread asks for Isaac from the first message after his last reply; null once he has answered everything in it. */
-function askedAt(t: Thread) {
-  const lastMine = t.messages.findLastIndex(m => m.from === "isaac");
-  const ask = t.messages.slice(lastMine + 1)[0];
-  return ask ? Date.parse(ask.at) : null;
+// The inbox is one channel, as Slack draws one: every thread's opening message, oldest at the top, under day dividers, with its
+// replies line; the box to start a thread sits at the bottom. Threads keep their place when replies come in.
+
+const GROUP_MS = 5 * 60_000;
+const SEEN_AT = "inbox-seen-at";
+
+/** A thread's opening message; a thread a router opened before writing in it shows its title, at the bottom until it does. */
+const openerOf = (t: Thread) => t.messages[0] ?? { from: t.routerIds[0] ?? t.objectiveId, at: t.pending?.since ?? "9999", text: t.title };
+
+function dayLabel(day: string) {
+  const d = new Date(`${day}T00:00`);
+  const today = new Date();
+  const yesterday = new Date(Date.now() - 86_400_000);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).replace(",", "");
+}
+
+/** When he last had the inbox open, kept in this browser; what opened after it sits under the red "New" line. */
+function useSeenAt() {
+  const [at] = useState(() => {
+    try {
+      return localStorage.getItem(SEEN_AT) ?? localAt();
+    } catch {
+      return localAt();
+    }
+  });
+  useEffect(() => {
+    const mark = () => {
+      try {
+        localStorage.setItem(SEEN_AT, localAt());
+      } catch {}
+    };
+    mark();
+    return mark;
+  }, []);
+  return at;
 }
 
 export function InboxView() {
   const threads = threadStore.use();
   const objectives = objectiveStore.use();
   const [showResolved, setShowResolved] = useState(false);
-  // Resolved from this list, a row stays put until he leaves the inbox, so a second click undoes an accidental resolve.
+  // Resolved or paused from this list, a row stays put until he leaves the inbox, so a second click undoes an accidental one.
   const [kept, setKept] = useState<Set<string>>(() => new Set());
   // Subthreads live under their message, not in the inbox.
   const tops = threads.filter(t => !t.parentId);
   const resolved = tops.filter(t => t.resolved).length;
-  // Paused, a thread is out of the inbox behind its own toggle until its time comes round, as resolved ones are.
   const [showPaused, setShowPaused] = useState(false);
   const paused = tops.filter(t => t.paused).length;
   useSeen();
+  const seenAt = useSeenAt();
   const rows = tops
     .filter(t => (showResolved || !t.resolved || kept.has(t.id)) && (showPaused || !t.paused || kept.has(t.id)))
-    .map(t => ({ t, asked: askedAt(t), last: Date.parse(t.messages.at(-1)?.at ?? "") || 0, back: freshlyBack(t, unseenDeep(t, threads)) }))
-    // An agent waiting on him comes first, longest-waiting on top, then what just came back from a pause.
-    .sort((a, b) => Number(!a.t.asks) - Number(!b.t.asks) || Number(!a.back) - Number(!b.back) || (a.asked ?? Infinity) - (b.asked ?? Infinity) || b.last - a.last);
-  // An agent waiting on him stays on top of everything.
-  const needsYou = rows.filter(r => r.t.asks);
-  const others = rows.filter(r => !r.t.asks);
+    .map(t => ({ t, first: openerOf(t) }))
+    .sort((a, b) => a.first.at.localeCompare(b.first.at));
+  const asks = rows.filter(r => r.t.asks);
+  const replied = rows.filter(r => unseenDeep(r.t, threads) > 0);
+  const firstNew = rows.findIndex(r => r.first.from !== "isaac" && r.first.at > seenAt);
   const toggle = (t: Thread) => (setKept(k => new Set(k).add(t.id)), setResolved(t.id, !t.resolved));
   // Drawing an ask flagged, on a page he has in front of him, starts the clock on its agent's default.
-  const unshown = rows.filter(r => r.t.asks && !r.t.asks.shown).map(r => r.t.id);
+  const unshown = asks.filter(r => !r.t.asks!.shown).map(r => r.t.id);
   useEffect(() => {
     if (document.visibilityState === "visible") for (const id of unshown) markAskShown(id);
   }, [unshown.join()]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lineRef = useRef<HTMLDivElement>(null);
   const open = (id: string) => (location.hash = `thread/${id}`);
   const reply = (id: string) => (composeOnArrival(), (location.hash = `thread/${id}`));
-  // Right-click offers what the keys do, on the row it was clicked on.
-  // Paused from this list, a row stays put like a resolved one, so he sees it took.
   const pause = (id: string) => (setKept(k => new Set(k).add(id)), openPause(id));
   const menu = (t: Thread) => threadItems(t, threads, { open: () => open(t.id), reply: () => reply(t.id), resolve: () => toggle(t), pause: () => pause(t.id) });
-  // j/k walk the page in reading order: the asks, then the threads.
-  const vim = useVim("inbox", [...needsYou, ...others].map(r => r.t.id), scrollRef, "first", {
+  // j/k walk the channel top to bottom, starting from its newest thread.
+  const vim = useVim("inbox", rows.map(r => r.t.id), scrollRef, "last", {
     compose: () => document.querySelector<HTMLElement>('[data-agent="inbox-input"]')?.focus(),
     open,
     tab: id => openTab(`thread/${id}`, true),
@@ -69,41 +99,61 @@ export function InboxView() {
     },
     pause: id => id && pause(id),
   });
-  // Back up out of a thread, the list is where he left it, and that thread's row takes the cursor and flashes.
-  useLayerScroll("inbox", scrollRef);
-  useEffect(() => {
-    const from = arrivedFrom();
-    const row = from && scrollRef.current?.querySelector(`[data-vim="${CSS.escape(from)}"]`);
-    if (row) vim.move(from, false), flash(row);
-  }, []);
+  const show = (id: string) => {
+    const row = scrollRef.current?.querySelector(`[data-vim="${CSS.escape(id)}"]`);
+    if (row) vim.move(id, false), flash(row);
+  };
 
-  const threadRow = (t: Thread) => {
-      // A thread a router opened before writing in it shows its title as the opening message.
-      const first = t.messages[0] ?? { from: t.routerIds[0] ?? t.objectiveId, at: "", text: t.title };
-      return (
-        <RowMenu key={t.id} agent={t.id} items={menu(t)}>
-        <li {...vimRow(t.id)} className={cn("group relative px-3 py-2.5", card)}>
-          <button
-            data-agent={`inbox-resolve:${t.id}`}
-            title={t.resolved ? "Reopen" : "Resolve"}
-            onClick={() => toggle(t)}
-            className={cn("absolute top-2.5 right-3 z-10 rounded-md border bg-card p-1 shadow-card hover:border-ring", t.resolved ? "text-ok" : "text-muted-foreground opacity-0 group-hover:opacity-100")}
-          >
-            <Check className="size-3.5" />
-          </button>
-          <div className={cn((t.resolved || t.paused) && "opacity-50")}>
-            {/* An image in the preview opens the viewer over the whole thread's. */}
-            <ShotScope.Provider value={shotsOf(t.messages)}>
+  // Opening, it lands where he left it when coming back, on the thread he climbed out of, on the "New" line, or at the bottom.
+  const restored = useLayerScroll("inbox", scrollRef);
+  const atBottom = useRef(true);
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const from = arrivedFrom();
+    if (!restored.current) {
+      if (lineRef.current) el.scrollTop = lineRef.current.offsetTop - 48;
+      else el.scrollTop = el.scrollHeight;
+    }
+    onScroll();
+    if (from) show(from);
+  }, []);
+  // A new thread lands at the bottom, and the channel follows it there when he was already at the bottom.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (mounted.current && el && atBottom.current) el.scrollTop = el.scrollHeight;
+    mounted.current = true;
+  }, [rows.length]);
+  function onScroll() {
+    const el = scrollRef.current!;
+    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
+
+  // The bar at the top steps through the threads with replies he hasn't seen, in the channel's order.
+  const [step, setStep] = useState(0);
+  const nextReplied = () => {
+    const r = replied[step % replied.length];
+    if (r) show(r.t.id), setStep(s => s + 1);
+  };
+
+  const threadRow = (t: Thread, first: ReturnType<typeof openerOf>, grouped: boolean) => (
+    <RowMenu key={t.id} agent={t.id} items={menu(t)}>
+      <div {...vimRow(t.id)} className={cn("group/row relative", !grouped && "mt-2.5")}>
+        <div className={cn((t.resolved || t.paused) && "opacity-50")}>
+          {/* An image in the preview opens the viewer over the whole thread's. */}
+          <ShotScope.Provider value={shotsOf(t.messages)}>
             <MessageRow
               from={first.from}
               at={first.at}
               text={first.text}
+              grouped={grouped}
               active={vim.cursor === t.id}
               className="cursor-pointer"
               // A long opener or a pasted screenshot stays a preview here; the thread has it in full.
               bodyClassName="max-h-36 overflow-hidden [&_img]:max-h-28"
               // The whole row opens the thread, except the links and chips inside the message.
-              onClick={e => (e.target as Element).closest("a") || (location.hash = `thread/${t.id}`)}
+              onClick={e => (e.target as Element).closest("a, button") || open(t.id)}
               meta={
                 <span className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
                   {t.asks && <span className="shrink-0 rounded-full bg-warn-soft px-2 font-medium text-warn">needs you</span>}
@@ -119,38 +169,93 @@ export function InboxView() {
                 </span>
               }
             >
-              <Replies t={t} />
+              {(t.messages.length > 1 || t.pending || grouped) && <Replies t={t} />}
             </MessageRow>
-            </ShotScope.Provider>
-          </div>
-        </li>
-        </RowMenu>
-      );
-  };
+          </ShotScope.Provider>
+        </div>
+        <button
+          data-agent={`inbox-resolve:${t.id}`}
+          title={t.resolved ? "Reopen" : "Resolve"}
+          onClick={() => toggle(t)}
+          className={cn("absolute top-0 right-0 z-10 rounded-md border bg-card p-1 shadow-card hover:border-ring", t.resolved ? "text-ok" : "text-muted-foreground opacity-0 group-hover/row:opacity-100")}
+        >
+          <Check className="size-3.5" />
+        </button>
+      </div>
+    </RowMenu>
+  );
 
   return (
-    <div ref={scrollRef} className="flex h-full gap-6 overflow-y-auto p-4">
-      {vim.panel}
-      <div className="flex max-w-4xl min-w-0 shrink basis-4xl flex-col gap-3">
-        <Composer autoFocus agent="inbox-input" draftKey="inbox" onSend={startThread} className="rounded-2xl border bg-card px-3.5 py-3 shadow-raised" />
-        {(resolved > 0 || paused > 0) && (
-        <div className="flex gap-2">
-        {resolved > 0 && (
-          <button data-agent="inbox-resolved" onClick={() => setShowResolved(v => !v)} className={cn("flex w-fit items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring", showResolved && "border-ring text-foreground")}>
-            <Check className="size-3" />
-            Resolved ({resolved})
-          </button>
+    <div className="flex h-full justify-center p-4">
+      <div className="flex max-w-4xl min-w-0 flex-1 flex-col gap-2">
+        {(resolved > 0 || paused > 0 || replied.length > 0) && (
+          <div className="flex shrink-0 items-center gap-2">
+            {replied.length > 0 && (
+              <button data-agent="inbox-new-replies" onClick={nextReplied} className="flex items-center gap-1.5 rounded-full bg-new-soft px-2.5 py-0.5 text-xs font-medium text-new hover:brightness-95">
+                <ChevronDown className="size-3" />
+                {replied.length === 1 ? "1 thread with new replies" : `${replied.length} threads with new replies`}
+              </button>
+            )}
+            <span className="ml-auto" />
+            {resolved > 0 && (
+              <button data-agent="inbox-resolved" onClick={() => setShowResolved(v => !v)} className={cn("flex w-fit items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring", showResolved && "border-ring text-foreground")}>
+                <Check className="size-3" />
+                Resolved ({resolved})
+              </button>
+            )}
+            {paused > 0 && (
+              <button data-agent="inbox-paused" onClick={() => setShowPaused(v => !v)} className={cn("flex w-fit items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring", showPaused && "border-ring text-foreground")}>
+                <AlarmClock className="size-3" />
+                Paused ({paused})
+              </button>
+            )}
+          </div>
         )}
-        {paused > 0 && (
-          <button data-agent="inbox-paused" onClick={() => setShowPaused(v => !v)} className={cn("flex w-fit items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring", showPaused && "border-ring text-foreground")}>
-            <AlarmClock className="size-3" />
-            Paused ({paused})
-          </button>
+        {/* Agents waiting on him, pinned above the channel one line each; a click scrolls to the thread where it sits. */}
+        {asks.length > 0 && (
+          <ol data-agent="inbox-asks" className="flex shrink-0 flex-col gap-0.5 rounded-2xl bg-warn-soft/70 p-1.5">
+            {asks.map(({ t, first }) => (
+              <li key={t.id}>
+                <button onClick={() => show(t.id)} className="flex w-full min-w-0 items-center gap-2 rounded-xl px-2 py-1 text-left text-sm hover:bg-card">
+                  <Avatar from={first.from} small />
+                  <span className="shrink-0 rounded-full bg-card px-2 text-xs font-medium text-warn">needs you</span>
+                  <Rich still text={(t.messages.findLast(m => m.from !== "isaac") ?? first).text.split("\n")[0] ?? t.title} className="min-w-0 truncate" />
+                </button>
+              </li>
+            ))}
+          </ol>
         )}
-        </div>
-        )}
-        {needsYou.length > 0 && <ol className={cn(surface, "bg-warn-soft/70")}>{needsYou.map(({ t }) => threadRow(t))}</ol>}
-        <ol className={cn(surface, "empty:hidden")}>{others.map(({ t }) => threadRow(t))}</ol>
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-card shadow-card">
+          <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-5 pt-0 pb-4">
+            {rows.map(({ t, first }, i) => {
+              const prev = rows[i - 1];
+              const day = first.at.slice(0, 10);
+              const newDay = day !== prev?.first.at.slice(0, 10);
+              const isNew = i === firstNew;
+              const grouped = !newDay && !isNew && !t.asks && !t.feed && !prev?.t.asks && prev?.first.from === first.from && Date.parse(first.at) - Date.parse(prev.first.at) <= GROUP_MS;
+              return (
+                <Fragment key={t.id}>
+                  {newDay && first.at !== "9999" && (
+                    <div data-agent="inbox-day" className="sticky top-0 z-10 mb-1 flex items-center gap-2 bg-card/95 py-2 text-xs font-medium text-muted-foreground backdrop-blur">
+                      <span className="h-px flex-1 bg-border" />
+                      <span className="rounded-full border bg-card px-2.5 py-0.5">{dayLabel(day)}</span>
+                      <span className="h-px flex-1 bg-border" />
+                    </div>
+                  )}
+                  {isNew && (
+                    <div ref={lineRef} data-agent="unread-line" className="my-2 flex items-center gap-1.5 text-[11px] font-semibold text-destructive">
+                      <span className="h-px flex-1 bg-destructive" />
+                      New
+                    </div>
+                  )}
+                  {threadRow(t, first, grouped)}
+                </Fragment>
+              );
+            })}
+          </div>
+          {vim.panel}
+          <Composer autoFocus agent="inbox-input" draftKey="inbox" onSend={text => ((atBottom.current = true), startThread(text))} className="border-t px-4 py-2.5" />
+        </section>
       </div>
     </div>
   );
