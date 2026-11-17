@@ -12,6 +12,8 @@
   --foreground: #0a0a0a;
   /* The layer a list sits on, one step off the page; its rows are cards */
   --surface: #f2f2f2;
+  /* The window: the tint around the one panel each view sits in, under the tabs and sidebar */
+  --window: #f3f3f4;
   --card: #ffffff;
   --card-foreground: #0a0a0a;
   --popover: #ffffff;
@@ -78,6 +80,7 @@
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
   --surface: oklch(0.175 0 0);
+  --window: oklch(0.12 0 0);
   --agent: oklch(0.606 0.25 292.717);
   --link: oklch(0.746 0.16 232.661);
   --ok: oklch(0.765 0.177 163.223);
@@ -133,6 +136,7 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-surface: var(--surface);
+  --color-window: var(--window);
   --color-agent: var(--agent);
   --color-link: var(--link);
   --color-ok: var(--ok);

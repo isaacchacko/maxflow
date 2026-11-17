@@ -1,6 +1,5 @@
-import { AlarmClock, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, Play, Quote, RotateCcw, SquarePlus, type LucideIcon } from "lucide-react";
+import { AlarmClock, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, Play, Quote, RotateCcw, type LucideIcon } from "lucide-react";
 import { ContextMenu } from "radix-ui";
-import { openTab } from "@/tabs";
 import { Kbd } from "@/components/ui/kbd";
 import type { Thread } from "@/mock";
 import { setPaused } from "@/store";
@@ -57,7 +56,6 @@ export function RowMenu({ items, agent, children }: { items: (MenuItem | false |
 export function threadItems(t: Thread, all: Thread[], on: { open?(): void; reply?(): void; resolve(): void; pause?(): void }): (MenuItem | false | undefined)[] {
   return [
     on.open && { label: "Open", icon: ExternalLink, keys: "Enter", run: on.open },
-    on.open && { label: "Open in new tab", icon: SquarePlus, keys: "t", run: () => openTab(`thread/${t.id}`, true) },
     on.reply && { label: "Reply", icon: MessageSquareReply, keys: "r", run: on.reply },
     "-",
     unseenDeep(t, all) > 0 && { label: "Mark read", icon: MailOpen, run: () => markRead(t, all), agent: `mark-read:${t.id}` },

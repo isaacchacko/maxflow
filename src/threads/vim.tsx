@@ -3,14 +3,13 @@ import { Kbd } from "@/components/ui/kbd";
 import { restoring } from "./jump";
 
 /** What the keys do to the item under the cursor; a page leaves out what it has no use for. */
-export type VimActions = { open?(key: string): void; tab?(key: string): void; up?(): void; compose(): void; reply?(key: string): void; quote?(key: string): void; resolve?(key?: string): void; pause?(key?: string): void; section?(dir: 1 | -1, key?: string): string | undefined };
+export type VimActions = { open?(key: string): void; up?(): void; compose(): void; reply?(key: string): void; quote?(key: string): void; resolve?(key?: string): void; pause?(key?: string): void; section?(dir: 1 | -1, key?: string): string | undefined };
 
 const HELP: [string, string][] = [
   ["j k", "next, previous"],
   ["gg G", "first, last"],
   ["Ctrl-d Ctrl-u", "half page down, up"],
   ["Enter l", "open"],
-  ["t", "open in a new tab"],
   ["h", "up a level"],
   ["i a", "write; Esc leaves an empty box"],
   ["r", "reply in thread"],
@@ -101,7 +100,6 @@ export function useVim(scope: string, items: string[], scroller: React.RefObject
         i: () => actions.compose(),
         a: () => actions.compose(),
         r: () => cursor && actions.reply?.(cursor),
-        t: () => cursor && actions.tab?.(cursor),
         y: () => cursor && actions.quote?.(cursor),
         q: () => cursor && actions.quote?.(cursor),
         x: () => actions.resolve?.(cursor),

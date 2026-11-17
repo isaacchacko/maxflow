@@ -267,8 +267,8 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
   const pause = () => (live ? void api(`/api/sessions/${agent.id}/input`, { keys: ["Escape"] }) : agentStore.set(all => all.map(a => (a.id === agent.id ? { ...a, state: "idle" } : a))));
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-hidden p-4">
-      <header className="flex items-center gap-3">
+    <div className="flex h-full flex-col gap-3 overflow-hidden pb-3">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
         <Button variant="ghost" size="icon" asChild data-agent="back">
           <a href={`#${back}`}>
             <ArrowLeft />
@@ -307,16 +307,16 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 gap-4">
+      <div className="flex min-h-0 flex-1 gap-4 pl-3">
         {live ? (
-          <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border bg-background p-2 shadow-card">
+          <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-background p-2">
             <Terminal key={agent.id} id={agent.id} />
           </section>
         ) : (
           <Tty agent={agent} lines={lines} />
         )}
 
-        <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">
+        <aside className="-my-3 flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto border-l px-4 py-4">
           {agent.role === "router" ? (
             <RouterSidebar router={agent} />
           ) : (
@@ -420,8 +420,8 @@ function SentryPage({ id, back }: { id: string; back: string }) {
   const sentry = sentryStore.use().find(s => s.id === id)!;
   const agents = agentStore.use();
   return (
-    <div className="flex h-full flex-col gap-3 overflow-hidden p-4">
-      <header className="flex items-center gap-3">
+    <div className="flex h-full flex-col gap-3 overflow-hidden pb-3">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
         <Button variant="ghost" size="icon" asChild>
           <a href={`#${back}`}>
             <ArrowLeft />
@@ -431,11 +431,11 @@ function SentryPage({ id, back }: { id: string; back: string }) {
         <h1 className="text-lg">{sentry.name}</h1>
         <Badge variant="outline">sentry</Badge>
       </header>
-      <div className="flex min-h-0 flex-1 gap-4">
-        <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border bg-background p-2 shadow-card">
+      <div className="flex min-h-0 flex-1 gap-4 pl-3">
+        <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-background p-2">
           <Terminal key={sentry.id} id={sentry.id} />
         </section>
-        <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">
+        <aside className="-my-3 flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto border-l px-4 py-4">
           <Section title="Properties">
             <Row label="State">
               <span className={cn("size-2 rounded-full", sentry.running ? "bg-ok" : "bg-destructive")} />

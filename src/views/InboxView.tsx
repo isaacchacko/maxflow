@@ -1,7 +1,6 @@
 import { AlarmClock, Check, ChevronDown } from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { openTab } from "@/tabs";
 import { localAt, type Thread } from "@/mock";
 import { markAskShown, objectiveStore, setResolved, startThread, threadStore } from "@/store";
 import { Composer } from "@/threads/Composer";
@@ -91,7 +90,6 @@ export function InboxView() {
   const vim = useVim("inbox", rows.map(r => r.t.id), scrollRef, "last", {
     compose: () => document.querySelector<HTMLElement>('[data-agent="inbox-input"]')?.focus(),
     open,
-    tab: id => openTab(`thread/${id}`, true),
     reply,
     resolve: id => {
       const t = threads.find(x => x.id === id);
@@ -177,7 +175,7 @@ export function InboxView() {
           data-agent={`inbox-resolve:${t.id}`}
           title={t.resolved ? "Reopen" : "Resolve"}
           onClick={() => toggle(t)}
-          className={cn("absolute top-0 right-0 z-10 rounded-md border bg-card p-1 shadow-card hover:border-ring", t.resolved ? "text-ok" : "text-muted-foreground opacity-0 group-hover/row:opacity-100")}
+          className={cn("absolute top-0 right-0 z-10 rounded-md border bg-card p-1 hover:border-ring", t.resolved ? "text-ok" : "text-muted-foreground opacity-0 group-hover/row:opacity-100")}
         >
           <Check className="size-3.5" />
         </button>
@@ -186,10 +184,9 @@ export function InboxView() {
   );
 
   return (
-    <div className="flex h-full p-3">
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        {(resolved > 0 || paused > 0 || replied.length > 0) && (
-          <div className="flex shrink-0 items-center gap-2">
+    <div className="flex h-full flex-col">
+        <header className="flex h-11 shrink-0 items-center gap-2 border-b px-5">
+            <h1 className="text-sm font-medium">Threads</h1>
             {replied.length > 0 && (
               <button data-agent="inbox-new-replies" onClick={nextReplied} className="flex items-center gap-1.5 rounded-full bg-new-soft px-2.5 py-0.5 text-xs font-medium text-new hover:brightness-95">
                 <ChevronDown className="size-3" />
@@ -209,14 +206,13 @@ export function InboxView() {
                 Paused ({paused})
               </button>
             )}
-          </div>
-        )}
+        </header>
         {/* Agents waiting on him, pinned above the channel one line each; a click scrolls to the thread where it sits. */}
         {asks.length > 0 && (
-          <ol data-agent="inbox-asks" className="flex shrink-0 flex-col gap-0.5 rounded-2xl bg-warn-soft/70 p-1.5">
+          <ol data-agent="inbox-asks" className="flex shrink-0 flex-col border-b bg-warn-soft/40 px-3 py-1">
             {asks.map(({ t, first }) => (
               <li key={t.id}>
-                <button onClick={() => show(t.id)} className="flex w-full min-w-0 items-center gap-2 rounded-xl px-2 py-1 text-left text-sm hover:bg-card">
+                <button onClick={() => show(t.id)} className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-black/[0.04]">
                   <Avatar from={first.from} small />
                   <span className="shrink-0 rounded-full bg-card px-2 text-xs font-medium text-warn">needs you</span>
                   <Rich still text={(t.messages.findLast(m => m.from !== "isaac") ?? first).text.split("\n")[0] ?? t.title} className="min-w-0 truncate" />
@@ -225,7 +221,7 @@ export function InboxView() {
             ))}
           </ol>
         )}
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-card shadow-card">
+        <section className="flex min-h-0 flex-1 flex-col">
           <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-5 pt-0 pb-4">
             {rows.map(({ t, first }, i) => {
               const prev = rows[i - 1];
@@ -236,9 +232,9 @@ export function InboxView() {
               return (
                 <Fragment key={t.id}>
                   {newDay && first.at !== "9999" && (
-                    <div data-agent="inbox-day" className="sticky top-0 z-10 mb-1 flex items-center gap-2 bg-card/95 py-2 text-xs font-medium text-muted-foreground backdrop-blur">
+                    <div data-agent="inbox-day" className="sticky top-0 z-10 mb-1 flex items-center gap-3 bg-card/95 py-2 text-xs font-medium text-muted-foreground backdrop-blur">
                       <span className="h-px flex-1 bg-border" />
-                      <span className="rounded-full border bg-card px-2.5 py-0.5">{dayLabel(day)}</span>
+                      <span>{dayLabel(day)}</span>
                       <span className="h-px flex-1 bg-border" />
                     </div>
                   )}
@@ -256,7 +252,6 @@ export function InboxView() {
           {vim.panel}
           <Composer autoFocus agent="inbox-input" draftKey="inbox" onSend={text => ((atBottom.current = true), startThread(text))} className="border-t px-4 py-2.5" />
         </section>
-      </div>
     </div>
   );
 }

@@ -32,8 +32,8 @@ export function Page({ pageRef, back }: { pageRef: PageRef; back: string }) {
   const isObjective = pageRef.startsWith("objective/");
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-hidden p-4">
-      <header className="flex items-center gap-3">
+    <div className="flex h-full flex-col gap-3 overflow-hidden pb-3">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
         <Button variant="ghost" size="icon" asChild data-agent="back">
           <a href={`#${back}`}><ArrowLeft /></a>
         </Button>

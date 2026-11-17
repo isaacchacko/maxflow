@@ -38,7 +38,7 @@ function setTitle() {
   const name = view === "inbox" ? "Threads" : view === "threads" ? "Thread map" : `${view[0]!.toUpperCase()}${view.slice(1)}`;
   document.title = `${pending ? `(${pending}) ` : ""}yarn · ${name}`;
 }
-addEventListener("route", setTitle);
+addEventListener("hashchange", setTitle);
 
 // The health sentry answers in the server's place while it is down; reloading lands on its "Oh no!" page.
 let misses = 0;

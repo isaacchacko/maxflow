@@ -1,16 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { AgentPage } from "@/agent/AgentPage";
-import { Capture } from "@/components/Capture";
-import { Mark } from "@/components/Mark";
 import { QuickSwitcher } from "@/components/QuickSwitcher";
 import { Viewer } from "@/threads/Viewer";
 import { PauseDialog, useResurfacing } from "@/threads/Pause";
 import { Sidebar } from "@/components/Sidebar";
-import { TabBar } from "@/components/TabBar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Page } from "@/page/Page";
 import type { PageRef } from "@/store";
-import { activeTabId, viewBehind, type RouteChange } from "@/tabs";
 import { ThreadPage, threadUp } from "@/threads/ThreadPage";
 import { arrive } from "@/threads/jump";
 import { InboxView } from "@/views/InboxView";
@@ -34,32 +30,38 @@ type ViewId = (typeof views)[number]["id"];
 type Detail = { kind: "page"; ref: PageRef } | { kind: "agent" | "thread"; id: string };
 type Route = { view: ViewId; detail?: Detail };
 
-// The view a page climbs back to is the one its tab was on before it.
-const lastView = (): ViewId => views.find(x => x.id === viewBehind())?.id ?? "inbox";
+function lastView(): ViewId {
+  try {
+    const v = sessionStorage.getItem("view");
+    return views.find(x => x.id === v)?.id ?? "inbox";
+  } catch {
+    return "inbox";
+  }
+}
 
 function routeFromHash(): Route {
   const [first, id] = location.hash.slice(1).split("/");
   if ((first === "task" || first === "objective") && id) return { view: lastView(), detail: { kind: "page", ref: `${first}/${id}` as PageRef } };
   if ((first === "agent" || first === "thread") && id) return { view: lastView(), detail: { kind: first, id } };
-  return { view: views.find(v => v.id === first)?.id ?? lastView() };
+  const view = views.find(v => v.id === first)?.id ?? lastView();
+  try {
+    sessionStorage.setItem("view", view);
+  } catch {}
+  return { view };
 }
 
 export function App() {
   const [route, setRoute] = useState(routeFromHash);
-  const [tab, setTab] = useState(activeTabId);
   const current = useRef(route);
   useResurfacing();
 
   useEffect(() => {
-    // Each route change tells the pages how he got there: up out of a thread, by Back/Forward, or fresh. Switching to another tab
-    // is none of these: that tab's pages come back as he left them, and nothing there was climbed out of.
-    const onRoute = (e: Event) => {
+    // Each route change tells the pages how he got there: up out of a thread, by Back/Forward, or fresh.
+    const onHash = () => {
       const prev = current.current;
       const next = (current.current = routeFromHash());
-      const from = (e as CustomEvent<RouteChange>).detail.moved !== "switch" && prev.detail?.kind === "thread" ? prev.detail.id : undefined;
-      arrive(from, { thread: next.detail?.kind === "thread" ? next.detail.id : undefined, view: !next.detail });
+      arrive(prev.detail?.kind === "thread" ? prev.detail.id : undefined, { thread: next.detail?.kind === "thread" ? next.detail.id : undefined, view: !next.detail });
       setRoute(next);
-      setTab(activeTabId());
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -69,10 +71,10 @@ export function App() {
       const match = !e.metaKey && !e.altKey && !e.ctrlKey && views.find(v => v.key === e.key);
       if (match) location.hash = match.id;
     };
-    addEventListener("route", onRoute);
+    addEventListener("hashchange", onHash);
     addEventListener("keydown", onKey);
     return () => {
-      removeEventListener("route", onRoute);
+      removeEventListener("hashchange", onHash);
       removeEventListener("keydown", onKey);
     };
   }, [route.view]);
@@ -85,17 +87,11 @@ export function App() {
       <QuickSwitcher views={views} />
       <Viewer />
       <PauseDialog />
-      <div className="flex h-full flex-col">
-        <header className="flex items-center gap-4 border-b px-4 py-2">
-          <Mark />
-          <TabBar />
-          <Capture />
-        </header>
-        {/* Keyed by tab, so each tab's pages mount as its own and put back its own scroll. */}
-        <div className="flex min-h-0 flex-1">
-        {/* The sidebar is the Todo and Threads views' own; drilled into a thread, the thread has the whole width. */}
-        {!detail && (route.view === "todo" || route.view === "inbox") && <Sidebar view={route.view} />}
-        <main key={tab} className="min-h-0 min-w-0 flex-1 overflow-hidden">
+      {/* Linear's frame: the sidebar sits on the window tint, and each view is one white panel, top to bottom, inset from the edges. */}
+      {/* Installed as an app, the tint around the panel drags the window, and the panel starts below the overlaid title bar. */}
+      <div className="flex h-full bg-window p-2 pl-0 [app-region:drag]">
+        <Sidebar view={route.view} />
+        <main style={{ marginTop: "max(0px, calc(env(titlebar-area-height, 0px) - 0.5rem))" }} className="ml-2 min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-card [app-region:no-drag]">
           {detail?.kind === "agent" ? (
             <AgentPage key={detail.id} id={detail.id} back={route.view} />
           ) : detail?.kind === "thread" ? (
@@ -112,7 +108,6 @@ export function App() {
             <RoutingView snap={snap} onSnap={n => (location.hash = ROUTING[Math.max(0, Math.min(ROUTING.length - 1, n))]!)} />
           )}
         </main>
-        </div>
       </div>
     </TooltipProvider>
   );

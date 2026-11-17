@@ -180,9 +180,9 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   const mentionedIn = all.filter(t => t.id !== thread.id && t.messages.some(m => m.text.includes(`[[thread:${thread.id}]]`)));
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-hidden p-3">
+    <div className="flex h-full flex-col overflow-hidden">
       <RowMenu agent="thread-header" items={threadItems(thread, all, { resolve: () => resolveOrReopen(thread, back), pause: () => openPause(thread.id, () => threadUp(thread.id, back)) })}>
-      <header className="flex items-center gap-3">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
         <Button variant="ghost" size="icon" asChild data-agent="back">
           <a href={thread.parentId ? `#thread/${thread.parentId}` : `#${back}`}>
             <ArrowLeft />
@@ -214,8 +214,8 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
       </header>
       </RowMenu>
 
-      <div className="flex min-h-0 flex-1 gap-4">
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-card shadow-card">
+      <div className="flex min-h-0 flex-1">
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {/* An image here opens the viewer over this thread's images, the root's included and its subthreads' not. */}
           <ShotScope.Provider value={shotsOf([...(root ? [root] : []), ...replies])}>
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
@@ -273,7 +273,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                       data-agent={`reply-in-thread:${m.id}`}
                       title="Reply in thread"
                       onClick={() => openSubthread(thread.id, m.id!)}
-                      className="absolute top-0 right-0 rounded-md border bg-card p-1 text-muted-foreground shadow-card opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
+                      className="absolute top-0 right-0 rounded-md border bg-card p-1 text-muted-foreground opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
                     >
                       <MessageSquareReply className="size-3.5" />
                     </button>
@@ -283,7 +283,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                       data-agent={`quote:${m.id}`}
                       title="Quote"
                       onClick={() => quoteInto(`thread:${thread.id}`, quoted(m.text, thread.id, m.id!))}
-                      className="absolute top-0 right-7 rounded-md border bg-card p-1 text-muted-foreground shadow-card opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
+                      className="absolute top-0 right-7 rounded-md border bg-card p-1 text-muted-foreground opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
                     >
                       <Quote className="size-3.5" />
                     </button>
@@ -300,7 +300,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
           <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => (setLine({ id }), postToThread(thread.id, "isaac", text, nudge ? "subthread" : undefined))} tools={<NudgeToggle on={nudge} set={on => setNudge(on ? "subthread" : "")} />} className="border-t px-4 py-2.5" />
         </section>
 
-        <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto pr-1">
+        <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto border-l px-4 py-4">
           {objective && (
             <Section title="Objective">
               <a href={`#objective/${objective.id}`} className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-sm hover:bg-muted">

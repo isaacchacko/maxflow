@@ -3,7 +3,6 @@ import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import type { Task, Thread } from "@/mock";
 import { agentStore, taskStore, threadStore } from "@/store";
-import { openTab } from "@/tabs";
 import { useLayerScroll } from "@/threads/jump";
 import { ago } from "@/threads/Replies";
 import { Avatar, Rich } from "@/threads/Rich";
@@ -39,7 +38,7 @@ export function TodoView() {
   const places = [...asks.map(t => `thread/${t.id}`), ...groups.flatMap(g => g.tasks.map(t => placeOf(t, threads)))];
   const scrollRef = useRef<HTMLDivElement>(null);
   const go = (place: string) => (location.hash = place);
-  const vim = useVim("todo", places, scrollRef, "first", { compose: () => {}, open: go, tab: place => openTab(place, true) });
+  const vim = useVim("todo", places, scrollRef, "first", { compose: () => {}, open: go });
   useLayerScroll("todo", scrollRef);
 
   const row = (place: string, body: React.ReactNode) => (
@@ -51,7 +50,11 @@ export function TodoView() {
   );
 
   return (
-    <div ref={scrollRef} className="h-full overflow-y-auto px-6 py-4">
+    <div className="flex h-full flex-col">
+      <header className="flex h-11 shrink-0 items-center border-b px-5">
+        <h1 className="text-sm font-medium">Todo</h1>
+      </header>
+    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
       {vim.panel}
       {asks.length > 0 && (
         <section className="mb-5">
@@ -99,6 +102,7 @@ export function TodoView() {
         </section>
       ))}
       {!asks.length && !groups.length && <p className="px-2.5 text-sm text-muted-foreground">Nothing on you.</p>}
+    </div>
     </div>
   );
 }

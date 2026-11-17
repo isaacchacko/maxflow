@@ -539,7 +539,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
   };
 
   return (
-    <div className="flex h-full flex-col gap-3 p-4">
+    <div className="flex h-full flex-col gap-3 p-3">
       {isActive(filter) && (
       <div className="flex items-center gap-4">
         {isActive(filter) && (
@@ -587,7 +587,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
                   e.stopPropagation();
                   go(to);
                 }}
-                className="flex size-8 items-center justify-center rounded-lg border bg-card text-muted-foreground shadow-card hover:border-ring hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
+                className="flex size-8 items-center justify-center rounded-lg border bg-card text-muted-foreground hover:border-ring hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
               >
                 <Chevron className="size-4" />
               </button>

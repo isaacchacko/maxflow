@@ -16,7 +16,7 @@ export function SentriesView() {
   const agents = agentStore.use();
 
   return (
-    <div className="h-full overflow-y-auto p-4">
+    <div className="h-full overflow-y-auto p-3">
       <ol className="flex flex-col border">
         {SENTRIES.map(name => {
           const s = sentries.find(x => x.name === name);
