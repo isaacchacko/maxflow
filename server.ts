@@ -1430,12 +1430,14 @@ async function prompted(s: Session, sent: NonNullable<Session["sending"]>, box?:
   // An explicit start: Bun's slice(-n) on a file shorter than n does not return the whole file.
   const file = Bun.file(s.transcript);
   const tail = await file.slice(Math.max(0, file.size - 2_000_000)).text().catch(() => "");
+  // Sent while claude works, it is queued rather than prompted: a queue-operation enqueue, then a queued_command attachment the turn
+  // takes in, and never a user line of its own. Queued is delivered.
   return tail.split("\n").some((line) => {
-    if (!line.includes('"type":"user"')) return false;
+    if (!line.includes('"type":"user"') && !line.includes('"type":"queue-operation"') && !line.includes('"type":"queued_command"')) return false;
     try {
       const e = JSON.parse(line);
       if (Date.parse(e.timestamp) < sent.at - 5000) return false;
-      const c = e.message?.content;
+      const c = e.type === "queue-operation" ? (e.operation === "enqueue" ? e.content : "") : e.type === "attachment" ? e.attachment?.prompt : e.message?.content;
       const text = typeof c === "string" ? c : Array.isArray(c) ? c.filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n") : "";
       return squash(text).includes(head);
     } catch {
