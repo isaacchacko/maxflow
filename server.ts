@@ -63,7 +63,9 @@ type WsData = { id: string; pty?: Subprocess };
 const sessions = new Map<string, Session>();
 
 // If maxflow itself was launched from a Claude Code session, its markers would make every child claude think it's a subagent.
-const childEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT)/.test(k)));
+// MAXFLOW_SENTRIES is the service's own: a pane that inherited it baked it into the plist on `maxflow install`, and the
+// server then respawned only those sentries.
+const childEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT|MAXFLOW_SENTRIES$)/.test(k)));
 const termEnv = { LANG: "en_US.UTF-8", ...childEnv, TERM: "xterm-256color", COLORTERM: "truecolor" };
 
 // Commands live in tmux sessions on a private socket so they survive server restarts; maxflow only attaches to them.
