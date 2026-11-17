@@ -394,7 +394,8 @@ async function onNotice(n: Notice, me: string, state: State) {
   const { msgs } = await read(place, (Number(n.ts) - 1).toFixed(6));
   const m = msgs.find((x) => x.ts === n.ts);
   const mentions = `search:<@${me}>`;
-  if (m && m.text.includes(`<@${me}>`) && !state.seen[mentions]?.includes(m.ts)) {
+  // A read prints a mention as <@U…|Name>, search as <@U…>.
+  if (m && new RegExp(`<@${me}[>|]`).test(m.text) && !state.seen[mentions]?.includes(m.ts)) {
     state.seen[mentions] = [...(state.seen[mentions] ?? []), m.ts].slice(-500);
     await post("/api/events", { topic: "slack/mention", data: { target: mentions, thread: `${place}/${m.ts}`, ts: m.ts, from: m.who, user: m.uid, text: m.text, link: permalink(place, m.ts), told: [], bot: state.bots.includes(m.uid), agent: false, where: n.subtitle } });
     writeFileSync(STATE_FILE, JSON.stringify(state));
