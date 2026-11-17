@@ -61,6 +61,13 @@ function EventDetail({ signal, onClose }: { signal: Signal; onClose: () => void 
         </header>
         <Field label="Source">{signal.source}</Field>
         {signal.from && <Field label="From">{from ? agentLink(from.id) : signal.from}</Field>}
+        {signal.where && <Field label="Where">{signal.where}</Field>}
+        {signal.link && (
+          <Field label="Original">
+            <a href={signal.link} target="_blank" rel="noreferrer" className="truncate text-link hover:underline">{signal.link}</a>
+          </Field>
+        )}
+        {signal.taskId && <Field label="Task"><RefChip r={{ kind: "task", id: signal.taskId }} /></Field>}
         <Field label="Thread">{signal.thread ? <RefChip r={{ kind: "thread", id: signal.thread }} /> : <span className="text-muted-foreground">none</span>}</Field>
         <section data-agent="event-route" className="flex flex-col gap-2">
           <h3 className="text-xs font-medium text-muted-foreground">Routed to</h3>

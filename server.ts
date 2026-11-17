@@ -521,7 +521,9 @@ function enqueue(s: Session, text: string) {
 // One chokepoint for every message: Isaac's chats, GitHub and Slack notices, the server's own, and one agent writing another
 // all become a signal on the bus, then go to the sessions named, else to the routers of the objective, else to the funnel.
 type Source = "isaac" | "gh" | "slack" | "agent" | "sentry" | "maxflow";
-type Signal = { source: Source; from?: string; target: string; text: string; routedTo: string[]; objective?: string };
+// An external message (see externalSignal) also carries who wrote it, where, a link to it, its thread or PR's link (on, which its board
+// task links), the bus event it came on and when that was.
+type Signal = { source: Source; from?: string; target: string; text: string; routedTo: string[]; objective?: string; who?: string; where?: string; link?: string; on?: string; event?: number; at?: number };
 const sourceOf = (from?: Session): Source =>
   !from ? "maxflow" : isSentry(from) ? (from.name === "sentry:gh" ? "gh" : from.name === "sentry:slack" ? "slack" : "sentry") : "agent";
 // What a signal is about, for the event log: a PR, a Slack channel, or who sent it.
@@ -583,6 +585,41 @@ async function reroute(seq: number, o: Objective, kind?: Kind) {
   if (thread) saveThreads(), publish(`thread/${thread.id}`, { thread: thread.id, pending: true });
   return to;
 }
+
+// Every message from a person outside maxflow is an event of its own in the log: Slack DMs, mentions and his own posts, and people's
+// comments and reviews on the PRs the gh sentry watches, in full, from that person, linking the original. Made as its bus event lands,
+// and once at boot for the last day's, each once by its link.
+const EXTERNAL_SEEN = `${STATE_DIR}/external-seen.json`;
+const externalSeen = new Set<string>((() => { try { return JSON.parse(readFileSync(EXTERNAL_SEEN, "utf8")); } catch { return []; } })());
+const slackThreadLink = (key: string) => { const [c, ts] = key.split("/"); return `https://dryftai.slack.com/archives/${c}${ts ? `/p${ts.replace(".", "")}` : ""}`; };
+function externalSignal(e: { seq: number; at: number; topic: string; data: unknown }, save = true) {
+  const d = (e.data ?? {}) as Record<string, any>;
+  const slack = /^slack\/(dm|mention|own)$/.exec(e.topic)?.[1];
+  const gh = /^gh\/[^/]+\/[^/]+\/pr\/\d+\/(comment|review|thread)$/.exec(e.topic)?.[1];
+  const link = String(d.link ?? d.url ?? "");
+  if (!link || externalSeen.has(link)) return;
+  if (slack ? !d.text || (d.bot && slack !== "mention") : !gh || !d.who || String(d.author ?? "").endsWith("[bot]")) return;
+  externalSeen.add(link);
+  if (save) writeFileSync(EXTERNAL_SEEN, JSON.stringify([...externalSeen].slice(-5000)));
+  const where = slack ? (slack === "dm" || d.where === "a DM" ? "DM" : String(d.where ?? "Slack").replace(/^thread .* in /, "")) : String(d.pr).split("/")[1] + (d.path ? ` ${d.path}` : "");
+  // Slack's <url|label> and <url> read as their label.
+  const text = slack ? String(d.text).replace(/<@\w+\|([^>]+)>/g, "@$1").replace(/<(https?:[^|>]+)\|([^>]+)>/g, "$2").replace(/<(https?:[^>]+)>/g, "$1")
+    : gh === "review" ? `${String(d.state ?? "reviewed").toLowerCase().replace("_", " ")}${d.body ? `: ${d.body}` : ""}` : String(d.body ?? "");
+  const on = slack ? (d.thread ? slackThreadLink(String(d.thread)) : link) : `https://github.com/${String(d.pr).replace("#", "/pull/")}`;
+  const source: Source = slack ? "slack" : "gh";
+  publish(`signal/${source}`, { source, target: where, text, routedTo: Array.isArray(d.told) ? d.told : [], who: String(d.from ?? d.who), where, link, on, event: e.seq, at: e.at } satisfies Signal);
+}
+setTimeout(() => {
+  const since = Date.now() - 86_400_000;
+  try {
+    for (const line of readFileSync(`${STATE_DIR}/events.jsonl`, "utf8").split("\n")) {
+      if (!line.includes('"topic":"slack/') && !line.includes('"topic":"gh/')) continue;
+      const e = JSON.parse(line);
+      if (e.at >= since) externalSignal(e, false);
+    }
+    writeFileSync(EXTERNAL_SEEN, JSON.stringify([...externalSeen].slice(-5000)));
+  } catch (err) { console.error(`external backfill failed: ${err}`); }
+}, 3_000);
 
 // Objectives own the work: each has one or more routers, each router a scope of it and its workers. Isaac sees them as rows.
 type Block = { id: string; kind: string; w: number; h: number; [k: string]: unknown };
@@ -1230,9 +1267,19 @@ async function world() {
     const r = routes.get(e.seq);
     // The route in steps: where it went when sent (the funnel, an objective's routers, named sessions), then where the funnel routed it.
     const route = [{ at: iso(e.at), to: d.routedTo, objective: d.objective }, ...(r ? [{ at: iso(r.at), to: r.routedTo, objective: r.objective, kind: r.kind, routed: true }] : [])];
+    // An external message goes on through the board task its thread or PR is on, the feed thread made for that task, and the agents on either.
+    if (d.event !== undefined) {
+      // A DM's task links the DM itself, a thread's the thread, a PR's the PR.
+      const task = tasks.findLast((t) => t.links.some((l) => (l = l.toLowerCase()) === d.on?.toLowerCase() || !!d.link?.toLowerCase().startsWith(`${l}/`)));
+      const fed = task && threads.find((t) => t.feed?.task === task.id && !t.mergedInto);
+      const on = [...new Set([...(fed?.routers ?? []), ...(task?.sessions ?? [])])];
+      const objective = fed?.objective || task?.objective;
+      const hops = [...(d.routedTo.length ? [{ at: iso(d.at ?? e.at), to: d.routedTo }] : []), ...(on.length || objective ? [{ at: iso(d.at ?? e.at), to: on, objective, routed: true }] : [])];
+      return { id: `s${e.seq}`, seq: e.seq, source: d.source, at: iso(d.at ?? e.at), target: d.target, text: d.text, from: d.who, who: d.who, where: d.where, link: d.link, routedTo: [...new Set([...d.routedTo, ...on])], objective, route: hops, thread: fed?.id, taskId: task && taskRef(task.id), delivery: delivery(d, [...new Set([...d.routedTo, ...on])]) };
+    }
     const thread = d.source === "isaac" ? threads.find((t) => t.messages.some((m) => m.from === "isaac" && m.text === d.text))?.id : undefined;
-    return { id: `s${e.seq}`, seq: e.seq, source: d.source, at: iso(e.at), target: d.target, text: d.text, from: d.from, routedTo: r ? [...d.routedTo, ...r.routedTo] : d.routedTo, objective: r?.objective ?? d.objective, route, thread, delivery: delivery(d, [...d.routedTo, ...(r?.routedTo ?? [])]) };
-  });
+    return { id: `s${e.seq}`, seq: e.seq, source: d.source, at: iso(e.at), target: d.target, text: d.text, from: d.from, routedTo: r ? [...d.routedTo, ...r.routedTo] : d.routedTo, objective: r?.objective ?? d.objective, route, thread, delivery: delivery(d, [...d.routedTo, ...(r?.routedTo ?? [])]) } as { id: string; seq: number; source: Source; at: string; target: string; text: string; from?: string; routedTo: string[]; objective?: string; route: unknown[]; thread?: string; delivery: Record<string, string>; who?: string; where?: string; link?: string; taskId?: string };
+  }).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   const mergedInto = (id?: string): string | undefined => { const o = objectives.find((x) => x.id === id); return o?.mergedInto ? mergedInto(o.mergedInto) : id; };
   const objectiveOf = (sig: (typeof signals)[number]) => mergedInto(sig.objective ?? sig.routedTo.map((id) => sessions.get(id)?.role?.objective).find(Boolean));
   const fromKind = (sig: (typeof signals)[number]) => (sig.source === "isaac" ? "isaac" : sig.from && sessions.get(sig.from)?.role?.role === "router" ? "router" : sig.source === "agent" ? "agent" : "sentry");
@@ -1593,7 +1640,10 @@ Bun.serve<WsData>({
       if (from && isSentry(from) && feed?.link && body.text?.trim()) {
         const text = body.text.trim();
         const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: (body.title?.trim() || `${feed.who}: ${text.split("\n")[0]}`).slice(0, 80), objective: "", routers: [], messages: [message("feed", text)], feed, ...(feed.task && { task: feed.task }) };
-        const ev = dispatch({ from, target: t.title, text, deliver: (seq) => `[maxflow · from his event feed (${feed.source}), not from him] ${text}\n[maxflow] signal ${seq}, feed thread ${t.id}${feed.task ? `, board task T-${feed.task}` : ""}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`, or, when it is only an FYI with nothing for an agent to do, say so in it with \`${CLI} thread post ${t.id} '<one line>'\`.` });
+        // The log has each message as its own event already; this signal is the handoff, naming them.
+        const links = new Set(text.match(/https?:\/\/\S+/g) ?? []);
+        const refs = (await query("signal/**", 0, 0)).filter((e) => links.has(String((e.data as Signal).link))).map((e) => `s${e.seq}`);
+        const ev = dispatch({ from, target: t.title, text: `${feed.task ? `T-${feed.task}` : "An item"} from the feed, as thread ${t.id}, for the funnel to route: ${feed.who}${refs.length ? ` (${refs.join(", ")})` : ""}`, deliver: (seq) => `[maxflow · from his event feed (${feed.source}), not from him] ${text}\n[maxflow] signal ${seq}, feed thread ${t.id}${feed.task ? `, board task T-${feed.task}` : ""}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`, or, when it is only an FYI with nothing for an agent to do, say so in it with \`${CLI} thread post ${t.id} '<one line>'\`.` });
         t.signal = ev.seq;
         threads.push(t);
         saveThreads();
@@ -1779,6 +1829,7 @@ Bun.serve<WsData>({
       if (!body.topic) return new Response("topic required", { status: 400 });
       const ev = publish(body.topic, body.data ?? null);
       onEvent(body.topic, body.data, sessions.get(req.headers.get("x-maxflow-from") ?? ""));
+      externalSignal(ev);
       return Response.json(ev, { status: 201 });
     }
 

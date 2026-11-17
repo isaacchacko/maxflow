@@ -99,6 +99,11 @@ export type Signal = {
   route?: { at: string; to: string[]; objective?: string; kind?: string; routed?: boolean }[];
   /** Live only: the inbox thread Isaac wrote it in. */
   thread?: string;
+  /** A message from a person outside maxflow (Slack, GitHub): who wrote it, where (DM, #channel, PR), the original, and its board task. */
+  who?: string;
+  where?: string;
+  link?: string;
+  taskId?: string;
   /** Live only: per recipient, whether it still waits in its inbox, reached its prompt, or the session is gone. */
   delivery?: Record<string, "queued" | "delivered" | "gone">;
 };

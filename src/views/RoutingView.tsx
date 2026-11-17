@@ -665,7 +665,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
                           <span className="w-11 shrink-0 text-xs text-muted-foreground tabular-nums">{when(s.at)}</span>
                           <Icon className={cn("size-3.5 shrink-0", look[s.source].text)} />
                           <span className="w-24 shrink-0 truncate font-mono text-xs text-muted-foreground">{s.target}</span>
-                          <span className="min-w-0 flex-1 truncate">{s.text}</span>
+                          <span className="min-w-0 flex-1 truncate">{s.who && <span className="font-medium">{s.who}: </span>}{s.text}</span>
                           {s.routedTo.length === 0 && <span className="shrink-0 text-xs text-warn">unrouted</span>}
                         </li>
                       );
