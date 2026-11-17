@@ -52,7 +52,7 @@ export function RefChip({ r, still }: { r: Ref; still?: boolean }) {
     <Tag
       href={still ? undefined : href}
       onClick={e => e.stopPropagation()}
-      title={found ? undefined : `No ${r.kind} ${r.id} in maxflow now`}
+      title={found ? undefined : `No ${r.kind} ${r.id} in yarn now`}
       className={cn("inline-flex items-center gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline hover:border-ring", mono ? "font-mono text-[0.85em]" : "text-[0.92em]", !found && "border-dashed border-border bg-transparent text-muted-foreground line-through")}
     >
       {icon}
@@ -76,7 +76,7 @@ export function RefChip({ r, still }: { r: Ref; still?: boolean }) {
       <Tag
         href={still ? undefined : `#thread/${threadId}`}
         onClick={e => (e.stopPropagation(), !still && (e.preventDefault(), goToMessage(threadId!, messageId)))}
-        title={m ? undefined : `No message ${r.id} in maxflow now`}
+        title={m ? undefined : `No message ${r.id} in yarn now`}
         className={cn("inline-flex items-center gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline text-[0.92em] not-italic hover:border-ring", !m && "border-dashed border-border bg-transparent text-muted-foreground line-through")}
       >
         <MessageSquareQuote className="size-3 text-link" />

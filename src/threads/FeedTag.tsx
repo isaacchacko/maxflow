@@ -9,7 +9,7 @@ export function FeedTag({ feed }: { feed: NonNullable<Thread["feed"]> }) {
       target="_blank"
       rel="noreferrer"
       data-agent="feed-tag"
-      title={`maxflow took this up by itself, from ${feed.who} (${feed.source}). Say stop in the thread to call it off.`}
+      title={`yarn took this up by itself, from ${feed.who} (${feed.source}). Say stop in the thread to call it off.`}
       onClick={e => e.stopPropagation()}
       className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 font-medium text-muted-foreground hover:text-foreground"
     >

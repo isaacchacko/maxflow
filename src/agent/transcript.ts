@@ -18,7 +18,7 @@ export const closing: Record<Agent["state"], (a: Agent) => Line> = {
 
 /** A plausible transcript built from what the agent is known to have done, up to but not including its current state. */
 export function transcriptFor(agent: Agent, crew: Agent[], parent: Agent | undefined, task: Task | undefined, signals: Signal[]): Line[] {
-  const lines: Line[] = [{ kind: "system", text: `maxflow · ${agent.id} · ${agent.role}${parent ? ` · spawned by ${parent.id}` : ""}` }];
+  const lines: Line[] = [{ kind: "system", text: `yarn · ${agent.id} · ${agent.role}${parent ? ` · spawned by ${parent.id}` : ""}` }];
 
   if (agent.role === "router") {
     lines.push({ kind: "router", text: `You route "${agent.scope}". Keep your agents busy, ask Isaac only in a thread, about decisions truly his.` });

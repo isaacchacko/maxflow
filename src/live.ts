@@ -4,7 +4,7 @@ import { agentStore, liveStore, objectiveStore, nameStore, prStore, type Pr, ref
 type World = { objectives: Objective[]; agents: Agent[]; tasks: Task[]; threads: Thread[]; signals: Signal[]; sentries: SentrySession[]; names?: Record<string, string>; prs: Record<string, Pr> };
 
 const SOURCE_SENTRY: Partial<Record<Sentry["id"], string>> = { gh: "gh", slack: "slack" };
-const LABEL: Record<Sentry["id"], string> = { isaac: "You", gh: "GitHub", slack: "Slack", agent: "Agents", sentry: "Sentries", maxflow: "maxflow" };
+const LABEL: Record<Sentry["id"], string> = { isaac: "You", gh: "GitHub", slack: "Slack", agent: "Agents", sentry: "Sentries", maxflow: "yarn" };
 const EVERY: Partial<Record<Sentry["id"], string>> = { gh: "30s", slack: "60s" };
 
 function sourcesOf(sentries: SentrySession[]): Sentry[] {
@@ -26,10 +26,18 @@ function apply(w: World) {
   prStore.set(w.prs ?? {});
   nameStore.set(w.names ?? {});
   // Threads an agent asked him in wait on him; the tab says how many, as v1's questions did.
-  const pending = w.threads.filter(t => t.asks).length;
-  document.title = pending ? `(${pending}) maxflow` : "maxflow";
+  pending = w.threads.filter(t => t.asks).length;
+  setTitle();
   liveStore.set(true);
 }
+
+// The tab reads "yarn · <view>", with how many threads wait on him in front.
+let pending = 0;
+function setTitle() {
+  const view = location.hash.slice(1).split("/")[0] || "inbox";
+  document.title = `${pending ? `(${pending}) ` : ""}yarn · ${view[0]!.toUpperCase()}${view.slice(1)}`;
+}
+addEventListener("hashchange", setTitle);
 
 // The health sentry answers in the server's place while it is down; reloading lands on its "Oh no!" page.
 let misses = 0;
