@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AgentPage } from "@/agent/AgentPage";
 import { Capture } from "@/components/Capture";
 import { Mark } from "@/components/Mark";
@@ -11,6 +11,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Page } from "@/page/Page";
 import type { PageRef } from "@/store";
 import { ThreadPage, threadUp } from "@/threads/ThreadPage";
+import { arrive } from "@/threads/jump";
 import { InboxView } from "@/views/InboxView";
 import { RoutingView } from "@/views/RoutingView";
 import { SentriesView } from "@/views/SentriesView";
@@ -52,10 +53,17 @@ function routeFromHash(): Route {
 
 export function App() {
   const [route, setRoute] = useState(routeFromHash);
+  const current = useRef(route);
   useResurfacing();
 
   useEffect(() => {
-    const onHash = () => setRoute(routeFromHash());
+    // Each route change tells the pages how he got there: up out of a thread, by Back/Forward, or fresh.
+    const onHash = () => {
+      const prev = current.current;
+      const next = (current.current = routeFromHash());
+      arrive(prev.detail?.kind === "thread" ? prev.detail.id : undefined, { thread: next.detail?.kind === "thread" ? next.detail.id : undefined, view: !next.detail });
+      setRoute(next);
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       const { detail } = routeFromHash();

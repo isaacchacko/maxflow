@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { agentStore, answerHere, objectiveStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
 import { Composer, quoteInto } from "./Composer";
-import { composeOnArrival, flashMessage, goToMessage, takeCompose } from "./jump";
+import { composeOnArrival, flashMessage, goToMessage, takeCompose, useLayerScroll } from "./jump";
 import { MessageRow, when } from "./MessageRow";
 import { Replies, repliesOf } from "./Replies";
 import { RowMenu, messageItems, threadItems } from "./RowMenu";
@@ -117,12 +117,15 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   const lineRef = useRef<HTMLDivElement>(null);
   const opened = useRef<string>(undefined);
 
-  // Opening with something unread scrolls to the line; otherwise, and as messages arrive, to the bottom.
+  // Back up from a subthread (or by Back/Forward) it is where he left it; opening with something unread scrolls to the line;
+  // otherwise, and as messages arrive, to the bottom.
+  const restored = useLayerScroll(`thread:${id}`, scrollRef);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !thread) return;
-    if (opened.current !== id && lineRef.current) lineRef.current.scrollIntoView({ block: "center" });
-    else el.scrollTop = el.scrollHeight;
+    const opening = opened.current !== id;
+    if (opening && lineRef.current && !restored.current) lineRef.current.scrollIntoView({ block: "center" });
+    else if (!opening || !restored.current) el.scrollTop = el.scrollHeight;
     opened.current = id;
   }, [id, !!thread, thread?.messages.length, !!thread?.pending]);
 
@@ -148,7 +151,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
     compose: composer,
     up: () => threadUp(id, back),
     resolve: () => thread && resolveOrReopen(thread, back),
-    pause: () => thread && !thread.parentId && openPause(id),
+    pause: () => thread && !thread.parentId && openPause(id, () => threadUp(id, back)),
     open: k => {
       const sub = all.find(t => t.parentId === id && t.parentMessageId === k);
       if (sub && (sub.messages.length > 0 || sub.pending)) location.hash = `thread/${sub.id}`;
@@ -167,7 +170,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   useEffect(() => {
     // With nothing to land on, the cursor starts at the first unread, and the line is scrolled to after vim restores its cursor.
     const landed = flashMessage();
-    if (!landed) lineRef.current?.scrollIntoView({ block: "center" });
+    if (!landed && !restored.current) lineRef.current?.scrollIntoView({ block: "center" });
     vim.move(landed ?? (firstNew >= 0 ? keyOf(replies[firstNew]!, firstNew) : undefined), false);
     if (takeCompose()) composer();
   }, [id]);
@@ -215,7 +218,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-hidden p-4">
-      <RowMenu agent="thread-header" items={threadItems(thread, all, { resolve: () => resolveOrReopen(thread, back) })}>
+      <RowMenu agent="thread-header" items={threadItems(thread, all, { resolve: () => resolveOrReopen(thread, back), pause: () => openPause(thread.id, () => threadUp(thread.id, back)) })}>
       <header className="flex items-center gap-3">
         <Button variant="ghost" size="icon" asChild data-agent="back">
           <a href={thread.parentId ? `#thread/${thread.parentId}` : `#${back}`}>
@@ -237,7 +240,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
         {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
         {thread.paused && <span data-agent="thread-paused" className="text-xs whitespace-nowrap text-muted-foreground">paused {pausedLabel(thread.paused)}</span>}
         {!thread.parentId && (
-          <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-pause" title="Pause until a time (p)" onClick={() => openPause(thread.id)}>
+          <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-pause" title="Pause until a time (p)" onClick={() => openPause(thread.id, () => threadUp(thread.id, back))}>
             <AlarmClock />
             {thread.paused ? "Paused" : "Pause"}
           </Button>

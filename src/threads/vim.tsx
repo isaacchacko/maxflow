@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Kbd } from "@/components/ui/kbd";
+import { restoring } from "./jump";
 
 /** What the keys do to the item under the cursor; a page leaves out what it has no use for. */
 export type VimActions = { open?(key: string): void; up?(): void; compose(): void; reply?(key: string): void; quote?(key: string): void; resolve?(key?: string): void; pause?(key?: string): void; section?(dir: 1 | -1, key?: string): string | undefined };
@@ -119,9 +120,9 @@ export function useVim(scope: string, items: string[], scroller: React.RefObject
     return () => removeEventListener("keydown", onKey, true);
   }, [scope]);
 
-  // Back in a thread, the cursor is where he left it.
+  // Back in a thread, the cursor is where he left it; brought into view unless the page's scroll was put back as he left it.
   useEffect(() => {
-    if (cursor) row(cursor)?.scrollIntoView({ block: "nearest" });
+    if (cursor && !restoring()) row(cursor)?.scrollIntoView({ block: "nearest" });
   }, [scope]);
 
   const panel = help && (

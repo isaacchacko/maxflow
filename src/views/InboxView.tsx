@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { markAskShown, objectiveStore, setKind, setResolved, startThread, threadStore } from "@/store";
 import { Composer } from "@/threads/Composer";
-import { composeOnArrival } from "@/threads/jump";
+import { arrivedFrom, composeOnArrival, flash, useLayerScroll } from "@/threads/jump";
 import { MessageRow, when } from "@/threads/MessageRow";
 import { FeedTag } from "@/threads/FeedTag";
 import { KINDS } from "@/threads/KindMenu";
@@ -134,6 +134,7 @@ export function InboxView() {
     if (document.visibilityState === "visible") for (const id of unshown) markAskShown(id);
   }, [unshown.join()]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
   // A command row opens in place; a conversation opens its thread.
   const open = (id: string) => (commands.some(r => r.t.id === id) ? setOpened(o => (o === id ? undefined : id)) : (location.hash = `thread/${id}`));
   const reply = (id: string) => (composeOnArrival(), (location.hash = `thread/${id}`));
@@ -156,6 +157,14 @@ export function InboxView() {
     // ] jumps to the commands, [ back to the asks and conversations.
     section: dir => (dir > 0 ? side[0] : main[0]),
   });
+  // Back up out of a thread, the list and the commands column are where he left them, and that thread's row takes the cursor and flashes.
+  useLayerScroll("inbox", scrollRef);
+  useLayerScroll("inbox:commands", asideRef);
+  useEffect(() => {
+    const from = arrivedFrom();
+    const row = from && scrollRef.current?.querySelector(`[data-vim="${CSS.escape(from)}"]`);
+    if (row) vim.move(from, false), flash(row);
+  }, []);
 
   const conversationRow = (t: Thread) => {
       // A thread a router opened before writing in it shows its title as the opening message.
@@ -270,7 +279,7 @@ export function InboxView() {
         <ol className={cn(surface, "empty:hidden")}>{conversations.map(({ t }) => conversationRow(t))}</ol>
       </div>
       {/* Sticky, so the commands stay in view while the conversations scroll under them. */}
-      {wide && strip && <aside className="@container sticky top-0 max-h-[calc(100dvh-6rem)] max-w-5xl min-w-70 flex-1 self-start overflow-y-auto">{strip}</aside>}
+      {wide && strip && <aside ref={asideRef} className="@container sticky top-0 max-h-[calc(100dvh-6rem)] max-w-5xl min-w-70 flex-1 self-start overflow-y-auto">{strip}</aside>}
     </div>
   );
 }

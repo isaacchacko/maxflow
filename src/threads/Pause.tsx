@@ -8,8 +8,10 @@ import { setSeen } from "./seen";
 import { CHIPS, formatWhen, parseWhen } from "./when";
 
 const pausing = createStore<string | undefined>(undefined);
+// What the page that opened it does once the thread is paused: the thread page climbs a level, as resolving does.
+let afterPause: (() => void) | undefined;
 /** Asks him until when to put a thread away: from its menus, its header's button, or p. */
-export const openPause = (threadId: string) => pausing.set(threadId);
+export const openPause = (threadId: string, then?: () => void) => ((afterPause = then), pausing.set(threadId));
 
 /** "until Tue Nov 17, 9:00 AM", and what agents posted meanwhile. */
 export const pausedLabel = (p: NonNullable<Thread["paused"]>) => `until ${formatWhen(p.until)}${p.posts ? ` · ${p.posts} new` : ""}`;
@@ -26,7 +28,11 @@ export function PauseDialog() {
   useEffect(() => (setSaid(""), setNow(new Date())), [id]);
   const at = parseWhen(said, now);
   const close = () => pausing.set(undefined);
-  const pause = (until: Date, words: string) => (close(), void setPaused(id!, { until: until.getTime(), said: words }));
+  const pause = (until: Date, words: string) => {
+    const then = afterPause;
+    close();
+    void setPaused(id!, { until: until.getTime(), said: words }).then(then);
+  };
 
   return (
     <Dialog.Root open={!!thread} onOpenChange={o => o || close()}>
