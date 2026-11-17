@@ -93,7 +93,8 @@ export function App() {
         </header>
         {/* Keyed by tab, so each tab's pages mount as its own and put back its own scroll. */}
         <div className="flex min-h-0 flex-1">
-        <Sidebar view={detail ? "" : route.view} />
+        {/* The sidebar is the Todo and Threads views' own; drilled into a thread, the thread has the whole width. */}
+        {!detail && (route.view === "todo" || route.view === "inbox") && <Sidebar view={route.view} />}
         <main key={tab} className="min-h-0 min-w-0 flex-1 overflow-hidden">
           {detail?.kind === "agent" ? (
             <AgentPage key={detail.id} id={detail.id} back={route.view} />
