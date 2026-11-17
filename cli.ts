@@ -155,7 +155,7 @@ if (verb === "ls") {
 } else if (verb === "ask" && rest[0]) {
   if (!process.env.MAXFLOW_SESSION) console.error("ask works only inside a maxflow session"), process.exit(1);
   const t = await call("/api/asks", { method: "POST", body: JSON.stringify({ text: await withImages(positional(rest, ["--re", "--default", "--image"]).join(" "), rest), re: flag(rest, "--re"), default: flag(rest, "--default"), new: rest.includes("--new") }) });
-  console.log(`${t.id}: asked in his inbox, flagged as waiting on him. Keep working; his reply arrives in your prompt. Once nothing is left that doesn't hang on it, run \`maxflow wait thread:${t.id}\` and end your turn.`);
+  console.log(`${t.id}: asked in "${t.title}" in his inbox, flagged as waiting on him (it goes in the thread you were handed; --new for a thread of its own, --re <id> for another). Keep working; his reply arrives in your prompt. Once nothing is left that doesn't hang on it, run \`maxflow wait thread:${t.id}\` and end your turn.`);
 } else if (verb === "tasks") {
   for (const t of await call("/api/tasks"))
     if (rest.includes("--all") || (t.status !== "done" && t.status !== "dropped"))

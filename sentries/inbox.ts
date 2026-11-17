@@ -33,7 +33,8 @@ type ReviewPr = { url: string; title: string; author: string; why: "review" | "a
 // at: when this sentry first saw it, which the stall clock counts from, so a backlog read late isn't flagged at once.
 type Question = { key: string; at: number; who: string; text: string; link: string };
 // source: slack, slack bot, ci, github or review request.
-type Routed = { task: number; source: string; who: string; where: string; text: string; link: string };
+// key: the Slack conversation (DM, or channel/thread ts), PR or alert it came from, which its feed thread is kept by.
+type Routed = { task: number; key: string; source: string; who: string; where: string; text: string; link: string };
 type State = {
   seq: number;
   // The board task each Slack thread, DM or PR is on.
@@ -52,15 +53,20 @@ type State = {
   batch: Routed[];
   // When the oldest item in batch came, so a restart doesn't restart its debounce.
   batchAt: number;
-  // The feed thread each board task went to the funnel as, so more on that task goes to whoever took it.
-  fed: Record<number, string>;
+  // The feed thread each Slack conversation, PR or alert went to the funnel as, so more from it lands there. A Slack message that
+  // links a PR is kept by that PR too, so a review request and a ping about one PR share a thread.
+  feedThreads: Record<string, string>;
   prsAt: number;
   stallAt: number;
 };
 const state: State = {
-  seq: 0, tasks: {}, prs: {}, questions: {}, answered: {}, seen: [], flagged: [], alerts: {}, open: {}, reruns: [], batch: [], batchAt: 0, fed: {}, prsAt: 0, stallAt: 0,
+  seq: 0, tasks: {}, prs: {}, questions: {}, answered: {}, seen: [], flagged: [], alerts: {}, open: {}, reruns: [], batch: [], batchAt: 0, feedThreads: {}, prsAt: 0, stallAt: 0,
   ...(existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {}),
 };
+// Feed threads were kept by board task before; each task's key carries its thread over.
+const oldFed = (state as { fed?: Record<number, string> }).fed;
+if (oldFed) for (const [key, task] of Object.entries(state.tasks)) if (oldFed[task]) state.feedThreads[key] ??= oldFed[task];
+delete (state as { fed?: unknown }).fed;
 const save = () => writeFileSync(STATE_FILE, JSON.stringify(state));
 const readJson = <T>(path: string, fallback: T): T => { try { return JSON.parse(readFileSync(path, "utf8")); } catch { return fallback; } };
 const short = (text: string, n: number) => { const t = text.replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
@@ -174,7 +180,7 @@ async function onSlack(topic: string, d: any, me: string) {
   if (task) state.open[d.ts] = key;
   if (/\?/.test(text)) state.questions[d.ts] = { key, at: Date.now(), who: d.from, text, link: d.link };
   // A mention or DM nobody owns goes to the funnel, which starts an agent on it; thread replies stay on the board.
-  if (!owner && task && kind !== "reply") feed({ task, source: "slack", who: d.from, where, text: short(text, 500), link: d.link });
+  if (!owner && task && kind !== "reply") feed({ task, key, source: "slack", who: d.from, where, text: short(text, 500), link: d.link });
 }
 
 // A bot's mention of him ("a run on main is red", a skipped deploy) is one task per kind of alert, however often it repeats: its text
@@ -191,7 +197,7 @@ async function onBotAlert(d: any) {
   const event = open ? `${alert.count} more since the last note, latest ${url ?? d.link}` : `${d.from} in ${where}: "${short(d.text, 120)}" ${url ?? ""}`;
   const task = await onBoard(tag, d.link, event, { title: `${d.from} alert: "${short(d.text.replace(/\d+/g, "#"), 60)}"`, status: "you" });
   Object.assign(alert, { count: 0, noted: Date.now() });
-  if (task && !open) feed({ task, source: "slack bot", who: d.from, where, text: short(d.text, 500) + (url ? ` ${url}` : ""), link: d.link });
+  if (task && !open) feed({ task, key: tag, source: "slack bot", who: d.from, where, text: short(d.text, 500) + (url ? ` ${url}` : ""), link: d.link });
 }
 
 // Whether the user put an emoji reaction on a message.
@@ -220,32 +226,45 @@ async function handled(me: string) {
 
 const feed = (item: Routed) => (state.batch.push(item), (state.batchAt ||= Date.now()));
 
-// Each board task in the batch becomes a feed thread in his inbox, which the funnel routes to an agent; more on a task already
-// routed goes into its thread and to the routers that took it.
+// The keys an item's feed thread is kept by: its own, and every PR a Slack message links.
+const keysOf = (i: Routed) => [i.key, ...[...i.text.matchAll(/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/gi)].map((m) => `${m[1]}#${m[2]}`.toLowerCase())];
+
+// The batch goes to his inbox as feed threads, one per Slack conversation or PR: an item whose source already has an open feed thread
+// posts into it (its routers get it, or the funnel again if nobody took it); the rest open one each, which the funnel routes.
 async function flushBatch() {
   // What he handled in the meantime isn't routed.
   const tasks = await getTasks();
   state.batch = state.batch.filter((i) => OPEN(tasks.find((t) => t.id === i.task)));
   if (!state.batch.length) return void (state.batchAt = 0);
   if (!(await sessions()).some((s) => s.sentry && s.name === "sentry:funnel" && s.running)) return log("funnel isn't running; holding the batch");
-  const byTask = new Map<number, Routed[]>();
-  for (const i of state.batch) byTask.set(i.task, [...(byTask.get(i.task) ?? []), i]);
-  for (const [task, items] of byTask) {
+  type T = { id: string; mergedInto?: string; resolved?: unknown };
+  const threads = (await (await fetch(`${base}/api/threads`)).json()) as T[];
+  const live = (id?: string): T | undefined => { const t = threads.find((x) => x.id === id); return t?.mergedInto ? live(t.mergedInto) : t; };
+  const open = (key: string) => { const t = live(state.feedThreads[key]); return t && !t.resolved ? t.id : undefined; };
+  // Grouped by the open thread they join, or else by their own key.
+  const groups = new Map<string, { thread?: string; items: Routed[] }>();
+  for (const i of state.batch) {
+    const thread = keysOf(i).map(open).find(Boolean);
+    const g = groups.get(thread ?? i.key) ?? { thread, items: [] };
+    g.items.push(i);
+    groups.set(thread ?? i.key, g);
+  }
+  for (const { thread, items } of groups.values()) {
     const [i] = items;
     const text = `${i.who} in ${i.where}:\n${items.map((x) => `> ${x.text.replace(/\n/g, "\n> ")}`).join("\n")}\n${[...new Set(items.map((x) => x.link))].join("\n")}`;
-    const thread = state.fed[task] && ((await (await fetch(`${base}/api/threads`)).json()) as { id: string; routers: string[]; mergedInto?: string }[]).find((t) => t.id === state.fed[task]);
-    if (thread) {
-      await post(`/api/threads/${thread.id}/messages`, { text: `More from the feed: ${text}` });
-      for (const r of thread.routers) await post(`/api/sessions/${r}/notify`, { text: `[maxflow inbox] More on board task T-${task}, your feed thread ${thread.id}: ${text}` });
-      log(`T-${task}: more into ${thread.id}`);
-      continue;
+    let id = thread;
+    if (id) {
+      const res = await post(`/api/threads/${id}/messages`, { text, feed: true });
+      if (!res.ok) { log(`more into ${id} failed: ${await res.text()}`); continue; }
+      log(`T-${i.task}: more into ${id}`);
+    } else {
+      const res = await post("/api/threads", { title: `${i.who}: ${short(items.at(-1)!.text, 70)}`, text, feed: { source: i.source, who: i.who, link: i.link, task: i.task } });
+      if (!res.ok) { log(`feed thread for T-${i.task} failed: ${await res.text()}`); continue; }
+      id = ((await res.json()) as { id: string }).id;
+      log(`funnel: T-${i.task} as feed thread ${id}`);
     }
-    const res = await post("/api/threads", { title: `${i.who}: ${short(items.at(-1)!.text, 70)}`, text, feed: { source: i.source, who: i.who, link: i.link, task } });
-    if (!res.ok) { log(`feed thread for T-${task} failed: ${await res.text()}`); continue; }
-    state.fed[task] = ((await res.json()) as { id: string }).id;
-    log(`funnel: T-${task} as feed thread ${state.fed[task]}`);
+    for (const x of items) for (const k of keysOf(x)) state.feedThreads[k] = id;
   }
-  for (const t of Object.keys(state.fed).map(Number)) if (!OPEN(tasks.find((x) => x.id === t))) delete state.fed[t];
   state.batch = [];
   state.batchAt = 0;
 }
@@ -327,7 +346,7 @@ async function refreshPrs(ghMe: string) {
       status: "you",
     });
     // A review agent already reads the risky ones; the rest go to the funnel too, for an agent to read ahead of him.
-    if (task && !agent && !first) feed({ task, source: "review request", who: pr.author?.login ?? "?", where: key, text: `${ask}: "${pr.title}"`, link: pr.url });
+    if (task && !agent && !first) feed({ task, key, source: "review request", who: pr.author?.login ?? "?", where: key, text: `${ask}: "${pr.title}"`, link: pr.url });
   }
   for (const [key, pr] of Object.entries(state.prs))
     if (!now.has(key) && !pr.gone) {
@@ -370,7 +389,7 @@ async function onGh(topic: string, d: any) {
     const failed = `CI failed: ${(d.failed ?? []).join(", ") || d.state}`;
     const task = await onBoard(key, url, rerun ?? failed, { title: `CI failing on ${key.split("/")[1]}` });
     // A known flake re-run once fixes itself; a real failure no session heard goes to an agent.
-    if (task && !rerun) feed({ task, source: "ci", who: "CI", where: key, text: failed, link: url });
+    if (task && !rerun) feed({ task, key, source: "ci", who: "CI", where: key, text: failed, link: url });
     return;
   }
   if (reviewing && (kind === "merged" || kind === "closed")) return closeTask(key, `the PR was ${kind}`);
@@ -379,7 +398,7 @@ async function onGh(topic: string, d: any) {
   if (!["comment", "review", "thread"].includes(kind) || d.told?.length || !d.who || d.who.startsWith("the user") || d.author?.endsWith("[bot]")) return;
   const what = kind === "review" ? `${d.who} reviewed (${String(d.state).toLowerCase().replace("_", " ")})` : `${d.who} commented${d.path ? ` on ${d.path}` : ""}`;
   const task = await onBoard(key, url, `${what}: "${short(d.body ?? "", 120)}"`, { title: `${what} on ${key.split("/")[1]}`, ...(!mine && { status: "you" }) });
-  if (task) feed({ task, source: "github", who: d.who, where: key, text: `${what}: "${short(d.body ?? "", 500)}"${d.path ? ` (${d.path})` : ""}`, link: d.url ?? url });
+  if (task) feed({ task, key, source: "github", who: d.who, where: key, text: `${what}: "${short(d.body ?? "", 500)}"${d.path ? ` (${d.path})` : ""}`, link: d.url ?? url });
 }
 
 // ---- Stalls, raised once each as a board task, never as a ping.
