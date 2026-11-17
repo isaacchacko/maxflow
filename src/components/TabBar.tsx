@@ -55,20 +55,20 @@ function TabItem({ tab, active, only, onDrop }: { tab: Tab; active: boolean; onl
       // A middle click closes it, as in a browser.
       onAuxClick={e => e.button === 1 && (e.preventDefault(), closeTab(tab.id))}
       className={cn(
-        "group relative flex h-8 max-w-56 min-w-24 shrink cursor-default items-center gap-1.5 rounded-lg pr-1.5 pl-2.5 text-[13px] select-none",
+        "group relative flex h-8 max-w-56 min-w-10 shrink-1 basis-auto cursor-default items-center gap-1.5 overflow-hidden rounded-lg px-3 text-[13px] select-none",
         active ? "bg-card text-foreground shadow-card" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
         over && "ring-2 ring-link/40",
       )}
     >
       {label.icon}
-      <span className="min-w-0 flex-1 truncate">{label.text}</span>
+      <span className="min-w-0 truncate">{label.text}</span>
       {label.unread && !active && <span aria-label="unread" className="size-1.5 shrink-0 rounded-full bg-new" />}
       {!only && (
         <button
           aria-label="Close tab"
           data-agent={`tab-close:${tab.id}`}
           onClick={e => (e.stopPropagation(), closeTab(tab.id))}
-          className={cn("shrink-0 rounded-md p-0.5 hover:bg-muted", active ? "visible" : "invisible group-hover:visible")}
+          className="-mr-1.5 hidden shrink-0 rounded-md p-0.5 group-hover:block hover:bg-muted"
         >
           <X className="size-3" />
         </button>
