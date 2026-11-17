@@ -1592,7 +1592,7 @@ Bun.serve<WsData>({
       const feed = (body as { feed?: Feed }).feed;
       if (from && isSentry(from) && feed?.link && body.text?.trim()) {
         const text = body.text.trim();
-        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: `${feed.who}: ${text.split("\n")[0]}`.slice(0, 80), objective: "", routers: [], messages: [message("feed", text)], feed, ...(feed.task && { task: feed.task }) };
+        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: (body.title?.trim() || `${feed.who}: ${text.split("\n")[0]}`).slice(0, 80), objective: "", routers: [], messages: [message("feed", text)], feed, ...(feed.task && { task: feed.task }) };
         const ev = dispatch({ from, target: t.title, text, deliver: (seq) => `[maxflow · from his event feed (${feed.source}), not from him] ${text}\n[maxflow] signal ${seq}, feed thread ${t.id}${feed.task ? `, board task T-${feed.task}` : ""}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`, or, when it is only an FYI with nothing for an agent to do, say so in it with \`${CLI} thread post ${t.id} '<one line>'\`.` });
         t.signal = ev.seq;
         threads.push(t);

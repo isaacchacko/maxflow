@@ -240,7 +240,7 @@ async function flushBatch() {
       log(`T-${task}: more into ${thread.id}`);
       continue;
     }
-    const res = await post("/api/threads", { text, feed: { source: i.source, who: i.who, link: i.link, task } });
+    const res = await post("/api/threads", { title: `${i.who}: ${short(items.at(-1)!.text, 70)}`, text, feed: { source: i.source, who: i.who, link: i.link, task } });
     if (!res.ok) { log(`feed thread for T-${task} failed: ${await res.text()}`); continue; }
     state.fed[task] = ((await res.json()) as { id: string }).id;
     log(`funnel: T-${task} as feed thread ${state.fed[task]}`);
