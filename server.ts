@@ -1,6 +1,7 @@
 import type { ServerWebSocket, Subprocess } from "bun";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { backgroundShells } from "./background";
 import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
@@ -1554,12 +1555,8 @@ async function turnEnd(s: Session) {
   if (!s.transcript) return { background: false };
   const file = Bun.file(s.transcript);
   const tail = await file.slice(Math.max(0, file.size - 2_000_000)).text().catch(() => "");
-  const running = new Set<string>();
   let cutOff: string | undefined;
   for (const line of tail.split("\n")) {
-    if (line.includes('"backgroundTaskId"') && Date.now() - Date.parse(line.match(/"timestamp":"([^"]+)"/)?.[1] ?? "") < 12 * 3_600_000)
-      for (const m of line.matchAll(/"backgroundTaskId":"(\w+)"/g)) running.add(m[1]);
-    for (const m of line.matchAll(/<task-id>(\w+)<\/task-id>/g)) running.delete(m[1]);
     if (!line.startsWith('{"') || !line.includes('"type":"assistant"')) continue;
     try {
       const e = JSON.parse(line);
@@ -1568,7 +1565,7 @@ async function turnEnd(s: Session) {
       cutOff = e.isApiErrorMessage && SLEEP_CUT.test(text) ? e.uuid : undefined;
     } catch {}
   }
-  return { cutOff, background: running.size > 0 };
+  return { cutOff, background: backgroundShells(tail).size > 0 };
 }
 // The Mac asleep stops this loop too, so a gap in it is a sleep; awakeSince is when the last one ended.
 let tickAt = Date.now(), awakeSince = 0;

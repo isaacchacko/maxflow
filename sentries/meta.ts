@@ -6,6 +6,7 @@
 import { existsSync, openSync, readSync, closeSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import { join } from "node:path";
+import { backgroundShells, transcriptTail } from "../background";
 import { BASE as base, STATE_DIR } from "../instance";
 
 const STATE_FILE = join(STATE_DIR, "meta-state.json");
@@ -156,8 +157,9 @@ async function tick() {
     const mark = (marks[s.transcript!] ??= { offset: Math.max(0, statSync(s.transcript!).size - 2_000_000), tools: {} });
     const d = digest(s, mark, delta(s.transcript!, mark), now);
     if (isSlow(d)) flagged.push(d);
-    // An agent is working or asleep on a declared wait; idle at its prompt with neither, nothing will wake it.
-    if (s.status === "idle" && !s.archived && !s.wait && !s.pending && now - s.activeAt >= IDLE_MS && mark.idleAt !== s.activeAt) {
+    // An agent is working or asleep on a declared wait; idle at its prompt with neither, nothing will wake it, unless a background shell
+    // it started is still running, whose exit re-invokes it (the server's auto done skips those too).
+    if (s.status === "idle" && !s.archived && !s.wait && !s.pending && now - s.activeAt >= IDLE_MS && mark.idleAt !== s.activeAt && !backgroundShells(await transcriptTail(s.transcript!)).size) {
       mark.idleAt = s.activeAt;
       idle.push({ id: s.id, title: s.name, idleMs: now - s.activeAt, lastText: lastText(s.transcript!) });
     }
