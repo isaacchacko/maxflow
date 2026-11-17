@@ -1046,10 +1046,12 @@ function tellWaiters(on: Session, what: string) {
   for (const w of sessions.values())
     if (w !== on && waitsOn(w, on.id) && w.exitCode === null) endWait(w, `"${on.name}" (session ${on.id}) ${what}`);
 }
-// An agent's finish is told to each agent waiting on it once: when it goes into done (not each turn it ends while done, which a peer's
-// message starts), or at once when the wait is declared on an agent already done. toldDone keeps, per waiter and agent, the done
-// (that agent's wait.at) it was told of, so a waiter that waits again on the same finish sleeps until the next one.
+// An agent's finish is told to each agent waiting on it once: when it comes to rest done (its turn over with `wait done` declared,
+// or the auto done), or at once when the wait is declared on an agent at rest done. Done but mid-turn (a turn a peer's message started
+// keeps its done) is not finished: that turn's end is a finish of its own. toldDone keeps, per waiter and agent, the finish (that
+// agent's wait.at) it was told of, so a waiter that waits again on the same finish sleeps until the next one.
 const toldDone = new Map<string, number>();
+const atRest = (s: Session) => s.claude?.state !== "working" && s.claude?.state !== "waiting";
 function tellDone(on: Session) {
   for (const w of sessions.values()) {
     if (w === on || !waitsOn(w, on.id) || w.exitCode !== null || toldDone.get(`${w.id}>${on.id}`) === on.wait?.at) continue;
@@ -1061,7 +1063,7 @@ function tellDone(on: Session) {
 function alreadyDone(w: Session) {
   for (const id of w.wait?.kind === "agent" ? w.wait.ref.split(",") : []) {
     const o = sessions.get(id);
-    if (o?.wait?.kind !== "done" || toldDone.get(`${w.id}>${id}`) === o.wait.at) continue;
+    if (o?.wait?.kind !== "done" || !atRest(o) || toldDone.get(`${w.id}>${id}`) === o.wait.at) continue;
     toldDone.set(`${w.id}>${id}`, o.wait.at);
     endWait(w, `"${o.name}" (session ${o.id}) is already done`);
     return true;
@@ -1104,7 +1106,8 @@ function declareWait(s: Session, kind: string, ref: string): string | null {
   const was = s.wait;
   const again = kind === "done" && was?.kind === "done";
   setWait(s, { kind: kind as Wait["kind"], ref: kind === "done" ? "" : ref, at: again ? was.at : Date.now() });
-  if (kind === "done") again || tellDone(s);
+  // Declared mid-turn, as it usually is, the finish is told when the turn ends (afterTurn).
+  if (kind === "done") again || !atRest(s) || tellDone(s);
   else if (!was || waitLabel(was) !== waitLabel(s.wait!)) tellWaiters(s, `is now waiting on ${waitLabel(s.wait!)}`);
   if (kind === "agent" && alreadyDone(s)) return null;
   // Declared between turns, it sleeps at once; mid-turn, the Stop hook puts it to sleep.
@@ -1592,6 +1595,8 @@ function afterTurn(s: Session) {
     if (s.claude?.state !== "idle" || s.claude.at !== at || s.exitCode !== null || s.inbox.length) return;
     const end = await turnEnd(s);
     if (end.cutOff && end.cutOff !== s.cutOff) return void ((s.cutOff = end.cutOff), carryOn(s, at));
+    // A turn ended done is a finish: anyone who started waiting on it during the turn hears now.
+    if (s.wait?.kind === "done") return void (setWait(s, { ...s.wait, at: Date.now() }), tellDone(s));
     if (s.wait || s.archived || end.background) return;
     setWait(s, { kind: "done", ref: "", at: Date.now(), auto: true });
     tellDone(s);
