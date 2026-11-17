@@ -2,7 +2,7 @@
 // slack sentry in about a second, where Slack's search index takes minutes. Slack shows none while its window is focused, under
 // Do Not Disturb or for a muted conversation, and cuts long bodies short, so the sentry's own polling stays the backstop.
 import { Database } from "bun:sqlite";
-import { copyFileSync, existsSync, mkdtempSync, rmSync, watch, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,7 +10,8 @@ const DIR = join(process.env.HOME!, "Library/Group Containers/group.com.apple.us
 const SLACK = "com.tinyspeck.slackmacgap";
 // The store's dates count from 2001, the Mac epoch.
 const MAC_EPOCH = 978_307_200;
-const FALLBACK_MS = 15_000;
+// fs.watch hears nothing of usernoted's writes here, so the store's files are stat'ed this often instead.
+const STAT_MS = 500;
 
 // title: the workspace; subtitle: `#channel`, a private channel's bare name, or the person for a DM; ts: the message's Slack ts.
 export type Notice = { id: number; title: string; subtitle: string; body: string; ts?: string; at: number };
@@ -70,13 +71,13 @@ export function watchNotices(onNotice: (n: Notice) => void, since?: number) {
       console.error(`notification check failed: ${e}`);
     }
   };
-  // The store's write-ahead log changes the moment a notification lands; a slow poll covers a missed file event.
-  let soon: Timer | undefined;
-  watch(DIR, () => {
-    clearTimeout(soon);
-    soon = setTimeout(check, 200);
-  });
-  setInterval(check, FALLBACK_MS);
+  // The store's write-ahead log (or, after a checkpoint, the store) changes the moment a notification lands.
+  const stamp = () => ["db-wal", "db"].map((f) => statSync(join(DIR, f), { throwIfNoEntry: false })?.mtimeMs ?? 0).join();
+  let seen = stamp();
+  setInterval(() => {
+    const now = stamp();
+    if (now !== seen) (seen = now), check();
+  }, STAT_MS);
   check();
   return true;
 }
