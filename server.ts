@@ -616,10 +616,25 @@ async function reroute(seq: number, o: Objective) {
 
 // A feed thread's item goes to the funnel to route, as a signal whose route hands the thread to the objective's routers. The log has
 // each message as its own event already; the signal is the handoff, naming them.
+// A DM, or a channel's top-level posts, is one conversation that can carry several topics (Susanna's DM: the priority demo and their
+// Thursday team event), so its next message is not appended to whichever thread its last one went to: the funnel is shown the other
+// open threads holding messages from the same conversation and joins it to the one on its topic, or leaves it as its own.
+const conversationOf = (link?: string) => (link && !/[?&]thread_ts=/.test(link) ? link.match(/\/archives\/(\w+)\//)?.[1] : undefined);
+function sameConversation(t: Thread) {
+  const own = new Set(t.messages.map((m) => conversationOf(m.ext?.link)).filter(Boolean));
+  if (!own.size) return [];
+  return threads.filter((x) => x !== t && !x.mergedInto && !x.resolved && x.messages.some((m) => own.has(conversationOf(m.ext?.link))));
+}
+function candidatesLine(t: Thread) {
+  const open = sameConversation(t);
+  if (!open.length) return "";
+  const last = (x: Thread) => x.messages.findLast((m) => m.ext && !m.ext.context) ?? x.messages.at(-1);
+  return `\n[maxflow] The same Slack conversation has these open threads. If this is on one's topic, route it to that thread's objective and fold it in with \`${CLI} thread merge ${t.id} <thread id>\`; if it is a different topic, leave it as its own thread (never fold it in only because it is the same person or DM):\n${open.map((x) => `- ${x.id} "${x.title}"${x.objective ? ` (objective ${x.objective})` : ""}, last: ${headline(last(x)?.text ?? "")}`).join("\n")}`;
+}
 async function feedToFunnel(t: Thread, from: Session, text: string, feed = t.feed!) {
   const links = new Set(text.match(/https?:\/\/\S+/g) ?? []);
   const refs = (await query("signal/**", 0, 0)).filter((e) => links.has(String((e.data as Signal).link))).map((e) => `s${e.seq}`);
-  const ev = dispatch({ from, target: t.title, text: `${feed.task ? `T-${feed.task}` : "An item"} from the feed, in thread ${t.id}, for the funnel to route: ${feed.who}${refs.length ? ` (${refs.join(", ")})` : ""}`, deliver: (seq) => `[maxflow · from his event feed (${feed.source}), not from him] ${text}${contextFor(text, feed.who)}\n[maxflow] signal ${seq}, feed thread ${t.id}${feed.task ? `, board task T-${feed.task}` : ""}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`, or, when it is only an FYI with nothing for an agent to do, say so in it with \`${CLI} thread post ${t.id} '<one line>'\`.` });
+  const ev = dispatch({ from, target: t.title, text: `${feed.task ? `T-${feed.task}` : "An item"} from the feed, in thread ${t.id}, for the funnel to route: ${feed.who}${refs.length ? ` (${refs.join(", ")})` : ""}`, deliver: (seq) => `[maxflow · from his event feed (${feed.source}), not from him] ${text}${contextFor(text, feed.who)}${candidatesLine(t)}\n[maxflow] signal ${seq}, feed thread ${t.id}${feed.task ? `, board task T-${feed.task}` : ""}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`, or, when it is only an FYI with nothing for an agent to do, say so in it with \`${CLI} thread post ${t.id} '<one line>'\`.` });
   t.signal = ev.seq;
   saveThreads();
 }
@@ -2140,6 +2155,27 @@ Bun.serve<WsData>({
       const t = threads.find((x) => x.id === askShown[1]);
       if (t?.asks && !t.asks.shown) (t.asks.shown = Date.now()), saveThreads();
       return new Response(null, { status: 204 });
+    }
+    // The other way: messages on another topic taken out of a thread into one of their own (a DM's second subject that was appended to
+    // the first's thread), with a line left where they were. From the feed, the new thread goes to the funnel to route.
+    const threadSplit = path.match(/^\/api\/threads\/([\w-]+)\/split$/);
+    if (threadSplit && req.method === "POST") {
+      const t = live_thread(threads.find((x) => x.id === threadSplit[1]));
+      const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
+      const body = (await req.json().catch(() => ({}))) as { messages?: string[]; title?: string };
+      if (!t || !from) return new Response("a thread, split by a session", { status: 404 });
+      const moved = t.messages.filter((m) => body.messages?.includes(m.id));
+      if (!moved.length || !body.title?.trim()) return new Response("messages: ids in the thread, and a title", { status: 400 });
+      t.messages = t.messages.filter((m) => !moved.includes(m));
+      const ext = moved.find((m) => m.ext && !m.ext.context)?.ext ?? moved.find((m) => m.ext)?.ext;
+      const nt: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: body.title.trim().slice(0, 80), objective: "", routers: [], messages: moved, ...(ext && { feed: { source: ext.source, who: ext.name, link: ext.link }, feedSaid: [] }) };
+      threads.push(nt);
+      postIn(t, from, `Moved ${moved.length} message${moved.length > 1 ? "s" : ""} about ${nt.title} to [[thread:${nt.id}]].`);
+      const said = moved.map((m) => `> **${m.ext ? (m.ext.own ? "Isaac (him, on Slack/GitHub)" : m.ext.name) : m.from === "isaac" ? "Isaac" : m.from}:** ${m.text.replace(/\n/g, "\n> ")}`).join("\n");
+      if (nt.feed) (nt.feedSaid = [said]), await feedToFunnel(nt, from, `${nt.feed.who}, moved out of thread ${t.id} as its own topic:\n${said}\n${ext!.link}`);
+      saveThreads();
+      for (const x of [t, nt]) publish(`thread/${x.id}`, { thread: x.id, split: nt.id });
+      return Response.json(nt, { status: 201 });
     }
     // Folding a duplicate thread into another; resolving stays his, so this is the way agents tidy his inbox.
     const threadMerge = path.match(/^\/api\/threads\/([\w-]+)\/merge$/);

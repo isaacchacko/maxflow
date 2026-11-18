@@ -283,8 +283,12 @@ async function flushBatch() {
   const open = (key: string) => { const t = live(state.feedThreads[key]); return t && !t.resolved ? t.id : undefined; };
   // Grouped by the open thread they join, or else by their own key.
   const groups = new Map<string, { thread?: string; items: Routed[] }>();
+  // A Slack thread or a PR is one topic, so what comes in on it joins its open thread. A DM or a channel's top-level posts can carry
+  // several: each batch from one opens a thread of its own, and the funnel, shown the conversation's other open threads, folds it into
+  // the one on its topic or keeps it apart.
+  const strict = (k: string) => !/^[CDG]\w+$/.test(k);
   for (const i of state.batch) {
-    const thread = keysOf(i).map(open).find(Boolean);
+    const thread = keysOf(i).filter(strict).map(open).find(Boolean);
     const g = groups.get(thread ?? i.key) ?? { thread, items: [] };
     g.items.push(i);
     groups.set(thread ?? i.key, g);
