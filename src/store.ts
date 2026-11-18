@@ -212,7 +212,8 @@ export function setArchived(id: string, archived: boolean) {
 /** One of his todos, on a day: YYYY-MM-DD in his local time. Clicking its box steps it through the states in order. */
 export const TODO_STATES = ["todo", "doing", "done", "cancelled"] as const;
 export type TodoState = (typeof TODO_STATES)[number];
-export type Todo = { id: string; text: string; day: string; state: TodoState; at: string; threadId?: string };
+/** threadIds: the threads tagged on it, by him or by agents (`maxflow todo tag`), shown indented under it. */
+export type Todo = { id: string; text: string; day: string; state: TodoState; at: string; threadIds: string[] };
 /** Not started or in progress: what the calendar dots and From earlier count. */
 export const isOpen = (t: Todo) => t.state === "todo" || t.state === "doing";
 /** His todo list, kept by the server in its own file; fetched by the Todo page, not part of the world. */
@@ -238,15 +239,14 @@ async function sendTodo(path: string, method: string, body?: unknown) {
 }
 
 export async function addTodo(text: string, day: string) {
-  const draft: Todo = { id: `new-${Date.now()}`, text, day, state: "todo", at: new Date().toISOString() };
+  const draft: Todo = { id: `new-${Date.now()}`, text, day, state: "todo", at: new Date().toISOString(), threadIds: [] };
   todoStore.set(all => [...all, draft]);
   const saved = await sendTodo("/api/todos", "POST", { text, day });
   if (saved) todoStore.set(all => all.map(t => (t.id === draft.id ? saved : t)));
 }
 
-/** threadId null unlinks its thread. */
-export async function editTodo(id: string, edit: Partial<Pick<Todo, "text" | "day" | "state">> & { threadId?: string | null }) {
-  todoStore.set(all => all.map(t => (t.id === id ? { ...t, ...edit, threadId: edit.threadId === undefined ? t.threadId : (edit.threadId ?? undefined) } : t)));
+export async function editTodo(id: string, edit: Partial<Pick<Todo, "text" | "day" | "state">>) {
+  todoStore.set(all => all.map(t => (t.id === id ? { ...t, ...edit } : t)));
   await sendTodo(`/api/todos/${id}`, "PATCH", edit);
 }
 
@@ -255,9 +255,15 @@ export async function deleteTodo(id: string) {
   await sendTodo(`/api/todos/${id}`, "DELETE");
 }
 
-/** A thread started from a todo: its text posted as his own message, routed by the funnel like any he writes, then linked to it. */
+/** Tags a thread on a todo, after the ones already there, or untags it. */
+export async function tagThread(todoId: string, threadId: string, tagged: boolean) {
+  todoStore.set(all => all.map(t => (t.id !== todoId ? t : { ...t, threadIds: tagged ? [...t.threadIds.filter(x => x !== threadId), threadId] : t.threadIds.filter(x => x !== threadId) })));
+  await sendTodo(`/api/todos/${todoId}/threads/${threadId}`, tagged ? "POST" : "DELETE");
+}
+
+/** A thread started from a todo: its text posted as his own message, routed by the funnel like any he writes, then tagged on it. */
 export async function startTodoThread(todo: Todo) {
   const t = (await startThread(todo.text)) as Thread;
-  await editTodo(todo.id, { threadId: t.id });
+  await tagThread(todo.id, t.id, true);
   return t;
 }

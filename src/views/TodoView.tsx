@@ -1,8 +1,9 @@
-import { ArrowRight, Check, ChevronLeft, ChevronRight, Link2, MessageSquarePlus, MessagesSquare, Plus, Trash2, X } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Link2, MessageSquarePlus, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { Thread } from "@/mock";
 import { score, useThreadItems } from "@/components/QuickSwitcher";
 import { cn } from "@/lib/utils";
-import { addTodo, deleteTodo, editTodo, isOpen, startTodoThread, liveStore, loadTodos, threadStore, TODO_STATES, todoStore, type Todo, type TodoState } from "@/store";
+import { addTodo, deleteTodo, editTodo, isOpen, startTodoThread, tagThread, liveStore, loadTodos, threadStore, TODO_STATES, todoStore, type Todo, type TodoState } from "@/store";
 import { useLayerScroll } from "@/threads/jump";
 import { ago } from "@/threads/Replies";
 import { Avatar, Rich } from "@/threads/Rich";
@@ -124,18 +125,23 @@ function NewTodo({ day }: { day: string }) {
   );
 }
 
-/** Click the text to edit it in place: Enter or leaving the field saves, Escape puts it back. */
+/**
+ * Click the text to edit it in place: Enter or leaving the field saves, Escape puts it back. The threads tagged on it, by him or
+ * by agents, are rows indented under it.
+ */
 function TodoRow({ todo, from, onMove }: { todo: Todo; from?: string; onMove?: () => void }) {
   const [draft, setDraft] = useState<string>();
   const [picking, setPicking] = useState(false);
-  const thread = threadStore.use().find(t => t.id === todo.threadId);
+  const all = threadStore.use();
+  const tagged = todo.threadIds.flatMap(id => all.find(t => t.id === id) ?? []);
   const save = () => {
     const text = draft?.trim();
     setDraft(undefined);
     if (text && text !== todo.text) void editTodo(todo.id, { text });
   };
   return (
-    <li className={cn("group relative flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm hover:bg-muted/60", picking && "bg-muted/60")}>
+    <li>
+    <div className={cn("group relative flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm hover:bg-muted/60", picking && "bg-muted/60")}>
       <StateBox state={todo.state} onClick={() => void editTodo(todo.id, { state: TODO_STATES[(TODO_STATES.indexOf(todo.state) + 1) % TODO_STATES.length]! })} />
       {draft !== undefined ? (
         <input
@@ -154,21 +160,9 @@ function TodoRow({ todo, from, onMove }: { todo: Todo; from?: string; onMove?: (
           {todo.text}
         </span>
       )}
-      {thread ? (
-        <span className="flex max-w-[40%] min-w-0 shrink-0 items-center rounded-full bg-muted text-xs text-muted-foreground">
-          <a href={`#thread/${thread.id}`} title="Open the thread" className="flex min-w-0 items-center gap-1 py-0.5 pl-2 hover:text-foreground">
-            <MessagesSquare className="size-3 shrink-0" />
-            <span className="truncate">{thread.title}</span>
-          </a>
-          <button onClick={() => void editTodo(todo.id, { threadId: null })} title="Unlink the thread" className="py-0.5 pr-1.5 pl-1 hover:text-foreground">
-            <X className="size-3" />
-          </button>
-        </span>
-      ) : (
-        <button onClick={() => setPicking(true)} title="Link a thread, or start one" className={cn("shrink-0 text-muted-foreground hover:text-foreground", !picking && "opacity-0 group-hover:opacity-100")}>
-          <Link2 className="size-4" />
-        </button>
-      )}
+      <button onClick={() => setPicking(true)} title="Tag a thread, or start one" className={cn("shrink-0 text-muted-foreground hover:text-foreground", !picking && "opacity-0 group-hover:opacity-100")}>
+        <Link2 className="size-4" />
+      </button>
       {picking && <ThreadPicker todo={todo} onClose={() => setPicking(false)} />}
       {from && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{dateOf(from).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>}
       {onMove && (
@@ -179,17 +173,44 @@ function TodoRow({ todo, from, onMove }: { todo: Todo; from?: string; onMove?: (
       <button onClick={() => void deleteTodo(todo.id)} title="Delete" className="shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive">
         <Trash2 className="size-4" />
       </button>
+    </div>
+    {tagged.length > 0 && (
+      <ol className="ml-[26px] flex flex-col">
+        {tagged.map(t => (
+          <TaggedThread key={t.id} thread={t} onUntag={() => void tagThread(todo.id, t.id, false)} />
+        ))}
+      </ol>
+    )}
     </li>
   );
 }
 
-/** Its box: empty to start, half filled in progress, a check when done, a cross when cancelled; a click steps it to the next. */
+/** A thread tagged on a todo: its title, then who spoke last and what they said; it opens the thread. */
+function TaggedThread({ thread, onUntag }: { thread: Thread; onUntag: () => void }) {
+  const last = thread.messages.at(-1);
+  // A thread he started from a line has that line as its title and its one message; it reads once.
+  const said = last && last.text.split("\n")[0]!.trim() !== thread.title ? last.text.split("\n")[0]! : undefined;
+  return (
+    <li className="group/thread flex min-w-0 items-center rounded-lg hover:bg-muted/60">
+      <a href={`#thread/${thread.id}`} className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1 text-[13px]">
+        {last && <Avatar from={last.from} small />}
+        <span className="max-w-[45%] shrink-0 truncate font-medium">{thread.title}</span>
+        {said && <Rich still text={said} className="min-w-0 flex-1 truncate text-muted-foreground" />}
+        {last && <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">{ago(Date.parse(last.at))}</span>}
+      </a>
+      <button onClick={onUntag} title="Untag the thread" className="mr-2 shrink-0 text-muted-foreground opacity-0 group-hover/thread:opacity-100 hover:text-foreground">
+        <X className="size-3.5" />
+      </button>
+    </li>
+  );
+}
+
 /**
- * Links a todo to a thread: type to search titles and opening messages the way ⌘K does, ↑↓ to move, Enter to pick; the last
- * row starts a new thread from the todo's text instead. Esc or a click outside closes it.
+ * Tags a thread on a todo, beside any it has: type to search titles and opening messages the way ⌘K does, ↑↓ to move, Enter to
+ * pick; the last row starts a new thread from the todo's text instead. Esc or a click outside closes it.
  */
 function ThreadPicker({ todo, onClose }: { todo: Todo; onClose: () => void }) {
-  const items = useThreadItems();
+  const items = useThreadItems().filter(i => !todo.threadIds.includes(i.href.slice("#thread/".length)));
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const box = useRef<HTMLDivElement>(null);
@@ -213,7 +234,7 @@ function ThreadPicker({ todo, onClose }: { todo: Todo; onClose: () => void }) {
   // The new-thread row sits after the matches, at index shown.length.
   const pick = (i: number) => {
     onClose();
-    if (i < shown.length) void editTodo(todo.id, { threadId: shown[i]!.href.slice("#thread/".length) });
+    if (i < shown.length) void tagThread(todo.id, shown[i]!.href.slice("#thread/".length), true);
     else void startTodoThread(todo);
   };
   const row = "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm";
@@ -229,7 +250,7 @@ function ThreadPicker({ todo, onClose }: { todo: Todo; onClose: () => void }) {
           if (e.key === "Enter" && !e.nativeEvent.isComposing) pick(active);
           if (e.key === "Escape") e.stopPropagation(), onClose();
         }}
-        placeholder="Link a thread…"
+        placeholder="Tag a thread…"
         className="w-full border-b bg-transparent px-2 pt-1 pb-2 text-sm outline-none placeholder:text-muted-foreground"
       />
       <ol className="mt-1 flex flex-col">
@@ -255,6 +276,7 @@ function ThreadPicker({ todo, onClose }: { todo: Todo; onClose: () => void }) {
   );
 }
 
+/** Its box: empty to start, half filled in progress, a check when done, a cross when cancelled; a click steps it to the next. */
 function StateBox({ state, onClick }: { state: TodoState; onClick: () => void }) {
   const next = TODO_STATES[(TODO_STATES.indexOf(state) + 1) % TODO_STATES.length]!;
   return (
