@@ -1,7 +1,8 @@
-import { ArrowRight, Check, ChevronLeft, ChevronRight, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Link2, MessageSquarePlus, MessagesSquare, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { score, useThreadItems } from "@/components/QuickSwitcher";
 import { cn } from "@/lib/utils";
-import { addTodo, deleteTodo, editTodo, isOpen, liveStore, loadTodos, threadStore, TODO_STATES, todoStore, type Todo, type TodoState } from "@/store";
+import { addTodo, deleteTodo, editTodo, isOpen, startTodoThread, liveStore, loadTodos, threadStore, TODO_STATES, todoStore, type Todo, type TodoState } from "@/store";
 import { useLayerScroll } from "@/threads/jump";
 import { ago } from "@/threads/Replies";
 import { Avatar, Rich } from "@/threads/Rich";
@@ -126,13 +127,15 @@ function NewTodo({ day }: { day: string }) {
 /** Click the text to edit it in place: Enter or leaving the field saves, Escape puts it back. */
 function TodoRow({ todo, from, onMove }: { todo: Todo; from?: string; onMove?: () => void }) {
   const [draft, setDraft] = useState<string>();
+  const [picking, setPicking] = useState(false);
+  const thread = threadStore.use().find(t => t.id === todo.threadId);
   const save = () => {
     const text = draft?.trim();
     setDraft(undefined);
     if (text && text !== todo.text) void editTodo(todo.id, { text });
   };
   return (
-    <li className="group flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm hover:bg-muted/60">
+    <li className={cn("group relative flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm hover:bg-muted/60", picking && "bg-muted/60")}>
       <StateBox state={todo.state} onClick={() => void editTodo(todo.id, { state: TODO_STATES[(TODO_STATES.indexOf(todo.state) + 1) % TODO_STATES.length]! })} />
       {draft !== undefined ? (
         <input
@@ -151,6 +154,22 @@ function TodoRow({ todo, from, onMove }: { todo: Todo; from?: string; onMove?: (
           {todo.text}
         </span>
       )}
+      {thread ? (
+        <span className="flex max-w-[40%] min-w-0 shrink-0 items-center rounded-full bg-muted text-xs text-muted-foreground">
+          <a href={`#thread/${thread.id}`} title="Open the thread" className="flex min-w-0 items-center gap-1 py-0.5 pl-2 hover:text-foreground">
+            <MessagesSquare className="size-3 shrink-0" />
+            <span className="truncate">{thread.title}</span>
+          </a>
+          <button onClick={() => void editTodo(todo.id, { threadId: null })} title="Unlink the thread" className="py-0.5 pr-1.5 pl-1 hover:text-foreground">
+            <X className="size-3" />
+          </button>
+        </span>
+      ) : (
+        <button onClick={() => setPicking(true)} title="Link a thread, or start one" className={cn("shrink-0 text-muted-foreground hover:text-foreground", !picking && "opacity-0 group-hover:opacity-100")}>
+          <Link2 className="size-4" />
+        </button>
+      )}
+      {picking && <ThreadPicker todo={todo} onClose={() => setPicking(false)} />}
       {from && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{dateOf(from).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>}
       {onMove && (
         <button onClick={onMove} title="Move to today" className="shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground">
@@ -165,6 +184,77 @@ function TodoRow({ todo, from, onMove }: { todo: Todo; from?: string; onMove?: (
 }
 
 /** Its box: empty to start, half filled in progress, a check when done, a cross when cancelled; a click steps it to the next. */
+/**
+ * Links a todo to a thread: type to search titles and opening messages the way ⌘K does, ↑↓ to move, Enter to pick; the last
+ * row starts a new thread from the todo's text instead. Esc or a click outside closes it.
+ */
+function ThreadPicker({ todo, onClose }: { todo: Todo; onClose: () => void }) {
+  const items = useThreadItems();
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const box = useRef<HTMLDivElement>(null);
+  const shown = useMemo(() => {
+    const q = query.trim();
+    if (!q) return [...items].sort((a, b) => b.rank - a.rank).slice(0, 8);
+    return items
+      .flatMap(i => {
+        const name = score(q, i.label, true), body = score(q, i.text, false);
+        return name === null && body === null ? [] : [{ ...i, s: Math.max(name ?? 0, (body ?? 0) - 100) }];
+      })
+      .sort((a, b) => b.s - a.s || b.rank - a.rank)
+      .slice(0, 8);
+  }, [items, query]);
+  useEffect(() => setActive(0), [query]);
+  useEffect(() => {
+    const away = (e: PointerEvent) => box.current?.contains(e.target as Node) || onClose();
+    window.addEventListener("pointerdown", away);
+    return () => window.removeEventListener("pointerdown", away);
+  }, [onClose]);
+  // The new-thread row sits after the matches, at index shown.length.
+  const pick = (i: number) => {
+    onClose();
+    if (i < shown.length) void editTodo(todo.id, { threadId: shown[i]!.href.slice("#thread/".length) });
+    else void startTodoThread(todo);
+  };
+  const row = "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm";
+  return (
+    <div ref={box} className="absolute top-full right-2 z-30 mt-1 w-96 max-w-[calc(100%-1rem)] rounded-xl border bg-popover p-1 shadow-raised">
+      <input
+        autoFocus
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === "ArrowDown") e.preventDefault(), setActive(a => Math.min(a + 1, shown.length));
+          if (e.key === "ArrowUp") e.preventDefault(), setActive(a => Math.max(a - 1, 0));
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) pick(active);
+          if (e.key === "Escape") e.stopPropagation(), onClose();
+        }}
+        placeholder="Link a thread…"
+        className="w-full border-b bg-transparent px-2 pt-1 pb-2 text-sm outline-none placeholder:text-muted-foreground"
+      />
+      <ol className="mt-1 flex flex-col">
+        {shown.map((item, i) => (
+          <li key={item.href}>
+            <button onMouseEnter={() => setActive(i)} onClick={() => pick(i)} className={cn(row, i === active && "bg-muted")}>
+              {item.icon}
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            </button>
+          </li>
+        ))}
+        {query.trim() && !shown.length && <li className="px-2 py-1.5 text-sm text-muted-foreground">No thread matches.</li>}
+        <li className="mt-1 border-t pt-1">
+          <button onMouseEnter={() => setActive(shown.length)} onClick={() => pick(shown.length)} className={cn(row, active === shown.length && "bg-muted")}>
+            <MessageSquarePlus className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate">
+              New thread: <span className="text-muted-foreground">{todo.text}</span>
+            </span>
+          </button>
+        </li>
+      </ol>
+    </div>
+  );
+}
+
 function StateBox({ state, onClick }: { state: TodoState; onClick: () => void }) {
   const next = TODO_STATES[(TODO_STATES.indexOf(state) + 1) % TODO_STATES.length]!;
   return (
