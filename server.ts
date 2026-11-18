@@ -8,6 +8,7 @@ import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
 import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR, TMUX_SCOPE, TMUX_SOCKET } from "./instance";
+import { enforce, onReply } from "./restrictions-enforce";
 import { invalid, loadRestrictions, resolve, saveRestrictions, type Restriction } from "./restrictions";
 import app from "./src/index.html";
 
@@ -984,6 +985,7 @@ function postIn(t: Thread, from: Session | undefined, text: string, nudge?: "sub
     if (to.length) t.pending = { routers: to.map((s) => s.id), since: Date.now() };
     for (const s of to) s.handed = t.id;
     answered(t);
+    onReply(t.id, text, enforcing);
   } else {
     t.pending = undefined;
     if (t.paused) t.paused.posts = (t.paused.posts ?? 0) + 1;
@@ -1322,6 +1324,22 @@ function answered(t: Thread) {
   for (const s of sessions.values()) if (s.wait?.kind === "thread" && s.wait.ref === t.id) endWait(s);
   settleTasks();
 }
+// Enforcing restrictions (restrictions-enforce.ts): a held call is asked about in the agent's thread, and each block, hold and
+// pass is a line on the agent's activity; told, it is also typed into the agent's prompt.
+const enforcing = {
+  restrictions: () => restrictions,
+  ask: (id: string, text: string) => {
+    const s = sessions.get(id);
+    const t = s && ask(s, text);
+    const asked = t && "same" in t ? ask(s!, text, undefined, undefined, true) : t;
+    return asked && !("same" in asked) ? asked.id : null;
+  },
+  log: (id: string, target: string, text: string, tell?: boolean) => {
+    const s = sessions.get(id);
+    if (s) dispatch({ to: [s], target, text, typed: !tell });
+  },
+  cli: CLI,
+};
 // Questions from before threads: each open one moves into a thread of its own, once, and its asker hears where.
 function migrateQuestions() {
   type Question = { id: number; session: string; name: string; status: string; at: number; thread: { from: string; text: string; at: number }[]; default?: string };
@@ -2392,6 +2410,13 @@ Bun.serve<WsData>({
       const to = [...sessions.values()].find((o) => isSentry(o) && o.name === `sentry:${body.sentry}` && o.exitCode === null);
       if (to) touchFrom(req, to, body.kind === "write" ? "write" : "read");
       return new Response(null, { status: 204 });
+    }
+    // The restrictions hook, on a call a restriction that asks or blocks matches: the verdict, with the session's objective.
+    if (path === "/api/restrictions/enforce" && req.method === "POST") {
+      const body = (await req.json().catch(() => ({}))) as { tool?: string; input?: Record<string, unknown>; cwd?: string };
+      const s = sessions.get(req.headers.get("x-maxflow-from") ?? "");
+      if (!s || !body.tool) return Response.json({ decision: "allow" });
+      return Response.json(enforce({ session: s.id, tool: body.tool, input: body.input, cwd: body.cwd, objective: s.role?.objective }, enforcing));
     }
     // `maxflow ask`: an agent's question to the user opens a thread from it, flagged as waiting on him.
     if (path === "/api/asks" && req.method === "POST") {

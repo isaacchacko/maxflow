@@ -7,10 +7,11 @@ const HOOKS = import.meta.dir;
 const SETTINGS = join(process.env.HOME!, ".claude/settings.json");
 const state = (s: string) => `${HOOKS}/claude-state.sh ${s}`;
 const questions = `${HOOKS}/claude-questions.ts`;
+const restrictions = `${HOOKS}/restrictions.ts`;
 const WANTED: Record<string, { matcher?: string; command: string }[]> = {
   SessionStart: [{ command: state("idle") }, { command: `${HOOKS}/claude-intro.sh` }],
   UserPromptSubmit: [{ command: state("working") }],
-  PreToolUse: [{ command: state("working") }, { matcher: "AskUserQuestion|SendMessage", command: questions }],
+  PreToolUse: [{ command: state("working") }, { matcher: "AskUserQuestion|SendMessage", command: questions }, { command: restrictions }],
   PostToolUse: [{ command: state("working") }],
   PermissionRequest: [{ command: state("waiting") }],
   Notification: [{ matcher: "permission_prompt", command: state("waiting") }],
