@@ -15,6 +15,8 @@ const usage = `usage:
   maxflow ask <question...> [--re THREAD] [--default REC] [--new] [--image PATH]   ask the user in a thread of yours, flagged as waiting on him; prints its id.
                                              Refused when an open ask on your objective reads the same: add to that one with --re, or --new if yours differs.
                                              --re: ask again in that thread; --default: your recommendation for a reversible step, which you go ahead with if he hasn't answered in 3h
+  maxflow todo ls [--day YYYY-MM-DD] [--json]   his todos (all days, or that day's): id, day, state (todo|doing|done|cancelled), text, tagged thread ids
+  maxflow todo tag <todo id> <thread id> | maxflow todo untag <todo id> <thread id>   show a thread under his todo, indented, or take it off
   maxflow tasks [--all]                      the user's task board, with each task's timeline; --all adds done and dropped ones
   maxflow task new <title...> | maxflow task <id> [--title T] [--status todo|doing|you|waiting|blocked|done|dropped] [--question] [--answer A]
                                              [--session ID] [--link URL] [--event TEXT] [--at TIME]   sentry:assistant's edits to the board
@@ -159,6 +161,17 @@ if (verb === "ls") {
   if (!process.env.MAXFLOW_SESSION) console.error("ask works only inside a maxflow session"), process.exit(1);
   const t = await call("/api/asks", { method: "POST", body: JSON.stringify({ text: await withImages(positional(rest, ["--re", "--default", "--image"]).join(" "), rest), re: flag(rest, "--re"), default: flag(rest, "--default"), new: rest.includes("--new") }) });
   console.log(`${t.id}: asked in "${t.title}" in his inbox, flagged as waiting on him (it goes in the thread you were handed; --new for a thread of its own, --re <id> for another). Keep working; his reply arrives in your prompt. Once nothing is left that doesn't hang on it, run \`maxflow wait thread:${t.id}\` and end your turn.`);
+} else if (verb === "todo" && rest[0] === "ls") {
+  const day = flag(rest, "--day");
+  const todos = ((await call("/api/todos")) as { id: string; day: string; state: string; text: string; threadIds: string[]; at: string }[])
+    .filter((t) => !day || t.day === day)
+    .sort((a, b) => a.day.localeCompare(b.day) || a.at.localeCompare(b.at))
+    .map(({ id, day, state, text, threadIds }) => ({ id, day, state, text, threadIds }));
+  if (rest.includes("--json")) console.log(JSON.stringify(todos, null, 2));
+  else for (const t of todos) console.log(`${t.id}  ${t.day}  ${t.state.padEnd(9)}  ${t.text}${t.threadIds.length ? `  [${t.threadIds.join(" ")}]` : ""}`);
+} else if (verb === "todo" && (rest[0] === "tag" || rest[0] === "untag") && rest[1] && rest[2]) {
+  const t = await call(`/api/todos/${rest[1]}/threads/${rest[2]}`, { method: rest[0] === "tag" ? "POST" : "DELETE" });
+  console.log(`${t.id}  ${t.text}  [${t.threadIds.join(" ")}]`);
 } else if (verb === "tasks") {
   for (const t of await call("/api/tasks"))
     if (rest.includes("--all") || (t.status !== "done" && t.status !== "dropped"))

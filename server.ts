@@ -1358,12 +1358,12 @@ const saveTasks = () => writeFileSync(TASKS, JSON.stringify(tasks));
 // His own todo list, each todo on a day (YYYY-MM-DD, his local day as the browser sends it); nothing else reads or writes it.
 // state: clicking a todo's box steps it todo → doing → done → cancelled → todo.
 const TODO_STATES = ["todo", "doing", "done", "cancelled"] as const;
-// threadId: a thread he linked it to, or started from it.
-type Todo = { id: string; text: string; day: string; state: (typeof TODO_STATES)[number]; at: string; threadId?: string };
+// threadIds: the threads tagged on it, by him from the page or by agents with `maxflow todo tag`, in the order they were tagged.
+type Todo = { id: string; text: string; day: string; state: (typeof TODO_STATES)[number]; at: string; threadIds: string[] };
 const TODOS = `${STATE_DIR}/todos.json`;
-// Todos saved before states were a done flag.
+// Todos saved before states were a done flag, or before a todo held several threads.
 const todos: Todo[] = (() => { try { return JSON.parse(readFileSync(TODOS, "utf8")); } catch { return []; } })().map(
-  ({ done, ...t }: Todo & { done?: boolean }) => ({ ...t, state: t.state ?? (done ? "done" : "todo") }),
+  ({ done, threadId, ...t }: Todo & { done?: boolean; threadId?: string }) => ({ ...t, state: t.state ?? (done ? "done" : "todo"), threadIds: t.threadIds ?? (threadId ? [threadId] : []) }),
 );
 const saveTodos = () => writeFileSync(TODOS, JSON.stringify(todos));
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -2393,23 +2393,34 @@ Bun.serve<WsData>({
     if (path === "/api/todos" && req.method === "POST") {
       const { text, day } = (await req.json().catch(() => ({}))) as { text?: string; day?: string };
       if (!text?.trim() || !day || !DAY.test(day)) return new Response("text, and day as YYYY-MM-DD", { status: 400 });
-      const todo: Todo = { id: crypto.randomUUID().slice(0, 8), text: text.trim(), day, state: "todo", at: new Date().toISOString() };
+      const todo: Todo = { id: crypto.randomUUID().slice(0, 8), text: text.trim(), day, state: "todo", at: new Date().toISOString(), threadIds: [] };
       todos.push(todo), saveTodos();
       return Response.json(todo, { status: 201 });
+    }
+    // Tagging a thread on a todo, or untagging it; each is idempotent, and answers with the todo.
+    const todoThread = path.match(/^\/api\/todos\/([\w-]+)\/threads\/([\w-]+)$/);
+    if (todoThread && (req.method === "POST" || req.method === "DELETE")) {
+      const [, todoId, threadId] = todoThread;
+      const todo = todos.find((t) => t.id === todoId);
+      if (!todo) return new Response(`no todo ${todoId}`, { status: 404 });
+      if (req.method === "POST") {
+        if (!threads.some((t) => t.id === threadId)) return new Response(`no thread ${threadId}`, { status: 404 });
+        if (!todo.threadIds.includes(threadId!)) todo.threadIds.push(threadId!);
+      } else todo.threadIds = todo.threadIds.filter((id) => id !== threadId);
+      saveTodos();
+      return Response.json(todo);
     }
     const todoPath = path.match(/^\/api\/todos\/([\w-]+)$/);
     const todo = todoPath && todos.find((t) => t.id === todoPath[1]);
     if (todoPath && !todo) return new Response("no such todo", { status: 404 });
     if (todo && req.method === "PATCH") {
-      const edit = (await req.json().catch(() => ({}))) as Partial<Pick<Todo, "text" | "day" | "state">> & { threadId?: string | null };
-      if (edit.threadId && !threads.some((t) => t.id === edit.threadId)) return new Response(`no thread ${edit.threadId}`, { status: 404 });
+      const edit = (await req.json().catch(() => ({}))) as Partial<Pick<Todo, "text" | "day" | "state">>;
       if (edit.text !== undefined && !edit.text.trim()) return new Response("text can't be empty", { status: 400 });
       if (edit.day !== undefined && !DAY.test(edit.day)) return new Response("day as YYYY-MM-DD", { status: 400 });
       if (edit.state !== undefined && !TODO_STATES.includes(edit.state)) return new Response(`state: one of ${TODO_STATES.join(", ")}`, { status: 400 });
       if (edit.text !== undefined) todo.text = edit.text.trim();
       if (edit.day !== undefined) todo.day = edit.day;
       if (edit.state !== undefined) todo.state = edit.state;
-      if (edit.threadId !== undefined) edit.threadId ? (todo.threadId = edit.threadId) : delete todo.threadId;
       saveTodos();
       return Response.json(todo);
     }
