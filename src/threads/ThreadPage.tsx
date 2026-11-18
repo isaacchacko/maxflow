@@ -16,7 +16,7 @@ import { pinItem, RowMenu, messageItems, threadItems } from "./RowMenu";
 import { firstUnseen, markSeen, setSeen } from "./seen";
 import { Rich } from "./Rich";
 import { ShotScope, shotsOf } from "./Viewer";
-import { AgentStack, ThreadPanel } from "./ThreadPanel";
+import { AgentHighlight, AgentStack, ThreadPanel } from "./ThreadPanel";
 import { HoverBar } from "./HoverBar";
 import { openPause, pausedLabel } from "./Pause";
 import { useVim, vimRow, type VimActions } from "./vim";
@@ -241,7 +241,8 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {/* An image here opens the viewer over this thread's images, the root's included and its subthreads' not. */}
           <ShotScope.Provider value={shotsOf([...(root ? [root] : []), ...replies])}>
-          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <div ref={scrollRef} data-messages className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            <AgentHighlight />
             {root?.ext?.context && <EarlierLine />}
             {root && (
               <RowMenu agent={`msg:${keyOf(root, -1)}`} items={messageMenu(root, keyOf(root, -1))}>
