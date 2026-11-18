@@ -26,7 +26,7 @@ const DRAFT_RECHECK_MS = 30 * 60_000;
 const REVIEW_TIMEOUT_MS = 40 * 60_000;
 const MODEL = "claude-opus-5-5";
 
-// The inbox sentry's risky paths; with the fast-lane deny list and CODEOWNERS, any hit makes a PR tier 3.
+// The inbox sentry's risky paths, outside tests and snapshots; with the fast-lane deny list and CODEOWNERS, any hit makes a PR tier 3.
 const RISKY = /migrat|alembic|\.sql$|erp|sap|terraform|infra|helm|k8s|kubernetes|\.github\/workflows|dockerfile|auth|permission|secret/i;
 const CORE_FLOW = /\/(cases?|suggestions?|instructions?|integrations?|mail(box)?|email|erp|api\/routes?|routes?\/api)\b|frontend\/src\/client\//i;
 const TEST = /(^|\/)(tests?|__tests__)\/|(^|\/)test_[^/]+\.py$|_test\.py$|\.(test|spec)\.[jt]sx?$/;
@@ -131,7 +131,7 @@ function score(clone: string, dir: string, ref: string, base: string): { signals
   const denied = (lane?.reasons ?? []).filter((r: string) => r.endsWith("on the deny list")).map((r: string) => r.split(":")[0]);
   const signals: Signals = {
     base, files: counted.length, lines: counted.reduce((n, c) => n + c.lines, 0), fastLane: lane && { eligible: lane.eligible, category: lane.category, reasons: lane.reasons },
-    risky: [...new Set([...denied, ...paths.filter((p) => RISKY.test(p))])],
+    risky: [...new Set([...denied, ...paths.filter((p) => RISKY.test(p) && !TEST.test(p) && !UNCOUNTED.test(p))])],
     owned: paths.filter((p) => isOwned(owners, p)),
     complexity: complexity(dir, base, paths.filter((p) => CODE.test(p) && !TEST.test(p))),
     churn: Number(run(["git", "-C", clone, "rev-list", "--count", "--since=30.days", ref, "--", ...paths])) || 0,
