@@ -79,7 +79,7 @@ function PinnedEntry({ t, open, unread, onDrop }: { t: Thread; open: boolean; un
       onDragLeave={() => setOver(false)}
       onDrop={e => (e.preventDefault(), setOver(false), onDrop(e.dataTransfer.getData("text/yarn-pin")))}
       onClick={e => e.metaKey || e.ctrlKey || (e.preventDefault(), e.shiftKey ? openPane(t.id) : (closePane(), (location.hash = `thread/${t.id}`)))}
-      className={cn("group/pin relative flex h-8 items-center gap-2 rounded-lg px-2 text-sm whitespace-nowrap text-muted-foreground hover:bg-black/[0.04] hover:text-foreground", (t.resolved || t.paused) && "opacity-50", over && "ring-2 ring-link/40")}
+      className={cn("group/pin relative flex h-8 shrink-0 items-center gap-2 rounded-lg px-2 text-sm whitespace-nowrap text-muted-foreground hover:bg-black/[0.04] hover:text-foreground", (t.resolved || t.paused) && "opacity-50", over && "ring-2 ring-link/40")}
     >
       {/* Its own face, from the thread's id so pins under one router still tell apart, doing what the thread is doing. */}
       <AgentFace id={t.id} expression={pinExpression(t)} small className="size-5 shrink-0" />
@@ -166,7 +166,7 @@ export function Sidebar({ view }: { view: string }) {
         </div>
         {pins.length > 0 && (
           <div data-agent="sidebar-pinned" className="mt-3 flex min-h-0 flex-col gap-0.5 overflow-y-auto [scrollbar-width:none]">
-            {open ? <p className="px-2.5 pb-1 text-xs font-medium text-muted-foreground">Pinned</p> : <span className="mx-2.5 mb-1.5 h-px bg-border" />}
+            {open ? <p className="shrink-0 px-2.5 pb-1 text-xs font-medium text-muted-foreground">Pinned</p> : <span className="mx-2.5 mb-1.5 h-px shrink-0 bg-border" />}
             {pins.map(t => (
               <PinnedEntry key={t.id} t={t} open={open} unread={unseenDeep(t, threads)} onDrop={dragged => dragged && dragged !== t.id && void setPinOrder(reorder(pins.map(x => x.id), dragged, t.id))} />
             ))}
