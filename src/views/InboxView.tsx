@@ -277,7 +277,7 @@ export function InboxView() {
             })}
           </div>
           {vim.panel}
-          <Composer autoFocus agent="inbox-input" draftKey="inbox" onSend={text => ((atBottom.current = true), startThread(text))} className="border-t px-4 py-2.5" />
+          <Composer autoFocus agent="inbox-input" draftKey="inbox" placeholder="Message Threads" onSend={text => ((atBottom.current = true), startThread(text))} className="px-4 pt-1 pb-3" />
         </section>
     </div>
   );

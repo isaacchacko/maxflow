@@ -324,7 +324,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
           </div>
           </ShotScope.Provider>
           {vim.panel}
-          <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => (setLine({ id }), postToThread(thread.id, "isaac", text, nudge ? "subthread" : undefined))} tools={<NudgeToggle on={nudge} set={on => setNudge(on ? "subthread" : "")} />} className="border-t px-4 py-2.5" />
+          <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => (setLine({ id }), postToThread(thread.id, "isaac", text, nudge ? "subthread" : undefined))} tools={<NudgeToggle on={nudge} set={on => setNudge(on ? "subthread" : "")} />} placeholder={thread.parentId ? "Reply in thread" : "Reply…"} className="px-4 pt-1 pb-3" />
         </section>
 
         {!embedded && (
@@ -410,9 +410,9 @@ function NudgeToggle({ on, set }: { on: string; set: (on: boolean) => void }) {
       title={on ? "asking for the answer in a subthread (click to answer inline)" : "ask for the answer in a subthread"}
       onMouseDown={e => e.preventDefault()}
       onClick={() => set(!on)}
-      className={cn("mt-0.5 shrink-0 rounded-md p-0.5 hover:bg-muted", on ? "text-foreground" : "text-muted-foreground/50")}
+      className={cn("flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-muted", on ? "bg-muted text-foreground" : "text-muted-foreground")}
     >
-      <GitBranch className="size-3.5" />
+      <GitBranch className="size-4" />
     </button>
   );
 }

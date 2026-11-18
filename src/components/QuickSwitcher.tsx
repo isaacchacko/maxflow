@@ -115,6 +115,8 @@ export function QuickSwitcher({ views }: { views: readonly { id: string; label: 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      // In a message box ⌘K makes a link, as in Slack.
+      if ((e.target as Element | null)?.closest?.("[data-composer]")) return;
       e.preventDefault();
       setOpen(o => !o);
     };
