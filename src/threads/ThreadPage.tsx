@@ -1,4 +1,4 @@
-import { AlarmClock, ArrowLeft, Check, ChevronRight, GitBranch, MessageSquareReply, MessagesSquare, Quote, RotateCcw } from "lucide-react";
+import { AlarmClock, ArrowLeft, ArrowUpToLine, Check, ChevronRight, GitBranch, MessageSquareReply, MessagesSquare, Quote, RotateCcw } from "lucide-react";
 import { createContext, Fragment, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
@@ -18,6 +18,7 @@ import { Rich } from "./Rich";
 import { ShotScope, shotsOf } from "./Viewer";
 import { AgentHighlight, AgentStack, ThreadPanel } from "./ThreadPanel";
 import { PinToggle } from "./PinToggle";
+import { openRaise, raise, raisedTo } from "./Raise";
 import { HoverBar } from "./HoverBar";
 import { openPause, pausedLabel } from "./Pause";
 import { useVim, vimRow, type VimActions } from "./vim";
@@ -144,6 +145,10 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
     },
     // Replying to the root is replying here; any other message gets a subthread of its own.
     reply: k => (k === root?.id || !byKey(k)?.id ? composer() : (composeOnArrival(), void openSubthread(id, k, nav.open))),
+    raise: k => {
+      const m = byKey(k);
+      if (m?.id) openRaise(m === root ? (thread?.parentId ?? id) : id, m.id, m.text);
+    },
     quote: k => {
       const m = byKey(k);
       if (m?.id) quoteInto(`thread:${id}`, quoted(m.text, m === root ? (thread?.parentId ?? id) : id, m.id));
@@ -191,6 +196,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
       open: sub && (sub.messages.length > 0 || sub.pending) ? () => actions.open(k) : undefined,
       reply: m.id ? () => actions.reply(k) : undefined,
       quote: m.id ? () => actions.quote(k) : undefined,
+      raise: m.id ? () => actions.raise(k) : undefined,
       unread: at >= (thread.parentId ? 0 : 1) ? () => (setSeen(thread.id, at), setLine({ id, at })) : undefined,
       link: m.id && `[[msg:${m === root ? (thread.parentId ?? id) : id}/${m.id}]]`,
     });
@@ -249,6 +255,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
                 <MessageRow from={root.from} at={root.at} text={root.text} ext={root.ext} active={vim.cursor === keyOf(root, -1)}>
                   {root.nudge && <NudgeMark />}
                   {root.wake && <WakeMark />}
+                  {root.id && <RaisedMark threads={all} thread={thread.parentId ?? thread.id} message={root.id} />}
                 </MessageRow>
                 {/* The root stands for the thread: resolving or pausing it here is the thread's, as the header's buttons are. */}
                 <HoverBar
@@ -309,6 +316,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
                   <MessageRow from={m.from} at={m.at} text={m.text} ext={m.ext} where={!!m.ext && conversationOf(m.ext.link) !== conversationOf((replies.slice(0, i).findLast(x => x.ext) ?? root)?.ext?.link)} grouped={grouped} active={vim.cursor === keyOf(m, i)} className={cn(!grouped && i > 0 && "mt-2.5")}>
                     {m.nudge && <NudgeMark />}
                     {m.wake && <WakeMark />}
+                    {m.id && <RaisedMark threads={all} thread={thread.id} message={m.id} />}
                     {sub && (sub.messages.length > 0 || sub.pending) && <Replies t={sub} />}
                   </MessageRow>
                   <HoverBar
@@ -329,7 +337,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
           </div>
           </ShotScope.Provider>
           {vim.panel}
-          <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => (setLine({ id }), postToThread(thread.id, "isaac", text, nudge ? "subthread" : undefined))} tools={<NudgeToggle on={nudge} set={on => setNudge(on ? "subthread" : "")} />} toolsOn={!!nudge} placeholder={thread.parentId ? "Reply in thread" : embedded ? "Reply to thread…" : "Reply…"} className="px-4 pt-1 pb-3" />
+          <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onRaise={text => void raise(text)} onSend={text => (setLine({ id }), postToThread(thread.id, "isaac", text, nudge ? "subthread" : undefined))} tools={<NudgeToggle on={nudge} set={on => setNudge(on ? "subthread" : "")} />} toolsOn={!!nudge} placeholder={thread.parentId ? "Reply in thread" : embedded ? "Reply to thread…" : "Reply…"} className="px-4 pt-1 pb-3" />
         </section>
 
         {!embedded && <ThreadPanel thread={thread} />}
@@ -354,6 +362,17 @@ function NudgeToggle({ on, set }: { on: string; set: (on: boolean) => void }) {
       {on && <Check className="size-3.5 shrink-0 text-link" />}
     </button>
   );
+}
+
+/** Under a message he raised to Threads: where it went, each a link to that thread. */
+function RaisedMark({ threads, thread, message }: { threads: Thread[]; thread: string; message: string }) {
+  const to = raisedTo(threads, thread, message);
+  return to.map(t => (
+    <a key={t.id} href={`#thread/${t.id}`} data-agent={`raised:${t.id}`} title={t.title} className="mt-0.5 flex w-fit max-w-full items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+      <ArrowUpToLine className="size-3 shrink-0" />
+      <span className="truncate">raised to {t.title}</span>
+    </a>
+  ));
 }
 
 /** On his sent message: he asked for its answer in a subthread. */

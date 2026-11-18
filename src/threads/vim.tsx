@@ -3,7 +3,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { restoring } from "./jump";
 
 /** What the keys do to the item under the cursor; a page leaves out what it has no use for. */
-export type VimActions = { open?(key: string): void; pin?(key?: string): void; up?(): void; compose(): void; reply?(key: string): void; quote?(key: string): void; resolve?(key?: string): void; pause?(key?: string): void; section?(dir: 1 | -1, key?: string): string | undefined };
+export type VimActions = { open?(key: string): void; pin?(key?: string): void; raise?(key: string): void; up?(): void; compose(): void; reply?(key: string): void; quote?(key: string): void; resolve?(key?: string): void; pause?(key?: string): void; section?(dir: 1 | -1, key?: string): string | undefined };
 
 const HELP: [string, string][] = [
   ["j k", "next, previous"],
@@ -14,6 +14,7 @@ const HELP: [string, string][] = [
   ["i a", "write; Esc leaves an empty box"],
   ["r", "reply in thread"],
   ["y q", "quote"],
+  ["R", "raise to Threads, quoted, as a new thread"],
   ["x", "resolve, reopen"],
   ["p", "pause until a time"],
   ["P", "pin to the sidebar, unpin"],
@@ -112,6 +113,7 @@ export function useVim(scope: string, items: string[], scroller: React.RefObject
         r: () => cursor && actions.reply?.(cursor),
         y: () => cursor && actions.quote?.(cursor),
         q: () => cursor && actions.quote?.(cursor),
+        R: () => cursor && actions.raise?.(cursor),
         x: () => actions.resolve?.(cursor),
         p: () => actions.pause?.(cursor),
         P: () => actions.pin?.(cursor),

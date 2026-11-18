@@ -1,4 +1,4 @@
-import { AlarmClock, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, Pin, PinOff, Play, Quote, RotateCcw, type LucideIcon } from "lucide-react";
+import { AlarmClock, ArrowUpToLine, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, Pin, PinOff, Play, Quote, RotateCcw, type LucideIcon } from "lucide-react";
 import { ContextMenu, DropdownMenu } from "radix-ui";
 import { Kbd } from "@/components/ui/kbd";
 import type { Thread } from "@/mock";
@@ -100,10 +100,11 @@ export function threadItems(t: Thread, all: Thread[], on: { open?(): void; reply
 export const pinItem = (t: Thread): MenuItem => ({ label: t.pinned ? "Unpin" : "Pin", icon: t.pinned ? PinOff : Pin, keys: "P", run: () => void setPinned(t.id, !t.pinned), agent: `pin:${t.id}`, pressed: !!t.pinned });
 
 /** What a message offers: its subthread if it has one, else a reply in thread; a quote; unread from it on; its link and text. */
-export function messageItems(text: string, on: { open?(): void; reply?(): void; quote?(): void; unread?(): void; link?: string }): (MenuItem | false | undefined)[] {
+export function messageItems(text: string, on: { open?(): void; reply?(): void; quote?(): void; raise?(): void; unread?(): void; link?: string }): (MenuItem | false | undefined)[] {
   return [
     on.open ? { label: "Open subthread", icon: MessageSquareReply, keys: "Enter", run: on.open } : on.reply && { label: "Reply in thread", icon: MessageSquareReply, keys: "r", run: on.reply },
     on.quote && { label: "Quote", icon: Quote, keys: "y", run: on.quote },
+    on.raise && { label: "Raise to Threads", icon: ArrowUpToLine, keys: "R", run: on.raise, agent: "raise" },
     "-",
     on.unread && { label: "Mark unread from here", icon: Mail, run: on.unread },
     "-",

@@ -4,6 +4,7 @@ import { Capture } from "@/components/Capture";
 import { QuickSwitcher } from "@/components/QuickSwitcher";
 import { Viewer } from "@/threads/Viewer";
 import { PauseDialog, useResurfacing } from "@/threads/Pause";
+import { RaiseDialog } from "@/threads/Raise";
 import { Sidebar } from "@/components/Sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Page } from "@/page/Page";
@@ -128,6 +129,7 @@ export function App() {
       <Capture />
       <Viewer />
       <PauseDialog />
+      <RaiseDialog />
       {/* Linear's frame: the sidebar sits on the window tint, and each view is one white panel, top to bottom, inset from the edges. */}
       {/* Installed as an app, the tint around the panel drags the window, and the panel starts below the overlaid title bar. */}
       {/* The sidebar runs the window's full height, edge to edge; the panel keeps its margin, below the title bar's strip when
