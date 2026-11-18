@@ -141,6 +141,19 @@ export async function setResolved(threadId: string, resolved: boolean) {
   threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: resolved ? { at: NOW_AT } : undefined } : t)));
 }
 
+/** Isaac pins a thread to his sidebar, at the end of his pins, or unpins it. */
+export async function setPinned(threadId: string, pinned: boolean) {
+  if (isLive()) return void (await api(`/api/threads/${threadId}`, { pinned }, "PATCH"));
+  const next = Math.max(0, ...threadStore.get().map(t => (t.pinned ? t.pinned.order + 1 : 0)));
+  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, pinned: pinned ? (t.pinned ?? { at: NOW_AT, order: next }) : undefined } : t)));
+}
+
+/** The order he dragged his pins into, first to last; drawn at once, then kept by the server. */
+export async function setPinOrder(ids: string[]) {
+  threadStore.set(all => all.map(t => (t.pinned && ids.includes(t.id) ? { ...t, pinned: { ...t.pinned, order: ids.indexOf(t.id) } } : t)));
+  if (isLive()) await api("/api/pins", { order: ids }, "PATCH");
+}
+
 /** Isaac puts a thread away until a time, or brings it back now (null); his own message in it brings it back too. */
 export async function setPaused(threadId: string, paused: { until: number; said: string } | null) {
   if (isLive()) return void (await api(`/api/threads/${threadId}`, { paused }, "PATCH"));

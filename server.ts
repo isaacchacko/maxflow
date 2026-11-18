@@ -723,7 +723,7 @@ type Feed = { source: string; who: string; link: string; task?: number };
 // any of them can have a subthread of its own. A top thread's root is its first message, so replying to that posts in it.
 // nudge: he asked for the answer to this message in a subthread of its own.
 type Message = { id: string; from: string; at: number; text: string; nudge?: "subthread" };
-type Thread = { id: string; title: string; objective: string; routers: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; task?: number; resolved?: { at: number }; paused?: Paused; resurfaced?: { at: number; from: number }; asks?: Ask; q?: number; mergedInto?: string; feed?: Feed };
+type Thread = { id: string; title: string; objective: string; routers: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; task?: number; resolved?: { at: number }; paused?: Paused; pinned?: { at: number; order: number }; resurfaced?: { at: number; from: number }; asks?: Ask; q?: number; mergedInto?: string; feed?: Feed };
 const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
 // Commands are retired: every thread is a plain thread, and a router's result on his message is an ordinary reply.
@@ -1467,7 +1467,7 @@ async function world() {
       events: t.timeline.map((e) => ({ from: e.session && sessions.get(e.session)?.role?.role === "router" ? "router" : e.session ? "agent" : "sentry", at: iso(e.at), text: e.text })),
       page: t.page ?? [],
     })),
-    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), ...(t.paused && { paused: { until: iso(t.paused.until), at: iso(t.paused.at), said: t.paused.said, posts: t.paused.posts ?? 0 } }), ...(t.resurfaced && { resurfaced: { at: iso(t.resurfaced.at), from: t.resurfaced.from } }), ...(t.feed && { feed: { source: t.feed.source, who: t.feed.who, link: t.feed.link } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, ...(m.nudge && { nudge: m.nudge }) })) })),
+    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), ...(t.paused && { paused: { until: iso(t.paused.until), at: iso(t.paused.at), said: t.paused.said, posts: t.paused.posts ?? 0 } }), ...(t.resurfaced && { resurfaced: { at: iso(t.resurfaced.at), from: t.resurfaced.from } }), ...(t.pinned && { pinned: { at: iso(t.pinned.at), order: t.pinned.order } }), ...(t.feed && { feed: { source: t.feed.source, who: t.feed.who, link: t.feed.link } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, ...(m.nudge && { nudge: m.nudge }) })) })),
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({
       id: s.id,
@@ -1986,7 +1986,15 @@ Bun.serve<WsData>({
       const t = threads.find((x) => x.id === threadAct[1]);
       if (!t) return new Response("no such thread", { status: 404 });
       if (!req.headers.get("user-agent")?.includes("Mozilla")) return new Response("resolving or pausing a thread is Isaac's, from the browser: answer in it and leave it to him", { status: 403 });
-      const body = (await req.json().catch(() => ({}))) as { resolved?: boolean; paused?: { until?: number; said?: string } | null };
+      const body = (await req.json().catch(() => ({}))) as { resolved?: boolean; paused?: { until?: number; said?: string } | null; pinned?: boolean };
+      // Pinned, it stays in his sidebar until he unpins it, at the end of his pins; resolving or pausing it leaves it pinned.
+      if ("pinned" in body) {
+        if (typeof body.pinned !== "boolean") return new Response("pinned: true or false", { status: 400 });
+        t.pinned = body.pinned ? (t.pinned ?? { at: Date.now(), order: Math.max(0, ...threads.map((x) => (x.pinned ? x.pinned.order + 1 : 0))) }) : undefined;
+        saveThreads();
+        publish(`thread/${t.id}`, { thread: t.id, pinned: body.pinned });
+        return Response.json(t);
+      }
       if ("paused" in body) {
         const { until, said } = body.paused ?? {};
         if (body.paused && (typeof until !== "number" || until <= Date.now())) return new Response("paused: { until: a time to come, in ms, said } or null", { status: 400 });
@@ -2004,6 +2012,19 @@ Bun.serve<WsData>({
       saveThreads();
       publish(`thread/${t.id}`, { thread: t.id, resolved });
       return Response.json(t);
+    }
+    // The order of his pinned threads, as he dragged them in the sidebar: the ids, first to last.
+    if (path === "/api/pins" && req.method === "PATCH") {
+      if (!req.headers.get("user-agent")?.includes("Mozilla")) return new Response("pins are Isaac's, from the browser", { status: 403 });
+      const { order } = (await req.json().catch(() => ({}))) as { order?: string[] };
+      if (!Array.isArray(order)) return new Response("order: the pinned thread ids, first to last", { status: 400 });
+      order.forEach((id, i) => {
+        const t = threads.find((x) => x.id === id);
+        if (t?.pinned) t.pinned.order = i;
+      });
+      saveThreads();
+      publish("pins", { order });
+      return new Response(null, { status: 204 });
     }
     const threadPost = path.match(/^\/api\/threads\/([\w-]+)\/messages$/);
     if (threadPost && req.method === "POST") {

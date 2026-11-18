@@ -1,15 +1,15 @@
-import { AlarmClock, Check, ChevronDown, MessageSquareReply, Quote, RotateCcw } from "lucide-react";
+import { AlarmClock, Check, ChevronDown, MessageSquareReply, Pin, Quote, RotateCcw } from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { localAt, type Thread } from "@/mock";
-import { markAskShown, objectiveStore, setResolved, startThread, threadStore } from "@/store";
+import { markAskShown, objectiveStore, setResolved, startThread, threadStore, setPinned } from "@/store";
 import { Composer, quoteInto, quoted } from "@/threads/Composer";
 import { HoverBar } from "@/threads/HoverBar";
 import { arrivedFrom, composeOnArrival, flash, useLayerScroll } from "@/threads/jump";
 import { MessageRow } from "@/threads/MessageRow";
 import { Replies } from "@/threads/Replies";
 import { Avatar, Rich } from "@/threads/Rich";
-import { RowMenu, threadItems } from "@/threads/RowMenu";
+import { pinItem, RowMenu, threadItems } from "@/threads/RowMenu";
 import { ShotScope, shotsOf } from "@/threads/Viewer";
 import { openPause, pausedLabel } from "@/threads/Pause";
 import { unseenDeep, useSeen } from "@/threads/seen";
@@ -102,6 +102,10 @@ export function InboxView() {
       if (t) toggle(t);
     },
     pause: id => id && pause(id),
+    pin: id => {
+      const t = threads.find(x => x.id === id);
+      if (t) void setPinned(t.id, !t.pinned);
+    },
     quote,
   });
   const show = (id: string) => {
@@ -161,6 +165,7 @@ export function InboxView() {
               onClick={e => (e.target as Element).closest("a, button") || open(t.id)}
               meta={
                 <span className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
+                  {t.pinned && <Pin aria-label="pinned" className="size-3 shrink-0 self-center text-muted-foreground" />}
                   {t.asks && <span className="shrink-0 rounded-full bg-warn-soft px-2 font-medium text-warn">needs you</span>}
                   <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : t.asks ? "" : "routing…"}</span>
                   {t.paused && (
@@ -195,6 +200,7 @@ export function InboxView() {
             { label: t.paused ? "Pause again…" : "Pause…", icon: AlarmClock, keys: "p", run: () => pause(t.id), agent: `inbox-pause:${t.id}` },
             { label: "Reply in thread", icon: MessageSquareReply, keys: "r", run: () => reply(t.id), agent: `inbox-reply:${t.id}` },
             !!t.messages[0]?.id && { label: "Quote", icon: Quote, keys: "y", run: () => quote(t.id), agent: `inbox-quote:${t.id}` },
+            pinItem(t),
           ]}
           menu={menu(t)}
         />

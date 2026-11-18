@@ -1,4 +1,4 @@
-import { AlarmClock, ArrowLeft, Check, ChevronRight, ExternalLink, GitBranch, MessageSquareReply, MessagesSquare, Network, Quote, RotateCcw, Waypoints } from "lucide-react";
+import { AlarmClock, ArrowLeft, Check, ChevronRight, ExternalLink, GitBranch, MessageSquareReply, MessagesSquare, Network, Pin, PinOff, Quote, RotateCcw, Waypoints } from "lucide-react";
 import { createContext, Fragment, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -6,12 +6,12 @@ import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { AgentFace } from "@/components/AgentFace";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
-import { agentStore, objectiveStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
+import { agentStore, objectiveStore, openSubthread, postToThread, setPinned, setResolved, threadStore } from "@/store";
 import { Composer, quoteInto, quoted } from "./Composer";
 import { composeOnArrival, flashMessage, goToMessage, takeCompose, useLayerScroll } from "./jump";
 import { MessageRow, when } from "./MessageRow";
 import { Replies, repliesOf } from "./Replies";
-import { RowMenu, messageItems, threadItems } from "./RowMenu";
+import { pinItem, RowMenu, messageItems, threadItems } from "./RowMenu";
 import { firstUnseen, markSeen, setSeen } from "./seen";
 import { RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
 import { ShotScope, shotsOf } from "./Viewer";
@@ -128,6 +128,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
     up: climb,
     resolve: () => thread && resolveOrReopen(thread, climb),
     pause: () => thread && !thread.parentId && openPause(id, climb),
+    pin: () => thread && void setPinned(id, !thread.pinned),
     open: k => {
       const sub = all.find(t => t.parentId === id && t.parentMessageId === k);
       if (sub && (sub.messages.length > 0 || sub.pending)) nav.open(sub.id);
@@ -214,13 +215,16 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
         <h1 className={cn("truncate text-xl font-semibold tracking-tight", thread.resolved && "text-muted-foreground")}>{thread.title}</h1>
         {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
         {thread.paused && <span data-agent="thread-paused" className="text-xs whitespace-nowrap text-muted-foreground">paused {pausedLabel(thread.paused)}</span>}
+        <Button variant="outline" size="icon" className="ml-auto size-8" data-agent="thread-pin" title={thread.pinned ? "Unpin from the sidebar (P)" : "Pin to the sidebar (P)"} aria-pressed={!!thread.pinned} onClick={() => void setPinned(thread.id, !thread.pinned)}>
+          {thread.pinned ? <PinOff /> : <Pin />}
+        </Button>
         {!thread.parentId && (
-          <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-pause" title="Pause until a time (p)" onClick={() => openPause(thread.id, climb)}>
+          <Button variant="outline" size="sm" data-agent="thread-pause" title="Pause until a time (p)" onClick={() => openPause(thread.id, climb)}>
             <AlarmClock />
             {thread.paused ? "Paused" : "Pause"}
           </Button>
         )}
-        <Button variant="outline" size="sm" className={cn(thread.parentId && "ml-auto")} data-agent="thread-resolve" onClick={() => resolveOrReopen(thread, climb)}>
+        <Button variant="outline" size="sm" data-agent="thread-resolve" onClick={() => resolveOrReopen(thread, climb)}>
           {thread.resolved ? <RotateCcw /> : <Check />}
           {thread.resolved ? "Reopen" : "Resolve"}
         </Button>
@@ -248,6 +252,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
                     !thread.parentId && { label: thread.paused ? "Pause again…" : "Pause…", icon: AlarmClock, keys: "p", run: () => openPause(thread.id, climb), agent: `msg-pause:${thread.id}` },
                     { label: "Reply", icon: MessageSquareReply, keys: "r", run: () => actions.reply(keyOf(root, -1)) },
                     !!root.id && { label: "Quote", icon: Quote, keys: "y", run: () => actions.quote(keyOf(root, -1)), agent: `quote:${root.id}` },
+                    pinItem(thread),
                   ]}
                   menu={messageMenu(root, keyOf(root, -1))}
                 />

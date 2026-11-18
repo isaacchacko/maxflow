@@ -1,8 +1,8 @@
-import { AlarmClock, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, Play, Quote, RotateCcw, type LucideIcon } from "lucide-react";
+import { AlarmClock, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, Pin, PinOff, Play, Quote, RotateCcw, type LucideIcon } from "lucide-react";
 import { ContextMenu } from "radix-ui";
 import { Kbd } from "@/components/ui/kbd";
 import type { Thread } from "@/mock";
-import { setPaused } from "@/store";
+import { setPaused, setPinned } from "@/store";
 import { openPause } from "./Pause";
 import { repliesOf } from "./Replies";
 import { markRead, markUnread, unseenDeep } from "./seen";
@@ -65,11 +65,15 @@ export function threadItems(t: Thread, all: Thread[], on: { open?(): void; reply
     { label: t.resolved ? "Reopen" : "Resolve", icon: t.resolved ? RotateCcw : Check, keys: "x", run: on.resolve, agent: `menu-resolve:${t.id}` },
     !t.parentId && { label: t.paused ? "Pause again…" : "Pause…", icon: AlarmClock, keys: "p", run: on.pause ?? (() => openPause(t.id)), agent: `menu-pause:${t.id}` },
     t.paused && { label: "Unpause", icon: Play, run: () => void setPaused(t.id, null), agent: `menu-unpause:${t.id}` },
+    pinItem(t),
     "-",
     { label: "Copy link", icon: Link, run: () => copy(threadLink(t.id)) },
     { label: "Copy text", icon: Copy, run: () => copy(t.messages[0]?.text ?? t.title) },
   ];
 }
+
+/** Pin a thread to the sidebar, or unpin it: the same item in its menus and hover bars, on P. */
+export const pinItem = (t: Thread): MenuItem => ({ label: t.pinned ? "Unpin" : "Pin", icon: t.pinned ? PinOff : Pin, keys: "P", run: () => void setPinned(t.id, !t.pinned), agent: `pin:${t.id}` });
 
 /** What a message offers: its subthread if it has one, else a reply in thread; a quote; unread from it on; its link and text. */
 export function messageItems(text: string, on: { open?(): void; reply?(): void; quote?(): void; unread?(): void; link?: string }): (MenuItem | false | undefined)[] {

@@ -1,8 +1,12 @@
 import { CircleCheckBig, MessagesSquare, type LucideIcon } from "lucide-react";
+import { AgentFace, expressionOf, faceOf } from "@/components/AgentFace";
+import { Working } from "@/components/Working";
+import type { Thread } from "@/mock";
 import { useEffect, useRef, useState } from "react";
 import { Mark } from "@/components/Mark";
 import { cn } from "@/lib/utils";
-import { taskStore, threadStore } from "@/store";
+import { agentStore, setPinOrder, taskStore, threadStore } from "@/store";
+import { openPane } from "@/threads/pane";
 import { unseenDeep, useSeen } from "@/threads/seen";
 
 // The rail's 52px run from the window's edge to the panel's, so a glyph has as much room on its right as on its left.
@@ -20,6 +24,13 @@ const load = (): Saved => {
   } catch {
     return { width: 216, pinned: false };
   }
+};
+
+/** The ids with `dragged` moved to where `onto` is. */
+const reorder = (ids: string[], dragged: string, onto: string) => {
+  const rest = ids.filter(id => id !== dragged);
+  rest.splice(rest.indexOf(onto) + (ids.indexOf(dragged) < ids.indexOf(onto) ? 1 : 0), 0, dragged);
+  return rest;
 };
 
 function Entry({ view, label, icon: Icon, count, warn, active, open }: { view: string; label: string; icon: LucideIcon; count: number; warn?: boolean; active: boolean; open: boolean }) {
@@ -40,6 +51,51 @@ function Entry({ view, label, icon: Icon, count, warn, active, open }: { view: s
       ) : (
         // Folded to a rail, a count is only a dot on the glyph, taking no room; the number shows when it opens.
         count > 0 && <span aria-label={`${count}`} className={cn("absolute top-1.5 left-[1.55rem] size-2 rounded-full ring-2 ring-window", warn ? "bg-warn" : "bg-new")} />
+      )}
+    </a>
+  );
+}
+
+/**
+ * A pinned thread: its router's face (or the thread glyph), its title, and whether it has news or a router at work on it. A click
+ * opens it beside the page and ⇧-click as the page, as everywhere; resolved or paused, it stays pinned, drawn muted.
+ */
+function PinnedEntry({ t, open, unread, onDrop }: { t: Thread; open: boolean; unread: number; onDrop(dragged: string): void }) {
+  const agents = agentStore.use();
+  const face = t.routerIds[0] ?? t.messages.find(m => m.from !== "isaac")?.from;
+  const working = !!t.pending && !t.pending.stale;
+  const [over, setOver] = useState(false);
+  return (
+    <a
+      href={`#thread/${t.id}`}
+      title={t.title}
+      data-agent={`pinned:${t.id}`}
+      draggable
+      onDragStart={e => e.dataTransfer.setData("text/yarn-pin", t.id)}
+      onDragOver={e => (e.preventDefault(), setOver(true))}
+      onDragLeave={() => setOver(false)}
+      onDrop={e => (e.preventDefault(), setOver(false), onDrop(e.dataTransfer.getData("text/yarn-pin")))}
+      onClick={e => e.metaKey || e.ctrlKey || (e.preventDefault(), e.shiftKey ? (location.hash = `thread/${t.id}`) : openPane(t.id))}
+      className={cn("relative flex h-8 items-center gap-2 rounded-lg px-2 text-sm whitespace-nowrap text-muted-foreground hover:bg-black/[0.04] hover:text-foreground", (t.resolved || t.paused) && "opacity-50", over && "ring-2 ring-link/40")}
+    >
+      {/* Folded, pins share their routers' faces too often to tell apart, so each is its title's first letter on its own tint. */}
+      {!open ? (
+        <span style={{ background: `hsl(${faceOf(t.id).hue} 70% 88%)`, color: `hsl(${faceOf(t.id).hue} 45% 30%)` }} className="flex size-5 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold">
+          {t.title.match(/[a-z0-9]/i)?.[0]?.toUpperCase() ?? "#"}
+        </span>
+      ) : face ? (
+        <AgentFace id={face} expression={expressionOf(agents.find(a => a.id === face)?.state)} small still className="size-5 shrink-0" />
+      ) : (
+        <MessagesSquare className="mx-0.5 size-4 shrink-0" />
+      )}
+      {open ? (
+        <>
+          <span className="min-w-0 flex-1 truncate">{t.title}</span>
+          {working && <Working className="size-3" />}
+          {unread > 0 && <span className="rounded-full bg-new-soft px-1.5 text-xs font-medium text-new tabular-nums">{unread}</span>}
+        </>
+      ) : (
+        unread > 0 && <span className="absolute top-1 left-[1.45rem] size-2 rounded-full bg-new ring-2 ring-window" />
       )}
     </a>
   );
@@ -80,6 +136,7 @@ export function Sidebar({ view }: { view: string }) {
   const tops = threads.filter(t => !t.parentId && !t.resolved && !t.paused);
   const needsYou = tops.filter(t => t.asks).length;
   const unread = tops.filter(t => unseenDeep(t, threads) > 0).length;
+  const pins = threads.filter(t => t.pinned).sort((a, b) => a.pinned!.order - b.pinned!.order);
   return (
     // The rail holds its place in the layout; open over the page, the panel inside it is wider than the rail.
     <div style={{ width: saved.pinned ? saved.width : RAIL }} className="relative shrink-0 [app-region:no-drag]">
@@ -102,6 +159,14 @@ export function Sidebar({ view }: { view: string }) {
           <Entry view="todo" label="Todo" icon={CircleCheckBig} count={needsYou} warn active={view === "todo"} open={open} />
           <Entry view="inbox" label="Threads" icon={MessagesSquare} count={unread} active={view === "inbox"} open={open} />
         </div>
+        {pins.length > 0 && (
+          <div data-agent="sidebar-pinned" className="mt-3 flex min-h-0 flex-col gap-0.5 overflow-y-auto [scrollbar-width:none]">
+            {open ? <p className="px-2.5 pb-1 text-xs font-medium text-muted-foreground">Pinned</p> : <span className="mx-2.5 mb-1.5 h-px bg-border" />}
+            {pins.map(t => (
+              <PinnedEntry key={t.id} t={t} open={open} unread={unseenDeep(t, threads)} onDrop={dragged => dragged && dragged !== t.id && void setPinOrder(reorder(pins.map(x => x.id), dragged, t.id))} />
+            ))}
+          </div>
+        )}
         {open && <div onPointerDown={drag} title={saved.pinned ? "Drag to resize · ⌘\\ to unpin" : "Drag to resize · ⌘\\ to pin open"} className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize" />}
       </nav>
     </div>
