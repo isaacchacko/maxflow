@@ -3,7 +3,6 @@ import { useContext, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentFace, expressionOf } from "@/components/AgentFace";
-import { AgentLink } from "@/components/AgentLink";
 import { GitHubGlyph, loadSlackNames, mrkdwn, SlackGlyph, slackLabel, slackLink, slackNameStore } from "@/lib/slack";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor, type External } from "@/mock";
@@ -330,6 +329,7 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
   const agents = agentStore.use();
   const objectives = objectiveStore.use();
   const sentries = sentryStore.use();
+  const names = nameStore.use();
   const [broken, setBroken] = useState(false);
   // Small is the 20px face in a replies line, where a worker's state dot would crowd it.
   const tile = cn("relative flex shrink-0 items-center justify-center rounded-full font-semibold", small ? "size-5 text-[10px] [&>svg]:size-3" : "size-9 text-sm");
@@ -351,18 +351,17 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
         <Radar className="size-4 text-muted-foreground" />
       </span>
     );
-  // An agent's own face, its expression following its state; a list of them stays still, so a long inbox doesn't repaint. A click
-  // on it opens the agent.
+  // An agent's own face, its expression following its state; a list of them stays still, so a long inbox doesn't repaint.
   const a = agents.find(x => x.id === from);
   return (
-    <AgentLink id={from} className={cn("relative flex shrink-0", small ? "size-5" : "size-9")}>
+    <span title={a?.name ?? names[from] ?? from} className={cn("relative flex shrink-0", small ? "size-5" : "size-9")}>
       <AgentFace id={from} expression={expressionOf(a?.state)} small={small} still className="size-full" />
       {!small && a?.role === "router" && (
         <span className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-full bg-card shadow-card">
           <Network className="size-2.5 text-router" />
         </span>
       )}
-    </AgentLink>
+    </span>
   );
 }
 
