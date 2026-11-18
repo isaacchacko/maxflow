@@ -183,6 +183,13 @@ export function InboxView() {
     const top = el.getBoundingClientRect().top;
     for (const mark of el.querySelectorAll<HTMLElement>("[data-day]")) mark.nextElementSibling?.toggleAttribute("data-stuck", mark.getBoundingClientRect().top < top + 6);
   }
+  // The channel's days in order, as runs of its rows: [from, to) in rows.
+  const sections = rows.reduce<{ day: string; from: number; to: number }[]>((all, r, i) => {
+    const day = r.first.at.slice(0, 10);
+    if (all.at(-1)?.day === day) all.at(-1)!.to = i + 1;
+    else all.push({ day, from: i, to: i + 1 });
+    return all;
+  }, []);
   // The days in the channel, newest first, for the dividers' jump-to menu; a jump lands on the day's first thread under its bar.
   const days = [...new Set(rows.map(r => r.first.at.slice(0, 10)).filter(d => d !== "9999"))].reverse();
   const jump = (day: string) => {
@@ -301,27 +308,30 @@ export function InboxView() {
         )}
         <section className="flex min-h-0 flex-1 flex-col">
           <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-5 pt-0 pb-4">
-            {rows.map(({ t, first }, i) => {
-              const prev = rows[i - 1];
-              const day = first.at.slice(0, 10);
-              const newDay = day !== prev?.first.at.slice(0, 10);
-              const isNew = i === firstNew;
-              const grouped = !newDay && !isNew && !t.asks && !t.feed && !t.paused && !prev?.t.asks && prev?.first.from === first.from && Date.parse(first.at) - Date.parse(prev.first.at) <= GROUP_MS;
-              return (
-                <Fragment key={t.id}>
-                  {newDay && first.at !== "9999" && (
-                    <DayDivider day={day} days={days} jump={jump} />
-                  )}
-                  {isNew && (
-                    <div ref={lineRef} data-agent="unread-line" className="my-2 flex items-center gap-1.5 text-[11px] font-semibold text-destructive">
-                      <span className="h-px flex-1 bg-destructive" />
-                      New
-                    </div>
-                  )}
-                  {threadRow(t, first, grouped)}
-                </Fragment>
-              );
-            })}
+            {/* Each day is a section of its own, so its pill sticks only while the day is on screen and the next day's pushes it
+                off: one pill at the top at a time, as in Slack. */}
+            {sections.map(({ day, from, to }) => (
+              <section key={day} data-agent="inbox-day-section">
+                {day !== "9999" && <DayDivider day={day} days={days} jump={jump} />}
+                {rows.slice(from, to).map(({ t, first }, j) => {
+                  const i = from + j;
+                  const prev = rows[i - 1];
+                  const isNew = i === firstNew;
+                  const grouped = j > 0 && !isNew && !t.asks && !t.feed && !t.paused && !prev?.t.asks && prev?.first.from === first.from && Date.parse(first.at) - Date.parse(prev.first.at) <= GROUP_MS;
+                  return (
+                    <Fragment key={t.id}>
+                      {isNew && (
+                        <div ref={lineRef} data-agent="unread-line" className="my-2 flex items-center gap-1.5 text-[11px] font-semibold text-destructive">
+                          <span className="h-px flex-1 bg-destructive" />
+                          New
+                        </div>
+                      )}
+                      {threadRow(t, first, grouped)}
+                    </Fragment>
+                  );
+                })}
+              </section>
+            ))}
           </div>
           {vim.panel}
           <Composer autoFocus agent="inbox-input" draftKey="inbox" placeholder="Message Threads" onSend={text => ((atBottom.current = true), startThread(text))} className="px-4 pt-1 pb-3" />
