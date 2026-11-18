@@ -1,5 +1,5 @@
 import { AlarmClock, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, Pin, PinOff, Play, Quote, RotateCcw, type LucideIcon } from "lucide-react";
-import { ContextMenu } from "radix-ui";
+import { ContextMenu, DropdownMenu } from "radix-ui";
 import { Kbd } from "@/components/ui/kbd";
 import type { Thread } from "@/mock";
 import { setPaused, setPinned } from "@/store";
@@ -47,6 +47,30 @@ export function RowMenu({ items, agent, children }: { items: (MenuItem | false |
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>
+  );
+}
+
+/** The same menu opened from a button (a header's ⋯) instead of a right-click: what the button sits on offers the same items either way. */
+export function DropMenu({ items, agent, children }: { items: (MenuItem | false | undefined)[]; agent: string; children: React.ReactElement }) {
+  return (
+    <DropdownMenu.Root modal={false}>
+      <DropdownMenu.Trigger asChild>{children}</DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content data-agent={`menu:${agent}`} align="end" sideOffset={4} onEscapeKeyDown={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()} onCloseAutoFocus={e => e.preventDefault()} className="z-50 min-w-48 border bg-background p-1 text-sm shadow-lg">
+          {applying(items).map((x, i) =>
+            x === "-" ? (
+              <DropdownMenu.Separator key={i} className="my-1 h-px bg-border" />
+            ) : (
+              <DropdownMenu.Item key={x.label} data-agent={x.agent} onSelect={x.run} className="flex cursor-pointer items-center gap-2 px-2 py-1 outline-none select-none data-highlighted:bg-muted">
+                <x.icon className="size-3.5 text-muted-foreground" />
+                <span className="flex-1">{x.label}</span>
+                {x.keys && <Kbd>{x.keys}</Kbd>}
+              </DropdownMenu.Item>
+            ),
+          )}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
 

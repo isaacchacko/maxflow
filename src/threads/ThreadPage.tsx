@@ -35,7 +35,7 @@ export type ThreadNav = { open(threadId: string): void; up(threadId: string, vie
 export const ThreadNavContext = createContext<ThreadNav>({ open: id => void (location.hash = `thread/${id}`), up: threadUp });
 
 /** Resolving is done with a thread, so it climbs a level as Escape does once the server has it; reopening stays put. */
-async function resolveOrReopen(thread: Thread, up: () => void) {
+export async function resolveOrReopen(thread: Thread, up: () => void) {
   const resolving = !thread.resolved;
   await setResolved(thread.id, resolving);
   if (resolving) up();
