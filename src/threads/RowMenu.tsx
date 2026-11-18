@@ -14,9 +14,11 @@ export const copy = (text: string) => void navigator.clipboard.writeText(text);
 export const threadLink = (id: string) => `${location.origin}${location.pathname}#thread/${id}`;
 
 /** A right-click menu on its one child (a row, a message, a header), which draws as hovered while the menu is open. */
+/** Only the items that apply; a rule never leads, trails or doubles up once the others are left out. */
+export const applying = (items: (MenuItem | false | undefined)[] | undefined) => (items ?? []).filter((x): x is MenuItem => !!x).filter((x, i, all) => x !== "-" || (i > 0 && i < all.length - 1 && all[i - 1] !== "-"));
+
 export function RowMenu({ items, agent, children }: { items: (MenuItem | false | undefined)[]; agent: string; children: React.ReactElement }) {
-  // Only the items that apply; a rule never leads, trails or doubles up once the others are left out.
-  const shown = (items ?? []).filter(x => !!x).filter((x, i, all) => x !== "-" || (i > 0 && i < all.length - 1 && all[i - 1] !== "-"));
+  const shown = applying(items);
   return (
     <ContextMenu.Root modal={false}>
       <ContextMenu.Trigger asChild className="data-[state=open]:bg-muted/40">

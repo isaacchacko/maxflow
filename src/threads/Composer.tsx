@@ -24,6 +24,9 @@ export function quoteInto(draftKey: string, markdown: string) {
   if (dispatchEvent(new CustomEvent("composer-quote", { detail: { draftKey, markdown }, cancelable: true }))) waiting.set(draftKey, [waiting.get(draftKey), markdown].filter(Boolean).join("\n\n"));
 }
 
+/** A quote as markdown: the passage, then a link back to the message it came from, which draws as a chip. */
+export const quoted = (text: string, thread: string, message: string) => `${text.trim().split("\n").map(l => `> ${l}`).join("\n")}\n>\n> — [[msg:${thread}/${message}]]`;
+
 const imagesIn = (files: FileList | undefined) => [...(files ?? [])].filter(f => f.type.startsWith("image/"));
 
 /** A message box that wraps and grows with its text, and takes images pasted from the clipboard or dropped on it: each is uploaded at once, and its path is kept with the draft so a reload keeps it attached. */

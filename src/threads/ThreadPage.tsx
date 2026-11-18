@@ -7,7 +7,7 @@ import { AgentFace } from "@/components/AgentFace";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { agentStore, objectiveStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
-import { Composer, quoteInto } from "./Composer";
+import { Composer, quoteInto, quoted } from "./Composer";
 import { composeOnArrival, flashMessage, goToMessage, takeCompose, useLayerScroll } from "./jump";
 import { MessageRow, when } from "./MessageRow";
 import { Replies, repliesOf } from "./Replies";
@@ -16,6 +16,7 @@ import { firstUnseen, markSeen, setSeen } from "./seen";
 import { RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
 import { FeedTag } from "./FeedTag";
 import { ShotScope, shotsOf } from "./Viewer";
+import { HoverBar } from "./HoverBar";
 import { openPause, pausedLabel } from "./Pause";
 import { useVim, vimRow, type VimActions } from "./vim";
 
@@ -35,9 +36,6 @@ async function resolveOrReopen(thread: Thread, view: string) {
 
 // Text selected inside one message, with where to draw its Quote button.
 type Selected = { thread: string; message: string; text: string; x: number; y: number };
-
-/** A quote as markdown: the passage, then a link back to the message it came from, which draws as a chip. */
-const quoted = (text: string, thread: string, message: string) => `${text.trim().split("\n").map(l => `> ${l}`).join("\n")}\n>\n> — [[msg:${thread}/${message}]]`;
 
 // Slack's grouping: a sender's next message within this long drops its picture and name.
 const GROUP_MS = 5 * 60_000;
@@ -221,10 +219,22 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {root && (
               <RowMenu agent={`msg:${keyOf(root, -1)}`} items={messageMenu(root, keyOf(root, -1))}>
-              <div data-msg={root.id} data-thread={thread.parentId ?? thread.id} {...vimRow(keyOf(root, -1))}>
+              <div data-msg={root.id} data-thread={thread.parentId ?? thread.id} {...vimRow(keyOf(root, -1))} className="group/bar relative">
                 <MessageRow from={root.from} at={root.at} text={root.text} active={vim.cursor === keyOf(root, -1)}>
                   {root.nudge && <NudgeMark />}
                 </MessageRow>
+                {/* The root stands for the thread: resolving or pausing it here is the thread's, as the header's buttons are. */}
+                <HoverBar
+                  agent={`msg:${keyOf(root, -1)}`}
+                  active={vim.cursor === keyOf(root, -1)}
+                  actions={[
+                    { label: thread.resolved ? "Reopen" : "Resolve", icon: thread.resolved ? RotateCcw : Check, keys: "x", run: () => resolveOrReopen(thread, back), agent: `msg-resolve:${thread.id}` },
+                    !thread.parentId && { label: thread.paused ? "Pause again…" : "Pause…", icon: AlarmClock, keys: "p", run: () => openPause(thread.id, () => threadUp(thread.id, back)), agent: `msg-pause:${thread.id}` },
+                    { label: "Reply", icon: MessageSquareReply, keys: "r", run: () => actions.reply(keyOf(root, -1)) },
+                    !!root.id && { label: "Quote", icon: Quote, keys: "y", run: () => actions.quote(keyOf(root, -1)), agent: `quote:${root.id}` },
+                  ]}
+                  menu={messageMenu(root, keyOf(root, -1))}
+                />
               </div>
               </RowMenu>
             )}
@@ -263,31 +273,20 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                   </div>
                 )}
                 <RowMenu agent={`msg:${keyOf(m, i)}`} items={messageMenu(m, keyOf(m, i))}>
-                <div data-msg={m.id} data-thread={thread.id} {...vimRow(keyOf(m, i))} className="group/msg relative">
+                <div data-msg={m.id} data-thread={thread.id} {...vimRow(keyOf(m, i))} className="group/bar relative">
                   <MessageRow from={m.from} at={m.at} text={m.text} grouped={grouped} active={vim.cursor === keyOf(m, i)} className={cn(!grouped && i > 0 && "mt-2.5")}>
                     {m.nudge && <NudgeMark />}
                     {sub && (sub.messages.length > 0 || sub.pending) && <Replies t={sub} />}
                   </MessageRow>
-                  {m.id && (
-                    <button
-                      data-agent={`reply-in-thread:${m.id}`}
-                      title="Reply in thread"
-                      onClick={() => openSubthread(thread.id, m.id!)}
-                      className="absolute top-0 right-0 rounded-md border bg-card p-1 text-muted-foreground opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
-                    >
-                      <MessageSquareReply className="size-3.5" />
-                    </button>
-                  )}
-                  {m.id && (
-                    <button
-                      data-agent={`quote:${m.id}`}
-                      title="Quote"
-                      onClick={() => quoteInto(`thread:${thread.id}`, quoted(m.text, thread.id, m.id!))}
-                      className="absolute top-0 right-7 rounded-md border bg-card p-1 text-muted-foreground opacity-0 group-hover/msg:opacity-100 hover:text-foreground"
-                    >
-                      <Quote className="size-3.5" />
-                    </button>
-                  )}
+                  <HoverBar
+                    agent={`msg:${keyOf(m, i)}`}
+                    active={vim.cursor === keyOf(m, i)}
+                    actions={[
+                      !!m.id && { label: "Reply in thread", icon: MessageSquareReply, keys: "r", run: () => openSubthread(thread.id, m.id!), agent: `reply-in-thread:${m.id}` },
+                      !!m.id && { label: "Quote", icon: Quote, keys: "y", run: () => quoteInto(`thread:${thread.id}`, quoted(m.text, thread.id, m.id!)), agent: `quote:${m.id}` },
+                    ]}
+                    menu={messageMenu(m, keyOf(m, i))}
+                  />
                 </div>
                 </RowMenu>
                 </Fragment>

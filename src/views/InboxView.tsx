@@ -1,9 +1,10 @@
-import { AlarmClock, Check, ChevronDown } from "lucide-react";
+import { AlarmClock, Check, ChevronDown, MessageSquareReply, Quote, RotateCcw } from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { localAt, type Thread } from "@/mock";
 import { markAskShown, objectiveStore, setResolved, startThread, threadStore } from "@/store";
-import { Composer } from "@/threads/Composer";
+import { Composer, quoteInto, quoted } from "@/threads/Composer";
+import { HoverBar } from "@/threads/HoverBar";
 import { arrivedFrom, composeOnArrival, flash, useLayerScroll } from "@/threads/jump";
 import { MessageRow } from "@/threads/MessageRow";
 import { FeedTag } from "@/threads/FeedTag";
@@ -85,6 +86,12 @@ export function InboxView() {
   const open = (id: string) => (location.hash = `thread/${id}`);
   const reply = (id: string) => (composeOnArrival(), (location.hash = `thread/${id}`));
   const pause = (id: string) => (setKept(k => new Set(k).add(id)), openPause(id));
+  // Quoting an opener answers it in its thread: the quote waits in that thread's box, which opens focused on it.
+  const quote = (id: string) => {
+    const t = threads.find(x => x.id === id);
+    const m = t?.messages[0];
+    if (t && m?.id) quoteInto(`thread:${t.id}`, quoted(m.text, t.id, m.id)), open(t.id);
+  };
   const menu = (t: Thread) => threadItems(t, threads, { open: () => open(t.id), reply: () => reply(t.id), resolve: () => toggle(t), pause: () => pause(t.id) });
   // j/k walk the channel top to bottom, starting from its newest thread.
   const vim = useVim("inbox", rows.map(r => r.t.id), scrollRef, "last", {
@@ -96,6 +103,7 @@ export function InboxView() {
       if (t) toggle(t);
     },
     pause: id => id && pause(id),
+    quote,
   });
   const show = (id: string) => {
     const row = scrollRef.current?.querySelector(`[data-vim="${CSS.escape(id)}"]`);
@@ -137,7 +145,7 @@ export function InboxView() {
 
   const threadRow = (t: Thread, first: ReturnType<typeof openerOf>, grouped: boolean) => (
     <RowMenu key={t.id} agent={t.id} items={menu(t)}>
-      <div {...vimRow(t.id)} className={cn("group/row relative", !grouped && "mt-2.5")}>
+      <div {...vimRow(t.id)} className={cn("group/row group/bar relative", !grouped && "mt-2.5")}>
         <div className={cn((t.resolved || t.paused) && "opacity-50")}>
           {/* An image in the preview opens the viewer over the whole thread's. */}
           <ShotScope.Provider value={shotsOf(t.messages)}>
@@ -157,7 +165,6 @@ export function InboxView() {
                   {t.asks && <span className="shrink-0 rounded-full bg-warn-soft px-2 font-medium text-warn">needs you</span>}
                   {t.feed && <FeedTag feed={t.feed} />}
                   <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : t.asks ? "" : "routing…"}</span>
-                  {t.resolved && <Check className="size-3 shrink-0 self-center" />}
                   {t.paused && (
                     <span data-agent={`inbox-paused:${t.id}`} className="flex shrink-0 items-center gap-1 whitespace-nowrap">
                       <AlarmClock className="size-3 self-center" />
@@ -167,18 +174,32 @@ export function InboxView() {
                 </span>
               }
             >
-              {(t.messages.length > 1 || t.pending || grouped) && <Replies t={t} />}
+              {/* Resolved, the row says so beside its replies, and the pill reopens it. */}
+              {((t.messages.length > 1 || t.pending || grouped) || t.resolved) && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {(t.messages.length > 1 || t.pending || grouped) && <Replies t={t} />}
+                  {t.resolved && (
+                    <button data-agent={`inbox-reopen:${t.id}`} title="Reopen" onClick={() => toggle(t)} className="mt-1 flex items-center gap-1 rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-xs font-medium text-ok hover:border-ok">
+                      <Check className="size-3" />
+                      Resolved
+                    </button>
+                  )}
+                </div>
+              )}
             </MessageRow>
           </ShotScope.Provider>
         </div>
-        <button
-          data-agent={`inbox-resolve:${t.id}`}
-          title={t.resolved ? "Reopen" : "Resolve"}
-          onClick={() => toggle(t)}
-          className={cn("absolute top-0 right-0 z-10 rounded-md border bg-card p-1 hover:border-ring", t.resolved ? "text-ok" : "text-muted-foreground opacity-0 group-hover/row:opacity-100")}
-        >
-          <Check className="size-3.5" />
-        </button>
+        <HoverBar
+          agent={t.id}
+          active={vim.cursor === t.id}
+          actions={[
+            { label: t.resolved ? "Reopen" : "Resolve", icon: t.resolved ? RotateCcw : Check, keys: "x", run: () => toggle(t), agent: `inbox-resolve:${t.id}` },
+            { label: t.paused ? "Pause again…" : "Pause…", icon: AlarmClock, keys: "p", run: () => pause(t.id), agent: `inbox-pause:${t.id}` },
+            { label: "Reply in thread", icon: MessageSquareReply, keys: "r", run: () => reply(t.id), agent: `inbox-reply:${t.id}` },
+            !!t.messages[0]?.id && { label: "Quote", icon: Quote, keys: "y", run: () => quote(t.id), agent: `inbox-quote:${t.id}` },
+          ]}
+          menu={menu(t)}
+        />
       </div>
     </RowMenu>
   );
