@@ -24,11 +24,7 @@
   .mark { display: flex; align-items: center; gap: 6px; font-weight: 600; }
   .panel { width: min(1080px, 100%); flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
   header { padding: 24px 28px 16px; display: flex; gap: 16px; align-items: center; border-bottom: 1px solid var(--line); }
-  .scene { width: 96px; height: 64px; flex: none; }
-  .scene .cat { transform-origin: 30px 58px; animation: sway 4s ease-in-out infinite; }
-  .scene .ball { transform-origin: 74px 40px; animation: roll 6s ease-in-out infinite; }
-  @keyframes roll { 0%, 100% { transform: rotate(-8deg) } 50% { transform: rotate(8deg) } }
-  @keyframes sway { 0%, 100% { transform: rotate(-3deg) } 50% { transform: rotate(3deg) } }
+  .scene { flex: none; font-size: 44px; line-height: 1; letter-spacing: 2px; }
   h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
   .sub { color: var(--dim); margin-top: 2px; }
   main { flex: 1; min-height: 0; display: flex; gap: 24px; padding: 20px 28px 24px; }
@@ -55,30 +51,8 @@
 <div class="titlebar"><div class="mark"><span>🧶</span> yarn</div></div>
 <div class="panel">
   <header>
-    <!-- A cat in the yarn: our agent face's mint for the cat, worried while yarn is tangled and glad once it is back, a pawed loose strand
-         running from a coral ball. -->
-    <svg class="scene" viewBox="0 0 96 64" aria-hidden="true">
-      <path d="M8 59c12-6 22 4 34-2s20-12 26-15" fill="none" stroke="#e07a5f" stroke-width="1.6" stroke-linecap="round" />
-      <g class="ball">
-        <circle cx="74" cy="40" r="15" fill="#f4a28c" />
-        <path d="M62 33c8 2 17 8 22 18M60 43c9-1 19 2 26 8M67 27c4 6 6 15 5 27M79 26c-1 7-5 18-12 27" fill="none" stroke="#d9694c" stroke-width="1.3" stroke-linecap="round" />
-      </g>
-      <g class="cat" stroke="hsl(158 48% 50%)" stroke-width=".9" stroke-linejoin="round" fill="hsl(158 82% 83%)">
-        <path d="M46 55c9 3 12-6 7-11" fill="none" stroke-width="3" stroke-linecap="round" />
-        <path d="M15 59c-2-13 4-22 15-22s17 9 15 22z" />
-        <path d="M20 26l1.5-11 8 6.5zM40 26l-1.5-11-8 6.5z" />
-        <circle cx="30" cy="30" r="11" />
-        <ellipse cx="41" cy="57.5" rx="4.5" ry="2.8" />
-        <g id="worried" fill="#121216" stroke="#121216" stroke-linecap="round">
-          <circle cx="25.8" cy="31.5" r="1.6" stroke="none" />
-          <circle cx="34.2" cy="31.5" r="1.6" stroke="none" />
-          <path d="M23.4 27.6l3.8-1.6M36.6 27.6l-3.8-1.6" stroke-opacity=".6" stroke-width="1.1" fill="none" />
-        </g>
-        <g id="glad" fill="none" stroke="#121216" stroke-width="1.5" stroke-linecap="round" hidden>
-          <path d="M24 31.8q1.8-2.6 3.6 0M32.4 31.8q1.8-2.6 3.6 0" />
-        </g>
-      </g>
-    </svg>
+    <!-- Slack's :cat2: then the yarn, as he asked: two emoji, large and still. -->
+    <div class="scene" aria-hidden="true">🐈🧶</div>
     <div>
       <h1>Oh no! The cat got into the yarn.</h1>
       <div class="sub">Untangling it now. Your agents are safe in tmux and still running.</div>
@@ -176,7 +150,6 @@
   function comeBack() {
     back = true;
     $("s4").className = "step done"; $("s4").querySelector(".tick").textContent = "✓";
-    $("worried").setAttribute("hidden", ""); $("glad").removeAttribute("hidden");
     $("back").style.display = "grid";
     setTimeout(() => {
       if (agentId) history.replaceState(null, "", `/#agent/${agentId}`);
