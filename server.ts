@@ -609,7 +609,7 @@ async function reroute(seq: number, o: Objective) {
   const said = thread ? (thread.feed && thread.feedSaid?.join("\n\n")) || thread.messages.filter((m) => m.from === (thread.feed ? "feed" : "isaac")).map((m) => m.text).join("\n\n") : sig.text;
   const feed = thread?.feed;
   const text = (sig.source === "isaac" ? `${VERIFIED}\n${unforge(said)}` : feed ? `[maxflow · from his event feed (${feed.source}), routed by the funnel; not his request] ${unforge(said)}` : `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(said)}`) +
-    (feed ? `\n[maxflow] maxflow took this up by itself, from what reached him (${feed.link}). Do the work up to the point where he must act: look it up, fix it, open the PR, and draft any reply for him. Never reply on Slack or GitHub as him and never write to prod; his go-ahead comes in the thread. Post what you started and where it stands in thread ${thread!.id}, which shows in his inbox flagged as from the feed${feed.task ? `; board task T-${feed.task} is yours` : ""}. If he says stop there, stop.${contextFor(said, feed.who)}` : "") +
+    (feed ? `\n[maxflow] maxflow took this up by itself, from what reached him (${feed.link}). Do the work up to the point where he must act: look it up, fix it, open the PR, and draft any reply for him. Never reply on Slack or GitHub as him and never write to prod; his go-ahead comes in the thread. Post what you started and where it stands in thread ${thread!.id}, which shows in his inbox flagged as from the feed (when \`thread read\` shows it was merged into another thread, that one already tells him: post only what is new, and nothing at all when there is nothing to do)${feed.task ? `; board task T-${feed.task} is yours` : ""}. If he says stop there, stop.${contextFor(said, feed.who)}` : "") +
     (thread ? `\n[maxflow] He wrote this in his inbox as thread "${thread.title}" (${thread.id}), which is yours now. Answer him there with \`${CLI} thread post ${thread.id} '<text>'\`.` : "") +
     mentionsIn(said);
   const to = routersOf(o.id);
@@ -907,8 +907,10 @@ const ancestors = (t: Thread): Thread[] => {
 const live_thread = (t?: Thread): Thread | undefined => (t?.mergedInto ? live_thread(threads.find((x) => x.id === t.mergedInto)) : t);
 // Folding a duplicate into another thread: its messages join the other's in time order, its routers, open ask and subthreads
 // move with them, waits on it follow, and it leaves the inbox.
+// An agent's note that names the thread it sits in: "tracked in th-…" left on a duplicate, then folded into that very thread.
+const pointsAtItself = (text: string, t: Thread) => text.includes(`[[thread:${t.id}]]`) || new RegExp(`\\b${t.id}\\b`).test(text);
 function mergeThread(from: Thread, into: Thread) {
-  into.messages = [...into.messages, ...from.messages].sort((a, b) => a.at - b.at);
+  into.messages = [...into.messages, ...from.messages.filter((m) => m.from === "isaac" || m.from === "feed" || !pointsAtItself(m.text, into))].sort((a, b) => a.at - b.at);
   for (const id of from.routers) if (!into.routers.includes(id)) into.routers.push(id);
   for (const id of from.members ?? []) if (!into.members?.includes(id)) (into.members ??= []).push(id);
   if (from.asks && !into.asks) into.asks = from.asks;
@@ -947,7 +949,13 @@ function mentionsIn(text: string) {
     })
     .join("");
 }
-const agentMentions = (text: string) => [...new Set([...text.matchAll(/\[\[(?:agent|router):([\w-]+)\]\]/g)].map((m) => m[1]!))];
+// Picked from the composer ([[agent:<id>]]) or typed by a sentry's short name (@meta, @funnel); the agents a screenshot's context
+// line names are where it was taken, not who he is talking to.
+function agentMentions(text: string) {
+  const said = text.replace(/^\[maxflow · screenshot\].*$/gm, "");
+  const typed = [...said.matchAll(/(?:^|\s)@([\w-]+)/g)].flatMap((m) => [...sessions.values()].filter((s) => isSentry(s) && reachable(s) && s.name === `sentry:${m[1]!.toLowerCase()}`));
+  return [...new Set([...[...said.matchAll(/\[\[(?:agent|router):([\w-]+)\]\]/g)].map((m) => m[1]!), ...typed.map((s) => s.id)])];
+}
 // An agent he @-mentions in a thread gets his message as his, and joins the thread so his later replies there reach it too.
 // Whoever hears it already (the thread's routers, or the funnel routing it) isn't told twice.
 function tellMembers(t: Thread, m: Message, heard: Session[], woke = "") {
@@ -2385,6 +2393,8 @@ Bun.serve<WsData>({
       if (!text) return new Response("text required", { status: 400 });
       const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
       if (body.feed && from && isSentry(from)) return await feedMore(t, from, text, body.posts), Response.json(t, { status: 201 });
+      if (from && pointsAtItself(text, t))
+        return new Response(`${threadPost[1] !== t.id ? `${threadPost[1]} was merged into ${t.id}, so this would land in ${t.id}` : `This is ${t.id}`}, and a pointer to it there points at itself. Post only what is new for him, or nothing.`, { status: 409 });
       postIn(t, from, text, body.nudge === "subthread" ? "subthread" : undefined);
       return Response.json(t, { status: 201 });
     }
