@@ -22,9 +22,13 @@ const DIR = join(import.meta.dir, "..");
 const TMUX = ["tmux", "-L", TMUX_SOCKET, "-f", join(DIR, "tmux.conf")];
 const HOST = "127.0.0.1";
 const XTERM = join(DIR, "node_modules/@xterm");
+// The page wears the app's own type, from the same package the app bundles, since the app can't serve it while it is down.
+const INTER = join(DIR, "node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2");
 
 // Only the live server runs as a service, and a dev one is down whenever its developer stops it, so there is nothing to recover.
-if (!LIVE) console.log("health sentry: not the live maxflow, nothing to watch"), process.exit(0);
+// HEALTH_DEV=1 watches a dev instance anyway, as if it were a loaded service, to try the down page against it.
+const DEV = !!process.env.HEALTH_DEV;
+if (!LIVE && !DEV) console.log("health sentry: not the live maxflow, nothing to watch"), process.exit(0);
 
 const run = (cmd: string[]) => {
   const r = Bun.spawnSync(cmd);
@@ -136,6 +140,7 @@ function openPage() {
         if (path === "/__down/ws") return server.upgrade(req, { data: {} }) ? undefined : new Response("upgrade failed", { status: 400 });
         const asset = { "/__down/xterm.js": "xterm/lib/xterm.js", "/__down/xterm.css": "xterm/css/xterm.css", "/__down/fit.js": "addon-fit/lib/addon-fit.js" }[path];
         if (asset) return new Response(Bun.file(join(XTERM, asset)));
+        if (path === "/__down/inter.woff2") return new Response(Bun.file(INTER), { headers: { "content-type": "font/woff2" } });
         if (path.startsWith("/api/")) return new Response("maxflow is down", { status: 503, headers: DOWN_HEADERS });
         return new Response(Bun.file(join(import.meta.dir, "health.html")), { headers: { ...DOWN_HEADERS, "content-type": "text/html" } });
       },
@@ -200,7 +205,7 @@ for (;;) {
           }
         }
       }
-    } else if (!loaded()) {
+    } else if (!DEV && !loaded()) {
       // Unloaded on purpose (launchctl bootout, systemctl disable), so it is meant to be down.
       downSince = null;
       closePage();
