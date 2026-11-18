@@ -9,7 +9,7 @@ import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
 import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR, TMUX_SCOPE, TMUX_SOCKET } from "./instance";
 import { enforce, onReply } from "./restrictions-enforce";
-import { invalid, loadRestrictions, resolve, saveRestrictions, type Restriction } from "./restrictions";
+import { invalid, loadRestrictions, resolve, saveRestrictions, type Person, type Restriction } from "./restrictions";
 import app from "./src/index.html";
 
 const HOST = "127.0.0.1";
@@ -1403,6 +1403,16 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 // His autonomy restrictions (restrictions.ts): the Restrictions page edits them, the enforcement hook reads them.
 export const restrictions: Restriction[] = loadRestrictions();
+function restrictionPeople() {
+  const people = new Map<string, Person>();
+  const store = (() => { try { return JSON.parse(readFileSync(`${STATE_DIR}/slack-messages.json`, "utf8")); } catch { return {}; } })() as Record<string, { msgs: { uid: string; who: string; bot?: boolean }[] }>;
+  for (const { msgs } of Object.values(store)) for (const m of msgs) if (!m.bot && /^[UW]/.test(m.uid)) people.set(`slack:${m.uid}`, { name: m.who, slack: m.uid });
+  const gh = (() => { try { return JSON.parse(readFileSync(`${STATE_DIR}/gh-status.json`, "utf8")); } catch { return {}; } })() as Record<string, { pr?: { author?: { login: string }; reviews?: { nodes: { author: { login: string } | null }[] }; comments?: { nodes: { author: { login: string } | null }[] } } }>;
+  for (const { pr } of Object.values(gh))
+    for (const login of [pr?.author?.login, ...(pr?.reviews?.nodes ?? []).map((n) => n.author?.login), ...(pr?.comments?.nodes ?? []).map((n) => n.author?.login)])
+      if (login && !login.endsWith("[bot]")) people.set(`github:${login.toLowerCase()}`, { name: login, github: login });
+  return [...people.values()].sort((a, b) => a.name!.localeCompare(b.name!));
+}
 
 // at: when the event happened, which the assistant reads from the transcript it took it from; it defaults to now.
 function editTask(t: Task | undefined, edit: TaskEdit) {
@@ -2472,26 +2482,36 @@ Bun.serve<WsData>({
     if (path === "/api/restrictions" && req.method === "GET") return Response.json(restrictions);
     if (path === "/api/restrictions" && req.method === "POST") {
       const body = (await req.json().catch(() => ({}))) as Partial<Restriction>;
-      const bad = invalid(body);
+      // An override is named after what it overrides unless he names it.
+      const parent = body.parent ? restrictions.find((r) => r.id === body.parent) : undefined;
+      const draft = { ...body, label: body.label?.trim() || parent?.label, action: body.action?.trim() || parent?.action, match: body.match ?? {} };
+      const bad = invalid(draft, restrictions);
       if (bad) return new Response(bad, { status: 400 });
-      const r: Restriction = { id: crypto.randomUUID().slice(0, 8), action: body.action!.trim(), label: body.label!.trim(), mode: body.mode!, match: body.match!, scope: body.scope, note: body.note };
+      const r: Restriction = { id: crypto.randomUUID().slice(0, 8), action: draft.action!, label: draft.label!.trim(), mode: draft.mode!, match: parent ? {} : draft.match, scope: draft.scope, parent: parent?.id, note: draft.note };
       restrictions.push(r), saveRestrictions(restrictions);
       return Response.json(r, { status: 201 });
     }
     // The mode that applies to a tool call, for `maxflow restrictions check`.
     if (path === "/api/restrictions/check" && req.method === "POST") return Response.json(resolve(restrictions, await req.json().catch(() => ({ tool: "" }))));
+    // The people the page offers for a restriction's scope: everyone the slack sentry has heard from, and the GitHub logins
+    // on the PRs the gh sentry polls. Email addresses he types.
+    if (path === "/api/restrictions/people" && req.method === "GET") return Response.json(restrictionPeople());
     const restrictionPath = path.match(/^\/api\/restrictions\/([\w-]+)$/);
     const restriction = restrictionPath && restrictions.find((r) => r.id === restrictionPath[1]);
     if (restrictionPath && !restriction && (req.method === "PATCH" || req.method === "DELETE")) return new Response("no such restriction", { status: 404 });
     if (restriction && req.method === "PATCH") {
       const edit = (await req.json().catch(() => ({}))) as Partial<Restriction>;
-      const next = { ...restriction, ...edit, id: restriction.id, builtin: restriction.builtin };
-      const bad = invalid(next);
+      const next = { ...restriction, ...edit, id: restriction.id, builtin: restriction.builtin, parent: restriction.parent };
+      const bad = invalid(next, restrictions);
       if (bad) return new Response(bad, { status: 400 });
       Object.assign(restriction, next), saveRestrictions(restrictions);
       return Response.json(restriction);
     }
-    if (restriction && req.method === "DELETE") return restrictions.splice(restrictions.indexOf(restriction), 1), saveRestrictions(restrictions), new Response(null, { status: 204 });
+    // Its overrides go with it.
+    if (restriction && req.method === "DELETE") {
+      restrictions.splice(0, restrictions.length, ...restrictions.filter((r) => r.id !== restriction.id && r.parent !== restriction.id));
+      return saveRestrictions(restrictions), new Response(null, { status: 204 });
+    }
 
     if (path === "/api/tasks" && req.method === "GET") return Response.json(tasks.map((t) => ({ ...t, prs: prProgress(t) })));
     if (path === "/api/comments" && req.method === "GET") return Response.json(openUserComments());
