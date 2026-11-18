@@ -1,8 +1,7 @@
-import { ArrowRight, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
-import { addTodo, deleteTodo, editTodo, liveStore, loadTodos, threadStore, todoStore, type Todo } from "@/store";
+import { addTodo, deleteTodo, editTodo, isOpen, liveStore, loadTodos, threadStore, TODO_STATES, todoStore, type Todo, type TodoState } from "@/store";
 import { useLayerScroll } from "@/threads/jump";
 import { ago } from "@/threads/Replies";
 import { Avatar, Rich } from "@/threads/Rich";
@@ -17,6 +16,9 @@ const dateOf = (day: string) => {
   return new Date(y!, m! - 1, d);
 };
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
+const STATE_LABEL: Record<TodoState, string> = { todo: "Not started", doing: "In progress", done: "Done", cancelled: "Cancelled" };
+// Open ones keep their place as they go from not started to in progress; done and then cancelled ones sink below them.
+const SINK: Record<TodoState, number> = { todo: 0, doing: 0, done: 1, cancelled: 2 };
 
 function label(day: string, today: string) {
   const d = dateOf(day);
@@ -37,9 +39,9 @@ export function TodoView() {
   useLayerScroll("todo", scrollRef);
   useEffect(() => void loadTodos(), [live]);
 
-  const onDay = todos.filter(t => t.day === day).sort((a, b) => Number(a.done) - Number(b.done) || a.at.localeCompare(b.at));
+  const onDay = todos.filter(t => t.day === day).sort((a, b) => SINK[a.state] - SINK[b.state] || a.at.localeCompare(b.at));
   // Open todos from days gone by show under today, so nothing left undone drops out of sight.
-  const carried = day === today ? todos.filter(t => !t.done && t.day < today).sort((a, b) => a.day.localeCompare(b.day)) : [];
+  const carried = day === today ? todos.filter(t => isOpen(t) && t.day < today).sort((a, b) => a.day.localeCompare(b.day)) : [];
 
   return (
     <div className="flex h-full flex-col">
@@ -132,7 +134,7 @@ function TodoRow({ todo, from, onMove }: { todo: Todo; from?: string; onMove?: (
   };
   return (
     <li className="group flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm hover:bg-muted/60">
-      <Checkbox checked={todo.done} onCheckedChange={done => void editTodo(todo.id, { done: done === true })} aria-label={todo.done ? "Mark not done" : "Mark done"} />
+      <StateBox state={todo.state} onClick={() => void editTodo(todo.id, { state: TODO_STATES[(TODO_STATES.indexOf(todo.state) + 1) % TODO_STATES.length]! })} />
       {draft !== undefined ? (
         <input
           autoFocus
@@ -146,7 +148,7 @@ function TodoRow({ todo, from, onMove }: { todo: Todo; from?: string; onMove?: (
           className="min-w-0 flex-1 bg-transparent outline-none"
         />
       ) : (
-        <span onClick={() => setDraft(todo.text)} className={cn("min-w-0 flex-1 cursor-text truncate", todo.done && "text-muted-foreground line-through")}>
+        <span onClick={() => setDraft(todo.text)} className={cn("min-w-0 flex-1 cursor-text truncate", todo.state === "done" && "text-muted-foreground line-through", todo.state === "cancelled" && "text-muted-foreground/60 line-through")}>
           {todo.text}
         </span>
       )}
@@ -163,11 +165,32 @@ function TodoRow({ todo, from, onMove }: { todo: Todo; from?: string; onMove?: (
   );
 }
 
+/** Its box: empty to start, half filled in progress, a check when done, a cross when cancelled; a click steps it to the next. */
+function StateBox({ state, onClick }: { state: TodoState; onClick: () => void }) {
+  const next = TODO_STATES[(TODO_STATES.indexOf(state) + 1) % TODO_STATES.length]!;
+  return (
+    <button
+      onClick={onClick}
+      title={`${STATE_LABEL[state]} · click for ${STATE_LABEL[next].toLowerCase()}`}
+      aria-label={STATE_LABEL[state]}
+      className={cn(
+        "grid size-4 shrink-0 place-items-center overflow-hidden rounded-[4px] border border-input outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+        state === "doing" && "border-link bg-[linear-gradient(to_right,var(--link)_50%,transparent_50%)]",
+        state === "done" && "border-primary bg-primary text-primary-foreground",
+        state === "cancelled" && "border-muted-foreground/40 text-muted-foreground",
+      )}
+    >
+      {state === "done" && <Check className="size-3.5" />}
+      {state === "cancelled" && <X className="size-3.5" />}
+    </button>
+  );
+}
+
 function Calendar({ day, today, todos, onPick }: { day: string; today: string; todos: Todo[]; onPick: (day: string) => void }) {
   const [month, setMonth] = useState(() => dateOf(day.slice(0, 8) + "01"));
   // Picking a day in another month (Back to today) turns the calendar to it.
   useEffect(() => setMonth(m => (dayOf(m).slice(0, 7) === day.slice(0, 7) ? m : dateOf(day.slice(0, 8) + "01"))), [day]);
-  const open = new Set(todos.filter(t => !t.done).map(t => t.day));
+  const open = new Set(todos.filter(isOpen).map(t => t.day));
   const first = month.getDay();
   const days = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
   const cells = [...Array(first).fill(undefined), ...Array.from({ length: days }, (_, i) => dayOf(new Date(month.getFullYear(), month.getMonth(), i + 1)))] as (string | undefined)[];

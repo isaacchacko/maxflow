@@ -209,8 +209,12 @@ export function setArchived(id: string, archived: boolean) {
 }
 
 
-/** One of his todos, on a day: YYYY-MM-DD in his local time. */
-export type Todo = { id: string; text: string; day: string; done: boolean; at: string };
+/** One of his todos, on a day: YYYY-MM-DD in his local time. Clicking its box steps it through the states in order. */
+export const TODO_STATES = ["todo", "doing", "done", "cancelled"] as const;
+export type TodoState = (typeof TODO_STATES)[number];
+export type Todo = { id: string; text: string; day: string; state: TodoState; at: string };
+/** Not started or in progress: what the calendar dots and From earlier count. */
+export const isOpen = (t: Todo) => t.state === "todo" || t.state === "doing";
 /** His todo list, kept by the server in its own file; fetched by the Todo page, not part of the world. */
 export const todoStore = createStore<Todo[]>([]);
 
@@ -234,13 +238,13 @@ async function sendTodo(path: string, method: string, body?: unknown) {
 }
 
 export async function addTodo(text: string, day: string) {
-  const draft: Todo = { id: `new-${Date.now()}`, text, day, done: false, at: new Date().toISOString() };
+  const draft: Todo = { id: `new-${Date.now()}`, text, day, state: "todo", at: new Date().toISOString() };
   todoStore.set(all => [...all, draft]);
   const saved = await sendTodo("/api/todos", "POST", { text, day });
   if (saved) todoStore.set(all => all.map(t => (t.id === draft.id ? saved : t)));
 }
 
-export async function editTodo(id: string, edit: Partial<Pick<Todo, "text" | "day" | "done">>) {
+export async function editTodo(id: string, edit: Partial<Pick<Todo, "text" | "day" | "state">>) {
   todoStore.set(all => all.map(t => (t.id === id ? { ...t, ...edit } : t)));
   await sendTodo(`/api/todos/${id}`, "PATCH", edit);
 }
