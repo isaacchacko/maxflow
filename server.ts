@@ -10,6 +10,7 @@ import { markRead, ownComment, repoOf } from "./sentries/gh";
 import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR, TMUX_SCOPE, TMUX_SOCKET } from "./instance";
 import { enforce, onReply } from "./restrictions-enforce";
 import { invalid, loadRestrictions, resolve, saveRestrictions, type Person, type Restriction } from "./restrictions";
+import { backfill, link, people as restrictionPeople } from "./restrictions-identities";
 import app from "./src/index.html";
 
 const HOST = "127.0.0.1";
@@ -951,6 +952,20 @@ function tellMembers(t: Thread, m: Message, heard: Session[], woke = "") {
   const owners = t.routers.map((r) => sessions.get(r)?.name ?? names[r] ?? r);
   dispatch({ source: "isaac", to, target: t.title, text: m.text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(m.text)}\n[maxflow] He @-mentioned you in this thread, so his messages in it reach you${owners.length ? `, as they reach its owner${owners.length > 1 ? "s" : ""} ${owners.join(", ")}` : ""}. Answer him inline with \`${CLI} thread post ${t.id} '<text>'\`; read the rest with \`${CLI} thread read ${t.id} --last 20\`.${woke}${mentionsIn(m.text)}` });
 }
+// A thread's title, from its first line: an agent he mentions as @name, and Slack's mentions, channels and links as Slack shows them.
+function titleOf(text: string) {
+  const slack = slackNames(slackChannels);
+  const line = text
+    .replace(IMAGE, "")
+    .replace(/\[\[(?:agent|router):([\w-]+)\]\]/g, (chip, id) => (sessions.get(id) ? `@${sessions.get(id)!.name.replace(/^sentry:/, "")}` : chip))
+    .replace(/<@([UW]\w+)(?:\|([^>]*))?>/g, (_, id, name) => `@${name || slack[id] || id}`)
+    .replace(/<#(C\w+)(?:\|([^>]*))?>/g, (_, id, name) => (name ? `#${name}` : (slack[id] ?? "#channel")))
+    .replace(/<!(here|channel|everyone)(?:\|[^>]*)?>/g, "@$1")
+    .replace(/<((?:https?|mailto):[^|>]+)\|([^>]+)>/g, "$2")
+    .trim()
+    .split("\n")[0];
+  return (line || "image").slice(0, 80);
+}
 // The subthread under a message, made on its first reply; a top thread's first message is the thread itself.
 function subthread(parent: Thread, messageId: string) {
   const m = parent.messages.find((x) => x.id === messageId);
@@ -958,7 +973,7 @@ function subthread(parent: Thread, messageId: string) {
   if (!parent.parent && parent.messages[0] === m) return parent;
   const found = threads.find((t) => t.parent?.thread === parent.id && t.parent.message === m.id);
   if (found) return found;
-  const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: (m.text.replace(IMAGE, "").trim().split("\n")[0] || "image").slice(0, 80), objective: parent.objective, routers: [...parent.routers], messages: [], parent: { thread: parent.id, message: m.id } };
+  const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: titleOf(m.text), objective: parent.objective, routers: [...parent.routers], messages: [], parent: { thread: parent.id, message: m.id } };
   threads.push(t);
   saveThreads();
   return t;
@@ -1417,16 +1432,6 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 // His autonomy restrictions (restrictions.ts): the Restrictions page edits them, the enforcement hook reads them.
 export const restrictions: Restriction[] = loadRestrictions();
-function restrictionPeople() {
-  const people = new Map<string, Person>();
-  const store = (() => { try { return JSON.parse(readFileSync(`${STATE_DIR}/slack-messages.json`, "utf8")); } catch { return {}; } })() as Record<string, { msgs: { uid: string; who: string; bot?: boolean }[] }>;
-  for (const { msgs } of Object.values(store)) for (const m of msgs) if (!m.bot && /^[UW]/.test(m.uid)) people.set(`slack:${m.uid}`, { name: m.who, slack: m.uid });
-  const gh = (() => { try { return JSON.parse(readFileSync(`${STATE_DIR}/gh-status.json`, "utf8")); } catch { return {}; } })() as Record<string, { pr?: { author?: { login: string }; reviews?: { nodes: { author: { login: string } | null }[] }; comments?: { nodes: { author: { login: string } | null }[] } } }>;
-  for (const { pr } of Object.values(gh))
-    for (const login of [pr?.author?.login, ...(pr?.reviews?.nodes ?? []).map((n) => n.author?.login), ...(pr?.comments?.nodes ?? []).map((n) => n.author?.login)])
-      if (login && !login.endsWith("[bot]")) people.set(`github:${login.toLowerCase()}`, { name: login, github: login });
-  return [...people.values()].sort((a, b) => a.name!.localeCompare(b.name!));
-}
 
 // at: when the event happened, which the assistant reads from the transcript it took it from; it defaults to now.
 function editTask(t: Task | undefined, edit: TaskEdit) {
@@ -2204,7 +2209,7 @@ Bun.serve<WsData>({
       const feed = (body as { feed?: Feed }).feed;
       if (from && isSentry(from) && feed?.link && body.text?.trim()) {
         const text = body.text.trim();
-        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: (body.title?.trim() || `${feed.who}: ${text.split("\n")[0]}`).slice(0, 80), objective: "", routers: [], messages: feedPosts(text, (body as { posts?: FeedPost[] }).posts), feedSaid: [text], feed, ...(feed.task && { task: feed.task }) };
+        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: body.title?.trim().slice(0, 80) || titleOf(`${feed.who}: ${text}`), objective: "", routers: [], messages: feedPosts(text, (body as { posts?: FeedPost[] }).posts), feedSaid: [text], feed, ...(feed.task && { task: feed.task }) };
         threads.push(t);
         await feedToFunnel(t, from, text);
         return Response.json(t, { status: 201 });
@@ -2212,8 +2217,7 @@ Bun.serve<WsData>({
       // Isaac's inbox: each message starts a thread, and the funnel picks the router that owns it.
       if (!from && body.text?.trim()) {
         const text = body.text.trim();
-        const named = text.replace(/\[\[(?:agent|router):([\w-]+)\]\]/g, (chip, id) => (sessions.get(id) ? `@${sessions.get(id)!.name.replace(/^sentry:/, "")}` : chip));
-        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: (named.replace(IMAGE, "").trim().split("\n")[0] || "image").slice(0, 80), objective: "", routers: [], messages: [message("isaac", text)] };
+        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: titleOf(text), objective: "", routers: [], messages: [message("isaac", text)] };
         const ev = dispatch({ source: "isaac", target: t.title, text, deliver: (seq) => `${text}\n[maxflow] signal ${seq}, his inbox thread ${t.id}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`. Always route an inbox thread, small talk included: its router answers him there.` });
         t.signal = ev.seq;
         threads.push(t);
@@ -2504,15 +2508,27 @@ Bun.serve<WsData>({
       const draft = { ...body, label: body.label?.trim() || parent?.label, action: body.action?.trim() || parent?.action, match: body.match ?? {} };
       const bad = invalid(draft, restrictions);
       if (bad) return new Response(bad, { status: 400 });
-      const r: Restriction = { id: crypto.randomUUID().slice(0, 8), action: draft.action!, label: draft.label!.trim(), mode: draft.mode!, match: parent ? {} : draft.match, scope: draft.scope, parent: parent?.id, note: draft.note };
+      const r: Restriction = { id: crypto.randomUUID().slice(0, 8), action: draft.action!, label: draft.label!.trim(), mode: draft.mode!, match: parent ? {} : draft.match, scope: draft.scope, parent: parent?.id, note: draft.note, ...(!parent && draft.reaches && { reaches: draft.reaches }) };
       restrictions.push(r), saveRestrictions(restrictions);
       return Response.json(r, { status: 201 });
     }
     // The mode that applies to a tool call, for `maxflow restrictions check`.
     if (path === "/api/restrictions/check" && req.method === "POST") return Response.json(resolve(restrictions, await req.json().catch(() => ({ tool: "" }))));
-    // The people the page offers for a restriction's scope: everyone the slack sentry has heard from, and the GitHub logins
-    // on the PRs the gh sentry polls. Email addresses he types.
-    if (path === "/api/restrictions/people" && req.method === "GET") return Response.json(restrictionPeople());
+    // The people the page offers for a restriction's scope, one a human (restrictions-identities.ts): everyone the slack sentry
+    // has heard from, joined to their GitHub login from the PRs the gh sentry polls. Email addresses he types. A listing also
+    // gives restrictions naming one account of a linked person the other.
+    if (path === "/api/restrictions/people" && req.method === "GET") {
+      if (backfill(restrictions)) saveRestrictions(restrictions);
+      return Response.json(restrictionPeople());
+    }
+    // He links a Slack user to a GitHub login, or unlinks a pair yarn matched or he linked.
+    if (path === "/api/restrictions/people/link" && (req.method === "POST" || req.method === "DELETE")) {
+      const pair = (await req.json().catch(() => ({}))) as { slack?: string; github?: string };
+      if (!pair.slack || !pair.github) return new Response("slack and github required", { status: 400 });
+      link({ slack: pair.slack, github: pair.github }, req.method === "POST");
+      if (backfill(restrictions, req.method === "DELETE" ? { slack: pair.slack, github: pair.github } : undefined)) saveRestrictions(restrictions);
+      return Response.json(restrictionPeople());
+    }
     const restrictionPath = path.match(/^\/api\/restrictions\/([\w-]+)$/);
     const restriction = restrictionPath && restrictions.find((r) => r.id === restrictionPath[1]);
     if (restrictionPath && !restriction && (req.method === "PATCH" || req.method === "DELETE")) return new Response("no such restriction", { status: 404 });

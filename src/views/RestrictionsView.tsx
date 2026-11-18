@@ -1,6 +1,6 @@
-import { ChevronDown, ChevronRight, CornerDownRight, Plus, RotateCcw, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ChevronDown, ChevronRight, CornerDownRight, Globe, Link2, Plus, RotateCcw, SlidersHorizontal, Trash2, Unlink, UserPlus, Users, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { Call, Mode, Person, Restriction } from "../../restrictions";
+import type { Call, Mode, Person, Reach, Restriction } from "../../restrictions";
 import { cn } from "@/lib/utils";
 import { liveStore, objectiveStore } from "@/store";
 import { useLayerScroll } from "@/threads/jump";
@@ -100,7 +100,7 @@ export function RestrictionsView() {
             What your agents do on their own, ask you about first, or never do. Override one for some people, an objective or a folder, and the override wins where it applies: a person named beats teammates, which beats an objective, which beats a folder. Among equals, and across everyone a call reaches, the strictest wins.
           </p>
           <Tester />
-          {tab === "people" && <PeopleList list={list} sections={sections} onEdit={edit} onDelete={remove} onAdd={add} />}
+          {tab === "people" && <PeopleList list={list} sections={sections} onEdit={edit} onDelete={remove} onAdd={add} onLinked={load} />}
           {tab === "actions" && adding && (
             <section className="mb-5 rounded-xl border p-3">
               <Editor kinds={kinds} onSave={add} onCancel={() => setAdding(false)} />
@@ -125,7 +125,23 @@ export function RestrictionsView() {
 }
 
 const chip = "max-w-48 shrink-0 truncate rounded bg-muted px-1.5 text-[11px] text-muted-foreground";
-const personName = (p: Person) => (p.team ? "Teammates" : p.name || p.email || p.github || p.slack!);
+const personName = (p: Person) => (p.team === true ? "Teammates" : p.team === false ? "Outsiders" : p.name || p.email || p.github || p.slack!);
+const isGroup = (p: Person) => p.team !== undefined;
+const GROUPS: Person[] = [{ team: true, name: "Teammates" }, { team: false, name: "Outsiders" }];
+// How each kind of account reaches someone, in the order a person's actions are listed.
+const REACHES: { reach: Reach; label: string }[] = [
+  { reach: "slack", label: "On Slack" },
+  { reach: "email", label: "By email" },
+  { reach: "github", label: "On GitHub" },
+];
+/** The accounts an action can reach this person by: a group is reached every way. */
+const reachable = (p: Person, reach: Reach) => isGroup(p) || !!p[reach];
+/** A restriction said of one person: "Approve Liudvikas's PRs", "Message teammates on Slack". */
+function forPerson(r: Restriction, p: Person) {
+  if (!r.forPerson) return r.label;
+  const name = p.team === true ? "teammates" : p.team === false ? "outsiders" : p.slack ? personName(p).split(/\s+/)[0]! : personName(p);
+  return r.forPerson.replace("{name's}", /s$/i.test(name) ? `${name}'` : `${name}'s`).replace("{name}", name);
+}
 
 /**
  * A person's face: their Slack photo from the server's cache, else their GitHub avatar, else their initials; Teammates is a
@@ -135,12 +151,14 @@ function PersonFace({ p, className }: { p: Person; className?: string }) {
   const [broken, setBroken] = useState(false);
   const src = p.slack ? `/api/avatar/slack/${p.slack}?name=${encodeURIComponent(p.name ?? "")}` : p.github && `https://avatars.githubusercontent.com/${p.github}?s=40`;
   const box = cn("size-4 shrink-0 rounded-full", className);
-  if (p.team)
+  if (isGroup(p)) {
+    const Icon = p.team ? Users : Globe;
     return (
       <span className={cn(box, "flex items-center justify-center bg-muted-foreground/15")}>
-        <Users className="size-2.5" />
+        <Icon className="size-2.5" />
       </span>
     );
+  }
   if (src && !broken) return <img src={src} alt="" onError={() => setBroken(true)} className={cn(box, "object-cover")} />;
   const initials = personName(p).split(/[\s@._-]+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase();
   return <span className={cn(box, "flex items-center justify-center bg-tile-2 text-[8px] font-semibold text-tile-ink")}>{initials}</span>;
@@ -183,8 +201,8 @@ function Row({ r, kinds, open, setOpen, overrides, onEdit, onDelete, onAdd }: Ro
           {!r.builtin && <span className={chip}>Custom</span>}
           <ScopeChips r={r} />
         </button>
-        <button onClick={() => setAdding(true)} title="Override it for some people, an objective or a folder" className={cn("shrink-0 text-muted-foreground hover:text-foreground", !adding && "opacity-0 group-hover:opacity-100")}>
-          <UserPlus className="size-4" />
+        <button onClick={() => setAdding(true)} title={r.reaches ? "Override it for some people, an objective or a folder" : "Override it for an objective or a folder (nobody is on the other end, so not per person)"} className={cn("shrink-0 text-muted-foreground hover:text-foreground", !adding && "opacity-0 group-hover:opacity-100")}>
+          {r.reaches ? <UserPlus className="size-4" /> : <SlidersHorizontal className="size-4" />}
         </button>
         <ModeToggle mode={r.mode} onChange={mode => void onEdit(r.id, { mode })} />
       </div>
@@ -208,14 +226,14 @@ function Row({ r, kinds, open, setOpen, overrides, onEdit, onDelete, onAdd }: Ro
               </div>
               {open === o.id && (
                 <div className="mb-2 ml-[22px] rounded-xl border p-3">
-                  <Editor key={JSON.stringify(o)} r={o} override kinds={kinds} onSave={c => onEdit(o.id, c)} onCancel={() => toggle(o.id)} onDelete={() => onDelete(o.id)} />
+                  <Editor key={JSON.stringify(o)} r={o} override reach={r.reaches} kinds={kinds} onSave={c => onEdit(o.id, c)} onCancel={() => toggle(o.id)} onDelete={() => onDelete(o.id)} />
                 </div>
               )}
             </li>
           ))}
           {adding && (
             <li className="mb-2 rounded-xl border p-3">
-              <Editor override kinds={kinds} initialMode={r.mode === "allow" ? "ask" : "allow"} onSave={async c => void (await onAdd({ ...c, parent: r.id }), setAdding(false))} onCancel={() => setAdding(false)} />
+              <Editor override reach={r.reaches} kinds={kinds} initialMode={r.mode === "allow" ? "ask" : "allow"} onSave={async c => void (await onAdd({ ...c, parent: r.id }), setAdding(false))} onCancel={() => setAdding(false)} />
             </li>
           )}
         </ol>
@@ -250,12 +268,15 @@ const field = "w-full rounded-md border bg-transparent px-2 py-1 text-sm outline
  * Edits a restriction, or makes a new one when there is none. Matchers are one regex a line. An override has no label, kind or
  * matchers of its own: it is who and where its parent is set differently for.
  */
-function Editor({ r, override, initialMode, kinds, onSave, onCancel, onDelete }: { r?: Restriction; override?: boolean; initialMode?: Mode; kinds: string[]; onSave: (r: Partial<Restriction>) => Promise<void>; onCancel: () => void; onDelete?: () => void }) {
+function Editor({ r, override, reach, initialMode, kinds, onSave, onCancel, onDelete }: { r?: Restriction; override?: boolean; reach?: Reach; initialMode?: Mode; kinds: string[]; onSave: (r: Partial<Restriction>) => Promise<void>; onCancel: () => void; onDelete?: () => void }) {
   const objectives = objectiveStore.use();
   const [label, setLabel] = useState(r?.label ?? "");
   const [action, setAction] = useState(r?.action ?? "");
   const [mode, setMode] = useState<Mode>(r?.mode ?? initialMode ?? "ask");
   const [people, setPeople] = useState<Person[]>(r?.scope?.people ?? []);
+  // A builtin's reach is the catalog's; his own restriction says who, if anyone, is on the other end.
+  const [reaches, setReaches] = useState<Reach | "">(r?.reaches ?? "");
+  const reachedBy = override ? reach : reaches || undefined;
   const [tools, setTools] = useState((r?.match.tools ?? []).join("\n"));
   const [bash, setBash] = useState((r?.match.bash ?? []).join("\n"));
   const [objective, setObjective] = useState(r?.scope?.objective ?? "");
@@ -263,10 +284,11 @@ function Editor({ r, override, initialMode, kinds, onSave, onCancel, onDelete }:
   const [note, setNote] = useState(r?.note ?? "");
   const [error, setError] = useState<string>();
   const save = async () => {
-    const scope = objective || cwd.trim() || people.length ? { ...(objective && { objective }), ...(cwd.trim() && { cwd: cwd.trim() }), ...(people.length && { people }) } : undefined;
+    const named = reachedBy ? people : [];
+    const scope = objective || cwd.trim() || named.length ? { ...(objective && { objective }), ...(cwd.trim() && { cwd: cwd.trim() }), ...(named.length && { people: named }) } : undefined;
     try {
       setError(undefined);
-      await onSave(override ? { mode, scope, note: note.trim() || undefined } : { label: label.trim(), action: action.trim().toLowerCase(), mode, match: { tools: lines(tools), bash: lines(bash) }, scope, note: note.trim() || undefined });
+      await onSave(override ? { mode, scope, note: note.trim() || undefined } : { label: label.trim(), action: action.trim().toLowerCase(), mode, match: { tools: lines(tools), bash: lines(bash) }, scope, note: note.trim() || undefined, ...(!r?.builtin && { reaches: reaches || undefined }) });
     } catch (e) {
       setError((e as Error).message);
     }
@@ -308,10 +330,23 @@ function Editor({ r, override, initialMode, kinds, onSave, onCancel, onDelete }:
         </label>
       </div>
       )}
-      <div className="flex flex-col gap-1">
-        <span className="text-xs text-muted-foreground">Only for people{override ? "" : " (leave empty for everyone)"}</span>
-        <PeoplePicker people={people} onChange={setPeople} />
-      </div>
+      {!override && !r?.builtin && (
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground">Who is on the other end</span>
+          <select value={reaches} onChange={e => setReaches(e.target.value as Reach | "")} className={field}>
+            <option value="">Nobody in particular (it can't be set per person)</option>
+            <option value="slack">Someone on Slack</option>
+            <option value="email">Someone by email</option>
+            <option value="github">A PR's author on GitHub</option>
+          </select>
+        </label>
+      )}
+      {reachedBy && (
+        <div className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground">Only for people{override ? "" : " (leave empty for everyone)"}</span>
+          <PeoplePicker people={people} reach={reachedBy} onChange={setPeople} />
+        </div>
+      )}
       <div className="flex gap-3">
         <label className="flex flex-1 flex-col gap-1">
           <span className="text-xs text-muted-foreground">Only on objective</span>
@@ -352,8 +387,8 @@ function Editor({ r, override, initialMode, kinds, onSave, onCancel, onDelete }:
 }
 
 const samePerson = (a: Person, b: Person) =>
-  a.team || b.team ? !!a.team && !!b.team : (!!a.slack && a.slack === b.slack) || (!!a.email && a.email.toLowerCase() === b.email?.toLowerCase()) || (!!a.github && a.github.toLowerCase() === b.github?.toLowerCase());
-const sourceOf = (p: Person) => (p.team ? "everyone on the team" : p.slack ? "Slack" : p.email ? "email" : "GitHub");
+  isGroup(a) || isGroup(b) ? a.team === b.team : (!!a.slack && a.slack === b.slack) || (!!a.email && a.email.toLowerCase() === b.email?.toLowerCase()) || (!!a.github && a.github.toLowerCase() === b.github?.toLowerCase());
+const sourceOf = (p: Person) => (p.team === true ? "everyone on the team" : p.team === false ? "everyone known not to be on it" : p.slack && p.github ? `Slack · GitHub ${p.github}` : p.slack ? "Slack" : p.email ? "email" : "GitHub");
 // An override that is about who, not where: only those apply to a person wherever they are.
 const peopleOnly = (o: Restriction) => !!o.scope?.people?.length && !o.scope.objective && !o.scope.cwd;
 
@@ -362,19 +397,29 @@ const peopleOnly = (o: Restriction) => !!o.scope?.people?.length && !o.scope.obj
  * and the toggle sets an override for them alone (one shared with others gives them up first); the arrow puts them back on the
  * broader rule.
  */
-function PeopleList({ list, sections, onEdit, onDelete, onAdd }: { list: Restriction[]; sections: string[]; onEdit: (id: string, c: Partial<Restriction>) => Promise<void>; onDelete: (id: string) => Promise<void>; onAdd: (r: Partial<Restriction>) => Promise<Restriction> }) {
+function PeopleList({ list, sections, onEdit, onDelete, onAdd, onLinked }: { list: Restriction[]; sections: string[]; onEdit: (id: string, c: Partial<Restriction>) => Promise<void>; onDelete: (id: string) => Promise<void>; onAdd: (r: Partial<Restriction>) => Promise<Restriction>; onLinked: () => Promise<unknown> }) {
   const [known, setKnown] = useState<Person[]>([]);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<string>();
   useEffect(() => void knownPeople().then(setKnown), []);
+  // Linking or unlinking answers with everyone again, and the server may have given restrictions the other account.
+  const relink = async (pair: { slack: string; github: string }, linked: boolean) => {
+    const everyone = (await send("/api/restrictions/people/link", linked ? "POST" : "DELETE", pair)) as Person[];
+    knownCache = Promise.resolve(everyone);
+    setKnown(everyone);
+    await onLinked();
+  };
   // People named in overrides but never seen on Slack or GitHub (a typed email) are listed too.
-  const named = list.flatMap(r => r.scope?.people ?? []).filter(p => !p.team);
-  const everyone = [{ team: true, name: "Teammates" }, ...[...known, ...named].filter((p, i, all) => all.findIndex(o => samePerson(o, p)) === i)];
+  const named = list.flatMap(r => r.scope?.people ?? []).filter(p => !isGroup(p));
+  const everyone = [...GROUPS, ...[...known, ...named].filter((p, i, all) => all.findIndex(o => samePerson(o, p)) === i)];
   const q = query.trim().toLowerCase();
   const shown = everyone.filter(p => !q || [personName(p), p.github, p.email].some(x => x?.toLowerCase().includes(q)));
-  const tops = list.filter(r => !r.parent);
+  // Only actions with someone on the other end are set per person; the rest stay on the Actions tab.
+  const tops = list.filter(r => !r.parent && r.reaches);
   const overridesFor = (p: Person, parent: string) => list.filter(o => o.parent === parent && peopleOnly(o) && o.scope!.people!.some(x => samePerson(x, p)));
-  const teammates = (parent: string) => list.find(o => o.parent === parent && peopleOnly(o) && o.scope!.people!.some(x => x.team));
+  // What Teammates and Outsiders are set to, for a named person who may be either.
+  const groupsOn = (parent: string) =>
+    GROUPS.flatMap(g => list.filter(o => o.parent === parent && peopleOnly(o) && o.scope!.people!.some(x => samePerson(x, g))).map(o => `${personName(g)}: ${MODES.find(m => m.mode === o.mode)!.label}`)).join(" · ");
 
   // Takes them out of overrides they share with others, so the one set here is theirs alone, then sets or clears theirs.
   const set = async (p: Person, parent: string, mode?: Mode) => {
@@ -391,32 +436,35 @@ function PeopleList({ list, sections, onEdit, onDelete, onAdd }: { list: Restric
       <input value={query} onChange={e => setQuery(e.target.value)} placeholder={`Filter ${everyone.length} people`} className={cn(field, "mb-2")} />
       <ol className="flex flex-col">
         {shown.map(p => {
-          const key = p.team ? "team" : `${p.slack ?? ""}${p.email ?? ""}${p.github ?? ""}`;
+          const key = isGroup(p) ? `group-${p.team}` : `${p.slack ?? ""}${p.email ?? ""}${p.github ?? ""}`;
           const count = tops.filter(r => overridesFor(p, r.id).length).length;
           const Chevron = open === key ? ChevronDown : ChevronRight;
           return (
             <li key={key}>
-              <button onClick={() => setOpen(open === key ? undefined : key)} className={cn("flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-muted/60", open === key && "bg-muted/60")}>
-                <Chevron className="size-4 shrink-0 text-muted-foreground" />
-                <PersonFace p={p} className="size-6" />
-                <span className="truncate">{personName(p)}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">{sourceOf(p)}</span>
-                <span className="ml-auto shrink-0 text-xs text-muted-foreground">{count ? `${count} set` : "everyone's rules"}</span>
-              </button>
+              <div className={cn("group flex min-w-0 items-center gap-2 rounded-lg pr-2.5 hover:bg-muted/60", open === key && "bg-muted/60")}>
+                <button onClick={() => setOpen(open === key ? undefined : key)} className="flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2.5 text-left text-sm">
+                  <Chevron className="size-4 shrink-0 text-muted-foreground" />
+                  <PersonFace p={p} className="size-6" />
+                  <span className="truncate">{personName(p)}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{sourceOf(p)}</span>
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">{count ? `${count} set` : "everyone's rules"}</span>
+                </button>
+                {!isGroup(p) && !p.email && <LinkAccount p={p} known={known} onLink={relink} />}
+              </div>
               {open === key && (
                 <div className="mb-3 ml-[26px]">
-                  {sections.map(section => (
-                    <div key={section} className="mt-2">
-                      <h3 className="px-2.5 text-xs font-medium text-muted-foreground">{section}</h3>
+                  {REACHES.filter(({ reach }) => reachable(p, reach)).map(({ reach, label }) => (
+                    <div key={reach} className="mt-2">
+                      <h3 className="px-2.5 text-xs font-medium text-muted-foreground">{label}</h3>
                       {tops
-                        .filter(r => kindLabel(r.action) === section)
+                        .filter(r => r.reaches === reach)
                         .map(r => {
                           const own = overridesFor(p, r.id)[0];
-                          const team = !p.team && teammates(r.id);
-                          const from = own ? undefined : team ? `as Teammates: ${MODES.find(m => m.mode === team.mode)!.label}` : "everyone's rule";
+                          const groups = !isGroup(p) && groupsOn(r.id);
+                          const from = own ? undefined : groups ? `everyone's rule · ${groups}` : "everyone's rule";
                           return (
                             <div key={r.id} className="group flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1 text-[13px] hover:bg-muted/60">
-                              <span className={cn("min-w-0 flex-1 truncate", !own && "text-muted-foreground")}>{r.label}</span>
+                              <span className={cn("min-w-0 flex-1 truncate", !own && "text-muted-foreground")}>{forPerson(r, p)}</span>
                               {from && <span className="shrink-0 text-[11px] text-muted-foreground/70">{from}</span>}
                               {own && (
                                 <button onClick={() => void set(p, r.id)} title="Back to the broader rule" className="shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground">
@@ -439,15 +487,59 @@ function PeopleList({ list, sections, onEdit, onDelete, onAdd }: { list: Restric
   );
 }
 
+/**
+ * Joins a Slack user and a GitHub login that are one person, or splits a pair that isn't: a person with both accounts can be
+ * unlinked; one with only one picks the other from the accounts nobody holds yet.
+ */
+function LinkAccount({ p, known, onLink }: { p: Person; known: Person[]; onLink: (pair: { slack: string; github: string }, linked: boolean) => Promise<void> }) {
+  const [picking, setPicking] = useState(false);
+  if (p.slack && p.github)
+    return (
+      <button onClick={() => void onLink({ slack: p.slack!, github: p.github! }, false)} title={`Not the same person: unlink GitHub ${p.github}`} className="shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground">
+        <Unlink className="size-4" />
+      </button>
+    );
+  // A Slack user takes a login no one has; a login takes a Slack user with none.
+  const free = known.filter(o => (p.slack ? o.github && !o.slack : o.slack && !o.github));
+  if (!picking)
+    return (
+      <button onClick={() => setPicking(true)} title={p.slack ? "Link their GitHub login" : "Link them to a Slack user"} className="shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground">
+        <Link2 className="size-4" />
+      </button>
+    );
+  return (
+    <select
+      autoFocus
+      defaultValue=""
+      onBlur={() => setPicking(false)}
+      onChange={e => {
+        const o = free.find(x => (p.slack ? x.github : x.slack) === e.target.value);
+        setPicking(false);
+        if (o) void onLink({ slack: (p.slack ?? o.slack)!, github: (p.github ?? o.github)! }, true);
+      }}
+      className={cn(field, "w-48 shrink-0 py-0.5 text-xs")}
+    >
+      <option value="" disabled>
+        {p.slack ? "Their GitHub login…" : "Their Slack user…"}
+      </option>
+      {free.map(o => (
+        <option key={o.github ?? o.slack} value={(p.slack ? o.github : o.slack)!}>
+          {personName(o)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 // The people the slack and gh sentries know, fetched once a page load.
-let known: Promise<Person[]> | undefined;
-const knownPeople = () => (known ??= send("/api/restrictions/people", "GET").catch(() => ((known = undefined), [])));
+let knownCache: Promise<Person[]> | undefined;
+const knownPeople = () => (knownCache ??= send("/api/restrictions/people", "GET").catch(() => ((knownCache = undefined), [])));
 
 /**
  * Picks people: focusing it lists everyone yarn has seen on Slack and GitHub, Teammates first, and typing filters the list;
  * Enter or a click adds one. An address with an @ adds that email, and a bare word that GitHub login.
  */
-function PeoplePicker({ people, onChange }: { people: Person[]; onChange: (p: Person[]) => void }) {
+function PeoplePicker({ people, reach, onChange }: { people: Person[]; reach: Reach; onChange: (p: Person[]) => void }) {
   const [all, setAll] = useState<Person[]>([]);
   const [query, setQuery] = useState("");
   const [listing, setListing] = useState(false);
@@ -463,10 +555,10 @@ function PeoplePicker({ people, onChange }: { people: Person[]; onChange: (p: Pe
   const picked = (p: Person) => people.some(o => samePerson(o, p));
   const offers: Person[] = listing
     ? [
-        { team: true, name: "Teammates" },
-        ...all,
-        ...(/^\S+@\S+\.\S+$/.test(q) ? [{ name: q, email: q }] : []),
-        ...(/^[\w-]+$/.test(q) && !all.some(p => p.github?.toLowerCase() === q) ? [{ name: q, github: q }] : []),
+        ...GROUPS,
+        ...all.filter(p => p[reach]),
+        ...(reach === "email" && /^\S+@\S+\.\S+$/.test(q) ? [{ name: q, email: q }] : []),
+        ...(reach === "github" && /^[\w-]+$/.test(q) && !all.some(p => p.github?.toLowerCase() === q) ? [{ name: q, github: q }] : []),
       ].filter(p => !picked(p) && (!q || p.email === q || p.github === q || [personName(p), p.github, p.email].some(x => x?.toLowerCase().includes(q))))
     : [];
   const add = (p: Person) => (onChange([...people, p]), setQuery(""));
@@ -477,7 +569,7 @@ function PeoplePicker({ people, onChange }: { people: Person[]; onChange: (p: Pe
           <span key={personName(p)} className="flex items-center gap-1 rounded bg-muted py-0.5 pr-1.5 pl-0.5 text-xs">
             <PersonFace p={p} />
             {personName(p)}
-            {!p.team && <span className="text-muted-foreground">{p.slack ? "Slack" : p.email ? "email" : "GitHub"}</span>}
+            {!isGroup(p) && <span className="text-muted-foreground">{p.slack ? "Slack" : p.email ? "email" : "GitHub"}</span>}
             <button onClick={() => onChange(people.filter(o => o !== p))} title="Remove" className="text-muted-foreground hover:text-foreground">
               <X className="size-3" />
             </button>
@@ -492,7 +584,7 @@ function PeoplePicker({ people, onChange }: { people: Person[]; onChange: (p: Pe
             if (e.key === "Enter" && offers[0]) e.preventDefault(), add(offers[0]);
             if (e.key === "Backspace" && !query && people.length) onChange(people.slice(0, -1));
           }}
-          placeholder={people.length ? "" : "Pick from everyone, or type a name, an email or a GitHub login"}
+          placeholder={people.length ? "" : { slack: "Pick from everyone on Slack, or type a name", email: "Type an email address, or pick Teammates or Outsiders", github: "Pick from everyone on GitHub, or type a login" }[reach]}
           className="min-w-32 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
       </div>
