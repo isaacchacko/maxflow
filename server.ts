@@ -786,7 +786,8 @@ type Feed = { source: string; who: string; link: string; task?: number };
 // one from before the new ones in its conversation, shown muted; own marks his own post there.
 type External = { source: "slack" | "github"; name: string; user?: string; link: string; where?: string; context?: true; own?: true };
 type Message = { id: string; from: string; at: number; text: string; nudge?: "subthread"; wake?: true; ext?: External };
-type Thread = { id: string; title: string; objective: string; routers: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; task?: number; resolved?: { at: number }; paused?: Paused; pinned?: { at: number; order: number }; resurfaced?: { at: number; from: number }; asks?: Ask; q?: number; mergedInto?: string; feed?: Feed; feedSaid?: string[] };
+// members: agents he @-mentioned in it, who hear his later replies there as its routers do.
+type Thread = { id: string; title: string; objective: string; routers: string[]; members?: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; task?: number; resolved?: { at: number }; paused?: Paused; pinned?: { at: number; order: number }; resurfaced?: { at: number; from: number }; asks?: Ask; q?: number; mergedInto?: string; feed?: Feed; feedSaid?: string[] };
 const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
 // Commands are retired: every thread is a plain thread, and a router's result on his message is an ordinary reply.
@@ -903,6 +904,7 @@ const live_thread = (t?: Thread): Thread | undefined => (t?.mergedInto ? live_th
 function mergeThread(from: Thread, into: Thread) {
   into.messages = [...into.messages, ...from.messages].sort((a, b) => a.at - b.at);
   for (const id of from.routers) if (!into.routers.includes(id)) into.routers.push(id);
+  for (const id of from.members ?? []) if (!into.members?.includes(id)) (into.members ??= []).push(id);
   if (from.asks && !into.asks) into.asks = from.asks;
   for (const t of threads) if (t.parent?.thread === from.id) t.parent.thread = into.id;
   for (const s of sessions.values()) if (s.wait?.kind === "thread" && s.wait.ref === from.id) setWait(s, { ...s.wait, ref: into.id });
@@ -926,7 +928,8 @@ const pathTitle = (t: Thread) => [...ancestors(t), t].map((x) => x.title).join("
 // and how to read the rest.
 function mentionsIn(text: string) {
   const ids = [...new Set([...text.matchAll(/\[\[thread:([\w-]+)\]\]/g)].map((m) => m[1]!))];
-  return ids
+  const agents = agentMentions(text).map((id) => `\n[maxflow] He @-mentions ${sessions.get(id)?.name ?? names[id] ?? id} (${id}), who gets his message too.`).join("");
+  return agents + ids
     .map((id) => {
       const t = live_thread(threads.find((x) => x.id === id));
       if (!t) return `\n[maxflow] He mentions thread ${id}, which no longer exists.`;
@@ -937,6 +940,16 @@ function mentionsIn(text: string) {
       return `\n[maxflow] He mentions thread "${pathTitle(t)}" (${t.id})${objective ? `, on "${objective.title}"` : ""}${owners.length ? `, owned by ${owners.join(", ")}` : ""}${last ? `; last from ${who}: "${headline(last.text)}"` : ""}. Read it with \`${CLI} thread read ${t.id} --last 20\`.`;
     })
     .join("");
+}
+const agentMentions = (text: string) => [...new Set([...text.matchAll(/\[\[(?:agent|router):([\w-]+)\]\]/g)].map((m) => m[1]!))];
+// An agent he @-mentions in a thread gets his message as his, and joins the thread so his later replies there reach it too.
+// Whoever hears it already (the thread's routers, or the funnel routing it) isn't told twice.
+function tellMembers(t: Thread, m: Message, heard: Session[], woke = "") {
+  for (const id of agentMentions(m.text)) if (!t.members?.includes(id) && sessions.get(id) && isAgent(sessions.get(id)!)) (t.members ??= []).push(id);
+  const to = (t.members ?? []).flatMap((id) => sessions.get(id) ?? []).filter((s) => live(s) && !heard.includes(s));
+  if (!to.length) return;
+  const owners = t.routers.map((r) => sessions.get(r)?.name ?? names[r] ?? r);
+  dispatch({ source: "isaac", to, target: t.title, text: m.text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(m.text)}\n[maxflow] He @-mentioned you in this thread, so his messages in it reach you${owners.length ? `, as they reach its owner${owners.length > 1 ? "s" : ""} ${owners.join(", ")}` : ""}. Answer him inline with \`${CLI} thread post ${t.id} '<text>'\`; read the rest with \`${CLI} thread read ${t.id} --last 20\`.${woke}${mentionsIn(m.text)}` });
 }
 // The subthread under a message, made on its first reply; a top thread's first message is the thread itself.
 function subthread(parent: Thread, messageId: string) {
@@ -982,6 +995,7 @@ function postIn(t: Thread, from: Session | undefined, text: string, nudge?: "sub
     if (!to.length && front)
       dispatch({ source: "isaac", to: [front], target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] Nobody owns this thread any more: its agents ended and it has no objective with a router. Give it one with \`${CLI} thread move ${t.id} <objective id>\`, which hands it to that objective's routers, then tell them his message is waiting there.${woke}${mentionsIn(text)}` });
     else dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] ${m.nudge ? `He asked for the answer in a subthread of its own: answer this message with \`${CLI} thread new --parent ${t.id}:${m.id} '<text>'\`, and post there from then on, not in the thread.` : `Answer inline in the thread with \`${CLI} thread post ${t.id} '<text>'\`.`} While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line.${woke}${mentionsIn(text)}` });
+    tellMembers(t, m, to.length ? to : [front].filter(live), woke);
     if (to.length) t.pending = { routers: to.map((s) => s.id), since: Date.now() };
     for (const s of to) s.handed = t.id;
     answered(t);
@@ -1736,6 +1750,7 @@ async function world() {
       id: s.id,
       name: s.name.replace(/^sentry:/, ""),
       running: live(s),
+      agent: isAgent(s),
       status: status(s),
       // To 10s: it moves with every line a sentry prints, and every move re-sent every sentry to every tab.
       lastOutputAt: Math.floor(s.lastOutputAt / 10_000) * 10_000,
@@ -2197,10 +2212,12 @@ Bun.serve<WsData>({
       // Isaac's inbox: each message starts a thread, and the funnel picks the router that owns it.
       if (!from && body.text?.trim()) {
         const text = body.text.trim();
-        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: (text.replace(IMAGE, "").trim().split("\n")[0] || "image").slice(0, 80), objective: "", routers: [], messages: [message("isaac", text)] };
+        const named = text.replace(/\[\[(?:agent|router):([\w-]+)\]\]/g, (chip, id) => (sessions.get(id) ? `@${sessions.get(id)!.name.replace(/^sentry:/, "")}` : chip));
+        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: (named.replace(IMAGE, "").trim().split("\n")[0] || "image").slice(0, 80), objective: "", routers: [], messages: [message("isaac", text)] };
         const ev = dispatch({ source: "isaac", target: t.title, text, deliver: (seq) => `${text}\n[maxflow] signal ${seq}, his inbox thread ${t.id}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`. Always route an inbox thread, small talk included: its router answers him there.` });
         t.signal = ev.seq;
         threads.push(t);
+        tellMembers(t, t.messages[0]!, [funnel()].filter(live));
         saveThreads();
         return Response.json(t, { status: 201 });
       }

@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { score, useThreadItems, type Item } from "@/components/QuickSwitcher";
 import { cn } from "@/lib/utils";
+import { agentStore, objectiveStore, sentryStore } from "@/store";
+import { Avatar } from "./Rich";
 
 const SHOWN = 8;
+const AGENTS_SHOWN = 4;
 // An @ at the start or after a space, then up to four words typed since, all before the caret.
 const AT = /(?:^|\s)@([^\s@\]]{0,40}(?: [^\s@\]]{1,40}){0,3})$/;
 
@@ -21,13 +24,32 @@ export function caretAt(el: HTMLTextAreaElement, pos: number) {
   return at;
 }
 
+/** The live agents and agent sentries he can @, each as [[agent:<id>]]: routers, workers, and sentries by their short name (@funnel). */
+function useAgentItems() {
+  const agents = agentStore.use();
+  const sentries = sentryStore.use();
+  const objectives = objectiveStore.use();
+  return useMemo<Item[]>(() => {
+    const title = (id: string) => objectives.find(o => o.id === id)?.title;
+    const sentry = sentries.filter(s => s.running && s.agent);
+    // The world draws unrouted agents under a stand-in funnel; the real one, when it runs, is among the sentries.
+    const agent = agents.filter(a => a.name && !(a.objectiveId === "unrouted" && a.name === "funnel") && !sentry.some(s => s.id === a.id));
+    return [
+      ...agent.map(a => ({ id: a.id, name: a.name!, detail: [a.role, title(a.objectiveId)].filter(Boolean).join(" · ") })),
+      ...sentry.map(s => ({ id: s.id, name: s.name, detail: "sentry" })),
+    ].map(a => ({ kind: "Agents" as const, href: `#agent/${a.id}`, label: a.name, detail: a.detail, icon: <Avatar from={a.id} small />, text: `${a.name} ${a.id}`, rank: 0 }));
+  }, [agents, sentries, objectives]);
+}
+
 /**
- * Typing @ in a composer lists the threads to mention: unread and recently moved first, then by how well the title or opening
- * message matches what follows the @, as the quick switcher ranks them. ↑↓ (or Ctrl-n/p) move, Enter or Tab inserts
- * [[thread:<id>]], Esc dismisses that @. `here` leaves out the thread being written in.
+ * Typing @ in a composer lists the agents and threads to mention. Agents and sentries come first, by how well their name matches
+ * what follows the @; threads after, unread and recently moved first, then by how well the title or opening message matches, as
+ * the quick switcher ranks them. ↑↓ (or Ctrl-n/p) move, Enter or Tab inserts [[agent:<id>]] or [[thread:<id>]], Esc dismisses
+ * that @. `here` leaves out the thread being written in.
  */
 export function useMentionPicker(input: React.RefObject<HTMLTextAreaElement | null>, draft: string, setDraft: (text: string) => void, here?: string) {
   const items = useThreadItems();
+  const agents = useAgentItems();
   const [caret, setCaret] = useState(0);
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState(-1);
@@ -40,15 +62,16 @@ export function useMentionPicker(input: React.RefObject<HTMLTextAreaElement | nu
     if (start < 0) return [];
     const threads = items.filter(i => i.href !== `#thread/${here}`);
     const q = query.trim();
-    if (!q) return [...threads].sort((a, b) => b.rank - a.rank).slice(0, SHOWN);
-    return threads
-      .flatMap(i => {
-        const name = score(q, i.label, true), body = score(q, i.text, false);
-        return name === null && body === null ? [] : [{ ...i, s: Math.max(name ?? 0, (body ?? 0) - 100) }];
-      })
-      .sort((a, b) => b.s - a.s || b.rank - a.rank)
-      .slice(0, SHOWN);
-  }, [items, query, start, here]);
+    const matching = (list: Item[]) =>
+      list
+        .flatMap(i => {
+          const name = score(q, i.label, true), body = score(q, i.text, false);
+          return name === null && body === null ? [] : [{ ...i, s: Math.max(name ?? 0, (body ?? 0) - 100) }];
+        })
+        .sort((a, b) => b.s - a.s || b.rank - a.rank);
+    const who = (q ? matching(agents) : agents).slice(0, AGENTS_SHOWN);
+    return [...who, ...(q ? matching(threads) : [...threads].sort((a, b) => b.rank - a.rank)).slice(0, SHOWN - who.length)];
+  }, [items, agents, query, start, here]);
 
   // Past a space with nothing matching, the @ was just text.
   const open = start >= 0 && start !== dismissed && (shown.length > 0 || !query.includes(" "));
@@ -61,7 +84,7 @@ export function useMentionPicker(input: React.RefObject<HTMLTextAreaElement | nu
   function pick(item: Item | undefined) {
     const el = input.current;
     if (!item || !el) return;
-    const ref = `[[thread:${item.href.replace("#thread/", "")}]] `;
+    const ref = `[[${item.href.replace(/^#(\w+)\//, "$1:")}]] `;
     setDraft(draft.slice(0, start) + ref + draft.slice(caret));
     const at = start + ref.length;
     requestAnimationFrame(() => (el.focus(), el.setSelectionRange(at, at), setCaret(at)));
@@ -93,8 +116,13 @@ export function useMentionPicker(input: React.RefObject<HTMLTextAreaElement | nu
       style={{ left: Math.min(at.left, (el?.clientWidth ?? 0) - 320), ...(below ? { top: at.top + at.line + 4 } : { bottom: `calc(100% - ${at.top}px + 4px)` }) }}
       className="absolute z-30 w-80 max-w-[90vw] border bg-popover py-1 text-sm shadow-md"
     >
-      <p className="px-3 pt-1 pb-1 text-[11px] font-medium text-muted-foreground">{shown.length ? "Mention a thread" : `No thread matches “${query}”`}</p>
-      {shown.map((item, n) => (
+      {!shown.length && <p className="px-3 pt-1 pb-1 text-[11px] font-medium text-muted-foreground">Nothing matches “{query}”</p>}
+      {shown.map((item, n) => [
+        item.kind !== shown[n - 1]?.kind && (
+          <p key={item.kind} className="px-3 pt-1 pb-1 text-[11px] font-medium text-muted-foreground">
+            {item.kind === "Agents" ? "Mention an agent" : "Mention a thread"}
+          </p>
+        ),
         <button
           type="button"
           key={item.href}
@@ -104,9 +132,10 @@ export function useMentionPicker(input: React.RefObject<HTMLTextAreaElement | nu
         >
           <span className="flex w-5 shrink-0 justify-center">{item.icon}</span>
           <span className="min-w-0 flex-1 truncate">{item.label}</span>
+          {item.kind === "Agents" && item.detail && <span className="max-w-[45%] shrink-0 truncate text-xs text-muted-foreground">{item.detail}</span>}
           {item.detail && /^\d+ new$/.test(item.detail) && <span className="shrink-0 text-xs text-new">{item.detail}</span>}
-        </button>
-      ))}
+        </button>,
+      ])}
     </div>
   );
   return { onKeyDown, track, panel };

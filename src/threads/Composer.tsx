@@ -90,7 +90,7 @@ const formatShown = () => { try { return localStorage.getItem(FORMAT_KEY) === "1
 /**
  * A message box drawn as Slack's: one rounded box that lights up while focused, the text, and one row under it: + to attach an image,
  * Aa to show the formatting row (which wraps the selection in markdown; its shortcuts work hidden too, ⌘K among them only while the
- * box has focus), emoji, @ to mention a thread, ⋯ for the box's rarer `tools` (a thread's subthread nudge; `toolsOn` tints it while one
+ * box has focus), emoji, @ to mention an agent or thread, ⋯ for the box's rarer `tools` (a thread's subthread nudge; `toolsOn` tints it while one
  * is on), and send. It grows with its text up to 40% of the
  * window, and takes images pasted or dropped on it: each is uploaded at once, and its path is kept with the draft so a reload keeps it.
  */
@@ -297,7 +297,7 @@ export function Composer({ onSend, onRaise, className, autoFocus, agent, draftKe
               </Popover>
             )}
           </span>
-          <button type="button" aria-label="Mention a thread" title="Mention a thread (@)" onMouseDown={keep} onClick={at} className={tool}>
+          <button type="button" aria-label="Mention an agent or thread" title="Mention an agent or thread (@)" onMouseDown={keep} onClick={at} className={tool}>
             <AtSign className="size-3.5" />
           </button>
           {tools && (

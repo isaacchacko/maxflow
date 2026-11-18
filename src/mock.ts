@@ -420,7 +420,7 @@ export const threads: Thread[] = [
 
 
 /** A sentry session from the live server: one of main's sentries, run in tmux. */
-export type SentrySession = { id: string; name: string; running: boolean; status: string; lastOutputAt: number; createdAt: number; ties: { session: string; label: string }[]; use: string };
+export type SentrySession = { id: string; name: string; running: boolean; agent?: boolean; status: string; lastOutputAt: number; createdAt: number; ties: { session: string; label: string }[]; use: string };
 
 export const sentries: Sentry[] = [
   {
