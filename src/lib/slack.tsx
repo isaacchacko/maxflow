@@ -35,13 +35,7 @@ export function mrkdwn(text: string) {
     .split(/(```[\s\S]*?```|`[^`\n]+`)/g)
     .map((part, i) => {
       if (i % 2) return part.startsWith("```") ? `\n\`\`\`\n${decode(part.slice(3, -3).replace(/^\n|\n$/g, ""))}\n\`\`\`\n` : decode(part);
-      return part
-        .replace(/<@(\w+)(?:\|([^>]*))?>/g, (_, id, name) => `[@${escapeLabel(name || id)}](slackuser:${id})`)
-        .replace(/<#(\w+)(?:\|([^>]*))?>/g, (_, id, name) => `[#${escapeLabel(name || "channel")}](slackchan:${id}${name ? `/${encodeURIComponent(name)}` : ""})`)
-        .replace(/<!(here|channel|everyone)(?:\|[^>]*)?>/g, "@$1")
-        .replace(/<!subteam\^\w+(?:\|([^>]*))?>/g, (_, name) => name || "@group")
-        .replace(/<((?:https?|mailto):[^|>]+)\|([^>]+)>/g, (_, url, label) => `[${escapeLabel(decode(label))}](${url})`)
-        .replace(/<((?:https?|mailto):[^>]+)>/g, "$1")
+      return slackTokens(part)
         .replace(/(^|[\s(>])\*([^*\n]+?)\*(?=$|[\s).,!?:;])/gm, "$1**$2**")
         .replace(/(^|[\s(>])_([^_\n]+?)_(?=$|[\s).,!?:;])/gm, "$1*$2*")
         .replace(/(^|[\s(>])~([^~\n]+?)~(?=$|[\s).,!?:;])/gm, "$1~~$2~~")
@@ -50,6 +44,30 @@ export function mrkdwn(text: string) {
     })
     .join("");
 }
+
+// Slack's <@user|name>, <#channel|name>, <!here>, <!subteam^…> and <url|label> as markdown chips and links. A mention with no name
+// carries only the id, which the chip looks up.
+const slackTokens = (text: string) =>
+  text
+    .replace(/<@([UW]\w+)(?:\|([^>]*))?>/g, (_, id, name) => `[@${escapeLabel(name || id)}](slackuser:${id})`)
+    .replace(/<#(C\w+)(?:\|([^>]*))?>/g, (_, id, name) => `[#${escapeLabel(name || "channel")}](slackchan:${id}${name ? `/${encodeURIComponent(name)}` : ""})`)
+    .replace(/<!(here|channel|everyone)(?:\|[^>]*)?>/g, "@$1")
+    .replace(/<!subteam\^\w+(?:\|([^>]*))?>/g, (_, name) => name || "@group")
+    .replace(/<((?:https?|mailto):[^|>]+)\|([^>]+)>/g, (_, url, label) => `[${escapeLabel(decode(label))}](${url})`)
+    .replace(/<((?:https?|mailto):[^>]+)>/g, "$1");
+
+/** Slack's mentions, channels and links where they turn up outside a Slack message (pasted or quoted into his own), code left alone. */
+export const slackSyntax = (text: string) => (text.includes("<") ? text.split(/(```[\s\S]*?```|`[^`\n]+`)/g).map((part, i) => (i % 2 ? part : slackTokens(part))).join("") : text);
+
+/** The same as plain text, for a preview or a search: @name, #channel, a link's label. */
+export const slackPlain = (text: string, names: Record<string, string> = slackNameStore.get()) =>
+  text
+    .replace(/<@([UW]\w+)(?:\|([^>]*))?>/g, (_, id, name) => `@${name || names[id] || id}`)
+    .replace(/<#(C\w+)(?:\|([^>]*))?>/g, (_, id, name) => name ? `#${name}` : (names[id] ?? "#channel"))
+    .replace(/<!(here|channel|everyone)(?:\|[^>]*)?>/g, "@$1")
+    .replace(/<!subteam\^\w+(?:\|([^>]*))?>/g, (_, name) => name || "@group")
+    .replace(/<((?:https?|mailto):[^|>]+)\|([^>]+)>/g, (_, _url, label) => decode(label))
+    .replace(/<((?:https?|mailto):[^>]+)>/g, "$1");
 
 // A table drawn with box characters (┌─┬─┐ │ ├─┼─┤) only lines up in a fixed-width font, and wrapped it is a wall of rules: its lines
 // become a code block, which keeps them whole and scrolls sideways.

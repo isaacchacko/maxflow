@@ -4,7 +4,7 @@ import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markd
 import remarkGfm from "remark-gfm";
 import { AgentFace, expressionOf } from "@/components/AgentFace";
 import { AgentLink } from "@/components/AgentLink";
-import { GitHubGlyph, loadSlackNames, mrkdwn, SlackGlyph, slackLabel, slackLink, slackNameStore } from "@/lib/slack";
+import { GitHubGlyph, loadSlackNames, mrkdwn, SlackGlyph, slackLabel, slackLink, slackNameStore, slackSyntax } from "@/lib/slack";
 import { emojify, emojiReady, loadEmoji } from "@/lib/emoji";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor, type External } from "@/mock";
@@ -125,7 +125,7 @@ export function Rich({ text, className, still }: { text: string; className?: str
   return (
     <span className={className}>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips]} components={still ? inlineStill : inline} allowedElements={INLINE} unwrapDisallowed urlTransform={keepRefs}>
-        {emojify(asLinks(splitCapture(text).body.replace(/\s*\n\s*/g, " ")))}
+        {emojify(asLinks(slackSyntax(splitCapture(text).body.replace(/\s*\n\s*/g, " "))))}
       </ReactMarkdown>
     </span>
   );
@@ -267,7 +267,7 @@ const md: Components = {
     const issue = href.match(/^linear:([A-Z]+-\d+)$/) ?? href.match(/^https:\/\/linear\.app\/[\w-]+\/issue\/([A-Z]+-\d+)/);
     if (issue) return <LinearChip issue={issue[1]!} />;
     // Slack's own mentions and channels, from its mrkdwn.
-    if (href.startsWith("slackuser:")) return <span className="rounded bg-link/10 px-0.5 font-medium text-link">{children}</span>;
+    if (href.startsWith("slackuser:")) return <SlackUser id={href.slice(10)}>{children}</SlackUser>;
     if (href.startsWith("slackchan:")) {
       const [channel, name] = href.slice(10).split("/");
       return <SlackChip href={`https://dryftai.slack.com/archives/${channel}`} name={name && decodeURIComponent(name)} />;
@@ -327,10 +327,18 @@ const inlineStill: Components = {
   a: ({ href = "", children }) => {
     const ref = href.match(/^ref:(agent|router|task|objective|thread|msg)\/(.+)$/);
     if (slackLink(href)) return <SlackChip href={href} still />;
+    if (href.startsWith("slackuser:")) return <SlackUser id={href.slice(10)}>{children}</SlackUser>;
     return ref ? <RefChip r={{ kind: ref[1] as Ref["kind"], id: decodeURIComponent(ref[2]!) }} still /> : <span className="text-link">{children}</span>;
   },
   img: () => <span className="text-link">[image]</span>,
 };
+/** A Slack user mentioned by id alone shows the name yarn has seen them by. */
+function SlackUser({ id, children }: { id: string; children: React.ReactNode }) {
+  const names = slackNameStore.use();
+  loadSlackNames();
+  const label = names[id] && String(children) === `@${id}` ? `@${names[id]}` : children;
+  return <span className="rounded bg-link/10 px-0.5 font-medium text-link">{label}</span>;
+}
 const keepRefs = (url: string) => (/^(ref|pr|linear|slackuser|slackchan):/.test(url) ? url : defaultUrlTransform(url));
 
 /** A whole message as GitHub-flavored markdown, with Rich's chips, links and pasted images inside it. */
@@ -341,7 +349,7 @@ export function Markdown({ text, className, slack }: { text: string; className?:
     // Any long word or token (a URL, a hash, inline code) breaks where it must, so a message is never wider than its column.
     <div className={cn("min-w-0 [overflow-wrap:anywhere]", className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips, remarkBreaks]} components={md} urlTransform={keepRefs}>
-        {slack ? mrkdwn(body) : emojify(asLinks(showUploads(body)))}
+        {slack ? mrkdwn(body) : emojify(asLinks(showUploads(slackSyntax(body))))}
       </ReactMarkdown>
       {caption && (
         <p data-agent="capture-caption" title={element && `element ${element}`} className="mt-1 text-xs text-muted-foreground">

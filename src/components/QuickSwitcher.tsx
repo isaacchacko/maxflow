@@ -2,6 +2,7 @@ import { LayoutGrid, Waypoints } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
+import { slackPlain } from "@/lib/slack";
 import { cn } from "@/lib/utils";
 import { statusColor } from "@/mock";
 import { agentStore, objectiveStore, sentryStore, taskStore, threadStore } from "@/store";
@@ -30,7 +31,7 @@ function visited(hash: string) {
   } catch {}
 }
 
-export const plain = (text: string) => text.replace(/!\[[^\]]*\]\([^)]+\)/g, "[image]").replace(/\[\[\w+:([^\]]+)\]\]/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/\s+/g, " ");
+export const plain = (text: string) => slackPlain(text).replace(/!\[[^\]]*\]\([^)]+\)/g, "[image]").replace(/\[\[\w+:([^\]]+)\]\]/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/\s+/g, " ");
 
 /**
  * Higher is better; null for no match. The query as one run counts most, earlier and at a word start more. Letters in order

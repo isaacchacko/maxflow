@@ -10,7 +10,7 @@ const AVATAR_INDEX = join(AVATARS, "slack.json");
 const DAY = 86_400_000;
 const readJson = <T>(path: string, fallback: T): T => { try { return JSON.parse(readFileSync(path, "utf8")); } catch { return fallback; } };
 
-// #name for a channel, "DM with X" for a DM, "group DM with X, Y" for a group DM, by channel id.
+// #name for a channel, "DM with X" for a DM, "group DM with X, Y" for a group DM, by channel id; and each person's name by user id.
 let names: { at: number; map: Record<string, string> } = { at: 0, map: {} };
 export function slackNames(channels: Record<string, string> = {}) {
   if (Date.now() - names.at < 60_000) return names.map;
@@ -23,7 +23,11 @@ export function slackNames(channels: Record<string, string> = {}) {
     const channel = target.split("/")[0];
     const named = title.match(/(?:^| in )(#[\w-]+)$/)?.[1];
     if (named) map[channel] ??= named;
-    for (const m of msgs) if (!m.bot && m.uid !== ME) (people[channel] ??= new Set()).add(m.who.split(" ")[0]);
+    for (const m of msgs) {
+      // A user's name by their id, for a mention that carries only the id.
+      if (m.uid && m.who) map[m.uid] ??= m.who;
+      if (!m.bot && m.uid !== ME) (people[channel] ??= new Set()).add(m.who.split(" ")[0]);
+    }
   }
   for (const [channel, who] of Object.entries(people)) if (!map[channel] && channel.startsWith("C")) map[channel] = `group DM with ${[...who].slice(0, 3).join(", ")}`;
   names = { at: Date.now(), map };

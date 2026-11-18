@@ -10,7 +10,6 @@ import { markRead, ownComment, repoOf } from "./sentries/gh";
 import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR, TMUX_SCOPE, TMUX_SOCKET } from "./instance";
 import { enforce, onReply } from "./restrictions-enforce";
 import { invalid, loadRestrictions, resolve, saveRestrictions, type Person, type Restriction } from "./restrictions";
-import { backfill, link, people as restrictionPeople } from "./restrictions-identities";
 import app from "./src/index.html";
 
 const HOST = "127.0.0.1";
@@ -1432,6 +1431,16 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 // His autonomy restrictions (restrictions.ts): the Restrictions page edits them, the enforcement hook reads them.
 export const restrictions: Restriction[] = loadRestrictions();
+function restrictionPeople() {
+  const people = new Map<string, Person>();
+  const store = (() => { try { return JSON.parse(readFileSync(`${STATE_DIR}/slack-messages.json`, "utf8")); } catch { return {}; } })() as Record<string, { msgs: { uid: string; who: string; bot?: boolean }[] }>;
+  for (const { msgs } of Object.values(store)) for (const m of msgs) if (!m.bot && /^[UW]/.test(m.uid)) people.set(`slack:${m.uid}`, { name: m.who, slack: m.uid });
+  const gh = (() => { try { return JSON.parse(readFileSync(`${STATE_DIR}/gh-status.json`, "utf8")); } catch { return {}; } })() as Record<string, { pr?: { author?: { login: string }; reviews?: { nodes: { author: { login: string } | null }[] }; comments?: { nodes: { author: { login: string } | null }[] } } }>;
+  for (const { pr } of Object.values(gh))
+    for (const login of [pr?.author?.login, ...(pr?.reviews?.nodes ?? []).map((n) => n.author?.login), ...(pr?.comments?.nodes ?? []).map((n) => n.author?.login)])
+      if (login && !login.endsWith("[bot]")) people.set(`github:${login.toLowerCase()}`, { name: login, github: login });
+  return [...people.values()].sort((a, b) => a.name!.localeCompare(b.name!));
+}
 
 // at: when the event happened, which the assistant reads from the transcript it took it from; it defaults to now.
 function editTask(t: Task | undefined, edit: TaskEdit) {
@@ -2508,27 +2517,15 @@ Bun.serve<WsData>({
       const draft = { ...body, label: body.label?.trim() || parent?.label, action: body.action?.trim() || parent?.action, match: body.match ?? {} };
       const bad = invalid(draft, restrictions);
       if (bad) return new Response(bad, { status: 400 });
-      const r: Restriction = { id: crypto.randomUUID().slice(0, 8), action: draft.action!, label: draft.label!.trim(), mode: draft.mode!, match: parent ? {} : draft.match, scope: draft.scope, parent: parent?.id, note: draft.note, ...(!parent && draft.reaches && { reaches: draft.reaches }) };
+      const r: Restriction = { id: crypto.randomUUID().slice(0, 8), action: draft.action!, label: draft.label!.trim(), mode: draft.mode!, match: parent ? {} : draft.match, scope: draft.scope, parent: parent?.id, note: draft.note };
       restrictions.push(r), saveRestrictions(restrictions);
       return Response.json(r, { status: 201 });
     }
     // The mode that applies to a tool call, for `maxflow restrictions check`.
     if (path === "/api/restrictions/check" && req.method === "POST") return Response.json(resolve(restrictions, await req.json().catch(() => ({ tool: "" }))));
-    // The people the page offers for a restriction's scope, one a human (restrictions-identities.ts): everyone the slack sentry
-    // has heard from, joined to their GitHub login from the PRs the gh sentry polls. Email addresses he types. A listing also
-    // gives restrictions naming one account of a linked person the other.
-    if (path === "/api/restrictions/people" && req.method === "GET") {
-      if (backfill(restrictions)) saveRestrictions(restrictions);
-      return Response.json(restrictionPeople());
-    }
-    // He links a Slack user to a GitHub login, or unlinks a pair yarn matched or he linked.
-    if (path === "/api/restrictions/people/link" && (req.method === "POST" || req.method === "DELETE")) {
-      const pair = (await req.json().catch(() => ({}))) as { slack?: string; github?: string };
-      if (!pair.slack || !pair.github) return new Response("slack and github required", { status: 400 });
-      link({ slack: pair.slack, github: pair.github }, req.method === "POST");
-      if (backfill(restrictions, req.method === "DELETE" ? { slack: pair.slack, github: pair.github } : undefined)) saveRestrictions(restrictions);
-      return Response.json(restrictionPeople());
-    }
+    // The people the page offers for a restriction's scope: everyone the slack sentry has heard from, and the GitHub logins
+    // on the PRs the gh sentry polls. Email addresses he types.
+    if (path === "/api/restrictions/people" && req.method === "GET") return Response.json(restrictionPeople());
     const restrictionPath = path.match(/^\/api\/restrictions\/([\w-]+)$/);
     const restriction = restrictionPath && restrictions.find((r) => r.id === restrictionPath[1]);
     if (restrictionPath && !restriction && (req.method === "PATCH" || req.method === "DELETE")) return new Response("no such restriction", { status: 404 });
