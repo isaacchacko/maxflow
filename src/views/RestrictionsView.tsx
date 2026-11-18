@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, CornerDownRight, Plus, Trash2, UserPlus, Users, X } from "lucide-react";
+import { ChevronDown, ChevronRight, CornerDownRight, Plus, RotateCcw, Trash2, UserPlus, Users, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Call, Mode, Person, Restriction } from "../../restrictions";
 import { cn } from "@/lib/utils";
@@ -41,6 +41,14 @@ export function RestrictionsView() {
   const [list, setList] = useState<Restriction[]>([]);
   const [open, setOpen] = useState<string>();
   const [adding, setAdding] = useState(false);
+  // The tab is in the address (#restrictions/people), so it survives a reload and can be linked to.
+  const [tab, setTabState] = useState<"actions" | "people">(location.hash === "#restrictions/people" ? "people" : "actions");
+  const setTab = (t: "actions" | "people") => (setTabState(t), history.replaceState(history.state, "", t === "people" ? "#restrictions/people" : "#restrictions"));
+  useEffect(() => {
+    const follow = () => location.hash.startsWith("#restrictions") && setTabState(location.hash === "#restrictions/people" ? "people" : "actions");
+    window.addEventListener("hashchange", follow);
+    return () => window.removeEventListener("hashchange", follow);
+  }, []);
   const scrollRef = useRef<HTMLDivElement>(null);
   useLayerScroll("restrictions", scrollRef);
   const load = async () => liveStore.get() && setList(await send("/api/restrictions", "GET"));
@@ -75,7 +83,14 @@ export function RestrictionsView() {
     <div className="flex h-full flex-col">
       <header className="flex h-12 shrink-0 items-center border-b px-5">
         <h1 className="text-sm font-medium">Restrictions</h1>
-        <button onClick={() => setAdding(true)} className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground">
+        <div className="ml-4 flex gap-0.5">
+          {(["actions", "people"] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)} className={cn("rounded-md px-2 py-1 text-[13px]", tab === t ? "bg-muted font-medium" : "text-muted-foreground hover:text-foreground")}>
+              {t === "actions" ? "Actions" : "People"}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => (setTab("actions"), setAdding(true))} className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground">
           <Plus className="size-4" /> New restriction
         </button>
       </header>
@@ -85,12 +100,13 @@ export function RestrictionsView() {
             What your agents do on their own, ask you about first, or never do. Override one for some people, an objective or a folder, and the override wins where it applies: a person named beats teammates, which beats an objective, which beats a folder. Among equals, and across everyone a call reaches, the strictest wins.
           </p>
           <Tester />
-          {adding && (
+          {tab === "people" && <PeopleList list={list} sections={sections} onEdit={edit} onDelete={remove} onAdd={add} />}
+          {tab === "actions" && adding && (
             <section className="mb-5 rounded-xl border p-3">
               <Editor kinds={kinds} onSave={add} onCancel={() => setAdding(false)} />
             </section>
           )}
-          {sections.map(section => (
+          {tab === "actions" && sections.map(section => (
             <section key={section} className="mb-5">
               <h2 className="mb-1 px-2.5 text-[13px] font-medium text-muted-foreground">{section}</h2>
               <ol className="flex flex-col">
@@ -208,7 +224,8 @@ function Row({ r, kinds, open, setOpen, overrides, onEdit, onDelete, onAdd }: Ro
   );
 }
 
-function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
+/** Allow / Ask me / Block. Inherited: the mode comes from a broader rule, so it shows faded, and a click sets one here. */
+function ModeToggle({ mode, inherited, onChange }: { mode: Mode; inherited?: boolean; onChange: (m: Mode) => void }) {
   return (
     <div role="radiogroup" className="flex shrink-0 rounded-md border p-0.5 text-xs">
       {MODES.map(m => (
@@ -216,8 +233,8 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => voi
           key={m.mode}
           role="radio"
           aria-checked={mode === m.mode}
-          onClick={() => mode !== m.mode && onChange(m.mode)}
-          className={cn("rounded px-2 py-0.5 font-medium", mode === m.mode ? m.on : "text-muted-foreground hover:text-foreground")}
+          onClick={() => (inherited || mode !== m.mode) && onChange(m.mode)}
+          className={cn("rounded px-2 py-0.5 font-medium", mode === m.mode ? cn(m.on, inherited && "opacity-45") : "text-muted-foreground hover:text-foreground")}
         >
           {m.label}
         </button>
@@ -334,31 +351,127 @@ function Editor({ r, override, initialMode, kinds, onSave, onCancel, onDelete }:
   );
 }
 
+const samePerson = (a: Person, b: Person) =>
+  a.team || b.team ? !!a.team && !!b.team : (!!a.slack && a.slack === b.slack) || (!!a.email && a.email.toLowerCase() === b.email?.toLowerCase()) || (!!a.github && a.github.toLowerCase() === b.github?.toLowerCase());
+const sourceOf = (p: Person) => (p.team ? "everyone on the team" : p.slack ? "Slack" : p.email ? "email" : "GitHub");
+// An override that is about who, not where: only those apply to a person wherever they are.
+const peopleOnly = (o: Restriction) => !!o.scope?.people?.length && !o.scope.objective && !o.scope.cwd;
+
+/**
+ * Everyone yarn knows, Teammates first, each opening to what is set for them on every action: what they inherit shows faded,
+ * and the toggle sets an override for them alone (one shared with others gives them up first); the arrow puts them back on the
+ * broader rule.
+ */
+function PeopleList({ list, sections, onEdit, onDelete, onAdd }: { list: Restriction[]; sections: string[]; onEdit: (id: string, c: Partial<Restriction>) => Promise<void>; onDelete: (id: string) => Promise<void>; onAdd: (r: Partial<Restriction>) => Promise<Restriction> }) {
+  const [known, setKnown] = useState<Person[]>([]);
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState<string>();
+  useEffect(() => void knownPeople().then(setKnown), []);
+  // People named in overrides but never seen on Slack or GitHub (a typed email) are listed too.
+  const named = list.flatMap(r => r.scope?.people ?? []).filter(p => !p.team);
+  const everyone = [{ team: true, name: "Teammates" }, ...[...known, ...named].filter((p, i, all) => all.findIndex(o => samePerson(o, p)) === i)];
+  const q = query.trim().toLowerCase();
+  const shown = everyone.filter(p => !q || [personName(p), p.github, p.email].some(x => x?.toLowerCase().includes(q)));
+  const tops = list.filter(r => !r.parent);
+  const overridesFor = (p: Person, parent: string) => list.filter(o => o.parent === parent && peopleOnly(o) && o.scope!.people!.some(x => samePerson(x, p)));
+  const teammates = (parent: string) => list.find(o => o.parent === parent && peopleOnly(o) && o.scope!.people!.some(x => x.team));
+
+  // Takes them out of overrides they share with others, so the one set here is theirs alone, then sets or clears theirs.
+  const set = async (p: Person, parent: string, mode?: Mode) => {
+    const mine = overridesFor(p, parent);
+    for (const o of mine.filter(o => o.scope!.people!.length > 1)) await onEdit(o.id, { scope: { ...o.scope, people: o.scope!.people!.filter(x => !samePerson(x, p)) } });
+    const own = mine.find(o => o.scope!.people!.length === 1);
+    if (!mode) return own && onDelete(own.id);
+    if (own) return onEdit(own.id, { mode });
+    await onAdd({ parent, mode, scope: { people: [p] } });
+  };
+
+  return (
+    <section>
+      <input value={query} onChange={e => setQuery(e.target.value)} placeholder={`Filter ${everyone.length} people`} className={cn(field, "mb-2")} />
+      <ol className="flex flex-col">
+        {shown.map(p => {
+          const key = p.team ? "team" : `${p.slack ?? ""}${p.email ?? ""}${p.github ?? ""}`;
+          const count = tops.filter(r => overridesFor(p, r.id).length).length;
+          const Chevron = open === key ? ChevronDown : ChevronRight;
+          return (
+            <li key={key}>
+              <button onClick={() => setOpen(open === key ? undefined : key)} className={cn("flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-muted/60", open === key && "bg-muted/60")}>
+                <Chevron className="size-4 shrink-0 text-muted-foreground" />
+                <PersonFace p={p} className="size-6" />
+                <span className="truncate">{personName(p)}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{sourceOf(p)}</span>
+                <span className="ml-auto shrink-0 text-xs text-muted-foreground">{count ? `${count} set` : "everyone's rules"}</span>
+              </button>
+              {open === key && (
+                <div className="mb-3 ml-[26px]">
+                  {sections.map(section => (
+                    <div key={section} className="mt-2">
+                      <h3 className="px-2.5 text-xs font-medium text-muted-foreground">{section}</h3>
+                      {tops
+                        .filter(r => kindLabel(r.action) === section)
+                        .map(r => {
+                          const own = overridesFor(p, r.id)[0];
+                          const team = !p.team && teammates(r.id);
+                          const from = own ? undefined : team ? `as Teammates: ${MODES.find(m => m.mode === team.mode)!.label}` : "everyone's rule";
+                          return (
+                            <div key={r.id} className="group flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1 text-[13px] hover:bg-muted/60">
+                              <span className={cn("min-w-0 flex-1 truncate", !own && "text-muted-foreground")}>{r.label}</span>
+                              {from && <span className="shrink-0 text-[11px] text-muted-foreground/70">{from}</span>}
+                              {own && (
+                                <button onClick={() => void set(p, r.id)} title="Back to the broader rule" className="shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground">
+                                  <RotateCcw className="size-3.5" />
+                                </button>
+                              )}
+                              <ModeToggle mode={own?.mode ?? r.mode} inherited={!own} onChange={mode => void set(p, r.id, mode)} />
+                            </div>
+                          );
+                        })}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 // The people the slack and gh sentries know, fetched once a page load.
 let known: Promise<Person[]> | undefined;
 const knownPeople = () => (known ??= send("/api/restrictions/people", "GET").catch(() => ((known = undefined), [])));
 
 /**
- * Picks people: type to search the Slack users and GitHub logins yarn has seen, Enter or a click adds one; an address with
- * an @ adds that email, and Teammates stands for everyone on the team.
+ * Picks people: focusing it lists everyone yarn has seen on Slack and GitHub, Teammates first, and typing filters the list;
+ * Enter or a click adds one. An address with an @ adds that email, and a bare word that GitHub login.
  */
 function PeoplePicker({ people, onChange }: { people: Person[]; onChange: (p: Person[]) => void }) {
   const [all, setAll] = useState<Person[]>([]);
   const [query, setQuery] = useState("");
+  const [listing, setListing] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
   useEffect(() => void knownPeople().then(setAll), []);
+  useEffect(() => {
+    if (!listing) return;
+    const away = (e: PointerEvent) => box.current?.contains(e.target as Node) || setListing(false);
+    window.addEventListener("pointerdown", away);
+    return () => window.removeEventListener("pointerdown", away);
+  }, [listing]);
   const q = query.trim().toLowerCase();
-  const picked = (p: Person) => people.some(o => (p.team ? o.team : personName(o) === personName(p)));
-  const offers: Person[] = q
+  const picked = (p: Person) => people.some(o => samePerson(o, p));
+  const offers: Person[] = listing
     ? [
-        ...("teammates".includes(q) ? [{ team: true, name: "Teammates" }] : []),
-        ...all.filter(p => [p.name, p.github, p.email].some(x => x?.toLowerCase().includes(q))).slice(0, 6),
+        { team: true, name: "Teammates" },
+        ...all,
         ...(/^\S+@\S+\.\S+$/.test(q) ? [{ name: q, email: q }] : []),
         ...(/^[\w-]+$/.test(q) && !all.some(p => p.github?.toLowerCase() === q) ? [{ name: q, github: q }] : []),
-      ].filter(p => !picked(p))
+      ].filter(p => !picked(p) && (!q || p.email === q || p.github === q || [personName(p), p.github, p.email].some(x => x?.toLowerCase().includes(q))))
     : [];
   const add = (p: Person) => (onChange([...people, p]), setQuery(""));
   return (
-    <div className="relative">
+    <div ref={box} className="relative">
       <div className={cn(field, "flex flex-wrap items-center gap-1")}>
         {people.map(p => (
           <span key={personName(p)} className="flex items-center gap-1 rounded bg-muted py-0.5 pr-1.5 pl-0.5 text-xs">
@@ -372,23 +485,25 @@ function PeoplePicker({ people, onChange }: { people: Person[]; onChange: (p: Pe
         ))}
         <input
           value={query}
-          onChange={e => setQuery(e.target.value)}
+          onChange={e => (setQuery(e.target.value), setListing(true))}
+          onFocus={() => setListing(true)}
           onKeyDown={e => {
+            if (e.key === "Escape" && listing) e.stopPropagation(), setListing(false);
             if (e.key === "Enter" && offers[0]) e.preventDefault(), add(offers[0]);
             if (e.key === "Backspace" && !query && people.length) onChange(people.slice(0, -1));
           }}
-          placeholder={people.length ? "" : "A name, an email, a GitHub login, or teammates"}
+          placeholder={people.length ? "" : "Pick from everyone, or type a name, an email or a GitHub login"}
           className="min-w-32 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
       </div>
       {offers.length > 0 && (
-        <ol className="absolute inset-x-0 top-full z-10 mt-1 rounded-lg border bg-popover p-1 shadow-raised">
+        <ol className="absolute inset-x-0 top-full z-10 mt-1 max-h-72 overflow-y-auto rounded-lg border bg-popover p-1 shadow-raised">
           {offers.map(p => (
             <li key={`${personName(p)}-${p.slack ?? p.email ?? p.github ?? "team"}`}>
               <button onClick={() => add(p)} className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-muted">
                 <PersonFace p={p} className="size-5" />
                 {personName(p)}
-                <span className="text-xs text-muted-foreground">{p.team ? "everyone on the team" : p.slack ? "Slack" : p.email ? "email" : "GitHub"}</span>
+                <span className="text-xs text-muted-foreground">{sourceOf(p)}</span>
               </button>
             </li>
           ))}
