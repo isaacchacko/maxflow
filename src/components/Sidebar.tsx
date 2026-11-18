@@ -1,6 +1,5 @@
 import { CircleCheckBig, MessagesSquare, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Capture } from "@/components/Capture";
 import { Mark } from "@/components/Mark";
 import { cn } from "@/lib/utils";
 import { taskStore, threadStore } from "@/store";
@@ -53,7 +52,6 @@ export function Sidebar({ view }: { view: string }) {
   const [saved, setSaved] = useState(load);
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
-  const [capturing, setCapturing] = useState(false);
   const timer = useRef(0);
   useEffect(() => {
     try {
@@ -76,8 +74,7 @@ export function Sidebar({ view }: { view: string }) {
   };
   const enter = () => (clearTimeout(timer.current), (timer.current = window.setTimeout(() => setHover(true), 150)));
   const leave = () => (clearTimeout(timer.current), setHover(false));
-  // A capture (⌘⇧S) draws its overlay inside the rail and focuses its box there: neither opens it, and it stays folded out of the shot.
-  const open = saved.pinned || (!capturing && (hover || focused));
+  const open = saved.pinned || hover || focused;
   const overlay = open && !saved.pinned;
 
   const tops = threads.filter(t => !t.parentId && !t.resolved && !t.paused);
@@ -104,9 +101,6 @@ export function Sidebar({ view }: { view: string }) {
         <div className="flex flex-col gap-0.5">
           <Entry view="todo" label="Todo" icon={CircleCheckBig} count={needsYou} warn active={view === "todo"} open={open} />
           <Entry view="inbox" label="Threads" icon={MessagesSquare} count={unread} active={view === "inbox"} open={open} />
-        </div>
-        <div className="mt-auto flex">
-          <Capture onActive={on => (setCapturing(on), on || (setHover(false), setFocused(false)))} />
         </div>
         {open && <div onPointerDown={drag} title={saved.pinned ? "Drag to resize · ⌘\\ to unpin" : "Drag to resize · ⌘\\ to pin open"} className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize" />}
       </nav>

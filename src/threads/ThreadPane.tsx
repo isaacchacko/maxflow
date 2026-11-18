@@ -46,7 +46,7 @@ export function ThreadPane() {
   const keepInside = (e: React.MouseEvent) => {
     const href = (e.target as Element).closest("a")?.getAttribute("href");
     const m = href?.match(/^#thread\/(.+)$/);
-    if (m && !e.metaKey && !e.ctrlKey && !e.shiftKey) (e.preventDefault(), e.stopPropagation(), openPane(m[1]!));
+    if (m && !e.metaKey && !e.ctrlKey && !e.shiftKey && !(e.target as Element).closest("[data-agent=pane-open-full]")) (e.preventDefault(), e.stopPropagation(), openPane(m[1]!));
   };
 
   return (

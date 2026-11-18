@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AgentPage } from "@/agent/AgentPage";
+import { Capture } from "@/components/Capture";
 import { QuickSwitcher } from "@/components/QuickSwitcher";
 import { Viewer } from "@/threads/Viewer";
 import { PauseDialog, useResurfacing } from "@/threads/Pause";
@@ -124,6 +125,7 @@ export function App() {
   return (
     <TooltipProvider>
       <QuickSwitcher views={views} />
+      <Capture />
       <Viewer />
       <PauseDialog />
       {/* Linear's frame: the sidebar sits on the window tint, and each view is one white panel, top to bottom, inset from the edges. */}

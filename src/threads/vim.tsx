@@ -17,6 +17,7 @@ const HELP: [string, string][] = [
   ["x", "resolve, reopen"],
   ["p", "pause until a time"],
   ["/", "jump anywhere (⌘K)"],
+  ["⌘⇧S", "screenshot to the funnel"],
   ["?", "these keys"],
 ];
 
