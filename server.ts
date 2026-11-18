@@ -727,7 +727,9 @@ async function acceptTrust(s: Session) {
 // paused: he put it away until a time (until), from the browser only, saying when in his words (said); count is how many messages
 // it had then, posts how many agents added since, which leave it paused. At until it comes back as resurfaced, unread from count.
 // His own message in it unpauses it at once. wake: what he wrote to be sent when it comes back, posted then as his message, so its
-// routers take it up as if he had typed it; unpaused early (by hand, or by his own post) it isn't sent.
+// routers take it up as if he had typed it; unpaused early (by hand, or by his own post) it isn't sent. An open ask in a paused (or
+// resolved) thread is kept but not drawn as needing him, and its default waits; it is his again when the thread comes back. Only a
+// new ask brings a paused thread back.
 type Paused = { until: number; at: number; said: string; count: number; posts?: number; wake?: string };
 // pending: his last message was handed to these routers, and none has answered yet; status is the line a router set on it.
 type Pending = { routers: string[]; since: number; status?: string };
@@ -750,6 +752,44 @@ for (const t of threads as (Thread & { kind?: string; kindBy?: string; done?: nu
   delete t.kind, delete t.kindBy, delete t.done;
   for (const m of t.messages as (Message & { re?: unknown })[]) delete m.re;
 }
+// Feed threads from before the feed posted each message as its author hold one text per hand-off ("<who> in <where>:", the context
+// quoted under "Before it…", then the new lines under "New:" and the links); each becomes its messages, with the text kept for agents.
+{
+  const uids: Record<string, string> = {};
+  try {
+    for (const { msgs } of Object.values(JSON.parse(readFileSync(`${STATE_DIR}/slack-messages.json`, "utf8")) as Record<string, { msgs: { uid: string; who: string }[] }>)) for (const m of msgs) uids[m.who] ??= m.uid;
+  } catch {}
+  for (const t of threads) {
+    if (!t.feed || !t.messages.some((m) => m.from === "feed" && !m.ext)) continue;
+    const source = t.feed.source === "slack" ? "slack" : "github";
+    const blobs = t.messages.filter((m) => m.from === "feed" && !m.ext).map((m) => m.text);
+    t.feedSaid = [...(t.feedSaid ?? []), ...blobs.filter((b) => !t.feedSaid?.includes(b))];
+    t.messages = t.messages.flatMap((m) => {
+      const head = m.from === "feed" && !m.ext && m.text.match(/^(.+?) in (.+?):\n([\s\S]*)$/);
+      if (!head) return [m];
+      const [, who, where, rest] = head;
+      const links = rest.match(/^https?:\/\/\S+$/gm) ?? [t.feed!.link];
+      const body = rest.replace(/^https?:\/\/\S+$/gm, "").trim();
+      const [before, now] = body.includes("\n\nNew:\n") ? body.split("\n\nNew:\n") : ["", body];
+      const unquote = (x: string) => x.replace(/^> ?/gm, "").trim();
+      // `message` is defined further down, so these are built by hand.
+      const said = (text: string, id = `m-${crypto.randomUUID().slice(0, 6)}`) => ({ id, from: "feed", at: m.at, text });
+      const out: Message[] = [];
+      for (const c of before.replace(/^Before it[^\n]*\n/, "").split(/\n(?=> \*\*)/).filter((x) => x.trim())) {
+        const n = c.match(/^> \*\*(.+?):\*\* ?([\s\S]*)$/);
+        if (!n || !unquote(n[2])) continue;
+        const own = n[1].startsWith("Isaac (him");
+        const name = own ? "Isaac" : n[1];
+        out.push({ ...said(unquote(n[2])), ext: { source, name, ...(uids[name] && source === "slack" && { user: uids[name] }), ...(source === "github" && !own && { user: name }), link: links[0], where, context: true, ...(own && { own: true }) } });
+      }
+      // Each new message was quoted with its continuation lines quoted too, so they split apart only when there is a link for each.
+      const split = now.split(/\n(?=> )/).map(unquote).filter(Boolean);
+      const lines = split.length === links.length ? split : [unquote(now)];
+      lines.forEach((text, i) => out.push({ ...said(text, i ? `${m.id}-${i}` : m.id), ext: { source, name: who, ...(source === "slack" ? uids[who] && { user: uids[who] } : { user: who }), link: links[Math.min(i, links.length - 1)], where } }));
+      return out.length ? out : [m];
+    });
+  }
+}
 const saveThreads = () => writeFileSync(THREADS, JSON.stringify(threads));
 // A paused thread comes back at its time: a timer for the ones due within a day, rebuilt at boot, and a sweep each minute for the
 // rest (and for a timer lost to sleep). Coming back, it is unread from where it was paused, so his inbox puts it up top.
@@ -771,7 +811,9 @@ function resurface(t: Thread) {
   publish(`thread/${t.id}`, { thread: t.id, resurfaced: true });
   if (wake) postIn(t, undefined, wake, undefined, true);
 }
+// An ask it held stays, and is his again from now: its default's clock starts over from the thread coming back.
 function unpause(t: Thread) {
+  if (t.paused && t.asks?.shown) t.asks.shown = Date.now();
   t.paused = undefined;
   schedulePause(t);
 }
@@ -1343,7 +1385,8 @@ setInterval(settleTasks, 15_000);
 setInterval(() => {
   for (const t of threads) {
     const a = t.asks;
-    if (!a?.default || !a.shown || Date.now() - a.shown < DEFAULT_AFTER_MS) continue;
+    // Paused, he isn't looking at it: the clock waits for the thread to come back.
+    if (!a?.default || !a.shown || t.paused || Date.now() - a.shown < DEFAULT_AFTER_MS) continue;
     t.messages.push(message(a.session, `No answer in ${DEFAULT_AFTER_H}h, so I went ahead with: ${a.default}`));
     answered(t);
     saveThreads();
@@ -2023,7 +2066,7 @@ Bun.serve<WsData>({
         if (body.paused && (typeof until !== "number" || until <= Date.now())) return new Response("paused: { until: a time to come, in ms, said } or null", { status: 400 });
         if (t.parent) return new Response("only a top thread pauses", { status: 400 });
         if (body.paused) Object.assign(t, { paused: { until, at: Date.now(), said: String(said ?? "").slice(0, 200), count: t.messages.length, ...(typeof wake === "string" && wake.trim() && { wake: wake.trim() }) }, resolved: undefined });
-        else t.paused = undefined;
+        else unpause(t);
         schedulePause(t);
         saveThreads();
         publish(`thread/${t.id}`, { thread: t.id, paused: !!t.paused });
