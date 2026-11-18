@@ -1,6 +1,7 @@
 import { Archive, ArrowLeft, Bot, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Hash, Link2, Network, Pause, Play, Plus, Radar, User, Waypoints } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AgentFace, expressionOf } from "@/components/AgentFace";
+import { Dots } from "@/components/Working";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -65,8 +66,9 @@ function Tty({ agent, lines }: { agent: Agent; lines: Line[] }) {
               </>
             )}
             {l.kind === "working" && (
-              <p className="text-agent">
-                <span className="inline-block animate-spin">✻</span> {l.text}…
+              <p className="flex items-center gap-2 text-agent">
+                <Dots spin />
+                <span className="shimmer">{l.text}…</span>
               </p>
             )}
           </div>

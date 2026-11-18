@@ -1,11 +1,11 @@
 import { CircleCheckBig, MessagesSquare, X, type LucideIcon } from "lucide-react";
-import { AgentFace, expressionOf, faceOf } from "@/components/AgentFace";
-import { Working } from "@/components/Working";
+import { AgentFace, type Expression } from "@/components/AgentFace";
+import { Dots } from "@/components/Working";
 import type { Thread } from "@/mock";
 import { useEffect, useRef, useState } from "react";
 import { Mark } from "@/components/Mark";
 import { cn } from "@/lib/utils";
-import { agentStore, setPinned, setPinOrder, taskStore, threadStore } from "@/store";
+import { setPinned, setPinOrder, taskStore, threadStore } from "@/store";
 import { openPane } from "@/threads/pane";
 import { unseenDeep, useSeen } from "@/threads/seen";
 
@@ -56,13 +56,15 @@ function Entry({ view, label, icon: Icon, count, warn, active, open }: { view: s
   );
 }
 
+/** A pinned thread's face, by what the thread is doing: a router at work, waiting on him, stopped short, paused, resolved. */
+const pinExpression = (t: Thread): Expression =>
+  t.resolved ? "done" : t.paused ? "asleep" : t.pending ? (t.pending.stale ? "error" : "working") : t.asks ? "waiting" : "idle";
+
 /**
- * A pinned thread: its router's face (or the thread glyph), its title, and whether it has news or a router at work on it. A click
+ * A pinned thread: its own face, its title, and whether it has news or a router at work on it. A click
  * opens it beside the page and ⇧-click as the page, as everywhere; resolved or paused, it stays pinned, drawn muted.
  */
 function PinnedEntry({ t, open, unread, onDrop }: { t: Thread; open: boolean; unread: number; onDrop(dragged: string): void }) {
-  const agents = agentStore.use();
-  const face = t.routerIds[0] ?? t.messages.find(m => m.from !== "isaac")?.from;
   const working = !!t.pending && !t.pending.stale;
   const [over, setOver] = useState(false);
   return (
@@ -78,20 +80,12 @@ function PinnedEntry({ t, open, unread, onDrop }: { t: Thread; open: boolean; un
       onClick={e => e.metaKey || e.ctrlKey || (e.preventDefault(), e.shiftKey ? (location.hash = `thread/${t.id}`) : openPane(t.id))}
       className={cn("group/pin relative flex h-8 items-center gap-2 rounded-lg px-2 text-sm whitespace-nowrap text-muted-foreground hover:bg-black/[0.04] hover:text-foreground", (t.resolved || t.paused) && "opacity-50", over && "ring-2 ring-link/40")}
     >
-      {/* Folded, pins share their routers' faces too often to tell apart, so each is its title's first letter on its own tint. */}
-      {!open ? (
-        <span style={{ background: `hsl(${faceOf(t.id).hue} 70% 88%)`, color: `hsl(${faceOf(t.id).hue} 45% 30%)` }} className="flex size-5 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold">
-          {t.title.match(/[a-z0-9]/i)?.[0]?.toUpperCase() ?? "#"}
-        </span>
-      ) : face ? (
-        <AgentFace id={face} expression={expressionOf(agents.find(a => a.id === face)?.state)} small still className="size-5 shrink-0" />
-      ) : (
-        <MessagesSquare className="mx-0.5 size-4 shrink-0" />
-      )}
+      {/* Its own face, from the thread's id so pins under one router still tell apart, doing what the thread is doing. */}
+      <AgentFace id={t.id} expression={pinExpression(t)} small className="size-5 shrink-0" />
       {open ? (
         <>
           <span className="min-w-0 flex-1 truncate">{t.title}</span>
-          {working && <Working className="size-3" />}
+          {working && <Dots className="text-muted-foreground" />}
           {unread > 0 && <span className="rounded-full bg-new-soft px-1.5 text-xs font-medium text-new tabular-nums group-hover/pin:hidden">{unread}</span>}
           {/* Hovered, its × unpins it in place of the count, without opening it. */}
           <button

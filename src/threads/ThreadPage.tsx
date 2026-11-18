@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { AgentFace } from "@/components/AgentFace";
+import { Elapsed } from "@/components/Working";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { agentStore, objectiveStore, openSubthread, postToThread, setPinned, setResolved, threadStore } from "@/store";
@@ -72,11 +73,11 @@ export function Pending({ pending, names }: { pending: NonNullable<Thread["pendi
     );
   const label = pending.status ? `${names[0]}: ${pending.status}` : `${who} ${names.length > 1 ? "are" : "is"} working on a response`;
   return (
-    <p data-agent="thread-pending" title={label} className="working-pill flex w-fit max-w-full min-w-0 items-center gap-2 py-0.5 pr-3 pl-1 text-xs font-medium">
-      <AgentFace id={pending.routerIds[0] ?? ""} expression="thinking" small className="size-5 shrink-0" />
+    <p data-agent="thread-pending" title={`${label} (since ${when(pending.since)})`} className="working-pill flex w-fit max-w-full min-w-0 items-center gap-2 py-0.5 pr-3 pl-1 text-xs font-medium">
+      <AgentFace id={pending.routerIds[0] ?? ""} expression="working" small className="size-5 shrink-0" />
       {/* A router's status is markdown with chips; it may sit inside the inbox row's link, so its chips stay text. */}
       <span className="shimmer min-w-0 flex-1 truncate">{pending.status ? <Rich still text={`${label}…`} /> : `${label}…`}</span>
-      {since}
+      <Elapsed since={pending.since} />
     </p>
   );
 }

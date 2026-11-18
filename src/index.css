@@ -205,20 +205,19 @@
 }
 .shimmer * { color: inherit; }
 .shimmer code { background: none; padding: 0; }
-/* An agent's face: it blinks and looks about while idle, glances up and around while thinking, and breathes while asleep. */
-.agent-face :is(.face-sway, .face-look, .face-blink) { transform-box: fill-box; transform-origin: center; }
-@keyframes face-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.12); } }
-@keyframes face-look { 0%, 40%, 100% { transform: translate(0, 0); } 46%, 60% { transform: translate(1.2px, 0); } 66%, 82% { transform: translate(-1px, 0.3px); } }
-@keyframes face-think { 0%, 100% { transform: translate(0.4px, -0.6px); } 35% { transform: translate(1.4px, -1.2px); } 70% { transform: translate(-0.6px, -1px); } }
-@keyframes face-sway { 0%, 100% { transform: rotate(-2.5deg); } 50% { transform: rotate(2.5deg); } }
-@keyframes face-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04, 0.97); } }
-:is(.face-idle, .face-waiting, .face-thinking, .face-error) .face-blink { animation: face-blink 5.2s ease-in-out infinite; }
-:is(.face-idle, .face-waiting) .face-look { animation: face-look 9s ease-in-out infinite; }
-.face-thinking .face-look { animation: face-think 2.6s ease-in-out infinite; }
-.face-thinking .face-sway { animation: face-sway 3.2s ease-in-out infinite; }
-.face-asleep .face-sway { animation: face-breathe 4.8s ease-in-out infinite; }
+/* In-progress marks, after BoardUI's (docs/face-motion.md): a 3×3 grid of dots lit by a passing wave or a turning sweep, five
+   sparkles twinkling in turn, and a comet running an infinity loop. Each moves only opacity, transform or a dash offset. */
+@keyframes dot-lit { 0% { opacity: 1; } 10% { opacity: .6; } 20% { opacity: .3; } 30%, 100% { opacity: .14; } }
+.dots { display: inline-grid; flex: none; grid-template-columns: repeat(3, 3px); gap: 1.5px; }
+.dots > i { width: 3px; height: 3px; border-radius: 1px; background: currentColor; opacity: .14; animation: dot-lit .8s linear infinite; }
+@keyframes sparkle { 0%, 100% { opacity: 0; transform: scale(0); } 40% { opacity: 1; transform: scale(1); } 60% { opacity: .9; transform: scale(.8); } }
+.sparkles > svg { position: absolute; transform: scale(0); animation: sparkle 1.4s ease-in-out infinite; }
+@keyframes comet { to { stroke-dashoffset: -100; } }
+.comet { animation: comet 1.2s linear infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .working-ring, .working-pill::before, .shimmer, .agent-face * { animation: none !important; }
+  .working-ring, .working-pill::before, .shimmer, .agent-face *, .dots > i, .sparkles > svg, .comet { animation: none !important; }
+  .dots > i { opacity: .5; }
+  .sparkles > svg { transform: none; opacity: .7; }
 }
 /* While the image viewer is open nothing under its scrim moves: a turning ring repaints the page beneath every frame, and with it
    re-rasters the inbox's full-size image previews, which made zooming crawl. */

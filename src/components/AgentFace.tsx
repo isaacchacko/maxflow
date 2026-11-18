@@ -1,9 +1,13 @@
 import { cn } from "@/lib/utils";
+import { useEffect, useRef } from "react";
+import { createLife, restFrame, step, type Expression, type Frame, type Life } from "./face/rig";
 
 // An agent's face: a soft paper body with a deeper edge behind it, and all the expression in the eyes and brows, no mouth.
-// Shape, hue and eye spacing come from the agent's id, so each agent keeps one face; its expression follows what it is doing.
+// Shape, hue and eye spacing come from the id, so each agent (or pinned thread) keeps one face. Its expression follows what it is
+// doing, and a living face moves: face/rig.ts springs its eyes from one expression into the next and gives it blinks, a
+// wandering gaze and each state's own motion. Lists of many faces draw them `still`, in their expression's resting pose.
 
-export type Expression = "idle" | "thinking" | "waiting" | "done" | "error" | "asleep";
+export type { Expression };
 
 // A body: its outline, where the eyes sit (y, and the widest half-spread that still fits), how much to shrink them, and how
 // round to make its corners (polygons are drawn sharp and rounded with a stroke of the same colour).
@@ -38,72 +42,188 @@ export function faceOf(id: string) {
   return { shape: h % SHAPES.length, hue: HUES[(h >>> 4) % HUES.length]!, spread: 0.78 + ((h >>> 9) % 4) * 0.07, phase: (h >>> 13) % 1000 };
 }
 
-type Eye = { kind: "pill" | "dot" | "arc" | "line"; w?: number; h?: number; r?: number; dx?: number; dy?: number; rot?: number };
-type Brow = { y: number; tilt: number } | null;
-type Look = { left: Eye; right: Eye; brows?: [Brow, Brow] };
-
-const pill = (h = 6, extra: Partial<Eye> = {}): Eye => ({ kind: "pill", w: 3.2, h, ...extra });
-const LOOKS: Record<Expression, Look> = {
-  idle: { left: pill(), right: pill() },
-  thinking: { left: pill(5.4, { dx: 0.7, dy: -0.8 }), right: { kind: "dot", r: 1.7, dx: 0.7, dy: -0.4 }, brows: [{ y: -5.4, tilt: 0 }, { y: -6.2, tilt: -0.9 }] },
-  waiting: { left: pill(6.6, { rot: -6 }), right: pill(6.6, { rot: 6 }), brows: [{ y: -6.6, tilt: 0.6 }, { y: -6.6, tilt: -0.6 }] },
-  done: { left: { kind: "arc" }, right: { kind: "arc" } },
-  error: { left: { kind: "dot", r: 1.7, dy: 0.6 }, right: { kind: "dot", r: 1.7, dy: 0.6 }, brows: [{ y: -4.6, tilt: 1.1 }, { y: -4.6, tilt: -1.1 }] },
-  asleep: { left: { kind: "line", w: 3.6, h: 1.3, dy: 1.2 }, right: { kind: "line", w: 3.6, h: 1.3, dy: 1.2 } },
-};
-
 const INK = "#121216";
 /** A face's own colours, for a face that wears a brand's rather than one from its id. */
 export type Colors = { face: string; edge: string; line: string; ink: string };
 
-function EyeShape({ e, cx, cy, ink }: { e: Eye; cx: number; cy: number; ink: string }) {
-  const x = cx + (e.dx ?? 0);
-  const y = cy + (e.dy ?? 0);
-  if (e.kind === "dot") return <circle cx={x} cy={y} r={e.r} fill={ink} />;
-  if (e.kind === "arc") return <path d={`M${x - 1.9} ${y + 0.9}q1.9-3 3.8 0`} fill="none" stroke={ink} strokeWidth="1.7" strokeLinecap="round" />;
-  const w = e.w ?? 3.2;
-  const h = e.h ?? 6;
-  return <rect x={x - w / 2} y={y - h / 2} width={w} height={h} rx={Math.min(w, h) / 2} fill={ink} transform={e.rot ? `rotate(${e.rot} ${x} ${y})` : undefined} />;
-}
+const r1 = (n: number) => Math.round(n * 100) / 100;
 
 /**
- * `expression` sets the eyes and brows; `still` drops every animation (the favicon, lists of many faces); `small` drops the
- * brows, which blur below about 24px.
+ * One eye's outline: a pill `w` wide and `h` tall that bends, as `smile` goes to 1, into a ^ (closed, happy), so every expression
+ * is the same shape with different numbers and one can morph into the next. Turned by `angle` about its centre.
+ */
+function eyePath(cx: number, cy: number, w: number, h: number, angle: number, smile: number, k: number) {
+  const N = 10;
+  const r = Math.min(w, h) / 2;
+  const top: [number, number][] = [];
+  const bottom: [number, number][] = [];
+  for (let i = 0; i <= N; i++) {
+    const x = (-w / 2) * Math.cos((Math.PI * i) / N);
+    const u = (2 * x) / w;
+    const a = Math.max(0, Math.abs(x) - (w / 2 - r));
+    const hh = h / 2 - r + Math.sqrt(Math.max(0, r * r - a * a));
+    const arc = (0.9 - 1.6 * (1 - u * u)) * k;
+    const t = 2.1 * k * (0.5 + 0.5 * Math.sqrt(Math.max(0, 1 - u * u)));
+    top.push([x, -hh + (arc - t / 2 + hh) * smile]);
+    bottom.push([x, hh + (arc + t / 2 - hh) * smile]);
+  }
+  const c = Math.cos(angle);
+  const sn = Math.sin(angle);
+  const pts = [...top, ...bottom.reverse()].map(([x, y]) => `${r1(cx + x * c - y * sn)} ${r1(cy + x * sn + y * c)}`);
+  return `M${pts.join("L")}Z`;
+}
+
+type Geometry = { lx: number; ly: number; rx: number; ry: number; k: number; brows: boolean; small: boolean };
+
+/** Everything a frame sets on the face's elements, as attributes, so React draws the first and the ticker the rest. */
+function paint(f: Frame, g: Geometry) {
+  const { k } = g;
+  const dx = f.gx * 1.5 * k;
+  const dy = f.gy * 1.3 * k;
+  const eye = (x: number, y: number, open: number, angle: number, far: number) => {
+    const w = 3.2 * k * f.width * (1 - 0.14 * far);
+    const h = Math.max(0.7 * k, 6 * k * open * Math.max(f.blink, f.smile > 0.5 ? 0.45 : 0));
+    return eyePath(x + dx, y + dy, w, h, angle, f.smile, k);
+  };
+  const brow = (x: number, y: number, side: -1 | 1) => {
+    const open = Math.max(f.leftOpen, f.rightOpen);
+    const by = y + dy - 3 * k * Math.max(open, 0.6) - 1.4 * k - f.browLift * 1.5 * k + side * f.browAsym * 0.5 * k;
+    const t = -f.browAngle * 2 * k * side;
+    return `M${r1(x + dx - 2.1 * k)} ${r1(by - t)}L${r1(x + dx + 2.1 * k)} ${r1(by + t)}`;
+  };
+  const deg = (f.rot * 180) / Math.PI;
+  const zCount = g.small ? 2 : 3;
+  return {
+    head: `translate(${r1(f.x)} ${r1(f.y)}) rotate(${r1(deg)} 16 18) translate(16 27) scale(${r1(f.scale * 1000) / 1000}) translate(-16 -27)`,
+    left: eye(g.lx, g.ly, f.leftOpen, f.leftAngle, Math.max(0, f.gx)),
+    right: eye(g.rx, g.ry, f.rightOpen, f.rightAngle, Math.max(0, -f.gx)),
+    browL: g.brows ? brow(g.lx, g.ly, -1) : "",
+    browR: g.brows ? brow(g.rx, g.ry, 1) : "",
+    browOpacity: r1(f.brow * 0.6),
+    // Asleep, z's rise from beside the head and fade, one after another.
+    zs: Array.from({ length: zCount }, (_, i) => {
+      const t = (f.z + i / zCount) % 1;
+      return { x: r1(g.rx + 3 + 3.5 * t + Math.sin(Math.PI * t)), y: r1(g.ry - 4 - 9 * t), o: f.z ? r1(0.85 * Math.sin(Math.PI * t) ** 1.5) : 0, s: r1((i % 2 ? 5 : 4) + 1.5 * t) };
+    }),
+  };
+}
+
+// Every living face on the page shares one animation frame loop: 60fps while any of them is mid-change or blinking, 30 while they
+// only drift. It draws nothing while the tab is hidden, while the image viewer is open (data-viewing: a moving face under its scrim
+// re-rastered the page beneath every frame) or for a face scrolled out of view.
+type Live = { life: Life; target: Expression; geometry: Geometry; els: Els; visible: boolean };
+type Els = { head: SVGGElement; left: SVGPathElement; right: SVGPathElement; browL: SVGPathElement; browR: SVGPathElement; brows: SVGGElement; zs: SVGTextElement[] };
+const live = new Set<Live>();
+let frame = 0;
+let last = 0;
+let busy = true;
+
+function apply(l: Live, f: Frame) {
+  const p = paint(f, l.geometry);
+  const { els } = l;
+  els.head.setAttribute("transform", p.head);
+  els.left.setAttribute("d", p.left);
+  els.right.setAttribute("d", p.right);
+  els.browL.setAttribute("d", p.browL);
+  els.browR.setAttribute("d", p.browR);
+  els.brows.setAttribute("opacity", String(p.browOpacity));
+  p.zs.forEach((z, i) => {
+    const el = els.zs[i];
+    if (!el) return;
+    el.setAttribute("x", String(z.x));
+    el.setAttribute("y", String(z.y));
+    el.setAttribute("opacity", String(z.o));
+    el.setAttribute("font-size", String(z.s));
+  });
+}
+
+function tick(t: number) {
+  frame = live.size ? requestAnimationFrame(tick) : 0;
+  if (!last) last = t;
+  if (t - last < (busy ? 15 : 31)) return;
+  const dt = Math.min(t - last, 64) / 1000;
+  last = t;
+  if (document.hidden || document.documentElement.hasAttribute("data-viewing")) return;
+  busy = false;
+  for (const l of live) {
+    if (!l.visible) continue;
+    const f = step(l.life, l.target, dt);
+    busy ||= l.life.blink.on || Object.values(l.life.vel).some(v => v !== 0) || l.target === "working" || l.target === "waiting" || l.target === "done";
+    apply(l, f);
+  }
+}
+
+const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/**
+ * `expression` sets the eyes and brows; `still` draws its resting pose and never moves (the favicon, lists of many faces); `small`
+ * drops the brows, which blur below about 24px.
  */
 export function AgentFace({ id, expression = "idle", still, small, shape, colors, className }: { id: string; expression?: Expression; still?: boolean; small?: boolean; shape?: string; colors?: Colors; className?: string }) {
   const f = faceOf(id);
   const body = SHAPES.find(x => x.name === shape) ?? SHAPES[f.shape]!;
-  const look = LOOKS[expression];
   const k = body.scale ?? 1;
   const spread = body.spread * f.spread;
   const [[lx, ly], [rx, ry]] = body.eyes ?? [[16 - spread, body.cy], [16 + spread, body.cy]];
-  const delay = { animationDelay: `-${f.phase * 9}ms` };
+  const geometry: Geometry = { lx, ly, rx, ry, k, brows: !small && body.brows !== false, small: !!small };
   const { face, edge, line, ink } = colors ?? { face: `hsl(${f.hue} 82% 83%)`, edge: `hsl(${f.hue} 52% 54%)`, line: `hsl(${f.hue} 48% 58%)`, ink: INK };
   const r = body.round ?? 0;
-  const eye = (e: Eye, x: number, y: number) => (
-    <g transform={`translate(${x} ${y}) scale(${k}) translate(${-x} ${-y})`}>
-      <EyeShape e={e} cx={x} cy={y} ink={ink} />
-    </g>
-  );
+
+  const svg = useRef<SVGSVGElement>(null);
+  const self = useRef<Live | null>(null);
+  // A living face is drawn by React once, in the pose it starts in; after that only the ticker touches its eyes, so a new
+  // expression springs from wherever they are rather than jumping.
+  const first = useRef(expression);
+  const animated = !still;
+  useEffect(() => {
+    const el = svg.current;
+    if (!animated || !el || reduced()) return;
+    const q = <T extends Element>(s: string) => el.querySelector(s) as T;
+    const me: Live = {
+      life: createLife(hash(id) ^ (Math.random() * 2 ** 32), first.current),
+      target: first.current,
+      geometry,
+      visible: true,
+      els: { head: q("[data-face=head]"), left: q("[data-face=left]"), right: q("[data-face=right]"), browL: q("[data-face=brow-l]"), browR: q("[data-face=brow-r]"), brows: q("[data-face=brows]"), zs: [...el.querySelectorAll("[data-face=z]")] as SVGTextElement[] },
+    };
+    self.current = me;
+    live.add(me);
+    busy = true;
+    if (!frame) (last = 0), (frame = requestAnimationFrame(tick));
+    const io = new IntersectionObserver(([e]) => (me.visible = !!e?.isIntersecting));
+    io.observe(el);
+    return () => {
+      io.disconnect();
+      live.delete(me);
+      self.current = null;
+    };
+  }, [animated, id, shape, small]);
+  useEffect(() => {
+    if (self.current) (self.current.target = expression), (busy = true);
+  }, [expression]);
+
+  const p = paint(restFrame(animated ? first.current : expression), geometry);
   return (
-    <svg viewBox="0 0 32 32" aria-hidden className={cn("agent-face shrink-0", !still && `face-${expression}`, className)}>
-      <g className="face-sway" style={delay} transform={small && body.smallZoom ? `translate(16 16) scale(${body.smallZoom}) translate(-16 -16)` : undefined}>
-        <path d={body.d} transform="translate(1.1 1.5)" fill={edge} stroke={edge} strokeWidth={r} strokeLinejoin="round" />
-        {r > 0 && <path d={body.d} fill="none" stroke={line} strokeWidth={r + 1.4} strokeLinejoin="round" />}
-        <path d={body.d} fill={face} stroke={r > 0 ? face : line} strokeWidth={r || 0.7} strokeLinejoin="round" />
-        <g className="face-look" style={delay}>
-          <g className="face-blink" style={delay}>
-            {eye(look.left, lx, ly)}
-            {eye(look.right, rx, ry)}
+    <svg ref={svg} viewBox="0 0 32 32" aria-hidden overflow="visible" className={cn("agent-face shrink-0", className)}>
+      <g data-face="head" transform={p.head}>
+        <g transform={small && body.smallZoom ? `translate(16 16) scale(${body.smallZoom}) translate(-16 -16)` : undefined}>
+          <path d={body.d} transform="translate(1.1 1.5)" fill={edge} stroke={edge} strokeWidth={r} strokeLinejoin="round" />
+          {r > 0 && <path d={body.d} fill="none" stroke={line} strokeWidth={r + 1.4} strokeLinejoin="round" />}
+          <path d={body.d} fill={face} stroke={r > 0 ? face : line} strokeWidth={r || 0.7} strokeLinejoin="round" />
+          <path data-face="left" d={p.left} fill={ink} />
+          <path data-face="right" d={p.right} fill={ink} />
+          <g data-face="brows" opacity={p.browOpacity} stroke={ink} strokeWidth={1.2 * k} strokeLinecap="round" fill="none">
+            <path data-face="brow-l" d={p.browL} />
+            <path data-face="brow-r" d={p.browR} />
           </g>
-          {!small &&
-            body.brows !== false &&
-            look.brows?.map((b, i) => {
-              const [x, y] = i ? [rx, ry] : [lx, ly];
-              return b && <path key={i} d={`M${x - 2 * k} ${y + (b.y + b.tilt) * k}L${x + 2 * k} ${y + (b.y - b.tilt) * k}`} stroke={ink} strokeOpacity=".6" strokeWidth={1.2 * k} strokeLinecap="round" />;
-            })}
         </g>
       </g>
+      {(expression === "asleep" || animated) &&
+        p.zs.map((z, i) => (
+          <text key={i} data-face="z" x={still ? rx + 3 + i * 3 : z.x} y={still ? ry - 4 - i * 4 : z.y} opacity={still && expression === "asleep" ? 0.7 - i * 0.2 : z.o} fontSize={z.s} fill={ink} fontWeight={800} fontFamily="ui-rounded, system-ui, sans-serif">
+            z
+          </text>
+        ))}
     </svg>
   );
 }
@@ -112,4 +232,4 @@ export function AgentFace({ id, expression = "idle", still, small, shape, colors
 export const SHAPE_NAMES = SHAPES.map(x => x.name);
 
 /** What an agent's state looks like on its face. */
-export const expressionOf = (state?: string): Expression => (state === "working" ? "thinking" : state === "waiting" ? "waiting" : state === "asleep" ? "asleep" : "idle");
+export const expressionOf = (state?: string): Expression => (state === "working" ? "working" : state === "waiting" ? "waiting" : state === "asleep" ? "asleep" : "idle");
