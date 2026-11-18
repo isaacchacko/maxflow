@@ -238,14 +238,25 @@ const md: Components = {
   blockquote: ({ children }) => <blockquote className="my-1.5 border-l-2 pl-3 text-muted-foreground">{children}</blockquote>,
   code: ({ children, className }) => <code className={cn("rounded-md bg-muted px-1 font-mono text-[0.88em]", className)}>{children}</code>,
   pre: ({ children }) => <pre className="my-1.5 overflow-x-auto rounded-lg bg-muted p-2.5 text-xs [&>code]:bg-transparent [&>code]:p-0">{children}</pre>,
-  // A wide table scrolls sideways in its own box, as a code block does; nothing else in a message may widen it.
+  // A table as Slack and Linear draw one: hairline borders, a muted header row, cells that wrap their text up to a readable width.
+  // Its words break only between words (the message's break-anywhere would let a column shrink to a letter and split "10" into
+  // "1 / 0"), so its box scrolls sideways, as a code block does, only when its words really don't fit. A chip in a cell is shorter
+  // still, since a chip never wraps and would otherwise hold its column open.
   table: ({ children }) => (
-    <div className="my-1.5 max-w-full overflow-x-auto">
-      <table className="border-collapse text-xs">{children}</table>
+    <div className="my-2 max-w-full overflow-x-auto rounded-lg border">
+      <table className="border-collapse text-[13px] leading-snug [overflow-wrap:normal] [&_tr:last-child>td]:border-b-0 [&_tr>*:first-child]:border-l-0 [&_tr>*:last-child]:border-r-0 [&_td_.rounded-full]:max-w-[20ch]">{children}</table>
     </div>
   ),
-  th: ({ children }) => <th className="border px-2 py-1 text-left font-medium">{children}</th>,
-  td: ({ children }) => <td className="border px-2 py-1">{children}</td>,
+  th: ({ children }) => (
+    <th className="border border-t-0 bg-muted/60 px-3 py-1.5 text-left align-bottom font-medium text-muted-foreground">
+      <div className="max-w-[26rem]">{children}</div>
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="border px-3 py-1.5 align-top">
+      <div className="max-w-[26rem]">{children}</div>
+    </td>
+  ),
   hr: () => <hr className="my-3" />,
   a: ({ href = "", children }) => {
     // [[kind:id]] and bare ids arrive as ref: links; a link to this app (#thread/th-…, or a localhost URL to one) opens in place.
