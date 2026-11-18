@@ -8,7 +8,7 @@ import { parsePr, repoOf } from "./sentries/gh";
 // Who a tool call reaches or acts on, for restrictions scoped to people: a Slack DM's other member, each email recipient, a
 // Teams chat's members, the author of the PR a gh command reviews or merges, a mallory target. Read from what the sentries
 // keep on disk, never a live Slack or GitHub call. team is set only when it is known: true for a dryft.ai address or a PR
-// author who is a member or collaborator of its repo, false for any other address or PR author. A channel post reaches no one
+// author who is a member or collaborator of its repo or one of Dryft's bots, false for any other address or PR author. A channel post reaches no one
 // person, so it has none.
 const ME = "U0B33G87YH4";
 // mallory's devices: umbrella is his phone, which he reads himself; the others run his own agents, so a message to one reaches no person.
@@ -48,6 +48,9 @@ function slackPeople(channel: string, dir: string): Person[] {
   return uid || name ? [{ ...(uid && { slack: uid }), ...(name && { name }) }] : [];
 }
 
+// Dryft's own bots are teammates: a dryft- login, or any app, since one authors a PR on a Dryft repo only once the org installed it.
+const ownBot = (a: { __typename?: string; login: string }) => a.__typename === "Bot" || /^dryft-|\[bot\]$|^app\//i.test(a.login) || undefined;
+
 function bashPeople(command: string, cwd: string, dir: string): Person[] {
   const people: Person[] = [];
   for (const m of command.matchAll(/\bmallory\s+send\b[^;&|\n]*?--to[\s=]+(\S+)/g)) people.push(...malloryTo(m[1].split("/")[0]));
@@ -69,7 +72,7 @@ function bashPeople(command: string, cwd: string, dir: string): Person[] {
       } else key = /^#?\d+$/.test(ref) && repo ? `${repo}#${ref.replace("#", "")}` : parsePr(ref, cwd);
     }
     const pr = key && prs[key]?.pr;
-    if (pr?.author?.login) people.push({ github: pr.author.login.toLowerCase(), team: pr.authorAssociation ? ["MEMBER", "OWNER", "COLLABORATOR"].includes(pr.authorAssociation) : undefined });
+    if (pr?.author?.login) people.push({ github: pr.author.login.toLowerCase(), team: ownBot(pr.author) || (pr.authorAssociation ? ["MEMBER", "OWNER", "COLLABORATOR"].includes(pr.authorAssociation) : undefined) });
   }
   return people;
 }
