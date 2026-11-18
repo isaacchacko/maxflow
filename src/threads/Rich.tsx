@@ -376,12 +376,12 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
   const sentries = sentryStore.use();
   const [broken, setBroken] = useState(false);
   // Small is the 20px face in a replies line, where a worker's state dot would crowd it.
-  const tile = cn("relative flex shrink-0 items-center justify-center rounded-full font-semibold", small ? "size-5 text-[10px] [&>svg]:size-3" : "size-9 text-sm");
+  const tile = cn("relative flex shrink-0 items-center justify-center font-semibold", small ? "size-5 rounded-full text-[10px] [&>svg]:size-3" : "size-9 rounded-lg text-sm");
   if (from === "isaac")
     return broken ? (
       <span className={cn(tile, "bg-tile-1 text-tile-ink")}>IC</span>
     ) : (
-      <img src={`https://avatars.githubusercontent.com/${GITHUB_LOGIN}?s=72`} alt="" onError={() => setBroken(true)} className={cn("shrink-0 rounded-full object-cover", small ? "size-5" : "size-9")} />
+      <img src={`https://avatars.githubusercontent.com/${GITHUB_LOGIN}?s=72`} alt="" onError={() => setBroken(true)} className={cn("shrink-0 object-cover", small ? "size-5 rounded-full" : "size-9 rounded-lg")} />
     );
   if (objectives.some(o => o.id === from))
     return (
@@ -442,9 +442,9 @@ export function ExtAvatar({ ext }: { ext: External }) {
       {ext.own ? (
         <Avatar from="isaac" />
       ) : src && !broken ? (
-        <img src={src} alt="" onError={() => setBroken(true)} className="size-9 rounded-full object-cover" />
+        <img src={src} alt="" onError={() => setBroken(true)} className="size-9 rounded-lg object-cover" />
       ) : (
-        <span className="flex size-9 items-center justify-center rounded-full bg-tile-2 text-sm font-semibold text-tile-ink">{initials}</span>
+        <span className="flex size-9 items-center justify-center rounded-lg bg-tile-2 text-sm font-semibold text-tile-ink">{initials}</span>
       )}
       <span className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-full bg-card shadow-card">
         {ext.source === "slack" ? <SlackGlyph className="size-2.5" /> : <GitHubGlyph className="size-2.5" />}

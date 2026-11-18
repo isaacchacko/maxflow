@@ -17,7 +17,7 @@ export function when(at: string) {
  */
 export function MessageRow({ from, at, text, ext, where = true, grouped, meta, children, className, bodyClassName, onClick }: { from: string; at: string; text: string; ext?: External; where?: boolean; grouped?: boolean; meta?: React.ReactNode; children?: React.ReactNode; className?: string; bodyClassName?: string; onClick?: (e: React.MouseEvent) => void }) {
   return (
-    <article onClick={onClick} data-from={from} data-at={at} data-context={ext?.context || undefined} className={cn("group -mx-2 flex gap-2.5 rounded-lg px-2 py-1 hover:bg-muted/50", ext?.context && "opacity-60", className)}>
+    <article onClick={onClick} data-from={from} data-at={at} data-context={ext?.context || undefined} className={cn("group -mx-5 flex gap-2 px-5 py-2 hover:bg-muted/50", ext?.context && "opacity-60", className)}>
       {grouped ? (
         <span className="invisible w-9 shrink-0 pt-0.5 text-right text-[10px] text-muted-foreground tabular-nums group-hover:visible">{at.slice(11, 16)}</span>
       ) : ext ? (
@@ -28,7 +28,7 @@ export function MessageRow({ from, at, text, ext, where = true, grouped, meta, c
       <div className="min-w-0 flex-1">
         {!grouped && (
           // One line: the name ends in an ellipsis only once what follows the time has given all it can, and the time never breaks.
-          <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap">
+          <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap group-hover/bar:pr-[calc(var(--bar-w,0px)_-_1.25rem)]">
             {ext ? <ExtAuthor ext={ext} className="min-w-0 truncate" /> : <Author from={from} className="min-w-0 truncate" />}
             <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{when(at)}</span>
             {ext?.context && <span className="shrink-0 rounded border px-1 text-[10px] text-muted-foreground uppercase">context</span>}
@@ -36,7 +36,7 @@ export function MessageRow({ from, at, text, ext, where = true, grouped, meta, c
             {meta && <span className="flex min-w-0 flex-1 basis-0 items-baseline [&>*]:min-w-0">{meta}</span>}
           </div>
         )}
-        <Markdown text={text} slack={ext?.source === "slack"} className={cn("max-w-[80ch] text-sm leading-relaxed", bodyClassName)} />
+        <Markdown text={text} slack={ext?.source === "slack"} className={cn("text-sm leading-relaxed", bodyClassName)} />
         {children}
       </div>
     </article>

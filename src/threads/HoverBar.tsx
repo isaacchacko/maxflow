@@ -8,29 +8,35 @@ import { applying, type MenuItem } from "./RowMenu";
 type Action = Exclude<MenuItem, "-">;
 
 /**
- * Slack's message toolbar: a small bar floating above a row's top-right edge, overlapping only its border so it never covers the
- * header's text, with the row's actions as 28px icon buttons, each named in a tooltip, and ⋯ for the rest of its right-click menu.
+ * Slack's message toolbar: a small bar on a row's top-right edge, a third of it above the row and the rest inside, at the right
+ * where it stays clear of the header's name and time on the left, with the row's actions as 32px icon buttons, each named in a
+ * tooltip, and ⋯ for the rest of its right-click menu.
  * It shows while the row is hovered (its parent carries `group/bar`) and while its menu is open.
  */
 export function HoverBar({ agent, actions, menu }: { agent: string; actions: (Action | false | undefined)[]; menu: (MenuItem | false | undefined)[] }) {
   const [open, setOpen] = useState(false);
   const items = applying(menu);
+  // How far it reaches in from the row's right edge (32px buttons, 2px gaps, its padding, border and 16px inset), set on the row
+  // as --bar-w so the header leaves that much room while it shows, and the name and time are never under it.
+  const n = actions.filter(Boolean).length + (items.length > 0 ? 1 : 0);
+  const reach = n * 32 + (n - 1) * 2 + 4 + 2 + 16;
   return (
     <Tooltip.Provider delayDuration={300}>
       <div
+        ref={el => void el?.parentElement?.style.setProperty("--bar-w", `${reach}px`)}
         data-agent={`hoverbar:${agent}`}
         onClick={e => e.stopPropagation()}
-        className={cn("absolute right-3 bottom-full z-10 hidden translate-y-1.5 items-center gap-0.5 rounded-lg border bg-card p-0.5 shadow-raised group-hover/bar:flex", open && "flex")}
+        className={cn("absolute -top-3 -right-1 z-10 hidden items-center gap-0.5 rounded-lg border bg-card p-0.5 shadow-raised group-hover/bar:flex", open && "flex")}
       >
         {actions.filter((x): x is Action => !!x).map(a => (
           <Tip key={a.label} label={a.label}>
             {/* A toggle (the pin) shows whether it is on, as the header's does. */}
             {a.pressed !== undefined ? (
-              <button data-agent={a.agent} aria-label={a.label} aria-pressed={a.pressed} onClick={a.run} className={cn("flex size-7 items-center justify-center rounded-md", pinLook(a.pressed))}>
+              <button data-agent={a.agent} aria-label={a.label} aria-pressed={a.pressed} onClick={a.run} className={cn("flex size-8 items-center justify-center rounded-md", pinLook(a.pressed))}>
                 <PinIcon on={a.pressed} className="size-4" />
               </button>
             ) : (
-              <button data-agent={a.agent} aria-label={a.label} onClick={a.run} className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+              <button data-agent={a.agent} aria-label={a.label} onClick={a.run} className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
                 <a.icon className="size-4" />
               </button>
             )}
@@ -39,7 +45,7 @@ export function HoverBar({ agent, actions, menu }: { agent: string; actions: (Ac
         {items.length > 0 && (
           <DropdownMenu.Root modal={false} open={open} onOpenChange={setOpen}>
             <Tip label="More">
-              <DropdownMenu.Trigger data-agent={`hoverbar-more:${agent}`} aria-label="More" className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground data-[state=open]:bg-muted">
+              <DropdownMenu.Trigger data-agent={`hoverbar-more:${agent}`} aria-label="More" className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground data-[state=open]:bg-muted">
                 <Ellipsis className="size-4" />
               </DropdownMenu.Trigger>
             </Tip>
