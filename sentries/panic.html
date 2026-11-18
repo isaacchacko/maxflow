@@ -22,74 +22,73 @@
      sized to it, starts right of the traffic lights and drags the window; in a browser tab the fallbacks leave a plain margin. */
   .titlebar { align-self: stretch; flex: none; display: flex; align-items: center; height: max(48px, env(titlebar-area-height, 48px)); padding-left: max(4px, calc(env(titlebar-area-x, 0px) + 4px)); app-region: drag; -webkit-app-region: drag; }
   .mark { display: flex; align-items: center; gap: 6px; font-weight: 600; }
-  .panel { width: min(1080px, 100%); flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
-  header { padding: 24px 28px 16px; display: flex; gap: 16px; align-items: center; border-bottom: 1px solid var(--line); }
-  .scene { flex: none; font-size: 44px; line-height: 1; letter-spacing: 2px; }
+  /* One calm column; it widens into two only once a recovery agent starts, and only then shows the agent's terminal. */
+  .panel { width: 100%; max-width: 520px; margin: auto 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); transition: max-width .45s ease; }
+  .panel.wide { max-width: 1160px; grid-template-columns: 360px minmax(0, 1fr); margin: 0; flex: 1; min-height: 0; }
+  .story { padding: 28px 28px 22px; display: flex; flex-direction: column; gap: 14px; }
+  .scene { font-size: 44px; line-height: 1; letter-spacing: 2px; }
   h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
-  .sub { color: var(--dim); margin-top: 2px; }
-  main { flex: 1; min-height: 0; display: flex; gap: 24px; padding: 20px 28px 24px; }
-  .steps { width: 300px; flex: none; display: flex; flex-direction: column; gap: 14px; }
-  .step { display: flex; gap: 12px; align-items: flex-start; color: var(--dim); }
-  .step .tick { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--line); flex: none; margin-top: 1px; display: grid; place-items: center; font-size: 11px; }
-  .step.done { color: var(--fg); } .step.done .tick { border-color: var(--ok); background: var(--ok); color: var(--panel); }
-  .step.now { color: var(--fg); } .step.now .tick { border-color: var(--link); border-top-color: transparent; animation: spin 1s linear infinite; }
+  .sub { color: var(--dim); margin-top: -8px; }
+  .status { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--code); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .status .spin { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--link); border-top-color: transparent; animation: spin 1s linear infinite; flex: none; }
+  .status.ok .spin { animation: none; border-color: var(--ok); background: var(--ok); }
   @keyframes spin { to { transform: rotate(360deg) } }
-  .step small { display: block; color: var(--dim); }
-  .calm { margin-top: 4px; padding: 12px 14px; border-radius: 10px; background: var(--code); color: var(--dim); }
-  details { color: var(--dim); } summary { cursor: pointer; }
-  pre { white-space: pre-wrap; word-break: break-all; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; max-height: 240px; overflow: auto; background: var(--code); border: 1px solid var(--line); padding: 8px 10px; border-radius: 8px; color: var(--fg); }
-  .tty { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; background: var(--code); overflow: hidden; }
-  .tty .bar { padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--dim); font-size: 12px; display: flex; justify-content: space-between; }
+  .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--dim); }
+  .steps li { display: flex; gap: 8px; align-items: baseline; }
+  .steps li::before { content: "○"; width: 12px; flex: none; text-align: center; }
+  .steps li.done { color: var(--fg); } .steps li.done::before { content: "✓"; color: var(--ok); }
+  .steps li.now { color: var(--fg); } .steps li.now::before { content: "●"; color: var(--link); }
+  details { color: var(--dim); font-size: 13px; } summary { cursor: pointer; }
+  pre { white-space: pre-wrap; word-break: break-all; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; max-height: 220px; overflow: auto; background: var(--code); border: 1px solid var(--line); padding: 8px 10px; border-radius: 8px; color: var(--fg); }
+  .tty { min-width: 0; min-height: 420px; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--code); border-radius: 0 16px 16px 0; overflow: hidden; animation: fade .4s ease .2s both; }
+  @keyframes fade { from { opacity: 0 } }
+  .tty .bar { padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--dim); font-size: 12px; display: flex; justify-content: space-between; }
   .tty .bar b { color: var(--fg); font-weight: 600; }
   #term { flex: 1; min-height: 0; padding: 6px 4px 4px 10px; }
-  .waiting { flex: 1; display: grid; place-items: center; color: var(--dim); text-align: center; padding: 24px; }
-  .back { position: fixed; inset: 0; display: none; place-items: center; background: color-mix(in srgb, var(--bg) 80%, transparent); font-size: 18px; font-weight: 500; }
-  @media (max-width: 760px) { main { flex-direction: column; padding: 16px } header { padding: 18px 16px 12px } .steps { width: auto } .tty { min-height: 320px } }
+  @media (max-width: 760px) { .panel.wide { grid-template-columns: minmax(0, 1fr); } .tty { border-left: 0; border-top: 1px solid var(--line); border-radius: 0 0 16px 16px; } }
 </style>
 </head>
 <body>
 <div class="titlebar"><div class="mark"><span>🧶</span> yarn</div></div>
-<div class="panel">
-  <header>
+<div class="panel" id="panel">
+  <section class="story">
     <!-- Slack's :cat2: then the yarn, as he asked: two emoji, large and still. -->
     <div class="scene" aria-hidden="true">🐈🧶</div>
-    <div>
-      <h1>Oh no! The cat got into the yarn.</h1>
-      <div class="sub">Untangling it now. Your agents are safe in tmux and still running.</div>
-    </div>
-  </header>
-  <main>
-    <section class="steps">
-      <div class="step done" id="s1"><div class="tick">✓</div><div>Noticed the tangle<small id="since"></small></div></div>
-      <div class="step now" id="s2"><div class="tick"></div><div>Rewinding the ball (restart)<small id="runs"></small></div></div>
-      <div class="step" id="s3"><div class="tick"></div><div>Calling in a helper (recovery agent)<small id="due"></small></div></div>
-      <div class="step" id="s4"><div class="tick"></div><div>Back to knitting<small>this page reloads itself, where you were</small></div></div>
-      <div class="calm">Nothing to do. Most tangles undo themselves in a few seconds. If it stays knotted, a helper agent starts on it here, and you can type to it.</div>
-      <details><summary>server log</summary><pre id="log"></pre></details>
-    </section>
-    <section class="tty">
-      <div class="bar"><span><b>yarn recovery</b></span><span id="ttystate">not started</span></div>
-      <div class="waiting" id="waiting">The agent's terminal shows up here once it starts.</div>
-      <div id="term" hidden></div>
-    </section>
-  </main>
+    <h1>Oh no! The cat got into the yarn.</h1>
+    <div class="sub">Untangling it now. Your agents are safe in tmux and still running.</div>
+    <div class="status" id="status" role="status"><span class="spin"></span><span id="line">Restarting…</span></div>
+    <ol class="steps">
+      <li class="done" id="s1">Noticed the tangle <span id="since"></span></li>
+      <li class="now" id="s2">Rewinding the ball (restart) <span id="runs"></span></li>
+      <li id="s3">Calling in a helper if it's still knotted</li>
+      <li id="s4">Back to knitting: this page reloads itself, where you were</li>
+    </ol>
+    <details><summary>server log</summary><pre id="log"></pre></details>
+  </section>
+  <section class="tty" id="tty" hidden>
+    <div class="bar"><span><b>yarn recovery</b></span><span id="ttystate">connecting…</span></div>
+    <div id="term"></div>
+  </section>
 </div>
-<div class="back" id="back">Untangled! Reloading…</div>
 <script src="/__panic/xterm.js"></script>
 <script src="/__panic/fit.js"></script>
 <script>
   const $ = (id) => document.getElementById(id);
   const span = (s) => s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`;
-  const ago = (t) => span(Math.max(0, Math.round((Date.now() - t) / 1000)));
+  const secs = (t) => Math.max(0, Math.round((Date.now() - t) / 1000));
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   let last = null, termOpen = false, agentId = null, back = false, buildWaitSince = 0;
 
+  // The helper's terminal, once one starts: the panel widens to make room for it (no space is kept for it before), and he can type to it.
   function openTerm() {
     termOpen = true;
-    $("waiting").hidden = true; $("term").hidden = false;
+    $("panel").classList.add("wide");
+    $("tty").hidden = false;
     const term = new Terminal({ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12.5, lineHeight: 1.2, cursorBlink: true, theme: { background: css("--code"), foreground: css("--fg"), cursor: css("--link"), selectionBackground: "#2673fe33" } });
     const fit = new FitAddon.FitAddon();
-    term.loadAddon(fit); term.open($("term")); fit.fit(); term.focus();
+    term.loadAddon(fit); term.open($("term"));
+    // Fitted again once the panel has finished widening.
+    setTimeout(() => (fit.fit(), term.focus()), 500);
     const ws = new WebSocket(`ws://${location.host}/__panic/ws`);
     ws.binaryType = "arraybuffer";
     const send = (m) => ws.readyState === 1 && ws.send(JSON.stringify(m));
@@ -101,23 +100,23 @@
     new ResizeObserver(() => fit.fit()).observe($("term"));
   }
 
+  // One line that says where it stands, kept current in place; the steps below it say the same as a list.
   function render() {
-    if (!last) return;
-    $("since").textContent = `${ago(last.downSince)} ago`;
-    // This outage's restarts only; an exit is worth naming only when it failed.
+    if (!last || back) return;
+    const down = secs(last.downSince);
+    $("since").textContent = `· ${span(down)} ago`;
     const { attempts, lastExit } = last.launchd;
     const failed = /^-?\d+$/.test(String(lastExit ?? "").trim()) && Number(lastExit) !== 0 ? `last exit code ${lastExit}` : "";
-    $("runs").textContent = [attempts ? `${attempts} restart${attempts > 1 ? "s" : ""} so far` : "", failed].filter(Boolean).join(", ");
-    const s3 = $("s3");
+    $("runs").textContent = [attempts ? `· ${attempts} restart${attempts > 1 ? "s" : ""}` : "", failed && `· ${failed}`].filter(Boolean).join(" ");
     if (last.agent) {
-      $("s2").className = "step done"; $("s2").querySelector(".tick").textContent = "✓";
-      $("runs").textContent = "didn't come undone on its own";
-      s3.className = "step now"; $("due").textContent = `untangling for ${ago(last.agent.at)}`;
+      $("s2").className = "done"; $("s3").className = "now";
+      $("s3").textContent = "Calling in a helper: it's on it";
+      $("line").textContent = `A helper is untangling it · ${span(secs(last.agent.at))}`;
       agentId = last.agent.id;
       if (!termOpen) openTerm();
     } else {
       const left = Math.max(0, Math.round((last.agentDueAt - Date.now()) / 1000));
-      $("due").textContent = left ? `if it's still knotted in ${span(left)}` : "on the way…";
+      $("line").textContent = down < 10 ? `Restarting… ${span(down)}` : left ? `Still down, calling in a helper in ${span(left)}` : "Calling in a helper…";
     }
     $("log").textContent = last.log;
   }
@@ -146,11 +145,12 @@
   }
 
   // A reload, not location.assign(location.href): assigning the same URL with a #hash is a jump within the page, which never
-  // reloads, and left "Reloading…" up until he pressed ⌘R. The URL and hash he was on are kept.
+  // reloads. The URL and hash he was on are kept.
   function comeBack() {
     back = true;
-    $("s4").className = "step done"; $("s4").querySelector(".tick").textContent = "✓";
-    $("back").style.display = "grid";
+    for (const id of ["s2", "s3", "s4"]) $(id).className = "done";
+    $("status").classList.add("ok");
+    $("line").textContent = "Back! Reloading…";
     setTimeout(() => {
       if (agentId) history.replaceState(null, "", `/#agent/${agentId}`);
       location.reload();
