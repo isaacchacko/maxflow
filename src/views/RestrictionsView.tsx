@@ -111,15 +111,44 @@ export function RestrictionsView() {
 const chip = "max-w-48 shrink-0 truncate rounded bg-muted px-1.5 text-[11px] text-muted-foreground";
 const personName = (p: Person) => (p.team ? "Teammates" : p.name || p.email || p.github || p.slack!);
 
+/**
+ * A person's face: their Slack photo from the server's cache, else their GitHub avatar, else their initials; Teammates is a
+ * group icon. The same pictures the threads show.
+ */
+function PersonFace({ p, className }: { p: Person; className?: string }) {
+  const [broken, setBroken] = useState(false);
+  const src = p.slack ? `/api/avatar/slack/${p.slack}?name=${encodeURIComponent(p.name ?? "")}` : p.github && `https://avatars.githubusercontent.com/${p.github}?s=40`;
+  const box = cn("size-4 shrink-0 rounded-full", className);
+  if (p.team)
+    return (
+      <span className={cn(box, "flex items-center justify-center bg-muted-foreground/15")}>
+        <Users className="size-2.5" />
+      </span>
+    );
+  if (src && !broken) return <img src={src} alt="" onError={() => setBroken(true)} className={cn(box, "object-cover")} />;
+  const initials = personName(p).split(/[\s@._-]+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  return <span className={cn(box, "flex items-center justify-center bg-tile-2 text-[8px] font-semibold text-tile-ink")}>{initials}</span>;
+}
+
 /** What a restriction is narrowed to: its people, objective and folder, as chips. */
 function ScopeChips({ r }: { r: Restriction }) {
   const objectives = objectiveStore.use();
-  const chips = [...(r.scope?.people ?? []).map(personName), r.scope?.objective && (objectives.find(o => o.id === r.scope!.objective)?.title ?? r.scope.objective), r.scope?.cwd].filter(Boolean) as string[];
-  return chips.map(c => (
-    <span key={c} className={chip}>
-      {c}
-    </span>
-  ));
+  const places = [r.scope?.objective && (objectives.find(o => o.id === r.scope!.objective)?.title ?? r.scope.objective), r.scope?.cwd].filter(Boolean) as string[];
+  return (
+    <>
+      {(r.scope?.people ?? []).map(p => (
+        <span key={personName(p)} className={cn(chip, "flex items-center gap-1 pl-0.5")}>
+          <PersonFace p={p} />
+          {personName(p)}
+        </span>
+      ))}
+      {places.map(c => (
+        <span key={c} className={chip}>
+          {c}
+        </span>
+      ))}
+    </>
+  );
 }
 
 type RowProps = { r: Restriction; kinds: string[]; open?: string; setOpen: (id?: string) => void; overrides: Restriction[]; onEdit: (id: string, c: Partial<Restriction>) => Promise<void>; onDelete: (id: string) => void; onAdd: (r: Partial<Restriction>) => Promise<Restriction> };
@@ -332,8 +361,8 @@ function PeoplePicker({ people, onChange }: { people: Person[]; onChange: (p: Pe
     <div className="relative">
       <div className={cn(field, "flex flex-wrap items-center gap-1")}>
         {people.map(p => (
-          <span key={personName(p)} className="flex items-center gap-1 rounded bg-muted px-1.5 text-xs">
-            {p.team && <Users className="size-3" />}
+          <span key={personName(p)} className="flex items-center gap-1 rounded bg-muted py-0.5 pr-1.5 pl-0.5 text-xs">
+            <PersonFace p={p} />
             {personName(p)}
             {!p.team && <span className="text-muted-foreground">{p.slack ? "Slack" : p.email ? "email" : "GitHub"}</span>}
             <button onClick={() => onChange(people.filter(o => o !== p))} title="Remove" className="text-muted-foreground hover:text-foreground">
@@ -357,7 +386,7 @@ function PeoplePicker({ people, onChange }: { people: Person[]; onChange: (p: Pe
           {offers.map(p => (
             <li key={`${personName(p)}-${p.slack ?? p.email ?? p.github ?? "team"}`}>
               <button onClick={() => add(p)} className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-muted">
-                {p.team && <Users className="size-3.5" />}
+                <PersonFace p={p} className="size-5" />
                 {personName(p)}
                 <span className="text-xs text-muted-foreground">{p.team ? "everyone on the team" : p.slack ? "Slack" : p.email ? "email" : "GitHub"}</span>
               </button>
