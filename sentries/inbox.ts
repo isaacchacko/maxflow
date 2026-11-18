@@ -36,9 +36,10 @@ type ReviewPr = { url: string; title: string; author: string; why: "review" | "a
 type Question = { key: string; at: number; who: string; text: string; link: string };
 // source: slack, slack bot, ci, github or review request.
 // key: the Slack conversation (DM, or channel/thread ts), PR or alert it came from, which its feed thread is kept by.
-type Routed = { task: number; key: string; source: string; who: string; where: string; text: string; link: string; at?: number };
+// user: the Slack user id or GitHub login; raw: the message as written (Slack's mrkdwn, GitHub's markdown), for his inbox to draw.
+type Routed = { task: number; key: string; source: string; who: string; where: string; text: string; link: string; at?: number; user?: string; raw?: string };
 // A message in a Slack conversation or on a PR, his own (mine) included, kept so what goes to an agent carries what led up to it.
-type Said = { at: number; who: string; text: string; mine?: boolean };
+type Said = { at: number; who: string; text: string; mine?: boolean; user?: string; raw?: string; link?: string };
 type State = {
   seq: number;
   // The board task each Slack thread, DM or PR is on.
@@ -161,7 +162,7 @@ async function onSlack(topic: string, d: any, me: string) {
   const key = keyOf(d);
   if (d.user && d.from) names[d.user] = d.from;
   const text = readable(d.text);
-  remember(key, { at: Number(d.ts) * 1000, who: d.from ?? "?", text, mine: topic === "slack/own" || d.user === me });
+  remember(key, { at: Number(d.ts) * 1000, who: d.from ?? "?", text, mine: topic === "slack/own" || d.user === me, user: d.user, raw: d.text, link: d.link });
   // His own posts answer what was asked there before them, whoever typed them.
   if (topic === "slack/own" || d.user === me) {
     state.answered[key] = Math.max(state.answered[key] ?? 0, Number(d.ts));
@@ -188,7 +189,7 @@ async function onSlack(topic: string, d: any, me: string) {
   if (task) state.open[d.ts] = key;
   if (/\?/.test(text)) state.questions[d.ts] = { key, at: Date.now(), who: d.from, text, link: d.link };
   // A mention or DM nobody owns goes to the funnel, which starts an agent on it; thread replies stay on the board.
-  if (!owner && task && kind !== "reply") feed({ task, key, source: "slack", who: d.from, where, text: short(text, 500), link: d.link, at: Number(d.ts) * 1000 });
+  if (!owner && task && kind !== "reply") feed({ task, key, source: "slack", who: d.from, where, text: short(text, 500), link: d.link, at: Number(d.ts) * 1000, user: d.user, raw: d.text });
 }
 
 // A bot's mention of him ("a run on main is red", a skipped deploy) is one task per kind of alert, however often it repeats: its text
@@ -244,14 +245,23 @@ function remember(key: string, said: Said) {
 function contextOf(items: Routed[]) {
   const fresh = new Set(items.map((i) => i.at));
   const first = Math.min(...items.map((i) => i.at ?? Date.now()));
-  const lines: string[] = [];
+  const before: Said[] = [];
   for (const key of new Set(items.map((i) => i.key))) {
     const since = state.ctxSent[key] ?? first - CONTEXT_MS;
-    for (const x of (state.convo[key] ?? []).filter((x) => x.at > since && x.at < first && !fresh.has(x.at)).slice(-CONTEXT_MAX))
-      lines.push(`> **${x.mine ? "Isaac (him, on Slack/GitHub)" : x.who}:** ${short(x.text, 400).replace(/\n/g, "\n> ")}`);
+    before.push(...(state.convo[key] ?? []).filter((x) => x.at > since && x.at < first && !fresh.has(x.at)).slice(-CONTEXT_MAX));
     state.ctxSent[key] = Math.max(state.ctxSent[key] ?? 0, ...items.filter((i) => i.key === key).map((i) => i.at ?? Date.now()));
   }
-  return lines;
+  return before;
+}
+const contextLine = (x: Said) => `> **${x.mine ? "Isaac (him, on Slack/GitHub)" : x.who}:** ${short(x.text, 400).replace(/\n/g, "\n> ")}`;
+// The messages his inbox shows for a hand-off: the context first, marked so, then the new ones, each as its author.
+function postsOf(items: Routed[], before: Said[]) {
+  const source = items[0].source === "slack" ? "slack" : "github";
+  const where = items[0].where;
+  return [
+    ...before.map((x) => ({ text: x.raw ?? x.text, at: x.at, ext: { source, name: x.mine ? "Isaac" : x.who, ...(x.user && { user: x.user }), link: x.link ?? items[0].link, where, context: true, ...(x.mine && { own: true }) } })),
+    ...items.map((i) => ({ text: i.raw ?? i.text, ...(i.at && { at: i.at }), ext: { source, name: i.who, ...(i.user && { user: i.user }), link: i.link, where } })),
+  ];
 }
 
 const feed = (item: Routed) => (state.batch.push(item), (state.batchAt ||= Date.now()));
@@ -281,16 +291,18 @@ async function flushBatch() {
   }
   for (const { thread, items } of groups.values()) {
     const [i] = items;
-    const before = contextOf(items);
+    const context = contextOf(items);
+    const before = context.map(contextLine);
+    const posts = postsOf(items, context);
     const said = items.map((x) => `> ${x.text.replace(/\n/g, "\n> ")}`).join("\n");
     const text = `${i.who} in ${i.where}:\n${before.length ? `Before it, in the same conversation (context, not new):\n${before.join("\n")}\n\nNew:\n` : ""}${said}\n${[...new Set(items.map((x) => x.link))].join("\n")}`;
     let id = thread;
     if (id) {
-      const res = await post(`/api/threads/${id}/messages`, { text, feed: true });
+      const res = await post(`/api/threads/${id}/messages`, { text, feed: true, posts });
       if (!res.ok) { log(`more into ${id} failed: ${await res.text()}`); continue; }
       log(`T-${i.task}: more into ${id}`);
     } else {
-      const res = await post("/api/threads", { title: `${i.who}: ${short(items.at(-1)!.text, 70)}`, text, feed: { source: i.source, who: i.who, link: i.link, task: i.task } });
+      const res = await post("/api/threads", { title: `${i.who}: ${short(items.at(-1)!.text, 70)}`, text, posts, feed: { source: i.source, who: i.who, link: i.link, task: i.task } });
       if (!res.ok) { log(`feed thread for T-${i.task} failed: ${await res.text()}`); continue; }
       id = ((await res.json()) as { id: string }).id;
       log(`funnel: T-${i.task} as feed thread ${id}`);
@@ -378,7 +390,7 @@ async function refreshPrs(ghMe: string) {
       status: "you",
     });
     // A review agent already reads the risky ones; the rest go to the funnel too, for an agent to read ahead of him.
-    if (task && !agent && !first && !BOT.test(pr.author?.login ?? "")) feed({ task, key, source: "review request", who: pr.author?.login ?? "?", where: key, text: `${ask}: "${pr.title}"`, link: pr.url });
+    if (task && !agent && !first && !BOT.test(pr.author?.login ?? "")) feed({ task, key, source: "review request", who: pr.author?.login ?? "?", where: key, text: `${ask}: "${pr.title}"`, link: pr.url, user: pr.author?.login });
   }
   for (const [key, pr] of Object.entries(state.prs))
     if (!now.has(key) && !pr.gone) {
@@ -427,14 +439,14 @@ async function onGh(topic: string, d: any) {
   if (reviewing && (kind === "merged" || kind === "closed")) return closeTask(key, `the PR was ${kind}`);
   if (["comment", "review", "thread"].includes(kind) && d.body && d.who && !BOT.test(d.author ?? "") && !BOT.test(d.who)) {
     const his = d.who.startsWith("the user");
-    remember(key, { at: Date.now(), who: his ? "Isaac" : d.who, text: short(d.body, 600), mine: his });
+    remember(key, { at: Date.now(), who: his ? "Isaac" : d.who, text: short(d.body, 600), mine: his, user: d.author, raw: d.body, link: d.url });
   }
   // A person's comment or review that no session heard: on his own PRs the review sentry revives the owner, so this only notes it on
   // a task he already has; on a PR he reviews, it puts the task back on him.
   if (!["comment", "review", "thread"].includes(kind) || d.told?.length || !d.who || d.who.startsWith("the user") || BOT.test(d.author ?? "") || BOT.test(d.who)) return;
   const what = kind === "review" ? `${d.who} reviewed (${String(d.state).toLowerCase().replace("_", " ")})` : `${d.who} commented${d.path ? ` on ${d.path}` : ""}`;
   const task = await onBoard(key, url, `${what}: "${short(d.body ?? "", 120)}"`, { title: `${what} on ${key.split("/")[1]}`, ...(!mine && { status: "you" }) });
-  if (task) feed({ task, key, source: "github", who: d.who, where: key, text: `${what}: "${short(d.body ?? "", 500)}"${d.path ? ` (${d.path})` : ""}`, link: d.url ?? url, at: Date.now() });
+  if (task) feed({ task, key, source: "github", who: d.who, where: key, text: `${what}: "${short(d.body ?? "", 500)}"${d.path ? ` (${d.path})` : ""}`, link: d.url ?? url, at: Date.now(), user: d.author, raw: `${kind === "review" ? `**${String(d.state).toLowerCase().replace("_", " ")}**${d.body ? "\n\n" : ""}` : ""}${d.body ?? ""}${d.path ? `\n\n\`${d.path}\`` : ""}` });
 }
 
 // ---- Stalls, raised once each as a board task, never as a ping.
@@ -477,7 +489,7 @@ if (import.meta.main) {
       try {
         const e = JSON.parse(line), d = e.data;
         if (Date.now() - e.at > 86_400_000 || !d?.link || !d.text || d.bot || !/^slack\/(dm|mention|own|\w+\/[\d.]+\/reply)$/.test(e.topic)) continue;
-        remember(keyOf(d), { at: Number(d.ts) * 1000, who: d.from ?? "?", text: readable(d.text), mine: e.topic === "slack/own" || d.user === me });
+        remember(keyOf(d), { at: Number(d.ts) * 1000, who: d.from ?? "?", text: readable(d.text), mine: e.topic === "slack/own" || d.user === me, user: d.user, raw: d.text, link: d.link });
       } catch {}
     }
   let handledAt = 0;

@@ -22,7 +22,8 @@ const GROUP_MS = 5 * 60_000;
 const SEEN_AT = "inbox-seen-at";
 
 /** A thread's opening message; a thread a router opened before writing in it shows its title, at the bottom until it does. */
-const openerOf = (t: Thread) => t.messages[0] ?? { from: t.routerIds[0] ?? t.objectiveId, at: t.pending?.since ?? "9999", text: t.title };
+// A feed thread opens on its first new message, not the context before it.
+const openerOf = (t: Thread): Thread["messages"][number] => t.messages.find(m => !m.ext?.context) ?? t.messages[0] ?? { from: t.routerIds[0] ?? t.objectiveId, at: t.pending?.since ?? "9999", text: t.title };
 
 function dayLabel(day: string) {
   const d = new Date(`${day}T00:00`);
@@ -156,6 +157,7 @@ export function InboxView() {
               from={first.from}
               at={first.at}
               text={first.text}
+              ext={first.ext}
               grouped={grouped}
               active={vim.cursor === t.id}
               className="cursor-pointer"

@@ -13,7 +13,7 @@ import { MessageRow, when } from "./MessageRow";
 import { Replies, repliesOf } from "./Replies";
 import { pinItem, RowMenu, messageItems, threadItems } from "./RowMenu";
 import { firstUnseen, markSeen, setSeen } from "./seen";
-import { RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
+import { Markdown, RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
 import { ShotScope, shotsOf } from "./Viewer";
 import { HoverBar } from "./HoverBar";
 import { openPause, pausedLabel } from "./Pause";
@@ -237,10 +237,11 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
           {/* An image here opens the viewer over this thread's images, the root's included and its subthreads' not. */}
           <ShotScope.Provider value={shotsOf([...(root ? [root] : []), ...replies])}>
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            {root?.ext?.context && <EarlierLine />}
             {root && (
               <RowMenu agent={`msg:${keyOf(root, -1)}`} items={messageMenu(root, keyOf(root, -1))}>
               <div data-msg={root.id} data-thread={thread.parentId ?? thread.id} {...vimRow(keyOf(root, -1))} className="group/bar relative">
-                <MessageRow from={root.from} at={root.at} text={root.text} active={vim.cursor === keyOf(root, -1)}>
+                <MessageRow from={root.from} at={root.at} text={root.text} ext={root.ext} active={vim.cursor === keyOf(root, -1)}>
                   {root.nudge && <NudgeMark />}
                   {root.wake && <WakeMark />}
                 </MessageRow>
@@ -272,22 +273,26 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
                 Quote
               </button>
             )}
-            {root && replies.length > 0 && (
+            {root && replies.length > 0 && !root.ext && (
               <p className="my-2 flex items-center gap-2 text-xs text-muted-foreground">
                 {replies.length === 1 ? "1 reply" : `${replies.length} replies`}
                 <span className="h-px flex-1 bg-border" />
               </p>
             )}
             {replies.map((m, i) => {
+              // Context the feed already showed earlier in this thread isn't shown again.
+              if (m.ext?.context && thread.messages.slice(0, thread.messages.indexOf(m)).some(x => x.ext?.link === m.ext!.link && x.text === m.text)) return null;
               const prev = replies[i - 1];
               const sub = subOf(m.id);
               // What agents posted after he resolved it sits below a line saying so; where the "New" line falls too, that line says both.
               const resolvedHere = thread.resolved && m.at > thread.resolved.at && !(prev && prev.at > thread.resolved.at);
               const isNew = i === firstNew;
-              const grouped = !isNew && !m.wake && prev?.from === m.from && Date.parse(m.at) - Date.parse(prev.at) <= GROUP_MS;
+              const grouped = !isNew && !m.wake && prev?.from === m.from && prev.ext?.name === m.ext?.name && !!prev.ext?.context === !!m.ext?.context && Date.parse(m.at) - Date.parse(prev.at) <= GROUP_MS;
+              const earlier = m.ext?.context && !(prev ?? root)?.ext?.context;
               return (
                 <Fragment key={i}>
                 {resolvedHere && !isNew && <p className="my-2 border-t pt-1 text-center text-xs text-muted-foreground">new since resolved</p>}
+                {earlier && <EarlierLine />}
                 {isNew && (
                   <div ref={lineRef} data-agent="unread-line" className="my-2 flex items-center gap-1.5 text-[11px] font-semibold text-destructive">
                     <span className="h-px flex-1 bg-destructive" />
@@ -296,7 +301,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
                 )}
                 <RowMenu agent={`msg:${keyOf(m, i)}`} items={messageMenu(m, keyOf(m, i))}>
                 <div data-msg={m.id} data-thread={thread.id} {...vimRow(keyOf(m, i))} className="group/bar relative">
-                  <MessageRow from={m.from} at={m.at} text={m.text} grouped={grouped} active={vim.cursor === keyOf(m, i)} className={cn(!grouped && i > 0 && "mt-2.5")}>
+                  <MessageRow from={m.from} at={m.at} text={m.text} ext={m.ext} where={!!m.ext && conversationOf(m.ext.link) !== conversationOf((replies.slice(0, i).findLast(x => x.ext) ?? root)?.ext?.link)} grouped={grouped} active={vim.cursor === keyOf(m, i)} className={cn(!grouped && i > 0 && "mt-2.5")}>
                     {m.nudge && <NudgeMark />}
                     {m.wake && <WakeMark />}
                     {sub && (sub.messages.length > 0 || sub.pending) && <Replies t={sub} />}
@@ -335,9 +340,10 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
           {/* A thread maxflow started from his event feed links where it came from. */}
           {thread.feed && (
             <Section title="Source">
-              <a href={thread.feed.link} target="_blank" rel="noreferrer" data-agent="thread-source" className="truncate rounded-md px-1.5 py-1 text-sm text-link hover:bg-muted">
-                {thread.feed.who} · {thread.feed.link.replace(/^https?:\/\//, "")}
-              </a>
+              <div data-agent="thread-source" className="flex min-w-0 items-baseline gap-1.5 px-1.5 py-1 text-sm">
+                <span className="shrink-0">{thread.feed.who}</span>
+                <Markdown text={`<${thread.feed.link}>`} className="min-w-0" />
+              </div>
             </Section>
           )}
           <Separator />
@@ -425,3 +431,16 @@ const WakeMark = () => (
     ⏰ sent on wake
   </span>
 );
+
+/** Above the messages from before the new ones in a Slack or GitHub conversation the feed brought in. */
+function EarlierLine() {
+  return (
+    <p className="my-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+      earlier in this conversation
+      <span className="h-px flex-1 bg-border" />
+    </p>
+  );
+}
+
+// A Slack link's channel, or a GitHub link's PR: the chip naming where a message was said shows when it changes.
+const conversationOf = (link?: string) => link?.match(/archives\/(\w+)|github\.com\/([\w.-]+\/[\w.-]+\/\w+\/\d+)/)?.slice(1).find(Boolean);

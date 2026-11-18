@@ -44,6 +44,9 @@ export type Objective = { id: string; title: string; taskIds: string[]; events: 
  * A virtual chat routers (and their objective) post into. Message text is prose with inline references:
  * [[agent:id]], [[router:id]], [[task:id]], [[objective:id]], and [label](https://url) for external links.
  */
+/** Someone on Slack or GitHub, as the feed posted them. */
+export type External = { source: "slack" | "github"; name: string; user?: string; link: string; where?: string; context?: boolean; own?: boolean };
+
 export type Thread = {
   id: string;
   title: string;
@@ -67,7 +70,7 @@ export type Thread = {
   parentId?: string;
   parentMessageId?: string;
   /** nudge: he asked for its answer in a subthread. */
-  messages: { id?: string; from: string; at: string; text: string; nudge?: "subthread"; wake?: boolean }[];
+  messages: { id?: string; from: string; at: string; text: string; nudge?: "subthread"; wake?: boolean; ext?: External }[];
 };
 
 export type AgentState = "working" | "waiting" | "idle" | "asleep";

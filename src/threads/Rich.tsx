@@ -3,8 +3,10 @@ import { useContext, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentFace, expressionOf } from "@/components/AgentFace";
+import { GitHubGlyph, loadSlackNames, mrkdwn, SlackGlyph, slackLabel, slackLink, slackNameStore } from "@/lib/slack";
 import { cn } from "@/lib/utils";
-import { agentStateColor, statusColor } from "@/mock";
+import { agentStateColor, statusColor, type External } from "@/mock";
+export type { External };
 import { agentStore, nameStore, objectiveStore, prStore, sentryStore, taskStore, threadStore } from "@/store";
 import { goToMessage } from "./jump";
 import { openViewer, ShotScope } from "./Viewer";
@@ -171,6 +173,38 @@ function PrChip({ repo, n }: { repo: string; n: string }) {
   );
 }
 
+/** A Slack permalink as where it points: "Slack · #festo", "Slack · DM with Christoph Moser", with " · thread" inside a thread. */
+export function SlackChip({ href, still, name }: { href: string; still?: boolean; name?: string }) {
+  const names = slackNameStore.use();
+  loadSlackNames();
+  const link = slackLink(href)!;
+  const label = `${names[link.channel] ?? (name ? `#${name}` : slackLabel(link.channel, names))}${link.thread ? " · thread" : ""}`;
+  const Tag = still ? "span" : "a";
+  return (
+    <Tag href={still ? undefined : href} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title={`Slack · ${label}`} className={cn(pill(), "text-[0.92em]")}>
+      <SlackGlyph />
+      <span className="min-w-0 truncate">
+        <span className="text-muted-foreground">Slack · </span>
+        {label}
+      </span>
+    </Tag>
+  );
+}
+
+/** A GitHub comment or review link that isn't a whole PR (those are PrChip): "GitHub · repo#n". */
+function GitHubChip({ href }: { href: string }) {
+  const m = href.match(/github\.com\/([\w.-]+)\/([\w.-]+)\/(?:pull|issues)\/(\d+)/i);
+  return (
+    <a href={href} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title={href} className={cn(pill(), "text-[0.92em]")}>
+      <GitHubGlyph />
+      <span className="min-w-0 truncate">
+        <span className="text-muted-foreground">GitHub · </span>
+        {m ? `${m[2]}#${m[3]}` : "link"}
+      </span>
+    </a>
+  );
+}
+
 function LinearChip({ issue }: { issue: string }) {
   return (
     <a href={`${LINEAR}/${issue}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title={issue} className={cn(pill(), "text-[0.92em]")}>
@@ -204,6 +238,14 @@ const md: Components = {
     if (pr) return <PrChip repo={pr[1]!.toLowerCase()} n={pr[2]!} />;
     const issue = href.match(/^linear:([A-Z]+-\d+)$/) ?? href.match(/^https:\/\/linear\.app\/[\w-]+\/issue\/([A-Z]+-\d+)/);
     if (issue) return <LinearChip issue={issue[1]!} />;
+    // Slack's own mentions and channels, from its mrkdwn.
+    if (href.startsWith("slackuser:")) return <span className="rounded bg-link/10 px-0.5 font-medium text-link">{children}</span>;
+    if (href.startsWith("slackchan:")) {
+      const [channel, name] = href.slice(10).split("/");
+      return <SlackChip href={`https://dryftai.slack.com/archives/${channel}`} name={name && decodeURIComponent(name)} />;
+    }
+    if (slackLink(href)) return <SlackChip href={href} />;
+    if (/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(pull|issues)\/\d+[/#?]/i.test(href)) return <GitHubChip href={href} />;
     return (
       <a href={href} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-0.5 text-link hover:underline">
         {children}
@@ -255,18 +297,19 @@ const inlineStill: Components = {
   ...inline,
   a: ({ href = "", children }) => {
     const ref = href.match(/^ref:(agent|router|task|objective|thread|msg)\/(.+)$/);
+    if (slackLink(href)) return <SlackChip href={href} still />;
     return ref ? <RefChip r={{ kind: ref[1] as Ref["kind"], id: decodeURIComponent(ref[2]!) }} still /> : <span className="text-link">{children}</span>;
   },
   img: () => <span className="text-link">[image]</span>,
 };
-const keepRefs = (url: string) => (/^(ref|pr|linear):/.test(url) ? url : defaultUrlTransform(url));
+const keepRefs = (url: string) => (/^(ref|pr|linear|slackuser|slackchan):/.test(url) ? url : defaultUrlTransform(url));
 
 /** A whole message as GitHub-flavored markdown, with Rich's chips, links and pasted images inside it. */
-export function Markdown({ text, className }: { text: string; className?: string }) {
+export function Markdown({ text, className, slack }: { text: string; className?: string; slack?: boolean }) {
   return (
     <div className={cn("break-words", className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips, remarkBreaks]} components={md} urlTransform={keepRefs}>
-        {asLinks(showUploads(text))}
+        {slack ? mrkdwn(text) : asLinks(showUploads(text))}
       </ReactMarkdown>
     </div>
   );
@@ -332,6 +375,36 @@ export function Author({ from, className }: { from: string; className?: string }
   return (
     <a href={`#agent/${from}`} title={name} className={cn("text-sm font-semibold hover:underline", className)}>
       {name}
+    </a>
+  );
+}
+
+
+/** Their own picture (Slack's, cached by the server, or GitHub's), with the source's mark on its corner; his own post is his picture. */
+export function ExtAvatar({ ext }: { ext: External }) {
+  const [broken, setBroken] = useState(false);
+  const src = ext.own ? undefined : ext.source === "slack" ? ext.user && `/api/avatar/slack/${ext.user}?name=${encodeURIComponent(ext.name)}` : ext.user && `https://avatars.githubusercontent.com/${ext.user}?s=72`;
+  const initials = ext.name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  return (
+    <span className="relative size-9 shrink-0">
+      {ext.own ? (
+        <Avatar from="isaac" />
+      ) : src && !broken ? (
+        <img src={src} alt="" onError={() => setBroken(true)} className="size-9 rounded-full object-cover" />
+      ) : (
+        <span className="flex size-9 items-center justify-center rounded-full bg-tile-2 text-sm font-semibold text-tile-ink">{initials}</span>
+      )}
+      <span className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-full bg-card shadow-card">
+        {ext.source === "slack" ? <SlackGlyph className="size-2.5" /> : <GitHubGlyph className="size-2.5" />}
+      </span>
+    </span>
+  );
+}
+
+export function ExtAuthor({ ext, className }: { ext: External; className?: string }) {
+  return (
+    <a href={ext.link} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title={`${ext.own ? "you" : ext.name} on ${ext.source === "slack" ? "Slack" : "GitHub"}`} className={cn("text-sm font-semibold hover:underline", className)}>
+      {ext.own ? "you" : ext.name}
     </a>
   );
 }

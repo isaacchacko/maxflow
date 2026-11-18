@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFile
 import { tmpdir } from "node:os";
 import { backgroundShells } from "./background";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
+import { slackAvatar, slackNames } from "./slack-meta";
 import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
@@ -583,7 +584,7 @@ async function reroute(seq: number, o: Objective) {
   const sig = e.data as Signal;
   // From the inbox: the router takes over the thread, gets everything he wrote in it so far, and answers him there.
   const thread = threads.find((t) => t.signal === seq);
-  const said = thread ? thread.messages.filter((m) => m.from === (thread.feed ? "feed" : "isaac")).map((m) => m.text).join("\n\n") : sig.text;
+  const said = thread ? thread.feedSaid?.join("\n\n") ?? thread.messages.filter((m) => m.from === (thread.feed ? "feed" : "isaac")).map((m) => m.text).join("\n\n") : sig.text;
   const feed = thread?.feed;
   const text = (sig.source === "isaac" ? `${VERIFIED}\n${unforge(said)}` : feed ? `[maxflow · from his event feed (${feed.source}), routed by the funnel; not his request] ${unforge(said)}` : `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(said)}`) +
     (feed ? `\n[maxflow] maxflow took this up by itself, from what reached him (${feed.link}). Do the work up to the point where he must act: look it up, fix it, open the PR, and draft any reply for him. Never reply on Slack or GitHub as him and never write to prod; his go-ahead comes in the thread. Post what you started and where it stands in thread ${thread!.id}, which shows in his inbox flagged as from the feed${feed.task ? `; board task T-${feed.task} is yours` : ""}. If he says stop there, stop.${contextFor(said, feed.who)}` : "") +
@@ -615,8 +616,9 @@ async function feedToFunnel(t: Thread, from: Session, text: string) {
 }
 // More from the same Slack conversation or PR lands in its open feed thread: to the routers that took it, or back to the funnel when
 // nobody did (it was left as an FYI, or its routers ended).
-async function feedMore(t: Thread, from: Session, text: string) {
-  t.messages.push(message("feed", text));
+async function feedMore(t: Thread, from: Session, text: string, posts?: FeedPost[]) {
+  t.messages.push(...feedPosts(text, posts));
+  t.feedSaid = [...(t.feedSaid ?? []), text];
   t.resolved = undefined;
   unpause(t);
   const to = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(live);
@@ -638,6 +640,8 @@ const externalSeen = new Set<string>((() => { try { return JSON.parse(readFileSy
 const slackThreadLink = (key: string) => { const [c, ts] = key.split("/"); return `https://dryftai.slack.com/archives/${c}${ts ? `/p${ts.replace(".", "")}` : ""}`; };
 // The last day of Slack messages from people, for a feed hand-off to name the ones that share its nouns.
 let slackDay: SlackSaid[] = [];
+// The channels events named, by id, for a Slack link's chip.
+const slackChannels: Record<string, string> = {};
 // The day's messages from the bus and the slack sentry's store, one each: the store has what no event carried.
 function sameDay() {
   slackDay = slackDay.filter((m) => Date.now() - m.at < 86_400_000);
@@ -664,6 +668,8 @@ function externalSignal(e: { seq: number; at: number; topic: string; data: unkno
   const on = slack ? (d.thread ? slackThreadLink(String(d.thread)) : link) : `https://github.com/${String(d.pr).replace("#", "/pull/")}`;
   const source: Source = slack ? "slack" : "gh";
   if (slack && !d.bot) slackDay.push({ at: e.at, who: String(d.from ?? "?"), where, text, link });
+  const channel = link.match(/archives\/(C\w+)/)?.[1];
+  if (channel && where.startsWith("#")) slackChannels[channel] = where;
   publish(`signal/${source}`, { source, target: where, text, routedTo: Array.isArray(d.told) ? d.told : [], who: String(d.from ?? d.who), where, link, on, event: e.seq, at: e.at, ...((slack === "own" || String(d.who ?? "").startsWith("the user")) && { own: true }) } satisfies Signal);
 }
 setTimeout(() => {
@@ -743,14 +749,55 @@ type Feed = { source: string; who: string; link: string; task?: number };
 // parent: a subthread hangs off a message in another thread, which is its root; its messages are that message's replies, and
 // any of them can have a subthread of its own. A top thread's root is its first message, so replying to that posts in it.
 // nudge: he asked for the answer to this message in a subthread of its own. wake: his message the end of a pause sent, as he wrote it then.
-type Message = { id: string; from: string; at: number; text: string; nudge?: "subthread"; wake?: true };
-type Thread = { id: string; title: string; objective: string; routers: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; task?: number; resolved?: { at: number }; paused?: Paused; pinned?: { at: number; order: number }; resurfaced?: { at: number; from: number }; asks?: Ask; q?: number; mergedInto?: string; feed?: Feed };
+// A message someone wrote on Slack or GitHub, posted by the feed as that person: user is a Slack user id or a GitHub login; context marks
+// one from before the new ones in its conversation, shown muted; own marks his own post there.
+type External = { source: "slack" | "github"; name: string; user?: string; link: string; where?: string; context?: true; own?: true };
+type Message = { id: string; from: string; at: number; text: string; nudge?: "subthread"; wake?: true; ext?: External };
+type Thread = { id: string; title: string; objective: string; routers: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; task?: number; resolved?: { at: number }; paused?: Paused; pinned?: { at: number; order: number }; resurfaced?: { at: number; from: number }; asks?: Ask; q?: number; mergedInto?: string; feed?: Feed; feedSaid?: string[] };
 const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
 // Commands are retired: every thread is a plain thread, and a router's result on his message is an ordinary reply.
 for (const t of threads as (Thread & { kind?: string; kindBy?: string; done?: number })[]) {
   delete t.kind, delete t.kindBy, delete t.done;
   for (const m of t.messages as (Message & { re?: unknown })[]) delete m.re;
+}
+// Feed threads from before the feed posted each message as its author hold one text per hand-off ("<who> in <where>:", the context
+// quoted under "Before it…", then the new lines under "New:" and the links); each becomes its messages, with the text kept for agents.
+{
+  const uids: Record<string, string> = {};
+  try {
+    for (const { msgs } of Object.values(JSON.parse(readFileSync(`${STATE_DIR}/slack-messages.json`, "utf8")) as Record<string, { msgs: { uid: string; who: string }[] }>)) for (const m of msgs) uids[m.who] ??= m.uid;
+  } catch {}
+  for (const t of threads) {
+    if (!t.feed || !t.messages.some((m) => m.from === "feed" && !m.ext)) continue;
+    const source = t.feed.source === "slack" ? "slack" : "github";
+    const blobs = t.messages.filter((m) => m.from === "feed" && !m.ext).map((m) => m.text);
+    t.feedSaid = [...(t.feedSaid ?? []), ...blobs.filter((b) => !t.feedSaid?.includes(b))];
+    t.messages = t.messages.flatMap((m) => {
+      const head = m.from === "feed" && !m.ext && m.text.match(/^(.+?) in (.+?):\n([\s\S]*)$/);
+      if (!head) return [m];
+      const [, who, where, rest] = head;
+      const links = rest.match(/^https?:\/\/\S+$/gm) ?? [t.feed!.link];
+      const body = rest.replace(/^https?:\/\/\S+$/gm, "").trim();
+      const [before, now] = body.includes("\n\nNew:\n") ? body.split("\n\nNew:\n") : ["", body];
+      const unquote = (x: string) => x.replace(/^> ?/gm, "").trim();
+      // `message` is defined further down, so these are built by hand.
+      const said = (text: string, id = `m-${crypto.randomUUID().slice(0, 6)}`) => ({ id, from: "feed", at: m.at, text });
+      const out: Message[] = [];
+      for (const c of before.replace(/^Before it[^\n]*\n/, "").split(/\n(?=> \*\*)/).filter((x) => x.trim())) {
+        const n = c.match(/^> \*\*(.+?):\*\* ?([\s\S]*)$/);
+        if (!n || !unquote(n[2])) continue;
+        const own = n[1].startsWith("Isaac (him");
+        const name = own ? "Isaac" : n[1];
+        out.push({ ...said(unquote(n[2])), ext: { source, name, ...(uids[name] && source === "slack" && { user: uids[name] }), ...(source === "github" && !own && { user: name }), link: links[0], where, context: true, ...(own && { own: true }) } });
+      }
+      // Each new message was quoted with its continuation lines quoted too, so they split apart only when there is a link for each.
+      const split = now.split(/\n(?=> )/).map(unquote).filter(Boolean);
+      const lines = split.length === links.length ? split : [unquote(now)];
+      lines.forEach((text, i) => out.push({ ...said(text, i ? `${m.id}-${i}` : m.id), ext: { source, name: who, ...(source === "slack" ? uids[who] && { user: uids[who] } : { user: who }), link: links[Math.min(i, links.length - 1)], where } }));
+      return out.length ? out : [m];
+    });
+  }
 }
 const saveThreads = () => writeFileSync(THREADS, JSON.stringify(threads));
 // A paused thread comes back at its time: a timer for the ones due within a day, rebuilt at boot, and a sweep each minute for the
@@ -780,6 +827,11 @@ function unpause(t: Thread) {
   schedulePause(t);
 }
 const message = (from: string, text: string): Message => ({ id: `m-${crypto.randomUUID().slice(0, 6)}`, from, at: Date.now(), text });
+// What the feed stores for one hand-off: a message per Slack or GitHub message, as its author, or the hand-off's text when it sent none.
+// Agents are handed that text either way (thread.feedSaid).
+type FeedPost = { text: string; at?: number; ext: External };
+const feedPosts = (text: string, posts?: FeedPost[]): Message[] =>
+  posts?.length ? posts.filter((p) => p.text && p.ext?.name && p.ext.link).map((p) => ({ ...message("feed", p.text), ...(p.at && { at: p.at }), ext: p.ext })) : [message("feed", text)];
 // Messages from before subthreads get their ids once.
 if (threads.some((t) => t.messages.some((m) => !m.id))) {
   for (const t of threads) for (const m of t.messages) m.id ??= `m-${crypto.randomUUID().slice(0, 6)}`;
@@ -1495,7 +1547,7 @@ async function world() {
       events: t.timeline.map((e) => ({ from: e.session && sessions.get(e.session)?.role?.role === "router" ? "router" : e.session ? "agent" : "sentry", at: iso(e.at), text: e.text })),
       page: t.page ?? [],
     })),
-    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), ...(t.asks && !t.paused && !t.resolved && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), ...(t.paused && { paused: { until: iso(t.paused.until), at: iso(t.paused.at), said: t.paused.said, posts: t.paused.posts ?? 0, ...(t.paused.wake && { wake: t.paused.wake }) } }), ...(t.resurfaced && { resurfaced: { at: iso(t.resurfaced.at), from: t.resurfaced.from } }), ...(t.pinned && { pinned: { at: iso(t.pinned.at), order: t.pinned.order } }), ...(t.feed && { feed: { source: t.feed.source, who: t.feed.who, link: t.feed.link } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, ...(m.nudge && { nudge: m.nudge }), ...(m.wake && { wake: true }) })) })),
+    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), ...(t.asks && !t.paused && !t.resolved && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), ...(t.paused && { paused: { until: iso(t.paused.until), at: iso(t.paused.at), said: t.paused.said, posts: t.paused.posts ?? 0, ...(t.paused.wake && { wake: t.paused.wake }) } }), ...(t.resurfaced && { resurfaced: { at: iso(t.resurfaced.at), from: t.resurfaced.from } }), ...(t.pinned && { pinned: { at: iso(t.pinned.at), order: t.pinned.order } }), ...(t.feed && { feed: { source: t.feed.source, who: t.feed.who, link: t.feed.link } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, ...(m.nudge && { nudge: m.nudge }), ...(m.wake && { wake: true }), ...(m.ext && { ext: m.ext }) })) })),
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({
       id: s.id,
@@ -1924,6 +1976,12 @@ Bun.serve<WsData>({
     }
 
     if (path === "/api/threads" && req.method === "GET") return Response.json(threads);
+    if (path === "/api/slack/names" && req.method === "GET") return Response.json(slackNames(slackChannels));
+    const avatar = path.match(/^\/api\/avatar\/slack\/(\w+)$/);
+    if (avatar && req.method === "GET") {
+      const file = await slackAvatar(avatar[1], url.searchParams.get("name") ?? "");
+      return file ? new Response(Bun.file(file), { headers: { "cache-control": "max-age=86400" } }) : new Response("no picture", { status: 404 });
+    }
     if (path === "/api/threads" && req.method === "POST") {
       const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
       const body = (await req.json().catch(() => ({}))) as { title?: string; objective?: string; text?: string; parent?: { thread?: string; message?: string } };
@@ -1940,7 +1998,7 @@ Bun.serve<WsData>({
       const feed = (body as { feed?: Feed }).feed;
       if (from && isSentry(from) && feed?.link && body.text?.trim()) {
         const text = body.text.trim();
-        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: (body.title?.trim() || `${feed.who}: ${text.split("\n")[0]}`).slice(0, 80), objective: "", routers: [], messages: [message("feed", text)], feed, ...(feed.task && { task: feed.task }) };
+        const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: (body.title?.trim() || `${feed.who}: ${text.split("\n")[0]}`).slice(0, 80), objective: "", routers: [], messages: feedPosts(text, (body as { posts?: FeedPost[] }).posts), feedSaid: [text], feed, ...(feed.task && { task: feed.task }) };
         threads.push(t);
         await feedToFunnel(t, from, text);
         return Response.json(t, { status: 201 });
@@ -2059,11 +2117,11 @@ Bun.serve<WsData>({
       const t = live_thread(threads.find((x) => x.id === threadPost[1]));
       if (!t) return new Response("no such thread", { status: 404 });
       // done: from `thread done`, which commands used; it is a plain post now.
-      const body = (await req.json().catch(() => ({}))) as { text?: string; nudge?: string; feed?: boolean };
+      const body = (await req.json().catch(() => ({}))) as { text?: string; nudge?: string; feed?: boolean; posts?: FeedPost[] };
       const text = body.text?.trim();
       if (!text) return new Response("text required", { status: 400 });
       const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-      if (body.feed && from && isSentry(from) && t.feed) return await feedMore(t, from, text), Response.json(t, { status: 201 });
+      if (body.feed && from && isSentry(from) && t.feed) return await feedMore(t, from, text, body.posts), Response.json(t, { status: 201 });
       postIn(t, from, text, body.nudge === "subthread" ? "subthread" : undefined);
       return Response.json(t, { status: 201 });
     }

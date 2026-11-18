@@ -64,7 +64,8 @@ function EventDetail({ signal, onClose }: { signal: Signal; onClose: () => void 
         {signal.where && <Field label="Where">{signal.where}</Field>}
         {signal.link && (
           <Field label="Original">
-            <a href={signal.link} target="_blank" rel="noreferrer" className="truncate text-link hover:underline">{signal.link}</a>
+            {/* A Slack or GitHub link draws as its chip, as in messages. */}
+            <Markdown text={`<${signal.link}>`} />
           </Field>
         )}
         {signal.taskId && <Field label="Task"><RefChip r={{ kind: "task", id: signal.taskId }} /></Field>}
