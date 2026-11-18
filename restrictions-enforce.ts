@@ -34,7 +34,7 @@ export function enforce(c: Call, d: Deps): Verdict {
   const key = `${c.tool}\n${call}`;
   if (mode === "deny") {
     d.log(c.session, `restriction: ${r.label}`, `Blocked ${c.tool}: restriction "${r.label}" (${r.id}) is set to block.\n\`\`\`\n${shown(call)}\n\`\`\``);
-    return { decision: "deny", reason: `Blocked by maxflow restriction "${r.label}" (${r.id}), which Isaac set to block${r.note ? `: ${r.note}` : ""}. Don't retry it or work around it with another tool; if the task needs it, ask him with \`${d.cli} ask\`.` };
+    return { decision: "deny", reason: `Blocked by maxflow restriction "${r.label}" (${r.id}), which Isaac set to block${r.note ? `: ${r.note.replace(/\.$/, "")}` : ""}. Don't retry it or work around it with another tool; if the task needs it, ask him with \`${d.cli} ask\`.` };
   }
   const mine = pending.filter((p) => p.session === c.session && p.key === key);
   const pass = mine.find((p) => p.granted && !p.used && Date.now() - p.granted < PASS_MS);
