@@ -1,4 +1,4 @@
-import { AtSign, Bold, Code, Italic, Link2, List, ListOrdered, Plus, SendHorizontal, Smile, SquareCode, Strikethrough, X } from "lucide-react";
+import { AtSign, Bold, Code, Ellipsis, Italic, Link2, List, ListOrdered, Plus, SendHorizontal, Smile, SquareCode, Strikethrough, Type, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { cn } from "@/lib/utils";
@@ -83,15 +83,20 @@ function formatFor(e: React.KeyboardEvent) {
   return FORMATS.find(f => f.label === name);
 }
 
-const tool = "flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground";
+const tool = "flex size-7 items-center justify-center rounded-md text-muted-foreground/80 hover:bg-muted hover:text-foreground aria-pressed:bg-muted aria-pressed:text-foreground";
+
+// Whether the formatting row shows, one choice for every box, as Slack's Aa remembers it.
+const FORMAT_KEY = "composer:format";
+const formatShown = () => { try { return localStorage.getItem(FORMAT_KEY) === "1"; } catch { return false; } };
 
 /**
- * A message box drawn as Slack's: one rounded box that lights up while focused, a formatting row on top that wraps the selection in
- * markdown (and its shortcuts, ⌘K among them only while the box has focus), the text, and a bottom row to attach an image, pick an
- * emoji, mention a thread, the box's own `tools` (a thread's subthread nudge) and send. It grows with its text up to 40% of the
+ * A message box drawn as Slack's: one rounded box that lights up while focused, the text, and one row under it: + to attach an image,
+ * Aa to show the formatting row (which wraps the selection in markdown; its shortcuts work hidden too, ⌘K among them only while the
+ * box has focus), emoji, @ to mention a thread, ⋯ for the box's rarer `tools` (a thread's subthread nudge; `toolsOn` tints it while one
+ * is on), and send. It grows with its text up to 40% of the
  * window, and takes images pasted or dropped on it: each is uploaded at once, and its path is kept with the draft so a reload keeps it.
  */
-export function Composer({ onSend, className, autoFocus, agent, draftKey, tools, placeholder = "Message" }: { onSend: (text: string) => unknown; className?: string; autoFocus?: boolean; agent: string; draftKey: string; tools?: React.ReactNode; placeholder?: string }) {
+export function Composer({ onSend, className, autoFocus, agent, draftKey, tools, toolsOn, placeholder = "Message" }: { onSend: (text: string) => unknown; className?: string; autoFocus?: boolean; agent: string; draftKey: string; tools?: React.ReactNode; toolsOn?: boolean; placeholder?: string }) {
   const [draft, setDraft] = usePersistentDraft(draftKey);
   const [imageDraft, setImageDraft] = usePersistentDraft(`${draftKey}:images`);
   const images = imageDraft.split("\n").filter(Boolean);
@@ -100,6 +105,13 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools,
   const input = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [emoji, setEmoji] = useState(false);
+  const [more, setMore] = useState(false);
+  const [formatting, setFormatting] = useState(formatShown);
+  const toggleFormatting = () =>
+    setFormatting(on => {
+      try { localStorage.setItem(FORMAT_KEY, on ? "0" : "1"); } catch {}
+      return !on;
+    });
   // It grows with what he types, up to 40% of the window, then scrolls.
   useLayoutEffect(() => {
     const el = input.current;
@@ -187,6 +199,7 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools,
       className={cn("flex flex-col gap-1", className)}
     >
       <div data-composer className="relative flex flex-col rounded-xl border border-border bg-card transition-[border-color,box-shadow] focus-within:border-foreground/35 focus-within:shadow-[0_1px_6px_rgb(0_0_0/0.08)]">
+        {formatting && (
         <div className="flex items-center gap-0.5 px-1.5 pt-1" data-agent={`${agent}-format`}>
           {FORMATS.map((f, i) => (
             <span key={f.label} className="contents">
@@ -197,6 +210,7 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools,
             </span>
           ))}
         </div>
+        )}
         {(images.length > 0 || uploading > 0) && (
           <div className="flex flex-wrap gap-2 px-3 pt-2" data-agent={`${agent}-images`}>
             {images.map((path, n) => (
@@ -243,28 +257,37 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools,
             if (files.length) e.preventDefault(), void attach(files);
           }}
           placeholder={placeholder}
-          className="block w-full resize-none overflow-y-auto bg-transparent px-3 py-1.5 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60"
+          className="block w-full resize-none overflow-y-auto bg-transparent px-3 pt-2.5 pb-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60"
         />
         {mention.panel}
         </div>
         <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
           <button type="button" aria-label="Attach an image" title="Attach an image" onMouseDown={keep} onClick={() => fileInput.current?.click()} className={cn(tool, "rounded-full bg-muted/70")}>
-            <Plus className="size-4" />
+            <Plus className="size-3.5" />
+          </button>
+          <button type="button" aria-label="Formatting" title={formatting ? "Hide formatting" : "Show formatting"} aria-pressed={formatting} onMouseDown={keep} onClick={toggleFormatting} className={tool}>
+            <Type className="size-3.5" />
           </button>
           <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden onChange={e => (void attach(imagesIn(e.target.files ?? undefined)), (e.target.value = ""))} />
           <span className="relative">
             <button type="button" aria-label="Emoji" title="Emoji" aria-expanded={emoji} onMouseDown={keep} onClick={() => setEmoji(o => !o)} className={tool}>
-              <Smile className="size-4" />
+              <Smile className="size-3.5" />
             </button>
             {emoji && <EmojiPicker onPick={e => (insert(e), setEmoji(false))} onClose={() => setEmoji(false)} />}
           </span>
           <button type="button" aria-label="Mention a thread" title="Mention a thread (@)" onMouseDown={keep} onClick={at} className={tool}>
-            <AtSign className="size-4" />
+            <AtSign className="size-3.5" />
           </button>
-          {tools}
-          <span className="ml-auto truncate px-2 text-[11px] text-muted-foreground/70">{draft && <><b className="font-semibold">Shift + Return</b> for a new line</>}</span>
-          <button type="submit" aria-label="Send" title="Send (Return)" disabled={empty || uploading > 0} onMouseDown={keep} className="flex h-7 w-8 items-center justify-center rounded-md bg-ok text-white transition-colors disabled:bg-transparent disabled:text-muted-foreground/50">
-            <SendHorizontal className="size-4" />
+          {tools && (
+            <span className="relative">
+              <button type="button" aria-label="More" title="More" aria-expanded={more} onMouseDown={keep} onClick={() => setMore(o => !o)} className={cn(tool, toolsOn && "text-link")}>
+                <Ellipsis className="size-3.5" />
+              </button>
+              {more && <Popover onClose={() => setMore(false)} className="w-72 p-1">{tools}</Popover>}
+            </span>
+          )}
+          <button type="submit" aria-label="Send" title="Send (Return)" disabled={empty || uploading > 0} onMouseDown={keep} className="ml-auto flex h-7 w-8 items-center justify-center rounded-md bg-ok text-white transition-colors disabled:bg-transparent disabled:text-muted-foreground/50">
+            <SendHorizontal className="size-3.5" />
           </button>
         </div>
       </div>
@@ -273,22 +296,31 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools,
   );
 }
 
-function EmojiPicker({ onPick, onClose }: { onPick: (emoji: string) => void; onClose: () => void }) {
+/** A small panel above a bottom-row button, closed by a click elsewhere or Esc. */
+function Popover({ onClose, className, children, agent }: { onClose: () => void; className?: string; children: React.ReactNode; agent?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const away = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && onClose();
+    const away = (e: MouseEvent) => ref.current && !ref.current.parentElement?.contains(e.target as Node) && onClose();
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     addEventListener("mousedown", away);
     addEventListener("keydown", esc);
     return () => (removeEventListener("mousedown", away), removeEventListener("keydown", esc));
   }, [onClose]);
   return (
-    <div ref={ref} data-agent="composer-emoji" className="absolute bottom-9 left-0 z-20 grid w-64 grid-cols-8 gap-0.5 rounded-xl border bg-card p-1.5 shadow-card">
+    <div ref={ref} data-agent={agent} className={cn("absolute bottom-9 left-0 z-20 rounded-xl border bg-card shadow-card", className)}>
+      {children}
+    </div>
+  );
+}
+
+function EmojiPicker({ onPick, onClose }: { onPick: (emoji: string) => void; onClose: () => void }) {
+  return (
+    <Popover onClose={onClose} agent="composer-emoji" className="grid w-64 grid-cols-8 gap-0.5 p-1.5">
       {EMOJI.map(e => (
         <button key={e} type="button" onMouseDown={ev => ev.preventDefault()} onClick={() => onPick(e)} className="flex size-7 items-center justify-center rounded-md text-base hover:bg-muted">
           {e}
         </button>
       ))}
-    </div>
+    </Popover>
   );
 }
