@@ -46,7 +46,7 @@ const escapeLabel = (s: string) => s.replace(/[[\]]/g, "\\$&");
  * written; a fence Slack ran onto one line gets lines of its own.
  */
 export function mrkdwn(text: string) {
-  return text
+  return boxesAsCode(text)
     .split(/(```[\s\S]*?```|`[^`\n]+`)/g)
     .map((part, i) => {
       if (i % 2) return part.startsWith("```") ? `\n\`\`\`\n${decode(part.slice(3, -3).replace(/^\n|\n$/g, ""))}\n\`\`\`\n` : decode(part);
@@ -64,6 +64,24 @@ export function mrkdwn(text: string) {
         .replace(/&lt;/g, "\\<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
     })
     .join("");
+}
+
+// A table drawn with box characters (┌─┬─┐ │ ├─┼─┤) only lines up in a fixed-width font, and wrapped it is a wall of rules: its lines
+// become a code block, which keeps them whole and scrolls sideways.
+const BOX = /[\u2500-\u257F]/;
+function boxesAsCode(text: string) {
+  if (!BOX.test(text)) return text;
+  let fenced = false;
+  const out: string[] = [];
+  let run: string[] = [];
+  const flush = () => (run.length && out.push("```", ...run, "```"), (run = []));
+  for (const line of text.split("\n")) {
+    if (line.trimStart().startsWith("```")) (fenced = !fenced), flush(), out.push(line);
+    else if (!fenced && BOX.test(line)) run.push(line);
+    else flush(), out.push(line);
+  }
+  flush();
+  return out.join("\n");
 }
 
 /** Slack's mark, in its four colours. */

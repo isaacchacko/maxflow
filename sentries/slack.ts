@@ -90,17 +90,20 @@ async function slack(tool: string, args: Record<string, unknown>) {
 
 // slack_read_thread and slack_read_channel print each message as a header naming the author, then `Message TS:`, then its text.
 const HEADER = /(?:=== Message from (.*?) \((\w+)\) at [^\n]*?===|(?:=== THREAD PARENT MESSAGE ===|--- Reply \d+ of \d+ ---)\nFrom: (.*?) \((\w+)\)\nTime: [^\n]*)\s*\nMessage TS: ([\d.]+)\n/g;
-function parseMessages(body: string): Msg[] {
+export function parseMessages(body: string): Msg[] {
   const heads = [...body.matchAll(HEADER)];
-  return heads.map((h, i) => ({
-    ts: h[5],
-    uid: h[2] ?? h[4],
-    who: (h[1] ?? h[3]).replace(/\s*<[^>]*>$/, "").trim() || h[2] || h[4],
-    text: body
-      .slice(h.index! + h[0].length, heads[i + 1]?.index ?? body.length)
-      .replace(/\n(?:=== THREAD REPLIES[^\n]*|Thread: \d+ repl[^\n]*|Reactions: [^\n]*|Files: [^\n]*)/g, "")
-      .trim(),
-  }));
+  return heads.map((h, i) => {
+    const raw = body.slice(h.index! + h[0].length, heads[i + 1]?.index ?? body.length);
+    // A file shows as its name, so a message that is only a file (a screenshot, a drawing) still says something.
+    const files = [...(raw.match(/\nFiles: ([^\n]*)/)?.[1] ?? "").matchAll(/([^,(]+?) \(ID: F\w+/g)].map((m) => m[1].trim());
+    const text = `\n${raw}`.replace(/\n(?:=== THREAD REPLIES[^\n]*|Thread: \d+ repl[^\n]*|Reactions: [^\n]*|Files: [^\n]*)/g, "").trim();
+    return {
+      ts: h[5],
+      uid: h[2] ?? h[4],
+      who: (h[1] ?? h[3]).replace(/\s*<[^>]*>$/, "").trim() || h[2] || h[4],
+      text: [text, ...files.map((f) => `📎 ${f}`)].filter(Boolean).join("\n"),
+    };
+  });
 }
 
 // A hit's channel is `#name`, `DM` or `Group DM` (whose members follow on a Participants line); one that failed to match would
