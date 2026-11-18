@@ -960,7 +960,10 @@ function postIn(t: Thread, from: Session | undefined, text: string, nudge?: "sub
   t.messages.push(m);
   // The funnel's FYI note on a feed thread settles it unrouted.
   if (from && t.feed) t.signal = undefined;
-  if (from?.role?.role === "router" && !t.routers.includes(from.id)) t.routers.push(from.id);
+  // A router posting becomes one of the thread's routers only where the thread is its to own: on its own objective, or with no live
+  // router of its own. A pointer posted in another objective's thread would otherwise bring it every reply there.
+  if (from?.role?.role === "router" && !t.routers.includes(from.id) && (!t.objective || t.objective === from.role.objective || !t.routers.some((id) => live(sessions.get(id)))))
+    t.routers.push(from.id);
   // Isaac's reply goes to the thread's routers through the event log, like any message; an agent's post answers him.
   if (!from) {
     t.resolved = undefined;
