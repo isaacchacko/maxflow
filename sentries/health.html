@@ -17,8 +17,11 @@
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 "Inter Variable", ui-sans-serif, system-ui, sans-serif; }
-  body { display: flex; flex-direction: column; align-items: center; padding: 24px 16px; overflow: auto; }
-  .mark { align-self: flex-start; display: flex; align-items: center; gap: 6px; font-weight: 600; margin: 0 0 16px 4px; }
+  body { display: flex; flex-direction: column; align-items: center; padding: 0 16px 24px; overflow: auto; }
+  /* The window's top strip, as the app draws it: in the installed app (window controls overlay) it is the title bar, so it is
+     sized to it, starts right of the traffic lights and drags the window; in a browser tab the fallbacks leave a plain margin. */
+  .titlebar { align-self: stretch; flex: none; display: flex; align-items: center; height: max(48px, env(titlebar-area-height, 48px)); padding-left: max(4px, calc(env(titlebar-area-x, 0px) + 4px)); app-region: drag; -webkit-app-region: drag; }
+  .mark { display: flex; align-items: center; gap: 6px; font-weight: 600; }
   .panel { width: min(1080px, 100%); flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
   header { padding: 24px 28px 16px; display: flex; gap: 16px; align-items: center; border-bottom: 1px solid var(--line); }
   .face { width: 52px; height: 52px; flex: none; animation: sway 4s ease-in-out infinite; }
@@ -46,7 +49,7 @@
 </style>
 </head>
 <body>
-<div class="mark"><span>🧶</span> yarn</div>
+<div class="titlebar"><div class="mark"><span>🧶</span> yarn</div></div>
 <div class="panel">
   <header>
     <!-- An agent's face, worried while yarn is down and glad once it is back: the app's own round body and eyes, drawn here
@@ -79,7 +82,7 @@
       <details><summary>server log</summary><pre id="log"></pre></details>
     </section>
     <section class="tty">
-      <div class="bar"><span><b>maxflow recovery</b></span><span id="ttystate">not started</span></div>
+      <div class="bar"><span><b>yarn recovery</b></span><span id="ttystate">not started</span></div>
       <div class="waiting" id="waiting">The agent's terminal shows up here once it starts.</div>
       <div id="term" hidden></div>
     </section>
@@ -115,7 +118,10 @@
   function render() {
     if (!last) return;
     $("since").textContent = `${ago(last.downSince)} ago`;
-    $("runs").textContent = last.launchd.runs ? `attempt ${last.launchd.runs}${last.launchd.lastExit ? `, last exit ${last.launchd.lastExit}` : ""}` : "";
+    // This outage's restarts only; an exit is worth naming only when it failed.
+    const { attempts, lastExit } = last.launchd;
+    const failed = /^-?\d+$/.test(String(lastExit ?? "").trim()) && Number(lastExit) !== 0 ? `last exit code ${lastExit}` : "";
+    $("runs").textContent = [attempts ? `${attempts} restart${attempts > 1 ? "s" : ""} so far` : "", failed].filter(Boolean).join(", ");
     const s3 = $("s3");
     if (last.agent) {
       $("s2").className = "step done"; $("s2").querySelector(".tick").textContent = "✓";

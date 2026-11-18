@@ -99,6 +99,8 @@ async function acceptTrust(t: string) {
 }
 
 let downSince: number | null = null;
+// The service manager's run count when this outage began: the page counts this outage's restarts, not the service's lifetime runs.
+let runsAtDown = 0;
 let agent: { id: string; tmux: string; at: number } | null = null;
 let page: ReturnType<typeof Bun.serve> | null = null;
 let releasedAt = 0;
@@ -116,7 +118,7 @@ function state() {
     downSince,
     agentDueAt: downSince && Math.max(agentDueAt()!, lastAgentAt + COOLDOWN_MS),
     agent: agent && run([...TMUX, "has-session", "-t", agent.tmux]).ok ? { id: agent.id, at: agent.at } : null,
-    launchd: { runs: service.runs, lastExit: service.lastExit },
+    launchd: { attempts: Math.max(0, Number(service.runs ?? 0) - runsAtDown), lastExit: service.lastExit },
     log: run(["tail", "-n", "40", LOG]).out,
   };
 }
@@ -210,7 +212,7 @@ for (;;) {
       downSince = null;
       closePage();
     } else {
-      downSince ??= Date.now();
+      if (!downSince) (downSince = Date.now()), (runsAtDown = Number(serviceStatus().runs ?? 0));
       if (!page && health === "refused" && Date.now() - downSince >= PAGE_AFTER_MS && Date.now() - releasedAt >= RELEASE_GRACE_MS) openPage();
       if (Date.now() >= agentDueAt()! && canStartAgent()) {
         agent = startAgent(downTask(downSince));
