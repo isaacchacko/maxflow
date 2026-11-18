@@ -1,18 +1,20 @@
-import { ChevronDown, ChevronRight, CornerDownRight, Globe, Link2, Plus, RotateCcw, SlidersHorizontal, Trash2, Unlink, UserPlus, Users, X } from "lucide-react";
+import { ChevronDown, ChevronRight, CornerDownRight, Globe, Link2, Pencil, Plus, RotateCcw, Trash2, Unlink, Users, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { Call, Mode, Person, Reach, Restriction } from "../../restrictions";
+import type { Call, Exception, Mode, Person, Reach, Restriction } from "../../restrictions";
 import { cn } from "@/lib/utils";
 import { liveStore, objectiveStore } from "@/store";
 import { useLayerScroll } from "@/threads/jump";
+import { ago } from "@/threads/Replies";
 
 // His autonomy restrictions: for each kind of action his agents take, whether they do it on their own, ask him first, or never do
-// it. The catalog comes seeded; he edits builtins, adds his own, and overrides one for some people, an objective or a folder,
-// shown nested under it.
+// it. The catalog comes seeded and explains itself; a builtin takes only its setting and the exceptions that make sense for it,
+// picked from lists. Patterns on tools and commands belong to his own rules, written under Advanced.
 
-const MODES: { mode: Mode; label: string; on: string }[] = [
-  { mode: "allow", label: "Allow", on: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" },
-  { mode: "ask", label: "Ask me", on: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
-  { mode: "deny", label: "Block", on: "bg-red-500/15 text-red-700 dark:text-red-400" },
+// meaning: what the setting does to an agent about to take the action, said of one of it ("message", "merge").
+const MODES: { mode: Mode; label: string; on: string; meaning: (noun: string) => string }[] = [
+  { mode: "allow", label: "Allow", on: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400", meaning: () => "The agent goes ahead on its own." },
+  { mode: "ask", label: "Ask me", on: "bg-amber-500/15 text-amber-700 dark:text-amber-400", meaning: noun => `The agent stops and asks you in its thread; your yes lets that one ${noun} go through.` },
+  { mode: "deny", label: "Block", on: "bg-red-500/15 text-red-700 dark:text-red-400", meaning: () => "The agent is told no, and doesn't do it." },
 ];
 const KINDS: Record<string, string> = {
   message: "Message people",
@@ -27,6 +29,7 @@ const KINDS: Record<string, string> = {
   delete: "Delete",
   processes: "Processes",
   money: "Spend money",
+  custom: "Your own rules",
 };
 const kindLabel = (action: string) => KINDS[action] ?? action.charAt(0).toUpperCase() + action.slice(1);
 
@@ -39,8 +42,6 @@ async function send(path: string, method: string, body?: unknown) {
 export function RestrictionsView() {
   const live = liveStore.use();
   const [list, setList] = useState<Restriction[]>([]);
-  const [open, setOpen] = useState<string>();
-  const [adding, setAdding] = useState(false);
   // The tab is in the address (#restrictions/people), so it survives a reload and can be linked to.
   const [tab, setTabState] = useState<"actions" | "people">(location.hash === "#restrictions/people" ? "people" : "actions");
   const setTab = (t: "actions" | "people") => (setTabState(t), history.replaceState(history.state, "", t === "people" ? "#restrictions/people" : "#restrictions"));
@@ -65,20 +66,19 @@ export function RestrictionsView() {
     }
   };
   const remove = async (id: string) => {
-    setList(all => all.filter(r => r.id !== id));
+    setList(all => all.filter(r => r.id !== id && r.parent !== id));
     await send(`/api/restrictions/${id}`, "DELETE").catch(load);
   };
   const add = async (r: Partial<Restriction>) => {
     const saved = (await send("/api/restrictions", "POST", r)) as Restriction;
     setList(all => [...all, saved]);
-    setAdding(false);
     return saved;
   };
 
-  // Kinds in the catalog's order, then his own in the order he added them; the PR kinds share one section.
-  const kinds = [...new Set(list.map(r => r.action))];
-  const tops = list.filter(r => !r.parent);
-  const sections = [...new Set(kinds.map(kindLabel))];
+  const builtins = list.filter(r => r.builtin && !r.parent);
+  const custom = list.filter(r => !r.builtin && !r.parent);
+  const sections = [...new Set(builtins.map(r => kindLabel(r.action)))];
+  const rowProps = { onEdit: edit, onDelete: remove, onAdd: add };
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-12 shrink-0 items-center border-b px-5">
@@ -90,34 +90,49 @@ export function RestrictionsView() {
             </button>
           ))}
         </div>
-        <button onClick={() => (setTab("actions"), setAdding(true))} className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground">
-          <Plus className="size-4" /> New restriction
-        </button>
       </header>
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-5 py-4">
-          <p className="mb-4 px-2.5 text-[13px] text-muted-foreground">
-            What your agents do on their own, ask you about first, or never do. Override one for some people, an objective or a folder, and the override wins where it applies: a person named beats teammates, which beats an objective, which beats a folder. Among equals, and across everyone a call reaches, the strictest wins.
-          </p>
-          <Tester />
+          <div className="mb-5 px-2.5 text-[13px] text-muted-foreground">
+            <p className="mb-1.5">Choose what your agents may do without you. Each action below says what it covers.</p>
+            <ul className="flex flex-col gap-0.5">
+              {MODES.map(m => (
+                <li key={m.mode} className="flex items-baseline gap-2">
+                  <span className={cn("w-14 shrink-0 rounded px-1.5 text-center text-xs font-medium", m.on)}>{m.label}</span>
+                  {m.meaning("action")}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1.5">An exception sets an action differently for some people, one objective or one repository, and wins over the general setting there.</p>
+          </div>
           {tab === "people" && <PeopleList list={list} sections={sections} onEdit={edit} onDelete={remove} onAdd={add} onLinked={load} />}
-          {tab === "actions" && adding && (
-            <section className="mb-5 rounded-xl border p-3">
-              <Editor kinds={kinds} onSave={add} onCancel={() => setAdding(false)} />
-            </section>
+          {tab === "actions" && (
+            <>
+              {sections.map(section => (
+                <section key={section} className="mb-6">
+                  <h2 className="mb-1 px-2.5 text-[13px] font-medium text-muted-foreground">{section}</h2>
+                  <ol className="flex flex-col gap-1">
+                    {builtins
+                      .filter(r => kindLabel(r.action) === section)
+                      .map(r => (
+                        <ActionRow key={r.id} r={r} exceptions={list.filter(o => o.parent === r.id)} {...rowProps} />
+                      ))}
+                  </ol>
+                </section>
+              ))}
+              {custom.length > 0 && (
+                <section className="mb-6">
+                  <h2 className="mb-1 px-2.5 text-[13px] font-medium text-muted-foreground">Your own rules</h2>
+                  <ol className="flex flex-col gap-1">
+                    {custom.map(r => (
+                      <ActionRow key={r.id} r={r} exceptions={list.filter(o => o.parent === r.id)} {...rowProps} />
+                    ))}
+                  </ol>
+                </section>
+              )}
+              <Advanced onAdd={add} />
+            </>
           )}
-          {tab === "actions" && sections.map(section => (
-            <section key={section} className="mb-5">
-              <h2 className="mb-1 px-2.5 text-[13px] font-medium text-muted-foreground">{section}</h2>
-              <ol className="flex flex-col">
-                {tops
-                  .filter(r => kindLabel(r.action) === section)
-                  .map(r => (
-                    <Row key={r.id} r={r} kinds={kinds} open={open} setOpen={setOpen} overrides={list.filter(o => o.parent === r.id)} onEdit={edit} onDelete={id => void remove(id)} onAdd={add} />
-                  ))}
-              </ol>
-            </section>
-          ))}
         </div>
       </div>
     </div>
@@ -167,7 +182,7 @@ function PersonFace({ p, className }: { p: Person; className?: string }) {
 /** What a restriction is narrowed to: its people, objective and folder, as chips. */
 function ScopeChips({ r }: { r: Restriction }) {
   const objectives = objectiveStore.use();
-  const places = [r.scope?.objective && (objectives.find(o => o.id === r.scope!.objective)?.title ?? r.scope.objective), r.scope?.cwd].filter(Boolean) as string[];
+  const places = [r.scope?.objective && `on ${objectives.find(o => o.id === r.scope!.objective)?.title ?? r.scope.objective}`, r.scope?.cwd && `in ${r.scope.cwd.split("/").filter(Boolean).at(-1)}`].filter(Boolean) as string[];
   return (
     <>
       {(r.scope?.people ?? []).map(p => (
@@ -185,60 +200,144 @@ function ScopeChips({ r }: { r: Restriction }) {
   );
 }
 
-type RowProps = { r: Restriction; kinds: string[]; open?: string; setOpen: (id?: string) => void; overrides: Restriction[]; onEdit: (id: string, c: Partial<Restriction>) => Promise<void>; onDelete: (id: string) => void; onAdd: (r: Partial<Restriction>) => Promise<Restriction> };
+type RowProps = { onEdit: (id: string, c: Partial<Restriction>) => Promise<void>; onDelete: (id: string) => Promise<void>; onAdd: (r: Partial<Restriction>) => Promise<Restriction> };
+// His own rules carry no catalog exceptions; the place ones always make sense for them.
+const exceptionsOf = (r: Restriction): Exception[] => (r.builtin ? (r.exceptions ?? []) : ["objective", "repo"]);
 
-/** A restriction, with its overrides indented under it; the person icon on hover adds one. */
-function Row({ r, kinds, open, setOpen, overrides, onEdit, onDelete, onAdd }: RowProps) {
+/**
+ * An action as he reads it: what it covers, an example or two, and what its setting does, with its exceptions under it. A
+ * builtin's matchers are the catalog's and never shown; his own rule opens its editor from the pencil.
+ */
+function ActionRow({ r, exceptions, onEdit, onDelete, onAdd }: RowProps & { r: Restriction; exceptions: Restriction[] }) {
   const [adding, setAdding] = useState(false);
-  const toggle = (id: string) => setOpen(open === id ? undefined : id);
-  const Chevron = open === r.id ? ChevronDown : ChevronRight;
+  const [editing, setEditing] = useState(false);
+  const m = MODES.find(x => x.mode === r.mode)!;
+  const kinds = exceptionsOf(r);
+  if (editing)
+    return (
+      <li className="rounded-xl border p-3">
+        <CustomEditor r={r} onSave={async c => (await onEdit(r.id, c), setEditing(false))} onCancel={() => setEditing(false)} onDelete={() => void onDelete(r.id)} />
+      </li>
+    );
   return (
-    <li data-row={`restriction/${r.id}`}>
-      <div className={cn("group flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm hover:bg-muted/60", open === r.id && "bg-muted/60")}>
-        <button onClick={() => toggle(r.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-          <Chevron className="size-4 shrink-0 text-muted-foreground" />
-          <span className="truncate">{r.label}</span>
-          {!r.builtin && <span className={chip}>Custom</span>}
-          <ScopeChips r={r} />
-        </button>
-        <button onClick={() => setAdding(true)} title={r.reaches ? "Override it for some people, an objective or a folder" : "Override it for an objective or a folder (nobody is on the other end, so not per person)"} className={cn("shrink-0 text-muted-foreground hover:text-foreground", !adding && "opacity-0 group-hover:opacity-100")}>
-          {r.reaches ? <UserPlus className="size-4" /> : <SlidersHorizontal className="size-4" />}
-        </button>
+    <li data-row={`restriction/${r.id}`} className="group rounded-lg px-2.5 py-2 hover:bg-muted/40">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            {r.label}
+            {!r.builtin && (
+              <button onClick={() => setEditing(true)} title="Edit this rule" className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground">
+                <Pencil className="size-3.5" />
+              </button>
+            )}
+          </div>
+          {(r.about ?? r.note) && <p className="text-[13px] text-muted-foreground">{r.about ?? r.note}</p>}
+          {r.examples?.length ? <p className="text-xs text-muted-foreground/80">For example: {r.examples.join("; ")}.</p> : null}
+        </div>
         <ModeToggle mode={r.mode} onChange={mode => void onEdit(r.id, { mode })} />
       </div>
-      {open === r.id && (
-        <div className="mb-2 ml-[26px] rounded-xl border p-3">
-          <Editor key={JSON.stringify(r)} r={r} kinds={kinds} onSave={c => onEdit(r.id, c)} onCancel={() => toggle(r.id)} onDelete={() => onDelete(r.id)} />
-        </div>
-      )}
-      {(overrides.length > 0 || adding) && (
-        <ol className="ml-[26px] flex flex-col">
-          {overrides.map(o => (
-            <li key={o.id} data-row={`restriction/${o.id}`}>
-              <div className={cn("group flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1 text-[13px] hover:bg-muted/60", open === o.id && "bg-muted/60")}>
-                <button onClick={() => toggle(o.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                  <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="shrink-0 text-muted-foreground">For</span>
-                  <ScopeChips r={o} />
-                  {o.label !== r.label && <span className="truncate text-muted-foreground">{o.label}</span>}
-                </button>
-                <ModeToggle mode={o.mode} onChange={mode => void onEdit(o.id, { mode })} />
-              </div>
-              {open === o.id && (
-                <div className="mb-2 ml-[22px] rounded-xl border p-3">
-                  <Editor key={JSON.stringify(o)} r={o} override reach={r.reaches} kinds={kinds} onSave={c => onEdit(o.id, c)} onCancel={() => toggle(o.id)} onDelete={() => onDelete(o.id)} />
-                </div>
-              )}
+      <p className="mt-1 flex items-baseline gap-1.5 text-xs">
+        <span className={cn("rounded px-1.5 font-medium", m.on)}>{m.label}</span>
+        <span className="text-muted-foreground">{m.meaning(r.noun ?? "action")}</span>
+      </p>
+      {(exceptions.length > 0 || adding) && (
+        <ol className="mt-1.5 flex flex-col">
+          {exceptions.map(o => (
+            <li key={o.id} className="group/exception flex min-w-0 items-center gap-2 rounded-md py-0.5 pl-1 text-[13px] hover:bg-muted/60">
+              <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="shrink-0 text-muted-foreground">Except</span>
+              <ScopeChips r={o} />
+              <span className="min-w-0 flex-1" />
+              <button onClick={() => void onDelete(o.id)} title="Remove this exception" className="shrink-0 text-muted-foreground opacity-0 group-hover/exception:opacity-100 hover:text-destructive">
+                <X className="size-3.5" />
+              </button>
+              <ModeToggle mode={o.mode} onChange={mode => void onEdit(o.id, { mode })} />
             </li>
           ))}
           {adding && (
-            <li className="mb-2 rounded-xl border p-3">
-              <Editor override reach={r.reaches} kinds={kinds} initialMode={r.mode === "allow" ? "ask" : "allow"} onSave={async c => void (await onAdd({ ...c, parent: r.id }), setAdding(false))} onCancel={() => setAdding(false)} />
+            <li className="mt-1 rounded-lg border p-2.5">
+              <ExceptionForm r={r} kinds={kinds} onAdd={async c => (await onAdd({ ...c, parent: r.id }), setAdding(false))} onCancel={() => setAdding(false)} />
             </li>
           )}
         </ol>
       )}
+      {kinds.length > 0 && !adding && (
+        <button onClick={() => setAdding(true)} className="mt-0.5 flex items-center gap-1 rounded-md px-1 text-xs text-muted-foreground/70 hover:text-foreground">
+          <Plus className="size-3.5" /> Add an exception
+        </button>
+      )}
     </li>
+  );
+}
+
+const KIND_LABEL: Record<Exception, string> = { people: "Some people", objective: "An objective", repo: "A repository" };
+
+// The repositories his agents work in, fetched once a page load.
+let reposCache: Promise<{ path: string; name: string }[]> | undefined;
+const knownRepos = () => (reposCache ??= send("/api/restrictions/repos", "GET").catch(() => ((reposCache = undefined), [])));
+
+/** An exception, picked from lists: who or where it holds, and its own setting, which starts as the other way round. */
+function ExceptionForm({ r, kinds, onAdd, onCancel }: { r: Restriction; kinds: Exception[]; onAdd: (c: Partial<Restriction>) => Promise<void>; onCancel: () => void }) {
+  const objectives = objectiveStore.use();
+  const [kind, setKind] = useState<Exception>(kinds[0]!);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [objective, setObjective] = useState("");
+  const [repo, setRepo] = useState("");
+  const [repos, setRepos] = useState<{ path: string; name: string }[]>([]);
+  const [mode, setMode] = useState<Mode>(r.mode === "allow" ? "ask" : "allow");
+  const [error, setError] = useState<string>();
+  useEffect(() => void knownRepos().then(setRepos), []);
+  const scope = kind === "people" ? people.length && { people } : kind === "objective" ? objective && { objective } : repo && { cwd: repo };
+  const add = async () => {
+    try {
+      await onAdd({ mode, scope: scope || undefined });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  return (
+    <div className="flex flex-col gap-2 text-sm">
+      {kinds.length > 1 && (
+        <div className="flex gap-1">
+          {kinds.map(k => (
+            <button key={k} onClick={() => setKind(k)} className={cn("rounded-md px-2 py-0.5 text-xs", kind === k ? "bg-muted font-medium" : "text-muted-foreground hover:text-foreground")}>
+              {KIND_LABEL[k]}
+            </button>
+          ))}
+        </div>
+      )}
+      {kind === "people" && r.reaches && <PeoplePicker people={people} reach={r.reaches} onChange={setPeople} />}
+      {kind === "objective" && (
+        <select value={objective} onChange={e => setObjective(e.target.value)} className={field}>
+          <option value="">Pick an objective…</option>
+          {objectives.map(o => (
+            <option key={o.id} value={o.id}>{o.title}</option>
+          ))}
+        </select>
+      )}
+      {kind === "repo" && (
+        <select value={repo} onChange={e => setRepo(e.target.value)} className={field}>
+          <option value="">Pick a repository…</option>
+          {repos.map(x => (
+            <option key={x.path} value={x.path}>{x.name} ({x.path})</option>
+          ))}
+        </select>
+      )}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">There, it's</span>
+        <ModeToggle mode={mode} onChange={setMode} />
+        <span className="text-xs text-muted-foreground">instead of {MODES.find(x => x.mode === r.mode)!.label}</span>
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <div className="flex gap-2">
+        <button disabled={!scope} onClick={() => void add()} className="rounded-md bg-primary px-3 py-1 text-[13px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40">
+          Add exception
+        </button>
+        <button onClick={onCancel} className="rounded-md px-3 py-1 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground">
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -261,123 +360,120 @@ function ModeToggle({ mode, inherited, onChange }: { mode: Mode; inherited?: boo
   );
 }
 
+/** Writing his own rule, and checking which command or tool name a rule hits, tucked away for when the catalog doesn't cover it. */
+function Advanced({ onAdd }: { onAdd: (r: Partial<Restriction>) => Promise<Restriction> }) {
+  const [open, setOpen] = useState(false);
+  const [writing, setWriting] = useState(false);
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return (
+    <section className="mb-6 border-t pt-4">
+      <button onClick={() => setOpen(!open)} className="flex items-center gap-1.5 px-2.5 text-[13px] font-medium text-muted-foreground hover:text-foreground">
+        <Chevron className="size-4" /> Advanced
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-col gap-3 px-2.5">
+          <p className="text-[13px] text-muted-foreground">For something the actions above don't cover: a rule that matches tools or shell commands by pattern. Test where a command lands, or write a rule.</p>
+          <Tester />
+          {writing ? (
+            <div className="rounded-xl border p-3">
+              <CustomEditor onSave={async c => void (await onAdd({ ...c, action: "custom" }), setWriting(false))} onCancel={() => setWriting(false)} />
+            </div>
+          ) : (
+            <button onClick={() => setWriting(true)} className="flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground">
+              <Plus className="size-4" /> Write a custom rule
+            </button>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 const lines = (text: string) => text.split("\n").map(l => l.trim()).filter(Boolean);
 const field = "w-full rounded-md border bg-transparent px-2 py-1 text-sm outline-none focus:border-foreground/30";
+type Preview = { checked: number; count: number; caught: { tool: string; text: string; at: string }[] };
 
 /**
- * Edits a restriction, or makes a new one when there is none. Matchers are one regex a line. An override has no label, kind or
- * matchers of its own: it is who and where its parent is set differently for.
+ * His own rule: a name, what it covers in his words, its setting, and the patterns it matches, with what those would have caught
+ * among the tool calls agents made lately, updated as he types.
  */
-function Editor({ r, override, reach, initialMode, kinds, onSave, onCancel, onDelete }: { r?: Restriction; override?: boolean; reach?: Reach; initialMode?: Mode; kinds: string[]; onSave: (r: Partial<Restriction>) => Promise<void>; onCancel: () => void; onDelete?: () => void }) {
-  const objectives = objectiveStore.use();
+function CustomEditor({ r, onSave, onCancel, onDelete }: { r?: Restriction; onSave: (c: Partial<Restriction>) => Promise<unknown>; onCancel: () => void; onDelete?: () => void }) {
   const [label, setLabel] = useState(r?.label ?? "");
-  const [action, setAction] = useState(r?.action ?? "");
-  const [mode, setMode] = useState<Mode>(r?.mode ?? initialMode ?? "ask");
-  const [people, setPeople] = useState<Person[]>(r?.scope?.people ?? []);
-  // A builtin's reach is the catalog's; his own restriction says who, if anyone, is on the other end.
-  const [reaches, setReaches] = useState<Reach | "">(r?.reaches ?? "");
-  const reachedBy = override ? reach : reaches || undefined;
+  const [about, setAbout] = useState(r?.about ?? r?.note ?? "");
+  const [mode, setMode] = useState<Mode>(r?.mode ?? "ask");
   const [tools, setTools] = useState((r?.match.tools ?? []).join("\n"));
   const [bash, setBash] = useState((r?.match.bash ?? []).join("\n"));
-  const [objective, setObjective] = useState(r?.scope?.objective ?? "");
-  const [cwd, setCwd] = useState(r?.scope?.cwd ?? "");
-  const [note, setNote] = useState(r?.note ?? "");
+  const [preview, setPreview] = useState<Preview | string>();
   const [error, setError] = useState<string>();
+  const match = { tools: lines(tools), bash: lines(bash) };
+  useEffect(() => {
+    if (!match.tools.length && !match.bash.length) return setPreview(undefined);
+    const timer = setTimeout(() => void send("/api/restrictions/preview", "POST", { match }).then(setPreview, e => setPreview((e as Error).message)), 300);
+    return () => clearTimeout(timer);
+  }, [tools, bash]);
   const save = async () => {
-    const named = reachedBy ? people : [];
-    const scope = objective || cwd.trim() || named.length ? { ...(objective && { objective }), ...(cwd.trim() && { cwd: cwd.trim() }), ...(named.length && { people: named }) } : undefined;
     try {
       setError(undefined);
-      await onSave(override ? { mode, scope, note: note.trim() || undefined } : { label: label.trim(), action: action.trim().toLowerCase(), mode, match: { tools: lines(tools), bash: lines(bash) }, scope, note: note.trim() || undefined, ...(!r?.builtin && { reaches: reaches || undefined }) });
+      await onSave({ label: label.trim(), about: about.trim() || undefined, mode, match });
     } catch (e) {
       setError((e as Error).message);
     }
   };
   return (
     <div className="flex flex-col gap-3 text-sm">
-      {!override && (
-      <div className="flex gap-3">
-        <label className="flex flex-1 flex-col gap-1">
-          <span className="text-xs text-muted-foreground">What it is</span>
-          <input autoFocus={!r} value={label} onChange={e => setLabel(e.target.value)} placeholder="Post in a customer channel" className={field} />
-        </label>
-        <label className="flex w-44 flex-col gap-1">
-          <span className="text-xs text-muted-foreground">Kind</span>
-          <input value={action} onChange={e => setAction(e.target.value)} list="restriction-kinds" placeholder="message" className={field} />
-          <datalist id="restriction-kinds">
-            {kinds.map(k => (
-              <option key={k} value={k}>{kindLabel(k)}</option>
-            ))}
-          </datalist>
-        </label>
-      </div>
-      )}
-      {!r && (
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Mode</span>
-          <ModeToggle mode={mode} onChange={setMode} />
-        </div>
-      )}
-      {!override && (
-      <div className="flex gap-3">
-        <label className="flex flex-1 flex-col gap-1">
-          <span className="text-xs text-muted-foreground">Tools, one regex a line, matching the whole tool name</span>
-          <textarea value={tools} onChange={e => setTools(e.target.value)} rows={Math.max(2, lines(tools).length)} placeholder="mcp__claude_ai_Slack__slack_send_message" className={cn(field, "resize-y font-mono text-xs")} />
-        </label>
-        <label className="flex flex-1 flex-col gap-1">
-          <span className="text-xs text-muted-foreground">Bash commands, one regex a line, found anywhere in the command</span>
-          <textarea value={bash} onChange={e => setBash(e.target.value)} rows={Math.max(2, lines(bash).length)} placeholder="\bgh\s+pr\s+merge\b" className={cn(field, "resize-y font-mono text-xs")} />
-        </label>
-      </div>
-      )}
-      {!override && !r?.builtin && (
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-muted-foreground">Who is on the other end</span>
-          <select value={reaches} onChange={e => setReaches(e.target.value as Reach | "")} className={field}>
-            <option value="">Nobody in particular (it can't be set per person)</option>
-            <option value="slack">Someone on Slack</option>
-            <option value="email">Someone by email</option>
-            <option value="github">A PR's author on GitHub</option>
-          </select>
-        </label>
-      )}
-      {reachedBy && (
-        <div className="flex flex-col gap-1">
-          <span className="text-xs text-muted-foreground">Only for people{override ? "" : " (leave empty for everyone)"}</span>
-          <PeoplePicker people={people} reach={reachedBy} onChange={setPeople} />
-        </div>
-      )}
-      <div className="flex gap-3">
-        <label className="flex flex-1 flex-col gap-1">
-          <span className="text-xs text-muted-foreground">Only on objective</span>
-          <select value={objective} onChange={e => setObjective(e.target.value)} className={field}>
-            <option value="">Any objective</option>
-            {objectives.map(o => (
-              <option key={o.id} value={o.id}>{o.title}</option>
-            ))}
-            {objective && !objectives.some(o => o.id === objective) && <option value={objective}>{objective}</option>}
-          </select>
-        </label>
-        <label className="flex flex-1 flex-col gap-1">
-          <span className="text-xs text-muted-foreground">Only under folder</span>
-          <input value={cwd} onChange={e => setCwd(e.target.value)} placeholder="Anywhere, or ~/Programs/arch" className={cn(field, "font-mono text-xs")} />
-        </label>
-      </div>
       <label className="flex flex-col gap-1">
-        <span className="text-xs text-muted-foreground">Note</span>
-        <textarea value={note} onChange={e => setNote(e.target.value)} rows={2} placeholder="Why it's set this way" className={cn(field, "resize-y")} />
+        <span className="text-xs text-muted-foreground">Name</span>
+        <input autoFocus={!r} value={label} onChange={e => setLabel(e.target.value)} placeholder="Apply Terraform changes" className={field} />
       </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs text-muted-foreground">What it covers, in your words</span>
+        <input value={about} onChange={e => setAbout(e.target.value)} placeholder="Changing cloud infrastructure with terraform apply" className={field} />
+      </label>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">Setting</span>
+        <ModeToggle mode={mode} onChange={setMode} />
+      </div>
+      <div className="flex gap-3">
+        <label className="flex flex-1 flex-col gap-1">
+          <span className="text-xs text-muted-foreground">Tool names it catches, one pattern a line (the whole name must match)</span>
+          <textarea value={tools} onChange={e => setTools(e.target.value)} rows={2} className={cn(field, "resize-y font-mono text-xs")} />
+        </label>
+        <label className="flex flex-1 flex-col gap-1">
+          <span className="text-xs text-muted-foreground">Shell commands it catches, one pattern a line (found anywhere in the command)</span>
+          <textarea value={bash} onChange={e => setBash(e.target.value)} rows={2} className={cn(field, "resize-y font-mono text-xs")} />
+        </label>
+      </div>
+      <div className="rounded-lg bg-muted/50 px-2.5 py-2 text-xs">
+        {preview === undefined ? (
+          <span className="text-muted-foreground">Add a pattern to see which of your agents' recent tool calls it would catch.</span>
+        ) : typeof preview === "string" ? (
+          <span className="text-destructive">{preview}</span>
+        ) : (
+          <>
+            <p className={cn("mb-1 font-medium", !preview.count && "text-muted-foreground")}>
+              Would have caught {preview.count} of the last {preview.checked} tool calls{preview.count ? ":" : "."}
+            </p>
+            <ol className="flex flex-col gap-0.5">
+              {preview.caught.map((c, i) => (
+                <li key={i} className="flex min-w-0 gap-2">
+                  <span className="min-w-0 flex-1 truncate font-mono">{c.text}</span>
+                  <span className="shrink-0 text-muted-foreground tabular-nums">{c.at && ago(Date.parse(c.at))}</span>
+                </li>
+              ))}
+            </ol>
+          </>
+        )}
+      </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
       <div className="flex items-center gap-2">
         <button onClick={() => void save()} className="rounded-md bg-primary px-3 py-1 text-[13px] font-medium text-primary-foreground hover:bg-primary/90">
-          {r ? "Save" : override ? "Add override" : "Add restriction"}
+          {r ? "Save" : "Add rule"}
         </button>
         <button onClick={onCancel} className="rounded-md px-3 py-1 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground">
           Cancel
         </button>
-        {r?.builtin && <span className="text-xs text-muted-foreground">Built in</span>}
         {onDelete && (
-          <button onClick={onDelete} title="Delete" className="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-[13px] text-muted-foreground hover:bg-muted hover:text-destructive">
+          <button onClick={onDelete} className="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-[13px] text-muted-foreground hover:bg-muted hover:text-destructive">
             <Trash2 className="size-4" /> Delete
           </button>
         )}
@@ -561,7 +657,8 @@ function PeoplePicker({ people, reach, onChange }: { people: Person[]; reach: Re
         ...(reach === "github" && /^[\w-]+$/.test(q) && !all.some(p => p.github?.toLowerCase() === q) ? [{ name: q, github: q }] : []),
       ].filter(p => !picked(p) && (!q || p.email === q || p.github === q || [personName(p), p.github, p.email].some(x => x?.toLowerCase().includes(q))))
     : [];
-  const add = (p: Person) => (onChange([...people, p]), setQuery(""));
+  // How yarn joined their accounts is the listing's business, not the restriction's.
+  const add = ({ linked: _, ...p }: Person & { linked?: string }) => (onChange([...people, p]), setQuery(""));
   return (
     <div ref={box} className="relative">
       <div className={cn(field, "flex flex-wrap items-center gap-1")}>

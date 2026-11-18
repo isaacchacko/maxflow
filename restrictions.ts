@@ -16,6 +16,8 @@ export type Mode = (typeof MODES)[number];
 // author); only a restriction that reaches someone can be set per person. forPerson: its label said of one person, {name}
 // standing for their name and {name's} for its possessive ("Approve {name's} PRs").
 export type Reach = "slack" | "email" | "github";
+// people: some people or Teammates/Outsiders; objective: one objective's agents; repo: calls made inside one repository.
+export type Exception = "people" | "objective" | "repo";
 export type Restriction = {
   id: string;
   action: string;
@@ -26,6 +28,12 @@ export type Restriction = {
   parent?: string;
   reaches?: Reach;
   forPerson?: string;
+  // The catalog's own words for a builtin: what it covers, examples of it, what one of it is called ("message"), and the
+  // exceptions he can carve out of it. His own rules carry about (his description) and nothing else.
+  about?: string;
+  examples?: string[];
+  noun?: string;
+  exceptions?: Exception[];
   note?: string;
   builtin?: boolean;
 };
@@ -88,6 +96,32 @@ export const SEED: Restriction[] = [
     "Spending money is always his call. Add the matchers for whatever else costs money."),
 ];
 
+type Explain = Required<Pick<Restriction, "about" | "examples" | "noun">> & { exceptions: Exception[] };
+const EXPLAIN: Record<string, Explain> = {
+  slack: { about: "Sending or scheduling a Slack message, to a person or a channel. A draft you send yourself isn't covered.", examples: ["An agent DMs Felix on Slack", "An agent posts an update in #arch_comms"], noun: "message", exceptions: ["people", "objective"] },
+  email: { about: "Sending, replying to or forwarding an email from Gmail or Outlook. Drafts aren't covered.", examples: ["An agent replies to a supplier's email"], noun: "email", exceptions: ["people", "objective"] },
+  teams: { about: "Sending a Teams chat or channel message, or starting a chat.", examples: ["An agent messages Christoph on Teams"], noun: "message", exceptions: ["people", "objective"] },
+  "mallory-phone": { about: "A mallory message to your phone (umbrella) or to every device. Messages between your agents aren't covered.", examples: ["An agent pings your phone that a deploy finished"], noun: "message", exceptions: ["objective"] },
+  calendar: { about: "Creating, changing, cancelling or answering a calendar event.", examples: ["An agent invites Felix to a review call", "An agent accepts a meeting for you"], noun: "change", exceptions: ["people", "objective"] },
+  "pr-comment": { about: "Commenting on a pull request, or leaving a review that isn't an approval.", examples: ["An agent leaves review comments on Felix's PR"], noun: "comment", exceptions: ["people", "objective"] },
+  "pr-approve": { about: "Approving a pull request on GitHub, as you.", examples: ["An agent approves Zelda's PR after reading the diff"], noun: "approval", exceptions: ["people", "objective"] },
+  "pr-merge": { about: "Merging a pull request, or turning on auto-merge so it merges once checks pass.", examples: ["An agent merges a yarn PR once CI is green"], noun: "merge", exceptions: ["people", "objective"] },
+  "pr-reviewers": { about: "Asking someone to review a pull request.", examples: ["An agent requests Felix as a reviewer"], noun: "request", exceptions: [] },
+  "pr-open-close": { about: "Opening, closing or reopening a pull request.", examples: ["An agent opens a PR for its fix"], noun: "change", exceptions: ["repo", "objective"] },
+  "push-default": { about: "Pushing commits straight to main or master, skipping a pull request.", examples: ["An agent pushes a yarn change to master"], noun: "push", exceptions: ["repo"] },
+  "force-push": { about: "Force-pushing, which rewrites a branch's history on GitHub.", examples: ["An agent force-pushes its rebased branch"], noun: "push", exceptions: ["repo"] },
+  "ci-jobs": { about: "Starting a GitHub Actions workflow, or re-running a job.", examples: ["An agent re-runs a flaky test job"], noun: "run", exceptions: ["repo", "objective"] },
+  "prod-deploy": { about: "Deploying to production.", examples: ["An agent dispatches the prod deploy workflow"], noun: "deploy", exceptions: ["objective"] },
+  "pipeline-runs": { about: "Launching, backfilling or changing a Dagster or Temporal run.", examples: ["An agent backfills a Dagster partition", "An agent starts a Temporal workflow"], noun: "run", exceptions: ["objective"] },
+  linear: { about: "Creating, editing or deleting Linear tickets, comments and documents.", examples: ["An agent files a ticket for a bug it found"], noun: "change", exceptions: ["objective"] },
+  "delete-files": { about: "Deleting a folder and everything in it (rm -r), or a SharePoint item.", examples: ["An agent deletes a build folder"], noun: "delete", exceptions: ["repo"] },
+  "delete-branches": { about: "Deleting a git branch, on your machine or on GitHub.", examples: ["An agent deletes its merged branch"], noun: "delete", exceptions: ["repo"] },
+  "delete-mail": { about: "Moving emails to the trash.", examples: ["An agent trashes a newsletter"], noun: "delete", exceptions: ["objective"] },
+  "kill-processes": { about: "Killing processes by name or pattern (pkill, killall) instead of the one process it started.", examples: ["An agent runs pkill -f bun"], noun: "kill", exceptions: [] },
+  "spend-money": { about: "Anything that charges money: Stripe charges, cloud purchases, billing changes.", examples: ["An agent buys an AWS reservation"], noun: "purchase", exceptions: [] },
+};
+for (const r of SEED) if (EXPLAIN[r.id]) Object.assign(r, EXPLAIN[r.id]);
+
 export const FILE = `${STATE_DIR}/restrictions.json`;
 // The catalog is seeded once, when the file doesn't exist yet; from then on the file is his, builtins and all. A builtin added
 // to the catalog later is seeded once too, so one he deleted stays deleted (restrictions-seeded.json keeps which were seeded).
@@ -103,6 +137,7 @@ export function loadRestrictions(file = FILE): Restriction[] {
     if (r) {
       if (s.reaches) (r.reaches = s.reaches), (r.forPerson = s.forPerson);
       else delete r.reaches, delete r.forPerson;
+      if (EXPLAIN[s.id]) Object.assign(r, EXPLAIN[s.id]);
       if (s.id === "mallory-phone" && r.label === "Mallory to his phone") r.label = s.label;
     } else if (!seeded.has(s.id) && (!s.parent || list.some((o) => o.id === s.parent))) list.push(structuredClone(s));
     seeded.add(s.id);

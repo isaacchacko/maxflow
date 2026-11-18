@@ -11,6 +11,7 @@ import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR, TMUX_SCOPE, TMUX_SOCKE
 import { enforce, onReply } from "./restrictions-enforce";
 import { invalid, loadRestrictions, resolve, saveRestrictions, type Person, type Restriction } from "./restrictions";
 import { backfill, link, people as restrictionPeople } from "./restrictions-identities";
+import { preview } from "./restrictions-recent";
 import app from "./src/index.html";
 
 const HOST = "127.0.0.1";
@@ -1432,6 +1433,16 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 // His autonomy restrictions (restrictions.ts): the Restrictions page edits them, the enforcement hook reads them.
 export const restrictions: Restriction[] = loadRestrictions();
+const gitRoots = new Map<string, string | null>();
+function restrictionRepos() {
+  const roots = new Set<string>();
+  for (const s of sessions.values()) {
+    if (!gitRoots.has(s.cwd)) gitRoots.set(s.cwd, Bun.spawnSync(["git", "-C", s.cwd, "rev-parse", "--show-toplevel"], { stderr: "ignore" }).stdout.toString().trim() || null);
+    const root = gitRoots.get(s.cwd);
+    if (root) roots.add(root);
+  }
+  return [...roots].sort().map((path) => ({ path: path.replace(process.env.HOME!, "~"), name: path.split("/").at(-1)! }));
+}
 
 // at: when the event happened, which the assistant reads from the transcript it took it from; it defaults to now.
 function editTask(t: Task | undefined, edit: TaskEdit) {
@@ -2508,7 +2519,7 @@ Bun.serve<WsData>({
       const draft = { ...body, label: body.label?.trim() || parent?.label, action: body.action?.trim() || parent?.action, match: body.match ?? {} };
       const bad = invalid(draft, restrictions);
       if (bad) return new Response(bad, { status: 400 });
-      const r: Restriction = { id: crypto.randomUUID().slice(0, 8), action: draft.action!, label: draft.label!.trim(), mode: draft.mode!, match: parent ? {} : draft.match, scope: draft.scope, parent: parent?.id, note: draft.note, ...(!parent && draft.reaches && { reaches: draft.reaches }) };
+      const r: Restriction = { id: crypto.randomUUID().slice(0, 8), action: draft.action!, label: draft.label!.trim(), mode: draft.mode!, match: parent ? {} : draft.match, scope: draft.scope, parent: parent?.id, note: draft.note, ...(!parent && draft.reaches && { reaches: draft.reaches }), ...(!parent && draft.about && { about: draft.about }) };
       restrictions.push(r), saveRestrictions(restrictions);
       return Response.json(r, { status: 201 });
     }
@@ -2521,6 +2532,14 @@ Bun.serve<WsData>({
       if (backfill(restrictions)) saveRestrictions(restrictions);
       return Response.json(restrictionPeople());
     }
+    // What a custom rule's matchers would have caught among the tool calls agents made lately (restrictions-recent.ts).
+    if (path === "/api/restrictions/preview" && req.method === "POST") {
+      const { match } = (await req.json().catch(() => ({}))) as { match?: Restriction["match"] };
+      const bad = invalid({ label: "x", action: "x", mode: "ask", match: match ?? {} });
+      return bad ? new Response(bad, { status: 400 }) : Response.json(preview(match!));
+    }
+    // The repositories his agents work in, for an exception that holds inside one: each live session's folder, as its git root.
+    if (path === "/api/restrictions/repos" && req.method === "GET") return Response.json(restrictionRepos());
     // He links a Slack user to a GitHub login, or unlinks a pair yarn matched or he linked.
     if (path === "/api/restrictions/people/link" && (req.method === "POST" || req.method === "DELETE")) {
       const pair = (await req.json().catch(() => ({}))) as { slack?: string; github?: string };
