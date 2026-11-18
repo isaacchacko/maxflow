@@ -1660,7 +1660,8 @@ async function world() {
       name: s.name.replace(/^sentry:/, ""),
       running: live(s),
       status: status(s),
-      lastOutputAt: s.lastOutputAt,
+      // To 10s: it moves with every line a sentry prints, and every move re-sent every sentry to every tab.
+      lastOutputAt: Math.floor(s.lastOutputAt / 10_000) * 10_000,
       createdAt: s.createdAt,
       ties: sentryTies[s.name]?.() ?? [],
       use: SENTRY_USES[s.name] ?? "",
