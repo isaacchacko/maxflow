@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { createLife, restFrame, step, type Expression, type Frame, type Life } from "./face/rig";
 
 // An agent's face: a soft paper body with a deeper edge behind it, and all the expression in the eyes and brows, no mouth.
@@ -120,11 +120,33 @@ function paint(f: Frame, g: Geometry) {
   };
 }
 
+// The body's grain, as BoardUI's: grey white noise tiled one dot to a pixel at 64px and laid over the body in soft-light, so it
+// shades whichever colour is under it, in light and dark alike. One 32×32 tile made once; faces drawn small leave it off, where it
+// would only muddy them.
+let grain = "";
+function grainTile() {
+  if (grain || typeof document === "undefined") return grain;
+  const c = document.createElement("canvas");
+  c.width = c.height = 32;
+  const ctx = c.getContext("2d");
+  if (!ctx) return "";
+  const img = ctx.createImageData(32, 32);
+  let seed = 713;
+  for (let i = 0; i < img.data.length; i += 4) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = seed >>> 24;
+    img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return (grain = c.toDataURL());
+}
+const GRAIN = { mixBlendMode: "soft-light", opacity: 0.45, pointerEvents: "none" } as const;
+
 // Every living face on the page shares one animation frame loop: 60fps while any of them is mid-change or blinking, 30 while they
 // only drift. It draws nothing while the tab is hidden, while the image viewer is open (data-viewing: a moving face under its scrim
 // re-rastered the page beneath every frame) or for a face scrolled out of view.
 type Live = { life: Life; target: Expression; geometry: Geometry; els: Els; visible: boolean };
-type Els = { cap: SVGGElement; shadow: SVGGElement; capFill: SVGPathElement; eyes: SVGGElement; slabs: SVGPathElement[]; head: SVGGElement; left: SVGPathElement; right: SVGPathElement; browL: SVGPathElement; browR: SVGPathElement; brows: SVGGElement; zs: SVGTextElement[] };
+type Els = { shadowClip: SVGPathElement | null; slabClips: SVGPathElement[]; cap: SVGGElement; shadow: SVGGElement; capFill: SVGPathElement; eyes: SVGGElement; slabs: SVGPathElement[]; head: SVGGElement; left: SVGPathElement; right: SVGPathElement; browL: SVGPathElement; browR: SVGPathElement; brows: SVGGElement; zs: SVGTextElement[] };
 const live = new Set<Live>();
 let frame = 0;
 let last = 0;
@@ -136,10 +158,11 @@ function apply(l: Live, f: Frame) {
   els.head.setAttribute("transform", p.head);
   els.cap.setAttribute("transform", p.cap);
   els.shadow.setAttribute("transform", p.cap);
+  els.shadowClip?.setAttribute("transform", `${p.cap} translate(1.1 1.5)`);
   els.capFill.setAttribute("fill", p.capFill);
   els.capFill.setAttribute("stroke", l.geometry.round ? p.capFill : l.geometry.line);
   els.eyes.setAttribute("opacity", String(p.eyes));
-  p.slabs.forEach((t, i) => els.slabs[i]?.setAttribute("transform", t));
+  p.slabs.forEach((t, i) => (els.slabs[i]?.setAttribute("transform", t), els.slabClips[i]?.setAttribute("transform", t)));
   els.left.setAttribute("d", p.left);
   els.right.setAttribute("d", p.right);
   els.browL.setAttribute("d", p.browL);
@@ -188,6 +211,8 @@ export function AgentFace({ id, expression = "idle", still, small, shape, colors
   const geometry: Geometry = { lx, ly, rx, ry, k, brows: !small && body.brows !== false, small: !!small, face, back: line, line, round: r > 0 };
 
   const svg = useRef<SVGSVGElement>(null);
+  const uid = useId().replace(/:/g, "");
+  const tile = small ? "" : grainTile();
   const self = useRef<Live | null>(null);
   // A living face is drawn by React once, in the pose it starts in; after that only the ticker touches its eyes, so a new
   // expression springs from wherever they are rather than jumping.
@@ -202,7 +227,7 @@ export function AgentFace({ id, expression = "idle", still, small, shape, colors
       target: first.current,
       geometry,
       visible: true,
-      els: { cap: q("[data-face=cap]"), shadow: q("[data-face=shadow]"), capFill: q("[data-face=cap-fill]"), eyes: q("[data-face=eyes]"), slabs: [...el.querySelectorAll("[data-face=slab]")] as SVGPathElement[], head: q("[data-face=head]"), left: q("[data-face=left]"), right: q("[data-face=right]"), browL: q("[data-face=brow-l]"), browR: q("[data-face=brow-r]"), brows: q("[data-face=brows]"), zs: [...el.querySelectorAll("[data-face=z]")] as SVGTextElement[] },
+      els: { shadowClip: q("[data-face=shadow-clip]"), slabClips: [...el.querySelectorAll("[data-face=slab-clip]")] as SVGPathElement[], cap: q("[data-face=cap]"), shadow: q("[data-face=shadow]"), capFill: q("[data-face=cap-fill]"), eyes: q("[data-face=eyes]"), slabs: [...el.querySelectorAll("[data-face=slab]")] as SVGPathElement[], head: q("[data-face=head]"), left: q("[data-face=left]"), right: q("[data-face=right]"), browL: q("[data-face=brow-l]"), browR: q("[data-face=brow-r]"), brows: q("[data-face=brows]"), zs: [...el.querySelectorAll("[data-face=z]")] as SVGTextElement[] },
     };
     self.current = me;
     live.add(me);
@@ -228,10 +253,30 @@ export function AgentFace({ id, expression = "idle", still, small, shape, colors
           <g data-face="shadow" transform={p.cap}>
             <path d={body.d} transform="translate(1.1 1.5)" fill={edge} stroke={edge} strokeWidth={r} strokeLinejoin="round" />
           </g>
+          {tile && (
+            <defs>
+              <pattern id={`${uid}g`} patternUnits="userSpaceOnUse" width="8" height="8">
+                <image href={tile} width="8" height="8" style={{ imageRendering: "pixelated" }} />
+              </pattern>
+              <clipPath id={`${uid}b`}>
+                <path d={body.d} />
+              </clipPath>
+              {/* The edge: the depth behind the body, and the side's slabs while it turns. */}
+              <clipPath id={`${uid}s`}>
+                <path data-face="shadow-clip" d={body.d} transform={`${p.cap} translate(1.1 1.5)`} />
+                {animated &&
+                  p.slabs.map((t, i) => (
+                    <path key={i} data-face="slab-clip" d={body.d} transform={t} />
+                  ))}
+              </clipPath>
+            </defs>
+          )}
           {animated && p.slabs.map((t, i) => <path key={i} data-face="slab" d={body.d} transform={t} fill={edge} stroke={edge} strokeWidth={r + 0.8} strokeLinejoin="round" />)}
+          {tile && <rect x="-4" y="-4" width="40" height="40" fill={`url(#${uid}g)`} clipPath={`url(#${uid}s)`} style={GRAIN} />}
           <g data-face="cap" transform={p.cap}>
             {r > 0 && <path d={body.d} fill="none" stroke={line} strokeWidth={r + 1.4} strokeLinejoin="round" />}
             <path data-face="cap-fill" d={body.d} fill={p.capFill} stroke={r > 0 ? p.capFill : line} strokeWidth={r || 0.7} strokeLinejoin="round" />
+            {tile && <rect x="-4" y="-4" width="40" height="40" fill={`url(#${uid}g)`} clipPath={`url(#${uid}b)`} style={GRAIN} />}
             <g data-face="eyes" opacity={p.eyes}>
               <path data-face="left" d={p.left} fill={ink} />
               <path data-face="right" d={p.right} fill={ink} />

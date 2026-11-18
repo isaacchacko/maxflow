@@ -117,6 +117,12 @@ draw the resting pose with no loop.
 | error | worried brows, wide narrow eyes | a small tremble |
 | asleep | lines, head tilted | no blinks; breathes on a 4.8s cycle; z's rise and fade |
 
+**Grain** (Isaac: "theres also a slight texture on the agents"). BoardUI fills a 192×192 canvas with grey LCG white noise once,
+and lays it over the body as a repeating pattern, one noise dot per device pixel, `soft-light` at grain/100 (36% by default),
+clipped to the body. yarn uses one 32×32 noise tile made once on a canvas and tiled as an SVG pattern (8 units, so a dot per
+device pixel at 64px on a 2× screen). It's laid `soft-light` at 45% over the face plane (under the eyes) and over the edge and
+turning slabs, each clipped to its shape. It's static, and faces drawn `small` (pins, 20px lines) leave it off.
+
 **The turn** (working and thinking; Isaac: "the thing rotates when its processing"). BoardUI's working beat, measured from its
 `workingPose`: a 1.15s turn through 2π under smootherstep with an 8% hold at each end, a hop (down `sin²` over the first 18%,
 then up `sin²(π·smootherstep)`) and a lean of `-.055·sin(turn)`. yarn adds 0.45s face-on between turns, so one comes every 1.6s,
