@@ -82,6 +82,8 @@ export function App() {
       const prev = current.current;
       const next = (current.current = routeFromHash());
       arrive(prev.detail?.kind === "thread" ? prev.detail.id : undefined, { thread: next.detail?.kind === "thread" ? next.detail.id : undefined, view: !next.detail });
+      // Opening a thread in full, by any means, cancels the side pane, the pane's own thread included (as its ↗ does).
+      if (next.detail?.kind === "thread") closePane();
       setRoute(next);
     };
     const onKey = (e: KeyboardEvent) => {
