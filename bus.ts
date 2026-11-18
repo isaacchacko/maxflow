@@ -20,12 +20,16 @@ export function topicMatcher(glob: string) {
   return (topic: string) => new RegExp(`^${re}$`).test(topic);
 }
 
+// Told of every event as it is published (the server's shared world marks itself stale).
+export const onPublish = new Set<(ev: Event) => void>();
+
 export function publish(topic: string, data: unknown) {
   const ev = { seq: ++seq, at: Date.now(), topic, data };
   events.push(ev);
   if (events.length > KEEP) events.shift();
   appendFileSync(LOG, JSON.stringify(ev) + "\n");
   for (const wake of waiters) wake();
+  for (const f of onPublish) f(ev);
   return ev;
 }
 

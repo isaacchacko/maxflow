@@ -48,7 +48,8 @@ export async function api(path: string, body?: unknown, method = "POST") {
  * Bumped around each of his own changes; live.ts drops a world it fetched across one, so a poll that left before the server had
  * the change can't draw the old state back over it.
  */
-export const changes = { n: 0 };
+// busy: how many are in flight; the world the server pushes meanwhile waits, as it may not have them yet.
+export const changes = { n: 0, busy: 0 };
 
 /**
  * His own change to a thread shows at once: it is made here first, then sent, and the world is fetched again in the background
@@ -60,6 +61,7 @@ async function optimistic(threadId: string, change: (t: Thread) => Thread, path:
   changes.n++;
   threadStore.set(all => all.map(t => (t.id === threadId ? change(t) : t)));
   if (!isLive()) return;
+  changes.busy++;
   try {
     const res = await fetch(path, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
@@ -68,6 +70,7 @@ async function optimistic(threadId: string, change: (t: Thread) => Thread, path:
     throw e;
   } finally {
     changes.n++;
+    changes.busy--;
     void refreshed.current?.();
   }
 }

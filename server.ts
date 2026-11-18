@@ -1,10 +1,10 @@
 import type { ServerWebSocket, Subprocess } from "bun";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { backgroundShells } from "./background";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
 import { slackAvatar, slackNames } from "./slack-meta";
-import { latestSeq, publish, query } from "./bus";
+import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
 import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR, TMUX_SCOPE, TMUX_SOCKET } from "./instance";
@@ -69,7 +69,8 @@ type Wait = { kind: "thread" | "approval" | "ci" | "agent" | "slack" | "done"; r
 type ClaudeState = "working" | "waiting" | "idle";
 
 // Each browser tab gets its own tmux client, so tmux hands it the full terminal state (modes, screen) on connect.
-type WsData = { id: string; pty?: Subprocess };
+// world: a browser tab following the world (/api/world/ws), not a terminal.
+type WsData = { id: string; pty?: Subprocess; world?: true };
 
 const sessions = new Map<string, Session>();
 
@@ -420,9 +421,18 @@ function candidates(s: Session): Candidate[] {
   // A resumed chat's transcript is known from its id before any hook reports it.
   if (!s.transcript && s.chatId && !l.at) (l.at = Date.now()), (s.transcript = [...new Bun.Glob(`*/${s.chatId}.jsonl`).scanSync(PROJECTS)].map((f) => `${PROJECTS}/${f}`)[0]);
   if (s.transcript) {
+    // Only what was appended since the last read: the whole transcript (often tens of MB) was read on every world before.
     let buf: Buffer;
     try {
-      buf = readFileSync(s.transcript).subarray(l.offset);
+      const size = statSync(s.transcript).size;
+      if (size < l.offset) l.offset = 0;
+      buf = Buffer.alloc(size - l.offset);
+      const fd = openSync(s.transcript, "r");
+      try {
+        readSync(fd, buf, 0, buf.length, l.offset);
+      } finally {
+        closeSync(fd);
+      }
     } catch {
       return l.found;
     }
@@ -1489,6 +1499,74 @@ const v2Status = (t: Task) => (t.status === "todo" ? "todo" : t.status === "doin
 // Local wall-clock time, which the UI compares by its first ten characters for "today".
 const iso = (at: number) => new Date(at - new Date(at).getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 
+// The world is built once and shared, not once per request: every open tab polled it every 1.5s, at 1.3MB and up to half a second
+// a build. A build follows a bus event (most changes publish one) within ~100ms, at most one every 300ms, and every 2s while a tab
+// follows it, for what changes without an event (an agent's state, read from its screen and the clock). Each build is diffed against the
+// last by entity, and the tabs following it get only what changed; GET answers from the last build, 304 when the tab has it.
+type World = Awaited<ReturnType<typeof world>>;
+const COLLECTIONS = ["objectives", "agents", "tasks", "threads", "signals", "sentries"] as const;
+type Built = { v: number; at: number; w: World; json?: string; items: Record<string, Map<string, string>>; order: Record<string, string>; rest: Record<string, string> };
+let built: Built | undefined;
+let worldDirty = true, building: Promise<Built> | undefined, worldTimer: ReturnType<typeof setTimeout> | undefined, lastBuildAt = 0;
+const worldClients = new Set<ServerWebSocket<WsData>>();
+function rebuildWorld(): Promise<Built> {
+  if (building) return building;
+  worldDirty = false;
+  lastBuildAt = Date.now();
+  building = (async () => {
+    const w = await world();
+    const items: Built["items"] = {}, order: Built["order"] = {}, rest: Built["rest"] = {};
+    const upsert: Record<string, unknown[]> = {}, remove: Record<string, string[]> = {}, orders: Record<string, string[]> = {}, set: Record<string, unknown> = {};
+    for (const c of COLLECTIONS) {
+      const list = w[c] as { id: string }[];
+      const m = new Map(list.map((x) => [String(x.id), JSON.stringify(x)]));
+      items[c] = m;
+      order[c] = [...m.keys()].join("\n");
+      if (!built) continue;
+      const prev = built.items[c]!;
+      const up = list.filter((x) => prev.get(String(x.id)) !== m.get(String(x.id)));
+      const gone = [...prev.keys()].filter((id) => !m.has(id));
+      if (up.length) upsert[c] = up;
+      if (gone.length) remove[c] = gone;
+      if (order[c] !== built.order[c]) orders[c] = [...m.keys()];
+    }
+    for (const [k, val] of Object.entries(w)) {
+      if ((COLLECTIONS as readonly string[]).includes(k)) continue;
+      rest[k] = JSON.stringify(val);
+      if (built && rest[k] !== built.rest[k]) set[k] = val;
+    }
+    const changed = !built || [upsert, remove, orders, set].some((o) => Object.keys(o).length);
+    if (!changed) return Object.assign(built!, { at: Date.now() });
+    const from = built?.v;
+    built = { v: (from ?? 0) + 1, at: Date.now(), w, items, order, rest };
+    if (from !== undefined && worldClients.size) {
+      const msg = JSON.stringify({ type: "patch", from, v: built.v, upsert, remove, order: orders, set });
+      for (const ws of worldClients) ws.sendText(msg);
+    }
+    return built;
+  })().finally(() => {
+    building = undefined;
+    if (worldDirty) scheduleWorld();
+  });
+  return building;
+}
+function scheduleWorld() {
+  if (worldTimer || !worldClients.size) return;
+  worldTimer = setTimeout(() => ((worldTimer = undefined), void rebuildWorld()), Math.max(100, lastBuildAt + 300 - Date.now()));
+}
+// GET's world: the last build when nothing happened since it and it is under a second old, else a new one.
+async function freshWorld() {
+  if (building) await building;
+  return built && !worldDirty && Date.now() - built.at < 1000 ? built : rebuildWorld();
+}
+onPublish.add(() => ((worldDirty = true), scheduleWorld()));
+setInterval(() => worldClients.size && Date.now() - lastBuildAt >= 2000 && void rebuildWorld(), 500);
+async function openWorld(ws: ServerWebSocket<WsData>) {
+  worldClients.add(ws);
+  const b = await freshWorld();
+  if (ws.readyState === 1) ws.sendText(JSON.stringify({ type: "world", v: b.v, world: b.w }));
+}
+
 async function world() {
   const all = [...sessions.values()].filter((s) => live(s) || s.role);
   const agents = all.filter((s) => isAgent(s) && !isSentry(s) && live(s));
@@ -1930,7 +2008,14 @@ Bun.serve<WsData>({
       return Response.json(describe(s), { status: 201 });
     }
 
-    if (path === "/api/world" && req.method === "GET") return Response.json(await world());
+    if (path === "/api/world" && req.method === "GET") {
+      const b = await freshWorld();
+      const etag = `"w${b.v}"`;
+      const headers = { etag, "x-world-v": String(b.v), "cache-control": "no-cache" };
+      if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
+      return new Response((b.json ??= JSON.stringify(b.w)), { headers: { ...headers, "content-type": "application/json" } });
+    }
+    if (path === "/api/world/ws") return server.upgrade(req, { data: { id: "", world: true } }) ? undefined : new Response("upgrade failed", { status: 400 });
 
     // Isaac's chat from the event log: to the objective he names, else to the funnel to route.
     if (path === "/api/signals" && req.method === "POST") {
@@ -2063,6 +2148,17 @@ Bun.serve<WsData>({
       const into = live_thread(threads.find((x) => x.id === id));
       if (!from || from.mergedInto) return new Response("no such thread, or it is merged already", { status: 404 });
       if (!into || into === from) return new Response("into: another thread's id", { status: 400 });
+      // His messages moved into a resolved or paused thread would be hidden under Resolved or Paused, where he can't find them: the
+      // thread comes back, as his own post there would bring it. With none of his, a resolved thread isn't the place for them.
+      const his = from.messages.some((m) => m.from === "isaac");
+      if (into.resolved && !his) return new Response(`${into.id} is resolved; merge into an open thread instead`, { status: 409 });
+      if (his && (into.resolved || into.paused)) {
+        const was = into.resolved ? "resolved" : "paused";
+        into.resolved = undefined;
+        if (into.paused) unpause(into);
+        console.log(`merge ${from.id} → ${into.id}: reopened it (${was}), since his messages moved in`);
+        publish(`thread/${into.id}`, { thread: into.id, reopened: `merge of ${from.id}, which holds his messages; it was ${was}` });
+      }
       mergeThread(from, into);
       return Response.json(into);
     }
@@ -2419,6 +2515,7 @@ Bun.serve<WsData>({
   },
   websocket: {
     open(ws) {
+      if (ws.data.world) return void openWorld(ws);
       const s = sessions.get(ws.data.id)!;
       s.clients.add(ws);
       ws.sendText("replayed");
@@ -2433,6 +2530,8 @@ Bun.serve<WsData>({
       });
     },
     message(ws, raw) {
+      // A tab that missed a patch asks for the whole world again.
+      if (ws.data.world) return void (String(raw) === "full" && built && ws.sendText(JSON.stringify({ type: "world", v: built.v, world: built.w })));
       const pty = ws.data.pty;
       if (!pty || pty.exitCode !== null) return;
       const msg = JSON.parse(String(raw)) as { type: "input"; data: string } | { type: "resize"; cols: number; rows: number };
@@ -2440,6 +2539,7 @@ Bun.serve<WsData>({
       else if (msg.type === "resize" && msg.cols > 0 && msg.rows > 0) pty.terminal!.resize(msg.cols, msg.rows);
     },
     close(ws) {
+      if (ws.data.world) return void worldClients.delete(ws);
       ws.data.pty?.kill();
       sessions.get(ws.data.id)?.clients.delete(ws);
     },
