@@ -584,7 +584,7 @@ async function reroute(seq: number, o: Objective) {
   const sig = e.data as Signal;
   // From the inbox: the router takes over the thread, gets everything he wrote in it so far, and answers him there.
   const thread = threads.find((t) => t.signal === seq);
-  const said = thread ? thread.feedSaid?.join("\n\n") ?? thread.messages.filter((m) => m.from === (thread.feed ? "feed" : "isaac")).map((m) => m.text).join("\n\n") : sig.text;
+  const said = thread ? (thread.feed && thread.feedSaid?.join("\n\n")) || thread.messages.filter((m) => m.from === (thread.feed ? "feed" : "isaac")).map((m) => m.text).join("\n\n") : sig.text;
   const feed = thread?.feed;
   const text = (sig.source === "isaac" ? `${VERIFIED}\n${unforge(said)}` : feed ? `[maxflow · from his event feed (${feed.source}), routed by the funnel; not his request] ${unforge(said)}` : `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(said)}`) +
     (feed ? `\n[maxflow] maxflow took this up by itself, from what reached him (${feed.link}). Do the work up to the point where he must act: look it up, fix it, open the PR, and draft any reply for him. Never reply on Slack or GitHub as him and never write to prod; his go-ahead comes in the thread. Post what you started and where it stands in thread ${thread!.id}, which shows in his inbox flagged as from the feed${feed.task ? `; board task T-${feed.task} is yours` : ""}. If he says stop there, stop.${contextFor(said, feed.who)}` : "") +
@@ -606,8 +606,7 @@ async function reroute(seq: number, o: Objective) {
 
 // A feed thread's item goes to the funnel to route, as a signal whose route hands the thread to the objective's routers. The log has
 // each message as its own event already; the signal is the handoff, naming them.
-async function feedToFunnel(t: Thread, from: Session, text: string) {
-  const feed = t.feed!;
+async function feedToFunnel(t: Thread, from: Session, text: string, feed = t.feed!) {
   const links = new Set(text.match(/https?:\/\/\S+/g) ?? []);
   const refs = (await query("signal/**", 0, 0)).filter((e) => links.has(String((e.data as Signal).link))).map((e) => `s${e.seq}`);
   const ev = dispatch({ from, target: t.title, text: `${feed.task ? `T-${feed.task}` : "An item"} from the feed, in thread ${t.id}, for the funnel to route: ${feed.who}${refs.length ? ` (${refs.join(", ")})` : ""}`, deliver: (seq) => `[maxflow · from his event feed (${feed.source}), not from him] ${text}${contextFor(text, feed.who)}\n[maxflow] signal ${seq}, feed thread ${t.id}${feed.task ? `, board task T-${feed.task}` : ""}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`, or, when it is only an FYI with nothing for an agent to do, say so in it with \`${CLI} thread post ${t.id} '<one line>'\`.` });
@@ -616,16 +615,19 @@ async function feedToFunnel(t: Thread, from: Session, text: string) {
 }
 // More from the same Slack conversation or PR lands in its open feed thread: to the routers that took it, or back to the funnel when
 // nobody did (it was left as an FYI, or its routers ended).
+// The thread can be any one the feed's conversation was merged into, not only a feed thread: it is told as the feed all the same.
 async function feedMore(t: Thread, from: Session, text: string, posts?: FeedPost[]) {
+  const first = posts?.find((p) => !p.ext?.context)?.ext;
+  const feed: Feed = t.feed ?? { source: first?.source ?? "slack", who: first?.name ?? "someone", link: first?.link ?? "" };
   t.messages.push(...feedPosts(text, posts));
-  t.feedSaid = [...(t.feedSaid ?? []), text];
+  if (t.feed) t.feedSaid = [...(t.feedSaid ?? []), text];
   t.resolved = undefined;
   unpause(t);
   const to = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(live);
-  if (!to.length) await feedToFunnel(t, from, text);
+  if (!to.length) await feedToFunnel(t, from, text, feed);
   else {
     for (const r of to) r.handed = t.id;
-    dispatch({ from, to, objective: t.objective, target: t.title, text: `More from the feed in thread ${t.id}: ${headline(text)}`, deliver: `[maxflow · from his event feed (${t.feed!.source}), not from him] More in your feed thread "${t.title}" (${t.id})${t.feed!.task ? `, board task T-${t.feed!.task}` : ""}: ${unforge(text)}${contextFor(text, t.feed!.who)}\n[maxflow] Same rules: work up to where he must act, never reply on Slack or GitHub as him; post where it stands with \`${CLI} thread post ${t.id} '<text>'\`.` });
+    dispatch({ from, to, objective: t.objective, target: t.title, text: `More from the feed in thread ${t.id}: ${headline(text)}`, deliver: `[maxflow · from his event feed (${feed.source}), not from him] More in your ${t.feed ? "feed " : ""}thread "${t.title}" (${t.id})${feed.task ? `, board task T-${feed.task}` : ""}: ${unforge(text)}${contextFor(text, feed.who)}\n[maxflow] Same rules: work up to where he must act, never reply on Slack or GitHub as him; post where it stands with \`${CLI} thread post ${t.id} '<text>'\`.` });
     t.pending = { routers: to.map((s) => s.id), since: Date.now() };
   }
   saveThreads();
@@ -772,15 +774,18 @@ for (const t of threads as (Thread & { kind?: string; kindBy?: string; done?: nu
       for (const m of msgs) (uids[m.who] ??= m.uid), (raw[m.ts.replace(".", "")] ??= m.text.replace(/\s*No thread mess+ages\s*$/, ""));
   } catch {}
   for (const t of threads) {
-    if (!t.feed || !t.messages.some((m) => m.from === "feed" && !m.ext)) continue;
-    const source = t.feed.source === "slack" ? "slack" : "github";
-    const blobs = t.messages.filter((m) => m.from === "feed" && !m.ext).map((m) => m.text);
-    t.feedSaid = [...(t.feedSaid ?? []), ...blobs.filter((b) => !t.feedSaid?.includes(b))];
+    // A hand-off can sit outside a feed thread too: moved by a merge, or posted by the inbox sentry into a thread the feed was merged
+    // into, which took it as a plain post before the server did either as the feed.
+    const blob = (m: Message) => !m.ext && m.from !== "isaac" && /^.+? in .+?:\n(Before it, in the same conversation|> )/.test(m.text) && /^https:\/\/(\S+\.slack\.com|github\.com)\//m.test(m.text);
+    if (!t.messages.some(blob)) continue;
+    const blobs = t.messages.filter(blob).map((m) => m.text);
+    if (t.feed) t.feedSaid = [...(t.feedSaid ?? []), ...blobs.filter((b) => !t.feedSaid?.includes(b))];
     t.messages = t.messages.flatMap((m) => {
-      const head = m.from === "feed" && !m.ext && m.text.match(/^(.+?) in (.+?):\n([\s\S]*)$/);
+      const head = blob(m) && m.text.match(/^(.+?) in (.+?):\n([\s\S]*)$/);
       if (!head) return [m];
+      const source = (t.feed ? t.feed.source === "slack" : /\.slack\.com\//.test(m.text)) ? "slack" : "github";
       const [, who, where, rest] = head;
-      const links = rest.match(/^https?:\/\/\S+$/gm) ?? [t.feed!.link];
+      const links = rest.match(/^https?:\/\/\S+$/gm) ?? [t.feed?.link ?? ""];
       const body = rest.replace(/^https?:\/\/\S+$/gm, "").trim();
       const [before, now] = body.includes("\n\nNew:\n") ? body.split("\n\nNew:\n") : ["", body];
       const unquote = (x: string) => x.replace(/^> ?/gm, "").trim();
@@ -2130,7 +2135,7 @@ Bun.serve<WsData>({
       const text = body.text?.trim();
       if (!text) return new Response("text required", { status: 400 });
       const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-      if (body.feed && from && isSentry(from) && t.feed) return await feedMore(t, from, text, body.posts), Response.json(t, { status: 201 });
+      if (body.feed && from && isSentry(from)) return await feedMore(t, from, text, body.posts), Response.json(t, { status: 201 });
       postIn(t, from, text, body.nudge === "subthread" ? "subthread" : undefined);
       return Response.json(t, { status: 201 });
     }
