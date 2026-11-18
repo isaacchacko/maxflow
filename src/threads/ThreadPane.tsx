@@ -7,6 +7,7 @@ import { landOn } from "./jump";
 import { openPause } from "./Pause";
 import { DropMenu, RowMenu, threadItems, type MenuItem } from "./RowMenu";
 import { resolveOrReopen, ThreadNavContext, ThreadPage, type ThreadNav } from "./ThreadPage";
+import { AgentStack } from "./ThreadPanel";
 import { focusRegion } from "./vim";
 
 /**
@@ -76,6 +77,7 @@ export function ThreadPane() {
           <span className="shrink-0 text-sm font-medium">Thread</span>
           <span title={thread?.title} className={cn("min-w-0 truncate text-xs text-muted-foreground", thread?.resolved && "line-through")}>{thread?.title}</span>
         </h2>
+        {thread && <AgentStack thread={thread} />}
         <DropMenu agent="pane" items={items}>
           <button data-agent="pane-menu" aria-label="More" title="More" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground data-[state=open]:bg-muted">
             <Ellipsis className="size-4" />

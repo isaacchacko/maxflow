@@ -84,6 +84,8 @@ export type Agent = {
   scope?: string;
   taskIds: string[];
   state: AgentState;
+  /** Live only: when its state began (its turn's start, when it went to sleep, or its last output). */
+  since?: string;
   doing: string;
   /** Live agents only: the session's title, folder, the links it surfaced and what it sleeps on. */
   name?: string;

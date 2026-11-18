@@ -50,7 +50,10 @@ export function urlsIn(text: string) {
  */
 const pill = (wide?: boolean) => cn("inline-flex items-baseline gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline whitespace-nowrap hover:border-ring [&>:first-child]:shrink-0 [&>:first-child]:self-center", wide ? "max-w-full" : "max-w-[min(100%,28ch)]");
 
-export function RefChip({ r, still, wide }: { r: Ref; still?: boolean; wide?: boolean }) {
+// `row` draws it as a line in a list (the thread panel's Related), Linear-style: icon and title, no pill.
+const ROW = "flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-[13px] whitespace-nowrap hover:bg-black/[0.04] [&>:first-child]:shrink-0 [&>svg:first-child]:size-4";
+
+export function RefChip({ r, still, wide, row }: { r: Ref; still?: boolean; wide?: boolean; row?: boolean }) {
   const agents = agentStore.use();
   const tasks = taskStore.use();
   const objectives = objectiveStore.use();
@@ -63,7 +66,7 @@ export function RefChip({ r, still, wide }: { r: Ref; still?: boolean; wide?: bo
       href={still ? undefined : href}
       onClick={e => e.stopPropagation()}
       title={found ? label : `No ${r.kind} ${r.id} in yarn now`}
-      className={cn(pill(wide), mono ? "font-mono text-[0.85em]" : "text-[0.92em]", !found && "border-dashed border-border bg-transparent text-muted-foreground line-through")}
+      className={cn(row ? ROW : pill(wide), !row && (mono ? "font-mono text-[0.85em]" : "text-[0.92em]"), !found && (row ? "text-muted-foreground line-through" : "border-dashed border-border bg-transparent text-muted-foreground line-through"))}
     >
       {icon}
       <span className="min-w-0 truncate">{label}</span>
@@ -87,7 +90,7 @@ export function RefChip({ r, still, wide }: { r: Ref; still?: boolean; wide?: bo
         href={still ? undefined : `#thread/${threadId}`}
         onClick={e => (e.stopPropagation(), !still && (e.preventDefault(), goToMessage(threadId!, messageId)))}
         title={m ? `${who} · ${m.at.slice(11, 16)}` : `No message ${r.id} in yarn now`}
-        className={cn(pill(wide), "text-[0.92em] not-italic", !m && "border-dashed border-border bg-transparent text-muted-foreground line-through")}
+        className={cn(row ? ROW : cn(pill(wide), "text-[0.92em]"), "not-italic", !m && (row ? "text-muted-foreground line-through" : "border-dashed border-border bg-transparent text-muted-foreground line-through"))}
       >
         <MessageSquareQuote className="size-3 text-link" />
         <span className="min-w-0 truncate">{m ? `${who} · ${m.at.slice(11, 16)}` : messageId}</span>

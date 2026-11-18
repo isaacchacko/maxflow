@@ -1,22 +1,22 @@
-import { AlarmClock, ArrowLeft, Check, ChevronRight, ExternalLink, GitBranch, MessageSquareReply, MessagesSquare, Network, Pin, PinOff, Quote, RotateCcw, Waypoints } from "lucide-react";
+import { AlarmClock, ArrowLeft, Check, ChevronRight, GitBranch, MessageSquareReply, MessagesSquare, Pin, PinOff, Quote, RotateCcw } from "lucide-react";
 import { createContext, Fragment, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { AgentFace } from "@/components/AgentFace";
 import { AgentLink } from "@/components/AgentLink";
 import { Elapsed } from "@/components/Working";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
-import { agentStore, objectiveStore, openSubthread, postToThread, setPinned, setResolved, threadStore } from "@/store";
+import { agentStore, openSubthread, postToThread, setPinned, setResolved, threadStore } from "@/store";
 import { Composer, quoteInto, quoted } from "./Composer";
 import { composeOnArrival, flashMessage, goToMessage, takeCompose, useLayerScroll } from "./jump";
 import { MessageRow, when } from "./MessageRow";
 import { Replies, repliesOf } from "./Replies";
 import { pinItem, RowMenu, messageItems, threadItems } from "./RowMenu";
 import { firstUnseen, markSeen, setSeen } from "./seen";
-import { Markdown, RefChip, Rich, refsIn, urlsIn, type Ref } from "./Rich";
+import { Rich } from "./Rich";
 import { ShotScope, shotsOf } from "./Viewer";
+import { AgentStack, ThreadPanel } from "./ThreadPanel";
 import { HoverBar } from "./HoverBar";
 import { openPause, pausedLabel } from "./Pause";
 import { useVim, vimRow, type VimActions } from "./vim";
@@ -47,15 +47,6 @@ type Selected = { thread: string; message: string; text: string; x: number; y: n
 
 // Slack's grouping: a sender's next message within this long drops its picture and name.
 const GROUP_MS = 5 * 60_000;
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="flex flex-col gap-1.5">
-      <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
-      {children}
-    </section>
-  );
-}
 
 // The router's acknowledgement while Isaac's last message waits on an answer, gone when it lands; drawn as BoardUI's thinking line:
 // no pill, the router's face turning where a message's picture sits, then its status if it set one, else a shimmering "Thinking…",
@@ -106,7 +97,6 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
   const all = threadStore.use();
   const thread = all.find(t => t.id === id);
   const agents = agentStore.use();
-  const objective = objectiveStore.use().find(o => o.id === thread?.objectiveId);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Slack's red "New" line: above the first message he hadn't seen when he opened the thread, taken before it is marked seen,
   // so it stays put while he reads and as more arrive under it. Gone once he writes here or leaves; "Mark unread from here" moves it.
@@ -205,11 +195,6 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
     });
   };
 
-  const mentioned = new Map<string, Ref>();
-  for (const m of thread.messages) for (const r of refsIn(m.text)) mentioned.set(`${r.kind}:${r.id}`, r);
-  const links = new Map(thread.messages.flatMap(m => urlsIn(m.text)).map(l => [l.url, l]));
-  // Backlinks: the threads with a message that @-mentions this one.
-  const mentionedIn = all.filter(t => t.id !== thread.id && t.messages.some(m => m.text.includes(`[[thread:${thread.id}]]`)));
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -233,7 +218,9 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
         <h1 className={cn("truncate text-xl font-semibold tracking-tight", thread.resolved && "text-muted-foreground")}>{thread.title}</h1>
         {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
         {thread.paused && <span data-agent="thread-paused" title={`paused ${pausedLabel(thread.paused)}`} className="min-w-0 truncate text-xs whitespace-nowrap text-muted-foreground">paused {pausedLabel(thread.paused)}</span>}
-        <Button variant="outline" size="icon" className="ml-auto size-8" data-agent="thread-pin" title={thread.pinned ? "Unpin from the sidebar (P)" : "Pin to the sidebar (P)"} aria-pressed={!!thread.pinned} onClick={() => void setPinned(thread.id, !thread.pinned)}>
+        <span className="ml-auto" />
+        <AgentStack thread={thread} onOpen={() => document.getElementById(`agents-${thread.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+        <Button variant="outline" size="icon" className="size-8" data-agent="thread-pin" title={thread.pinned ? "Unpin from the sidebar (P)" : "Pin to the sidebar (P)"} aria-pressed={!!thread.pinned} onClick={() => void setPinned(thread.id, !thread.pinned)}>
           {thread.pinned ? <PinOff /> : <Pin />}
         </Button>
         {!thread.parentId && (
@@ -345,74 +332,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
           <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => (setLine({ id }), postToThread(thread.id, "isaac", text, nudge ? "subthread" : undefined))} tools={<NudgeToggle on={nudge} set={on => setNudge(on ? "subthread" : "")} />} toolsOn={!!nudge} placeholder={thread.parentId ? "Reply in thread" : embedded ? "Reply to thread…" : "Reply…"} className="px-4 pt-1 pb-3" />
         </section>
 
-        {!embedded && (
-        <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto border-l px-4 py-4">
-          {objective && (
-            <Section title="Objective">
-              <a href={`#objective/${objective.id}`} className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-sm hover:bg-muted">
-                <Waypoints className="size-3.5 text-agent" />
-                {objective.title}
-              </a>
-            </Section>
-          )}
-          {/* A thread maxflow started from his event feed links where it came from. */}
-          {thread.feed && (
-            <Section title="Source">
-              <div data-agent="thread-source" className="flex min-w-0 items-baseline gap-1.5 px-1.5 py-1 text-sm">
-                <span className="shrink-0">{thread.feed.who}</span>
-                <Markdown text={`<${thread.feed.link}>`} className="min-w-0" />
-              </div>
-            </Section>
-          )}
-          <Separator />
-          <Section title={`Routers · ${thread.routerIds.length}`}>
-            {thread.routerIds.map(rid => {
-              const r = agents.find(a => a.id === rid);
-              return (
-                <a key={rid} href={`#agent/${rid}`} className="flex flex-col rounded-md px-1.5 py-1 hover:bg-muted">
-                  <span className="flex items-center gap-1.5 text-xs">
-                    <Network className="size-3 text-router" />
-                    {r?.name ?? rid}
-                  </span>
-                  {r?.scope && <span className="truncate text-xs text-muted-foreground">{r.scope}</span>}
-                </a>
-              );
-            })}
-          </Section>
-          <Separator />
-          <Section title={`Mentioned · ${mentioned.size}`}>
-            {mentioned.size === 0 && <p className="text-xs text-muted-foreground">None</p>}
-            <div className="flex flex-wrap gap-1.5 text-sm">
-              {[...mentioned.values()].map(r => (
-                <RefChip key={`${r.kind}:${r.id}`} r={r} wide />
-              ))}
-            </div>
-          </Section>
-          <Separator />
-          {mentionedIn.length > 0 && (
-            <>
-              <Section title={`Mentioned in · ${mentionedIn.length}`}>
-                <div className="flex flex-wrap gap-1.5 text-sm" data-agent="mentioned-in">
-                  {mentionedIn.map(t => (
-                    <RefChip key={t.id} r={{ kind: "thread", id: t.id }} wide />
-                  ))}
-                </div>
-              </Section>
-              <Separator />
-            </>
-          )}
-          <Section title={`Links · ${links.size}`}>
-            {links.size === 0 && <p className="text-xs text-muted-foreground">None</p>}
-            {[...links.values()].map(l => (
-              <a key={l.url} href={l.url} target="_blank" rel="noreferrer" title={`${l.label}\n${l.url}`} className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-sm whitespace-nowrap hover:bg-muted">
-                <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 truncate">{l.label}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">{new URL(l.url).hostname}</span>
-              </a>
-            ))}
-          </Section>
-        </aside>
-        )}
+        {!embedded && <ThreadPanel thread={thread} />}
       </div>
     </div>
   );

@@ -1471,6 +1471,13 @@ function agentState(s: Session) {
   const st = status(s);
   return st === "working" || st === "waiting" ? st : s.wait && s.wait.kind !== "done" ? "waiting" : "idle";
 }
+// When an agent's state began, as near as the session knows: its turn's start while working, when it went to sleep on what it
+// waits on, else its last output.
+function stateSince(s: Session) {
+  if (s.wait && s.wait.kind !== "done" && agentState(s) !== "working") return s.wait.at;
+  if (s.claude && s.claude.state === agentState(s)) return s.claude.at;
+  return s.lastOutputAt;
+}
 const taskRef = (id: number) => `t${id}`;
 const v2Status = (t: Task) => (t.status === "todo" ? "todo" : t.status === "doing" ? "doing" : t.status === "done" || t.status === "dropped" ? "done" : "review");
 // Local wall-clock time, which the UI compares by its first ten characters for "today".
@@ -1491,6 +1498,7 @@ async function world() {
     ...(s.role?.scope && { scope: s.role.scope }),
     taskIds: taskIdsOf(s),
     state: agentState(s),
+    since: iso(stateSince(s)),
     doing: s.wait && s.wait.kind !== "done" ? `waiting on ${waitLabel(s.wait)}` : s.name,
     cwd: s.cwd,
     links: links(s),
