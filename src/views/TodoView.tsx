@@ -1,7 +1,7 @@
 import { ArrowRight, Check, ChevronLeft, ChevronRight, Link2, MessageSquarePlus, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Thread } from "@/mock";
-import { score, useThreadItems } from "@/components/QuickSwitcher";
+import { plain, score, useThreadItems } from "@/components/QuickSwitcher";
 import { cn } from "@/lib/utils";
 import { addTodo, deleteTodo, editTodo, isOpen, startTodoThread, tagThread, liveStore, loadTodos, threadStore, TODO_STATES, todoStore, type Todo, type TodoState } from "@/store";
 import { useLayerScroll } from "@/threads/jump";
@@ -185,17 +185,21 @@ function TodoRow({ todo, from, onMove }: { todo: Todo; from?: string; onMove?: (
   );
 }
 
-/** A thread tagged on a todo: its title, then who spoke last and what they said; it opens the thread. */
+/**
+ * A thread tagged on a todo: its title, then who spoke last and what they said; it opens the thread. One line in one face: the
+ * message is plain text, so code, bold and PR chips don't change its font, size or colour mid-line.
+ */
 function TaggedThread({ thread, onUntag }: { thread: Thread; onUntag: () => void }) {
   const last = thread.messages.at(-1);
   // A thread he started from a line has that line as its title and its one message; it reads once.
-  const said = last && last.text.split("\n")[0]!.trim() !== thread.title ? last.text.split("\n")[0]! : undefined;
+  const line = last && plain(last.text.split("\n")[0]!).replace(/`|\*\*|~~/g, "").trim();
+  const said = line && line !== thread.title ? line : undefined;
   return (
     <li className="group/thread flex min-w-0 items-center rounded-lg hover:bg-muted/60">
-      <a href={`#thread/${thread.id}`} className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1 text-[13px]">
+      <a href={`#thread/${thread.id}`} className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1 text-sm">
         {last && <Avatar from={last.from} small />}
-        <span className="max-w-[45%] shrink-0 truncate font-medium">{thread.title}</span>
-        {said && <Rich still text={said} className="min-w-0 flex-1 truncate text-muted-foreground" />}
+        <span className="max-w-[45%] shrink-0 truncate">{thread.title}</span>
+        {said && <span className="min-w-0 flex-1 truncate text-muted-foreground">{said}</span>}
         {last && <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">{ago(Date.parse(last.at))}</span>}
       </a>
       <button onClick={onUntag} title="Untag the thread" className="mr-2 shrink-0 text-muted-foreground opacity-0 group-hover/thread:opacity-100 hover:text-foreground">
