@@ -17,8 +17,6 @@ const dateOf = (day: string) => {
 };
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 const STATE_LABEL: Record<TodoState, string> = { todo: "Not started", doing: "In progress", done: "Done", cancelled: "Cancelled" };
-// Open ones keep their place as they go from not started to in progress; done and then cancelled ones sink below them.
-const SINK: Record<TodoState, number> = { todo: 0, doing: 0, done: 1, cancelled: 2 };
 
 function label(day: string, today: string) {
   const d = dateOf(day);
@@ -39,7 +37,8 @@ export function TodoView() {
   useLayerScroll("todo", scrollRef);
   useEffect(() => void loadTodos(), [live]);
 
-  const onDay = todos.filter(t => t.day === day).sort((a, b) => SINK[a.state] - SINK[b.state] || a.at.localeCompare(b.at));
+  // In the order they were added, whatever their state, so a click on a box never moves its row.
+  const onDay = todos.filter(t => t.day === day).sort((a, b) => a.at.localeCompare(b.at));
   // Open todos from days gone by show under today, so nothing left undone drops out of sight.
   const carried = day === today ? todos.filter(t => isOpen(t) && t.day < today).sort((a, b) => a.day.localeCompare(b.day)) : [];
 
