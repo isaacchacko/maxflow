@@ -10,6 +10,10 @@ import { parsePr, repoOf } from "./sentries/gh";
 // keep on disk, never a live Slack or GitHub call. team is set only when it is known: a dryft.ai address, a PR author who is
 // a member of its org. A channel post reaches no one person, so it has none.
 const ME = "U0B33G87YH4";
+// mallory's devices: umbrella is his phone, which he reads himself; the others run his own agents, so a message to one reaches no person.
+const ISAAC: Person = { name: "Isaac", slack: ME, email: "isaac@dryft.ai", team: true };
+const DEVICES = /^(victoria|macbook|cleopatra|wevawie)$/;
+const malloryTo = (to: string): Person[] => (to === "umbrella" || to === "all" ? [ISAAC] : DEVICES.test(to) ? [] : [{ name: to }]);
 const TEAM_DOMAIN = "dryft.ai";
 const SLACK = /^mcp__claude_ai_Slack__slack_(send_message|schedule_message|send_message_draft)$/;
 const MAIL = /^mcp__claude_ai_(Gmail__(send_message|reply|forward|create_draft|update_draft)|Microsoft_365__outlook_\w+)$/;
@@ -42,7 +46,7 @@ function slackPeople(channel: string, dir: string): Person[] {
 
 function bashPeople(command: string, cwd: string, dir: string): Person[] {
   const people: Person[] = [];
-  for (const m of command.matchAll(/\bmallory\s+send\b[^;&|\n]*?--to[\s=]+(\S+)/g)) people.push({ name: m[1].split("/")[0] });
+  for (const m of command.matchAll(/\bmallory\s+send\b[^;&|\n]*?--to[\s=]+(\S+)/g)) people.push(...malloryTo(m[1].split("/")[0]));
   const status = [...command.matchAll(/\bgh\s+pr\s+(?:review|merge|comment|close|edit|ready)\b([^;&|\n]*)/g), ...command.matchAll(/\bgh\s+api\b[^;&|\n]*?repos\/([\w.-]+\/[\w.-]+)\/pulls\/(\d+)/g)];
   if (!status.length) return people;
   const prs = read("gh-status.json", dir) ?? {};

@@ -24,7 +24,7 @@ const res = await fetch(`http://localhost:${process.env.MAXFLOW_PORT ?? 4949}/ap
 const verdict: { decision: string; reason?: string } = res?.ok
   ? await res.json()
   : resolve(list, call).mode === "deny"
-    ? { decision: "deny", reason: `Blocked by a maxflow restriction (${resolve(list, call).restriction?.label}), which Isaac set to block.` }
+    ? { decision: "deny", reason: `Blocked by a yarn restriction (${resolve(list, call).restriction?.label}), which Isaac set to block.` }
     : { decision: "allow" };
 if (verdict.decision === "deny")
   console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: verdict.reason } }));

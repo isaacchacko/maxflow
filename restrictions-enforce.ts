@@ -36,7 +36,7 @@ export function enforce(c: Call, d: Deps): Verdict {
   const key = `${c.tool}\n${call}`;
   if (mode === "deny") {
     d.log(c.session, `restriction: ${r.label}`, `Blocked ${c.tool}${to}: restriction "${r.label}" (${r.id}) is set to block.\n\`\`\`\n${shown(call)}\n\`\`\``);
-    return { decision: "deny", reason: `Blocked by maxflow restriction "${r.label}" (${r.id}), which Isaac set to block${r.note ? `: ${r.note.replace(/\.$/, "")}` : ""}. Don't retry it or work around it with another tool; if the task needs it, ask him with \`${d.cli} ask\`.` };
+    return { decision: "deny", reason: `Blocked by yarn restriction "${r.label}" (${r.id}), which Isaac set to block${r.note ? `: ${r.note.replace(/\.$/, "")}` : ""}. Don't retry it or work around it with another tool; if the task needs it, ask him with \`${d.cli} ask\`.` };
   }
   const mine = pending.filter((p) => p.session === c.session && p.key === key);
   const pass = mine.find((p) => p.granted && !p.used && Date.now() - p.granted < PASS_MS);
@@ -57,7 +57,7 @@ export function enforce(c: Call, d: Deps): Verdict {
   pending.push({ id: crypto.randomUUID().slice(0, 8), session: c.session, key, call, restriction: r.id, label: r.label, thread, at: Date.now() });
   savePending();
   d.log(c.session, `restriction: ${r.label}`, `Held ${c.tool}${to} for Isaac's approval in ${thread} (restriction "${r.label}" is set to ask).\n\`\`\`\n${shown(call)}\n\`\`\``);
-  return { decision: "deny", reason: `Held by maxflow restriction "${r.label}" (${r.id}): Isaac wants to approve this first. maxflow asked him in thread ${thread}, naming this exact call. Don't retry it or work around it. Run \`${d.cli} wait thread:${thread}\` and end your turn (do other work first if any doesn't hang on it); when he says yes you get a one-time pass and the same call goes through.` };
+  return { decision: "deny", reason: `Held by yarn restriction "${r.label}" (${r.id}): Isaac wants to approve this first. yarn asked him in thread ${thread}, naming this exact call. Don't retry it or work around it. Run \`${d.cli} wait thread:${thread}\` and end your turn (do other work first if any doesn't hang on it); when he says yes you get a one-time pass and the same call goes through.` };
 }
 
 const YES = /^\s*(y|yes|yep|yeah|yup|ok|okay|sure|approved?|allow(ed)?|go( ahead)?|do it|ship it|lgtm|fine|granted)\b/i;
