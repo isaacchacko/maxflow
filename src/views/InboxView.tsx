@@ -7,7 +7,6 @@ import { Composer, quoteInto, quoted } from "@/threads/Composer";
 import { HoverBar } from "@/threads/HoverBar";
 import { arrivedFrom, composeOnArrival, flash, useLayerScroll } from "@/threads/jump";
 import { MessageRow } from "@/threads/MessageRow";
-import { FeedTag } from "@/threads/FeedTag";
 import { Replies } from "@/threads/Replies";
 import { Avatar, Rich } from "@/threads/Rich";
 import { RowMenu, threadItems } from "@/threads/RowMenu";
@@ -163,7 +162,6 @@ export function InboxView() {
               meta={
                 <span className="flex min-w-0 items-baseline gap-2 text-xs text-muted-foreground">
                   {t.asks && <span className="shrink-0 rounded-full bg-warn-soft px-2 font-medium text-warn">needs you</span>}
-                  {t.feed && <FeedTag feed={t.feed} />}
                   <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : t.asks ? "" : "routing…"}</span>
                   {t.paused && (
                     <span data-agent={`inbox-paused:${t.id}`} className="flex shrink-0 items-center gap-1 whitespace-nowrap">

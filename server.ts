@@ -636,7 +636,7 @@ function externalSignal(e: { seq: number; at: number; topic: string; data: unkno
   const gh = /^gh\/[^/]+\/[^/]+\/pr\/\d+\/(comment|review|thread)$/.exec(e.topic)?.[1];
   const link = String(d.link ?? d.url ?? "");
   if (!link || externalSeen.has(link)) return;
-  if (slack ? !d.text || (d.bot && slack !== "mention") : !gh || !d.who || String(d.author ?? "").endsWith("[bot]")) return;
+  if (slack ? !d.text || (d.bot && slack !== "mention") : !gh || !d.who || /\[bot\]$|^(github-actions|dependabot|renovate)$/i.test(String(d.author ?? d.who))) return;
   externalSeen.add(link);
   if (save) writeFileSync(EXTERNAL_SEEN, JSON.stringify([...externalSeen].slice(-5000)));
   const where = slack ? (slack === "dm" || d.where === "a DM" ? "DM" : String(d.where ?? "Slack").replace(/^thread .* in /, "")) : String(d.pr).split("/")[1] + (d.path ? ` ${d.path}` : "");

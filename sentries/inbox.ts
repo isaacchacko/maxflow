@@ -27,6 +27,8 @@ const IDLE_STALL_MS = 3 * 86_400_000;
 const BIG = 800;
 const RISKY = /migrat|alembic|\.sql$|erp|sap|terraform|infra|helm|k8s|kubernetes|\.github\/workflows|dockerfile|auth|permission|secret/i;
 const MAX_AGENTS = 2;
+// GitHub bots (an Actions stale-PR notice, dependabot): on his board at most, never a feed thread or a post in one.
+const BOT = /\[bot\]$|^(github-actions|dependabot|renovate)$/i;
 
 // A PR requesting his review or assigned to him. requested: when the latest review request was made; gone: when it left the search.
 type ReviewPr = { url: string; title: string; author: string; why: "review" | "assigned"; requested: number; updated: number; gone?: number; agent?: string; risk?: string };
@@ -184,7 +186,8 @@ async function onSlack(topic: string, d: any, me: string) {
 }
 
 // A bot's mention of him ("a run on main is red", a skipped deploy) is one task per kind of alert, however often it repeats: its text
-// without links, mentions and numbers names the kind. A repeat adds a note at most hourly; the funnel hears of a kind once per open task.
+// without links, mentions and numbers names the kind. A repeat adds a note at most hourly. It stays on his board only: a bot opens
+// no feed thread.
 const ALERT_NOTE_MS = 3_600_000;
 async function onBotAlert(d: any) {
   const tag = `bot:${d.user}:${short(String(d.raw).replace(/<[^>]*>/g, "").replace(/\d+/g, "#"), 120)}`;
@@ -197,7 +200,6 @@ async function onBotAlert(d: any) {
   const event = open ? `${alert.count} more since the last note, latest ${url ?? d.link}` : `${d.from} in ${where}: "${short(d.text, 120)}" ${url ?? ""}`;
   const task = await onBoard(tag, d.link, event, { title: `${d.from} alert: "${short(d.text.replace(/\d+/g, "#"), 60)}"`, status: "you" });
   Object.assign(alert, { count: 0, noted: Date.now() });
-  if (task && !open) feed({ task, key: tag, source: "slack bot", who: d.from, where, text: short(d.text, 500) + (url ? ` ${url}` : ""), link: d.link });
 }
 
 // Whether the user put an emoji reaction on a message.
@@ -346,7 +348,7 @@ async function refreshPrs(ghMe: string) {
       status: "you",
     });
     // A review agent already reads the risky ones; the rest go to the funnel too, for an agent to read ahead of him.
-    if (task && !agent && !first) feed({ task, key, source: "review request", who: pr.author?.login ?? "?", where: key, text: `${ask}: "${pr.title}"`, link: pr.url });
+    if (task && !agent && !first && !BOT.test(pr.author?.login ?? "")) feed({ task, key, source: "review request", who: pr.author?.login ?? "?", where: key, text: `${ask}: "${pr.title}"`, link: pr.url });
   }
   for (const [key, pr] of Object.entries(state.prs))
     if (!now.has(key) && !pr.gone) {
@@ -395,7 +397,7 @@ async function onGh(topic: string, d: any) {
   if (reviewing && (kind === "merged" || kind === "closed")) return closeTask(key, `the PR was ${kind}`);
   // A person's comment or review that no session heard: on his own PRs the review sentry revives the owner, so this only notes it on
   // a task he already has; on a PR he reviews, it puts the task back on him.
-  if (!["comment", "review", "thread"].includes(kind) || d.told?.length || !d.who || d.who.startsWith("the user") || d.author?.endsWith("[bot]")) return;
+  if (!["comment", "review", "thread"].includes(kind) || d.told?.length || !d.who || d.who.startsWith("the user") || BOT.test(d.author ?? "") || BOT.test(d.who)) return;
   const what = kind === "review" ? `${d.who} reviewed (${String(d.state).toLowerCase().replace("_", " ")})` : `${d.who} commented${d.path ? ` on ${d.path}` : ""}`;
   const task = await onBoard(key, url, `${what}: "${short(d.body ?? "", 120)}"`, { title: `${what} on ${key.split("/")[1]}`, ...(!mine && { status: "you" }) });
   if (task) feed({ task, key, source: "github", who: d.who, where: key, text: `${what}: "${short(d.body ?? "", 500)}"${d.path ? ` (${d.path})` : ""}`, link: d.url ?? url });
