@@ -142,11 +142,15 @@ function grainTile() {
 }
 const GRAIN = { mixBlendMode: "soft-light", opacity: 0.45, pointerEvents: "none" } as const;
 
+// A sleeping face's z, drawn as a path (as text it would be the page's text: copied, found by ⌘F), `size` units tall at x, y.
+const Z = "M-1.3 -1.6H1.3L-1.3 1.6H1.3";
+const zAt = (x: number, y: number, size: number) => `translate(${x} ${r1(y - size / 2)}) scale(${r1(size / 5.5)})`;
+
 // Every living face on the page shares one animation frame loop: 60fps while any of them is mid-change or blinking, 30 while they
 // only drift. It draws nothing while the tab is hidden, while the image viewer is open (data-viewing: a moving face under its scrim
 // re-rastered the page beneath every frame) or for a face scrolled out of view.
 type Live = { life: Life; target: Expression; geometry: Geometry; els: Els; visible: boolean };
-type Els = { shadowClip: SVGPathElement | null; slabClips: SVGPathElement[]; cap: SVGGElement; shadow: SVGGElement; capFill: SVGPathElement; eyes: SVGGElement; slabs: SVGPathElement[]; head: SVGGElement; left: SVGPathElement; right: SVGPathElement; browL: SVGPathElement; browR: SVGPathElement; brows: SVGGElement; zs: SVGTextElement[] };
+type Els = { shadowClip: SVGPathElement | null; slabClips: SVGPathElement[]; cap: SVGGElement; shadow: SVGGElement; capFill: SVGPathElement; eyes: SVGGElement; slabs: SVGPathElement[]; head: SVGGElement; left: SVGPathElement; right: SVGPathElement; browL: SVGPathElement; browR: SVGPathElement; brows: SVGGElement; zs: SVGPathElement[] };
 const live = new Set<Live>();
 let frame = 0;
 let last = 0;
@@ -171,10 +175,8 @@ function apply(l: Live, f: Frame) {
   p.zs.forEach((z, i) => {
     const el = els.zs[i];
     if (!el) return;
-    el.setAttribute("x", String(z.x));
-    el.setAttribute("y", String(z.y));
+    el.setAttribute("transform", zAt(z.x, z.y, z.s));
     el.setAttribute("opacity", String(z.o));
-    el.setAttribute("font-size", String(z.s));
   });
 }
 
@@ -227,7 +229,7 @@ export function AgentFace({ id, expression = "idle", still, small, shape, colors
       target: first.current,
       geometry,
       visible: true,
-      els: { shadowClip: q("[data-face=shadow-clip]"), slabClips: [...el.querySelectorAll("[data-face=slab-clip]")] as SVGPathElement[], cap: q("[data-face=cap]"), shadow: q("[data-face=shadow]"), capFill: q("[data-face=cap-fill]"), eyes: q("[data-face=eyes]"), slabs: [...el.querySelectorAll("[data-face=slab]")] as SVGPathElement[], head: q("[data-face=head]"), left: q("[data-face=left]"), right: q("[data-face=right]"), browL: q("[data-face=brow-l]"), browR: q("[data-face=brow-r]"), brows: q("[data-face=brows]"), zs: [...el.querySelectorAll("[data-face=z]")] as SVGTextElement[] },
+      els: { shadowClip: q("[data-face=shadow-clip]"), slabClips: [...el.querySelectorAll("[data-face=slab-clip]")] as SVGPathElement[], cap: q("[data-face=cap]"), shadow: q("[data-face=shadow]"), capFill: q("[data-face=cap-fill]"), eyes: q("[data-face=eyes]"), slabs: [...el.querySelectorAll("[data-face=slab]")] as SVGPathElement[], head: q("[data-face=head]"), left: q("[data-face=left]"), right: q("[data-face=right]"), browL: q("[data-face=brow-l]"), browR: q("[data-face=brow-r]"), brows: q("[data-face=brows]"), zs: [...el.querySelectorAll("[data-face=z]")] as SVGPathElement[] },
     };
     self.current = me;
     live.add(me);
@@ -290,9 +292,7 @@ export function AgentFace({ id, expression = "idle", still, small, shape, colors
       </g>
       {(expression === "asleep" || animated) &&
         p.zs.map((z, i) => (
-          <text key={i} data-face="z" x={still ? rx + 3 + i * 3 : z.x} y={still ? ry - 4 - i * 4 : z.y} opacity={still && expression === "asleep" ? 0.7 - i * 0.2 : z.o} fontSize={z.s} fill={ink} fontWeight={800} fontFamily="ui-rounded, system-ui, sans-serif">
-            z
-          </text>
+          <path key={i} data-face="z" d={Z} transform={still ? zAt(rx + 3 + i * 3, ry - 4 - i * 4, z.s) : zAt(z.x, z.y, z.s)} opacity={still && expression === "asleep" ? 0.7 - i * 0.2 : z.o} fill="none" stroke={ink} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
         ))}
     </svg>
   );
