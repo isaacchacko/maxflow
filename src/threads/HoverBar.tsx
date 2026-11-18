@@ -8,8 +8,9 @@ import { applying, type MenuItem } from "./RowMenu";
 type Action = Exclude<MenuItem, "-">;
 
 /**
- * Slack's message toolbar: a small bar floating on a row's top-right edge, over its border, with the row's actions as 28px icon
- * buttons, each named in a tooltip with its key, and ⋯ for the rest of its right-click menu. It shows while the row is hovered
+ * Slack's message toolbar: a small bar floating above a row's top-right edge, overlapping only its border so it never covers the
+ * header's text, with the row's actions as 28px icon buttons, each named in a tooltip with its key, and ⋯ for the rest of its
+ * right-click menu. It shows while the row is hovered
  * (its parent carries `group/bar`), while the row is under the vim cursor (`active`), and while its menu is open.
  */
 export function HoverBar({ agent, active, actions, menu }: { agent: string; active?: boolean; actions: (Action | false | undefined)[]; menu: (MenuItem | false | undefined)[] }) {
@@ -20,7 +21,7 @@ export function HoverBar({ agent, active, actions, menu }: { agent: string; acti
       <div
         data-agent={`hoverbar:${agent}`}
         onClick={e => e.stopPropagation()}
-        className={cn("absolute -top-4 right-3 z-10 hidden items-center gap-0.5 rounded-lg border bg-card p-0.5 shadow-raised group-hover/bar:flex", (active || open) && "flex")}
+        className={cn("absolute right-3 bottom-full z-10 hidden translate-y-1.5 items-center gap-0.5 rounded-lg border bg-card p-0.5 shadow-raised group-hover/bar:flex", (active || open) && "flex")}
       >
         {actions.filter((x): x is Action => !!x).map(a => (
           <Tip key={a.label} label={a.label} keys={a.keys}>

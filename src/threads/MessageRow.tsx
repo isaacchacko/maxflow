@@ -19,10 +19,11 @@ export function MessageRow({ from, at, text, grouped, active, meta, children, cl
       {grouped ? <span className="invisible w-9 shrink-0 pt-0.5 text-right text-[10px] text-muted-foreground tabular-nums group-hover:visible">{at.slice(11, 16)}</span> : <Avatar from={from} />}
       <div className="min-w-0 flex-1">
         {!grouped && (
-          <div className="flex items-baseline gap-2">
-            <Author from={from} />
-            <span className="text-xs text-muted-foreground tabular-nums">{when(at)}</span>
-            {meta}
+          // One line: the name ends in an ellipsis only once what follows the time has given all it can, and the time never breaks.
+          <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap">
+            <Author from={from} className="min-w-0 truncate" />
+            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{when(at)}</span>
+            {meta && <span className="flex min-w-0 flex-1 basis-0 items-baseline [&>*]:min-w-0">{meta}</span>}
           </div>
         )}
         <Markdown text={text} className={cn("max-w-[80ch] text-sm leading-relaxed", bodyClassName)} />

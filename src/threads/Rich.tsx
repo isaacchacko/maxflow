@@ -173,7 +173,7 @@ function PrChip({ repo, n }: { repo: string; n: string }) {
 
 function LinearChip({ issue }: { issue: string }) {
   return (
-    <a href={`${LINEAR}/${issue}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title={issue} className={cn(pill(), "text-[0.92em] tabular-nums")}>
+    <a href={`${LINEAR}/${issue}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title={issue} className={cn(pill(), "text-[0.92em]")}>
       <SquareKanban className="size-3 text-link" />
       <span className="min-w-0 truncate">{issue}</span>
     </a>
@@ -315,22 +315,23 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
   );
 }
 
-export function Author({ from }: { from: string }) {
+export function Author({ from, className }: { from: string; className?: string }) {
   const agents = agentStore.use();
   const objectives = objectiveStore.use();
   const sentries = sentryStore.use();
   const names = nameStore.use();
-  if (from === "isaac") return <span className="text-sm font-semibold">you</span>;
+  if (from === "isaac") return <span className={cn("text-sm font-semibold", className)}>you</span>;
   const o = objectives.find(x => x.id === from);
   if (o)
     return (
-      <a href={`#objective/${o.id}`} className="text-sm font-semibold hover:underline">
+      <a href={`#objective/${o.id}`} title={o.title} className={cn("text-sm font-semibold hover:underline", className)}>
         {o.title}
       </a>
     );
+  const name = agents.find(x => x.id === from)?.name ?? sentries.find(x => x.id === from)?.name ?? names[from] ?? from;
   return (
-    <a href={`#agent/${from}`} className="text-sm font-semibold hover:underline">
-      {agents.find(x => x.id === from)?.name ?? sentries.find(x => x.id === from)?.name ?? names[from] ?? from}
+    <a href={`#agent/${from}`} title={name} className={cn("text-sm font-semibold hover:underline", className)}>
+      {name}
     </a>
   );
 }
