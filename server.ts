@@ -1277,14 +1277,24 @@ function sameAsk(objective: string, text: string) {
   });
 }
 
+// The thread a session works in: the one it was handed, else the newest open one it answers in, else its router's the same way up
+// the lineage. A worker is briefed by its router, not handed a thread, so its ask belongs in the thread its router was handed.
+function handedThread(s: Session): Thread | undefined {
+  const open = (x?: Thread) => (x && !x.resolved && !x.mergedInto ? x : undefined);
+  for (let x: Session | undefined = s, seen = new Set<string>(); x && !seen.has(x.id); seen.add(x.id), x = x.role?.parent ? sessions.get(x.role.parent) : undefined) {
+    const { id, handed } = x;
+    const t = open(live_thread(threads.find((y) => y.id === handed))) ?? threads.findLast((y) => !!open(y) && y.routers.includes(id));
+    if (t) return t;
+  }
+}
+
 // re: a thread id, or an old question's q<n>, to ask again in.
 // fresh: the agent saw sameAsk's match and asks anyway.
 function ask(s: Session, text: string, re?: string, dflt?: string, fresh?: boolean): Thread | null | { same: Thread } {
   let t = re ? threadOf(re) : undefined;
   if (re && !t) return null;
-  // With no --re, the thread it was handed (or the newest open one it answers in); a new thread only with --new.
-  const open = (x?: Thread) => (x && !x.resolved && !x.mergedInto ? x : undefined);
-  if (!re && !fresh) t = open(live_thread(threads.find((x) => x.id === s.handed))) ?? threads.findLast((x) => !!open(x) && x.routers.includes(s.id));
+  // With no --re, the thread its lineage was handed; a new thread only with --new, or when no such thread exists.
+  if (!re && !fresh) t = handedThread(s);
   const same = !t && !fresh && sameAsk(s.role?.objective ?? "", text);
   if (same) return { same };
   if (!t) {
