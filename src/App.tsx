@@ -7,7 +7,10 @@ import { Sidebar } from "@/components/Sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Page } from "@/page/Page";
 import type { PageRef } from "@/store";
+import { closePane, openPane, paneStore } from "@/threads/pane";
 import { ThreadPage, threadUp } from "@/threads/ThreadPage";
+import { ThreadPane } from "@/threads/ThreadPane";
+import { activeRegion } from "@/threads/vim";
 import { arrive } from "@/threads/jump";
 import { InboxView } from "@/views/InboxView";
 import { RoutingView } from "@/views/RoutingView";
@@ -50,6 +53,24 @@ function routeFromHash(): Route {
   return { view };
 }
 
+/** The thread a shift-click lands on: a link to one, an inbox row, a Todo row, a mention or a card on the canvas. */
+function threadAt(target: EventTarget | null) {
+  const el = target instanceof Element ? target : null;
+  const href = el?.closest("a")?.getAttribute("href")?.match(/^#thread\/(.+)$/)?.[1];
+  if (href) return href;
+  const card = el?.closest<HTMLElement>("[data-node^='thread:']")?.dataset.node?.slice(7);
+  if (card) return card;
+  const row = el?.closest<HTMLElement>("[data-region=main] [data-vim]")?.dataset.vim;
+  return row?.startsWith("th-") ? row : row?.match(/^thread\/(.+)$/)?.[1];
+}
+// Shift-click opens a thread in the side pane, as in Slack; the press would otherwise select text between it and the cursor.
+const onShiftClick = (e: MouseEvent) => {
+  if (!e.shiftKey || e.metaKey || e.ctrlKey || e.button !== 0) return;
+  const id = threadAt(e.target);
+  if (id) (e.preventDefault(), e.stopPropagation(), openPane(id));
+};
+const onShiftDown = (e: MouseEvent) => e.shiftKey && e.button === 0 && threadAt(e.target) && e.preventDefault();
+
 export function App() {
   const [route, setRoute] = useState(routeFromHash);
   const current = useRef(route);
@@ -65,6 +86,8 @@ export function App() {
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // In the side pane, Escape closes it and the page underneath stays as it was.
+      if (e.key === "Escape" && paneStore.get() && activeRegion() === "pane") return closePane();
       const { detail } = routeFromHash();
       if (e.key === "Escape" && detail?.kind === "thread") threadUp(detail.id, route.view);
       else if (e.key === "Escape" && detail) location.hash = route.view;
@@ -73,9 +96,13 @@ export function App() {
     };
     addEventListener("hashchange", onHash);
     addEventListener("keydown", onKey);
+    addEventListener("click", onShiftClick, true);
+    addEventListener("mousedown", onShiftDown, true);
     return () => {
       removeEventListener("hashchange", onHash);
       removeEventListener("keydown", onKey);
+      removeEventListener("click", onShiftClick, true);
+      removeEventListener("mousedown", onShiftDown, true);
     };
   }, [route.view]);
 
@@ -91,7 +118,8 @@ export function App() {
       {/* Installed as an app, the tint around the panel drags the window, and the panel starts below the overlaid title bar. */}
       <div className="flex h-full bg-window p-2 pl-0 [app-region:drag]">
         <Sidebar view={route.view} />
-        <main style={{ marginTop: "max(0px, calc(env(titlebar-area-height, 0px) - 0.5rem))" }} className="ml-2 min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-card [app-region:no-drag]">
+        <main style={{ marginTop: "max(0px, calc(env(titlebar-area-height, 0px) - 0.5rem))" }} className="ml-2 flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-card [app-region:no-drag]">
+        <div data-region="main" className="min-h-0 min-w-0 flex-1">
           {detail?.kind === "agent" ? (
             <AgentPage key={detail.id} id={detail.id} back={route.view} />
           ) : detail?.kind === "thread" ? (
@@ -107,6 +135,8 @@ export function App() {
           ) : (
             <RoutingView snap={snap} onSnap={n => (location.hash = ROUTING[Math.max(0, Math.min(ROUTING.length - 1, n))]!)} />
           )}
+        </div>
+        <ThreadPane />
         </main>
       </div>
     </TooltipProvider>

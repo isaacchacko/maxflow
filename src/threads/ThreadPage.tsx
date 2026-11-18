@@ -1,5 +1,5 @@
 import { AlarmClock, ArrowLeft, Check, ChevronRight, ExternalLink, GitBranch, MessageSquareReply, MessagesSquare, Network, Quote, RotateCcw, Waypoints } from "lucide-react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { createContext, Fragment, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
@@ -26,11 +26,18 @@ export function threadUp(id: string, view: string) {
   goToMessage(t.parentId, t.parentMessageId);
 }
 
+/**
+ * Where a thread page goes when it opens another thread (a subthread, its parent) or climbs out. The page in the window moves the
+ * address; the side pane keeps it all inside itself.
+ */
+export type ThreadNav = { open(threadId: string): void; up(threadId: string, view: string): void };
+export const ThreadNavContext = createContext<ThreadNav>({ open: id => void (location.hash = `thread/${id}`), up: threadUp });
+
 /** Resolving is done with a thread, so it climbs a level as Escape does once the server has it; reopening stays put. */
-async function resolveOrReopen(thread: Thread, view: string) {
+async function resolveOrReopen(thread: Thread, up: () => void) {
   const resolving = !thread.resolved;
   await setResolved(thread.id, resolving);
-  if (resolving) threadUp(thread.id, view);
+  if (resolving) up();
 }
 
 // Text selected inside one message, with where to draw its Quote button.
@@ -68,7 +75,10 @@ export function Pending({ pending, names }: { pending: NonNullable<Thread["pendi
   );
 }
 
-export function ThreadPage({ id, back }: { id: string; back: string }) {
+/** `embedded` is the side pane's: no header (the pane draws its own) and no info column. */
+export function ThreadPage({ id, back, embedded }: { id: string; back: string; embedded?: boolean }) {
+  const nav = useContext(ThreadNavContext);
+  const climb = () => nav.up(id, back);
   const all = threadStore.use();
   const thread = all.find(t => t.id === id);
   const agents = agentStore.use();
@@ -98,7 +108,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
     if (thread) markSeen(thread.id, thread.messages.length);
   }, [thread?.id, thread?.messages.length]);
 
-  const composer = () => document.querySelector<HTMLElement>('[data-agent="thread-input"]')?.focus();
+  const composer = () => (scrollRef.current?.closest("[data-region]") ?? document).querySelector<HTMLElement>('[data-agent="thread-input"]')?.focus();
   // The keyboard cursor walks the root, then the replies: each by its id, or its place for an old message without one.
   const root = thread?.parentId ? all.find(t => t.id === thread.parentId)?.messages.find(m => m.id === thread.parentMessageId) : thread?.messages[0];
   const replies = thread ? repliesOf(thread) : [];
@@ -109,15 +119,15 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
   const byKey = (k: string) => (root && k === keyOf(root, -1) ? root : replies.find((m, i) => keyOf(m, i) === k));
   const actions = {
     compose: composer,
-    up: () => threadUp(id, back),
-    resolve: () => thread && resolveOrReopen(thread, back),
-    pause: () => thread && !thread.parentId && openPause(id, () => threadUp(id, back)),
+    up: climb,
+    resolve: () => thread && resolveOrReopen(thread, climb),
+    pause: () => thread && !thread.parentId && openPause(id, climb),
     open: k => {
       const sub = all.find(t => t.parentId === id && t.parentMessageId === k);
-      if (sub && (sub.messages.length > 0 || sub.pending)) location.hash = `thread/${sub.id}`;
+      if (sub && (sub.messages.length > 0 || sub.pending)) nav.open(sub.id);
     },
     // Replying to the root is replying here; any other message gets a subthread of its own.
-    reply: k => (k === root?.id || !byKey(k)?.id ? composer() : (composeOnArrival(), void openSubthread(id, k))),
+    reply: k => (k === root?.id || !byKey(k)?.id ? composer() : (composeOnArrival(), void openSubthread(id, k, nav.open))),
     quote: k => {
       const m = byKey(k);
       if (m?.id) quoteInto(`thread:${id}`, quoted(m.text, m === root ? (thread?.parentId ?? id) : id, m.id));
@@ -178,7 +188,8 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <RowMenu agent="thread-header" items={threadItems(thread, all, { resolve: () => resolveOrReopen(thread, back), pause: () => openPause(thread.id, () => threadUp(thread.id, back)) })}>
+      {!embedded && (
+      <RowMenu agent="thread-header" items={threadItems(thread, all, { resolve: () => resolveOrReopen(thread, climb), pause: () => openPause(thread.id, climb) })}>
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
         <Button variant="ghost" size="icon" asChild data-agent="back">
           <a href={thread.parentId ? `#thread/${thread.parentId}` : `#${back}`}>
@@ -198,17 +209,18 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
         {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
         {thread.paused && <span data-agent="thread-paused" className="text-xs whitespace-nowrap text-muted-foreground">paused {pausedLabel(thread.paused)}</span>}
         {!thread.parentId && (
-          <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-pause" title="Pause until a time (p)" onClick={() => openPause(thread.id, () => threadUp(thread.id, back))}>
+          <Button variant="outline" size="sm" className="ml-auto" data-agent="thread-pause" title="Pause until a time (p)" onClick={() => openPause(thread.id, climb)}>
             <AlarmClock />
             {thread.paused ? "Paused" : "Pause"}
           </Button>
         )}
-        <Button variant="outline" size="sm" className={cn(thread.parentId && "ml-auto")} data-agent="thread-resolve" onClick={() => resolveOrReopen(thread, back)}>
+        <Button variant="outline" size="sm" className={cn(thread.parentId && "ml-auto")} data-agent="thread-resolve" onClick={() => resolveOrReopen(thread, climb)}>
           {thread.resolved ? <RotateCcw /> : <Check />}
           {thread.resolved ? "Reopen" : "Resolve"}
         </Button>
       </header>
       </RowMenu>
+      )}
 
       <div className="flex min-h-0 flex-1">
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -226,8 +238,8 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                   agent={`msg:${keyOf(root, -1)}`}
                   active={vim.cursor === keyOf(root, -1)}
                   actions={[
-                    { label: thread.resolved ? "Reopen" : "Resolve", icon: thread.resolved ? RotateCcw : Check, keys: "x", run: () => resolveOrReopen(thread, back), agent: `msg-resolve:${thread.id}` },
-                    !thread.parentId && { label: thread.paused ? "Pause again…" : "Pause…", icon: AlarmClock, keys: "p", run: () => openPause(thread.id, () => threadUp(thread.id, back)), agent: `msg-pause:${thread.id}` },
+                    { label: thread.resolved ? "Reopen" : "Resolve", icon: thread.resolved ? RotateCcw : Check, keys: "x", run: () => resolveOrReopen(thread, climb), agent: `msg-resolve:${thread.id}` },
+                    !thread.parentId && { label: thread.paused ? "Pause again…" : "Pause…", icon: AlarmClock, keys: "p", run: () => openPause(thread.id, climb), agent: `msg-pause:${thread.id}` },
                     { label: "Reply", icon: MessageSquareReply, keys: "r", run: () => actions.reply(keyOf(root, -1)) },
                     !!root.id && { label: "Quote", icon: Quote, keys: "y", run: () => actions.quote(keyOf(root, -1)), agent: `quote:${root.id}` },
                   ]}
@@ -280,7 +292,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
                     agent={`msg:${keyOf(m, i)}`}
                     active={vim.cursor === keyOf(m, i)}
                     actions={[
-                      !!m.id && { label: "Reply in thread", icon: MessageSquareReply, keys: "r", run: () => openSubthread(thread.id, m.id!), agent: `reply-in-thread:${m.id}` },
+                      !!m.id && { label: "Reply in thread", icon: MessageSquareReply, keys: "r", run: () => void openSubthread(thread.id, m.id!, nav.open), agent: `reply-in-thread:${m.id}` },
                       !!m.id && { label: "Quote", icon: Quote, keys: "y", run: () => quoteInto(`thread:${thread.id}`, quoted(m.text, thread.id, m.id!)), agent: `quote:${m.id}` },
                     ]}
                     menu={messageMenu(m, keyOf(m, i))}
@@ -297,6 +309,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
           <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onSend={text => (setLine({ id }), postToThread(thread.id, "isaac", text, nudge ? "subthread" : undefined))} tools={<NudgeToggle on={nudge} set={on => setNudge(on ? "subthread" : "")} />} className="border-t px-4 py-2.5" />
         </section>
 
+        {!embedded && (
         <aside className="flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto border-l px-4 py-4">
           {objective && (
             <Section title="Objective">
@@ -362,6 +375,7 @@ export function ThreadPage({ id, back }: { id: string; back: string }) {
             ))}
           </Section>
         </aside>
+        )}
       </div>
     </div>
   );

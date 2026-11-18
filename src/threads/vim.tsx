@@ -47,6 +47,14 @@ function elsewhere(e: KeyboardEvent) {
 
 export const vimRow = (key: string) => ({ "data-vim": key });
 
+// With a thread open in the side pane beside the page, the keys go to whichever of the two (data-region) he last clicked or focused.
+let region = "main";
+const regionOf = (el: Element | null | undefined) => el?.closest<HTMLElement>("[data-region]")?.dataset.region ?? "main";
+for (const type of ["pointerdown", "focusin"]) addEventListener(type, e => (region = regionOf(e.target as Element)), true);
+/** The region the keys go to: "main", or "pane" while he is in the side pane. */
+export const activeRegion = () => region;
+export const focusRegion = (r: string) => void (region = r);
+
 /**
  * Vim motions over a list of items (a thread's messages, the inbox's rows), each drawn with `vimRow(key)` inside `scroller`.
  * The first motion lands on `start`: the last message in a thread, which opens at the bottom, or the inbox's top row.
@@ -70,7 +78,7 @@ export function useVim(scope: string, items: string[], scroller: React.RefObject
     const onKey = (e: KeyboardEvent) => {
       const { items, actions, cursor, help } = live.current;
       if (e.key === "Escape" && help) return void (e.preventDefault(), e.stopPropagation(), setHelp(false));
-      if (elsewhere(e)) return;
+      if (elsewhere(e) || regionOf(scroller.current) !== region) return;
       const at = cursor ? items.indexOf(cursor) : -1;
       const step = (by: number) => move(items[at < 0 ? (start === "first" ? 0 : items.length - 1) : Math.max(0, Math.min(items.length - 1, at + by))]);
       // Half a page: scroll half the pane and take the cursor the same distance, to the row nearest where it lands.

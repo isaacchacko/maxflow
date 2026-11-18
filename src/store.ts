@@ -130,9 +130,9 @@ export function postToThread(threadId: string, from: string, text: string, nudge
 }
 
 /** Opens the subthread under a message, making it on the first visit; a top thread's first message is the thread itself. */
-export async function openSubthread(threadId: string, messageId: string) {
+export async function openSubthread(threadId: string, messageId: string, open = (id: string) => void (location.hash = `thread/${id}`)) {
   const t = isLive() ? await api("/api/threads", { parent: { thread: threadId, message: messageId } }) : threadStore.get().find(x => x.parentId === threadId && x.parentMessageId === messageId);
-  if (t) location.hash = `thread/${t.id}`;
+  if (t) open(t.id);
 }
 
 /** Isaac marks a thread done, or reopens it; it stays readable and postable either way. */

@@ -82,6 +82,9 @@ export function flashMessage(id = arriving.message) {
   return id;
 }
 
+/** The next thread page drawn lands on this message (the side pane climbing out of a subthread). */
+export const landOn = (messageId?: string) => void (arriving.message = messageId);
+
 /** The next thread page he opens starts in its message box, as replying from the keyboard (r) expects. */
 export const composeOnArrival = () => void (arriving.compose = true);
 export function takeCompose() {
