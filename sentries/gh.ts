@@ -48,7 +48,8 @@ export function parsePr(ref: string, cwd: string) {
   return repo ? `${repo}#${bare![1]}` : null;
 }
 
-const FIELDS = `number url title state createdAt mergeable reviewDecision headRefOid headRefName
+// author and authorAssociation: whose PR it is, for restrictions scoped to people (hooks/restrictions.ts reads them from gh-status.json).
+const FIELDS = `number url title state createdAt mergeable reviewDecision headRefOid headRefName author { login } authorAssociation
   commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
     __typename ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
   reviews(last: 30) { nodes { id state body author { login } } }
@@ -57,6 +58,7 @@ const FIELDS = `number url title state createdAt mergeable reviewDecision headRe
 
 type Pr = {
   number: number; url: string; title: string; state: string; createdAt: string; mergeable: string; reviewDecision: string | null; headRefOid: string; headRefName: string;
+  author: { login: string } | null; authorAssociation: string;
   commits: { nodes: { commit: { statusCheckRollup: { state: string; contexts: { nodes: { __typename: string; name?: string; conclusion?: string; context?: string; state?: string }[] } } | null } }[] };
   reviews: { nodes: { id: string; state: string; body: string; author: { login: string } | null }[] };
   comments: { nodes: { id: string; body: string; url: string; author: { login: string } | null }[] };
