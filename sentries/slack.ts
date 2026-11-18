@@ -37,9 +37,11 @@ const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
 
 // A target is `C123/1794442442.159219` (a thread), `C123` (a channel's top-level posts) or `search:<query>`.
 export type Watch = { target: string; sessions: string[] };
-export type Msg = { ts: string; uid: string; who: string; text: string; channel?: string; link?: string; bot?: boolean };
+// members: a search hit's conversation members other than the user, as `Name (ID: U…)`, which a group DM's notification names.
+export type Msg = { ts: string; uid: string; who: string; text: string; channel?: string; link?: string; bot?: boolean; members?: string };
 // own: the threads the user posted in himself, with when he last did; readAt: when each was last read; bots: authors search marked [BOT].
-// dms: his DM conversations by channel id, with the other person and when it last moved; places: a notification's subtitle as the
+// dms: his DM conversations by channel id, with the other person and when it last moved; groups: his group DMs by channel id, with
+// the other members' names, for a notification that names them; places: a notification's subtitle as the
 // conversation it names (null when it names none we can read); direct: the ts of DMs and own posts published, so search's later copy isn't.
 type State = {
   latest: Record<string, string>;
@@ -50,6 +52,7 @@ type State = {
   bots: string[];
   ownSeeded?: boolean;
   dms: Record<string, { who: string; at: number }>;
+  groups: Record<string, string[]>;
   places: Record<string, string | null>;
   direct: string[];
 };
@@ -100,17 +103,20 @@ function parseMessages(body: string): Msg[] {
   }));
 }
 
-const RESULT = /Channel: (\S+) \(ID: (\w+)\)\n[\s\S]*?From: (.*?) \(ID: (\w+)\)([^\n]*)\n[\s\S]*?Message_ts: ([\d.]+)\nPermalink: \[link\]\(([^)]+)\)\nText: \n([\s\S]*?)(?=\nContext before:|\n---|$)/g;
+// A hit's channel is `#name`, `DM` or `Group DM` (whose members follow on a Participants line); one that failed to match would
+// otherwise be skipped whole.
+const RESULT = /Channel: ([^\n(]+?) \(ID: (\w+)\)\n(?:Participants: ([^\n]*)\n)?[\s\S]*?From: (.*?) \(ID: (\w+)\)([^\n]*)\n[\s\S]*?Message_ts: ([\d.]+)\nPermalink: \[link\]\(([^)]+)\)\nText: \n([\s\S]*?)(?=\nContext before:|\n---|$)/g;
 async function search(query: string): Promise<Msg[]> {
   const res = await slack("slack_search_public_and_private", { query, sort: "timestamp", limit: 20 });
   return [...String(res.results ?? "").matchAll(RESULT)].map((m) => ({
-    channel: m[1] === "DM" ? "a DM" : m[1],
-    uid: m[4],
-    who: m[3].replace(/\s*<[^>]*>$/, "").trim(),
-    bot: m[5].includes("[BOT]"),
-    ts: m[6],
-    link: m[7],
-    text: m[8].trim(),
+    channel: m[1] === "DM" ? "a DM" : m[1] === "Group DM" ? "a group DM" : m[1],
+    uid: m[5],
+    who: m[4].replace(/\s*<[^>]*>$/, "").trim(),
+    bot: m[6].includes("[BOT]"),
+    ts: m[7],
+    link: m[8],
+    text: m[9].trim(),
+    ...(m[3] && { members: m[3] }),
   }));
 }
 
@@ -301,9 +307,11 @@ async function tick(me: string, state: State, only?: Set<string>) {
           if (at && Date.now() - Number(m.ts) * 1000 < OWN_TIE_MS) state.own[at] = Math.max(state.own[at] ?? 0, Number(m.ts) * 1000);
         }
       }
-      // A DM search hit names a conversation to read directly from now on.
-      if (target === `search:to:<@${me}>` || target === `search:from:<@${me}>`)
+      // A DM search hit names a conversation to read directly from now on; a group DM hit, the members its notifications name.
+      if (target === `search:to:<@${me}>` || target === `search:from:<@${me}>` || target === `search:<@${me}>`)
         for (const m of kept?.[target]?.msgs ?? []) {
+          const group = m.channel === "a group DM" && m.members && m.link?.match(/archives\/(\w+)/)?.[1];
+          if (group) state.groups[group] = [...m.members.matchAll(/([^,]+?) \(ID: (\w+)\)/g)].filter((x) => x[2] !== me).map((x) => x[1]!.trim());
           const dm = m.link?.match(/archives\/(D\w+)/)?.[1];
           if (!dm) continue;
           const d = (state.dms[dm] ??= { who: "", at: 0 });
@@ -373,6 +381,12 @@ async function tick(me: string, state: State, only?: Set<string>) {
 // DM a read by their user id finds. Cached, misses included, since each lookup is a Slack call.
 async function placeOf(subtitle: string, state: State): Promise<string | null> {
   if (subtitle in state.places) return state.places[subtitle]!;
+  // A group DM's notification names its other members, by display name, which may be the start of the full name.
+  if (subtitle.includes(", ")) {
+    const names = subtitle.split(", ");
+    const group = Object.entries(state.groups).find(([, members]) => members.length === names.length && names.every((n) => members.some((m) => m === n || m.startsWith(`${n} `))));
+    return group?.[0] ?? null;
+  }
   const known = Object.entries(state.dms).find(([, d]) => d.who === subtitle)?.[0];
   let place: string | null = known ?? null;
   if (!place) {
@@ -393,7 +407,10 @@ async function onNotice(n: Notice, me: string, state: State) {
   await post("/api/events", { topic: "slack/notify", data: { title: n.title, subtitle: n.subtitle, body: n.body, ts: n.ts, at: n.at } });
   const place = await placeOf(n.subtitle, state).catch((e) => (console.error(`notice "${n.subtitle}": ${e}`), null));
   console.log(`${new Date().toLocaleTimeString()}  notice from ${n.subtitle} (${place ?? "unknown"}), ${((Date.now() - n.at) / 1000).toFixed(1)}s after delivery`);
-  if (!place || !n.ts) return;
+  // A conversation the sentry can't name yet (a group DM it hasn't seen, a channel search can't find) is looked for at once
+  // through the searches for his mentions and DMs, instead of at the next tick.
+  if (!place) return void (n.ts && (await tick(me, state, new Set([`search:<@${me}>`, `search:to:<@${me}>`]))));
+  if (!n.ts) return;
   if (place.startsWith("D")) {
     // A conversation new to the sentry starts just before this message, so the read publishes it instead of only recording it.
     const d = (state.dms[place] ??= { who: n.subtitle, at: 0 });
@@ -409,7 +426,7 @@ async function onNotice(n: Notice, me: string, state: State) {
   // A read prints a mention as <@U…|Name>, search as <@U…>.
   if (m && new RegExp(`<@${me}[>|]`).test(m.text) && !state.seen[mentions]?.includes(m.ts)) {
     state.seen[mentions] = [...(state.seen[mentions] ?? []), m.ts].slice(-500);
-    await post("/api/events", { topic: "slack/mention", data: { target: mentions, thread: `${place}/${m.ts}`, ts: m.ts, from: m.who, user: m.uid, text: m.text, link: permalink(place, m.ts), told: [], bot: state.bots.includes(m.uid), agent: false, where: n.subtitle } });
+    await post("/api/events", { topic: "slack/mention", data: { target: mentions, thread: `${place}/${m.ts}`, ts: m.ts, from: m.who, user: m.uid, text: m.text, link: permalink(place, m.ts), told: [], bot: state.bots.includes(m.uid), agent: false, where: n.subtitle.includes(", ") ? "a group DM" : n.subtitle } });
     writeFileSync(STATE_FILE, JSON.stringify(state));
     return;
   }
@@ -422,7 +439,7 @@ async function onNotice(n: Notice, me: string, state: State) {
 
 if (import.meta.main) {
   const me = (await slack("slack_read_user_profile", {}).catch(() => ({}))).result?.match(/User ID: (\w+)/)?.[1] ?? "";
-  const state = { latest: {}, seen: {}, titles: {}, own: {}, readAt: {}, bots: [], dms: {}, places: {}, direct: [], ...readJson<Partial<State>>(STATE_FILE, {}) } as State;
+  const state = { latest: {}, seen: {}, titles: {}, own: {}, readAt: {}, bots: [], dms: {}, groups: {}, places: {}, direct: [], ...readJson<Partial<State>>(STATE_FILE, {}) } as State;
   // A notification is handled at once, beside a tick that may be running; `exclusive` keeps them off the same conversation.
   // SLACK_NOTICES_SINCE=<record id> replays the notifications after it, for a test.
   const notices = watchNotices((n) => void onNotice(n, me, state).catch((e) => console.error(`${new Date().toLocaleTimeString()}  notice failed:`, e)), Number(process.env.SLACK_NOTICES_SINCE) || undefined);
