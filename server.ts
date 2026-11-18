@@ -8,6 +8,7 @@ import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
 import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR, TMUX_SCOPE, TMUX_SOCKET } from "./instance";
+import { invalid, loadRestrictions, resolve, saveRestrictions, type Restriction } from "./restrictions";
 import app from "./src/index.html";
 
 const HOST = "127.0.0.1";
@@ -1382,6 +1383,9 @@ const todos: Todo[] = (() => { try { return JSON.parse(readFileSync(TODOS, "utf8
 const saveTodos = () => writeFileSync(TODOS, JSON.stringify(todos));
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
+// His autonomy restrictions (restrictions.ts): the Restrictions page edits them, the enforcement hook reads them.
+export const restrictions: Restriction[] = loadRestrictions();
+
 // at: when the event happened, which the assistant reads from the transcript it took it from; it defaults to now.
 function editTask(t: Task | undefined, edit: TaskEdit) {
   if (edit.status && !TASK_STATUSES.includes(edit.status)) return `status is one of ${TASK_STATUSES.join(", ")}`;
@@ -2439,6 +2443,30 @@ Bun.serve<WsData>({
       return Response.json(todo);
     }
     if (todo && req.method === "DELETE") return todos.splice(todos.indexOf(todo), 1), saveTodos(), new Response(null, { status: 204 });
+
+    if (path === "/api/restrictions" && req.method === "GET") return Response.json(restrictions);
+    if (path === "/api/restrictions" && req.method === "POST") {
+      const body = (await req.json().catch(() => ({}))) as Partial<Restriction>;
+      const bad = invalid(body);
+      if (bad) return new Response(bad, { status: 400 });
+      const r: Restriction = { id: crypto.randomUUID().slice(0, 8), action: body.action!.trim(), label: body.label!.trim(), mode: body.mode!, match: body.match!, scope: body.scope, note: body.note };
+      restrictions.push(r), saveRestrictions(restrictions);
+      return Response.json(r, { status: 201 });
+    }
+    // The mode that applies to a tool call, for `maxflow restrictions check`.
+    if (path === "/api/restrictions/check" && req.method === "POST") return Response.json(resolve(restrictions, await req.json().catch(() => ({ tool: "" }))));
+    const restrictionPath = path.match(/^\/api\/restrictions\/([\w-]+)$/);
+    const restriction = restrictionPath && restrictions.find((r) => r.id === restrictionPath[1]);
+    if (restrictionPath && !restriction && (req.method === "PATCH" || req.method === "DELETE")) return new Response("no such restriction", { status: 404 });
+    if (restriction && req.method === "PATCH") {
+      const edit = (await req.json().catch(() => ({}))) as Partial<Restriction>;
+      const next = { ...restriction, ...edit, id: restriction.id, builtin: restriction.builtin };
+      const bad = invalid(next);
+      if (bad) return new Response(bad, { status: 400 });
+      Object.assign(restriction, next), saveRestrictions(restrictions);
+      return Response.json(restriction);
+    }
+    if (restriction && req.method === "DELETE") return restrictions.splice(restrictions.indexOf(restriction), 1), saveRestrictions(restrictions), new Response(null, { status: 204 });
 
     if (path === "/api/tasks" && req.method === "GET") return Response.json(tasks.map((t) => ({ ...t, prs: prProgress(t) })));
     if (path === "/api/comments" && req.method === "GET") return Response.json(openUserComments());

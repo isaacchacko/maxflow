@@ -17,6 +17,8 @@ const usage = `usage:
                                              --re: ask again in that thread; --default: your recommendation for a reversible step, which you go ahead with if he hasn't answered in 3h
   maxflow todo ls [--day YYYY-MM-DD] [--json]   his todos (all days, or that day's): id, day, state (todo|doing|done|cancelled), text, tagged thread ids
   maxflow todo tag <todo id> <thread id> | maxflow todo untag <todo id> <thread id>   show a thread under his todo, indented, or take it off
+  maxflow restrictions ls [--json]           his autonomy restrictions: id, mode (allow|ask|deny), label, scope
+  maxflow restrictions check --tool <name> [--input <json>] [--cwd D] [--objective O]   the mode that applies to that tool call, and which restriction
   maxflow tasks [--all]                      the user's task board, with each task's timeline; --all adds done and dropped ones
   maxflow task new <title...> | maxflow task <id> [--title T] [--status todo|doing|you|waiting|blocked|done|dropped] [--question] [--answer A]
                                              [--session ID] [--link URL] [--event TEXT] [--at TIME]   sentry:assistant's edits to the board
@@ -40,6 +42,7 @@ const usage = `usage:
   maxflow install                            run this checkout as the login service and add its hooks to ~/.claude/settings.json`;
 import { fetchPrs, links, parsePr, readStatus, readWatches, render, writeWatches } from "./sentries/gh";
 import * as slack from "./sentries/slack";
+import { loadRestrictions, resolve, type Restriction } from "./restrictions";
 const flag = (args: string[], k: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
 const positional = (args: string[], valued: string[]) => args.filter((a, i) => !a.startsWith("--") && !valued.includes(args[i - 1]));
 
@@ -172,6 +175,16 @@ if (verb === "ls") {
 } else if (verb === "todo" && (rest[0] === "tag" || rest[0] === "untag") && rest[1] && rest[2]) {
   const t = await call(`/api/todos/${rest[1]}/threads/${rest[2]}`, { method: rest[0] === "tag" ? "POST" : "DELETE" });
   console.log(`${t.id}  ${t.text}  [${t.threadIds.join(" ")}]`);
+} else if (verb === "restrictions" && rest[0] === "ls") {
+  const list = (await call("/api/restrictions")) as Restriction[];
+  if (rest.includes("--json")) console.log(JSON.stringify(list, null, 2));
+  else for (const r of list) console.log(`${r.id.padEnd(12)}  ${r.mode.padEnd(5)}  ${r.label}${r.scope?.objective || r.scope?.cwd ? `  (${[r.scope.objective, r.scope.cwd].filter(Boolean).join(" ")})` : ""}`);
+} else if (verb === "restrictions" && rest[0] === "check" && flag(rest, "--tool")) {
+  // Read from disk, as the enforcement hook does, so the answer is the same whether or not the server is up.
+  let input: Record<string, unknown> | undefined;
+  try { input = JSON.parse(flag(rest, "--input") ?? "{}"); } catch { console.error("--input: not JSON"), process.exit(1); }
+  const { mode, restriction } = resolve(loadRestrictions(), { tool: flag(rest, "--tool")!, input, cwd: flag(rest, "--cwd") ?? process.cwd(), objective: flag(rest, "--objective") });
+  console.log(restriction ? `${mode}  ${restriction.id}  ${restriction.label}` : `${mode}  (no restriction matches)`);
 } else if (verb === "tasks") {
   for (const t of await call("/api/tasks"))
     if (rest.includes("--all") || (t.status !== "done" && t.status !== "dropped"))

@@ -1,4 +1,4 @@
-import { CircleCheckBig, MessagesSquare, X, type LucideIcon } from "lucide-react";
+import { CircleCheckBig, MessagesSquare, ShieldCheck, X, type LucideIcon } from "lucide-react";
 import { AgentFace, type Expression } from "@/components/AgentFace";
 import { Dots } from "@/components/Working";
 import type { Thread } from "@/mock";
@@ -163,6 +163,7 @@ export function Sidebar({ view }: { view: string }) {
         <div className="flex flex-col gap-0.5">
           <Entry view="todo" label="Todo" icon={CircleCheckBig} count={needsYou} warn active={view === "todo"} open={open} />
           <Entry view="inbox" label="Threads" icon={MessagesSquare} count={unread} active={view === "inbox"} open={open} />
+          <Entry view="restrictions" label="Restrictions" icon={ShieldCheck} count={0} active={view === "restrictions"} open={open} />
         </div>
         {pins.length > 0 && (
           <div data-agent="sidebar-pinned" className="mt-3 flex min-h-0 flex-col gap-0.5 overflow-y-auto [scrollbar-width:none]">
