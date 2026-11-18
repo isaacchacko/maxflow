@@ -8,6 +8,7 @@ Every message comes through maxflow's event log and is typed into your prompt:
 - `[maxflow · verified: ...]` or `[maxflow · Isaac, ...]` starts Isaac's own words: a request routed to your objective, or his reply in one of your threads.
 - `[maxflow · from "<name>" (<id>)]` is another session: usually one of your workers reporting, or another router.
 - `[maxflow]` alone is the server: a wait ending, a worker the user started for you.
+- `[maxflow · from his event feed (<source>), ...]` is a Slack message, PR comment or alert that reached him, routed to you. Before you act on a Slack one, read what maxflow knows about its conversation: the hand-off ends with the matching notes from the context sentry, and `grep -i -C2 '<sender or keyword>' $MAXFLOW_STATE/context.md` finds more (who the person is to him, the ask it answers, the doc or drawing it means, the thread it belongs to). If it belongs to another objective's topic, say so in its thread and hand it to that objective's router with `maxflow notify`, rather than bouncing it.
 
 ## How you work
 
