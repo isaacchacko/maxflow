@@ -3,6 +3,7 @@ import { useContext, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentFace, expressionOf } from "@/components/AgentFace";
+import { AgentLink } from "@/components/AgentLink";
 import { GitHubGlyph, loadSlackNames, mrkdwn, SlackGlyph, slackLabel, slackLink, slackNameStore } from "@/lib/slack";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor, type External } from "@/mock";
@@ -226,7 +227,12 @@ const md: Components = {
   blockquote: ({ children }) => <blockquote className="my-1.5 border-l-2 pl-3 text-muted-foreground">{children}</blockquote>,
   code: ({ children, className }) => <code className={cn("rounded-md bg-muted px-1 font-mono text-[0.88em]", className)}>{children}</code>,
   pre: ({ children }) => <pre className="my-1.5 overflow-x-auto rounded-lg bg-muted p-2.5 text-xs [&>code]:bg-transparent [&>code]:p-0">{children}</pre>,
-  table: ({ children }) => <table className="my-1.5 border-collapse text-xs">{children}</table>,
+  // A wide table scrolls sideways in its own box, as a code block does; nothing else in a message may widen it.
+  table: ({ children }) => (
+    <div className="my-1.5 max-w-full overflow-x-auto">
+      <table className="border-collapse text-xs">{children}</table>
+    </div>
+  ),
   th: ({ children }) => <th className="border px-2 py-1 text-left font-medium">{children}</th>,
   td: ({ children }) => <td className="border px-2 py-1">{children}</td>,
   hr: () => <hr className="my-3" />,
@@ -246,10 +252,11 @@ const md: Components = {
     }
     if (slackLink(href)) return <SlackChip href={href} />;
     if (/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(pull|issues)\/\d+[/#?]/i.test(href)) return <GitHubChip href={href} />;
+    // Inline, so a long bare URL (a preview's hostname runs past 3000px) wraps with the text instead of widening the list.
     return (
-      <a href={href} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-0.5 text-link hover:underline">
+      <a href={href} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-link [overflow-wrap:anywhere] hover:underline">
         {children}
-        <ExternalLink className="size-3" />
+        <ExternalLink className="ml-0.5 inline size-3 align-[-0.1em]" />
       </a>
     );
   },
@@ -307,7 +314,8 @@ const keepRefs = (url: string) => (/^(ref|pr|linear|slackuser|slackchan):/.test(
 /** A whole message as GitHub-flavored markdown, with Rich's chips, links and pasted images inside it. */
 export function Markdown({ text, className, slack }: { text: string; className?: string; slack?: boolean }) {
   return (
-    <div className={cn("break-words", className)}>
+    // Any long word or token (a URL, a hash, inline code) breaks where it must, so a message is never wider than its column.
+    <div className={cn("min-w-0 [overflow-wrap:anywhere]", className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips, remarkBreaks]} components={md} urlTransform={keepRefs}>
         {slack ? mrkdwn(text) : asLinks(showUploads(text))}
       </ReactMarkdown>
@@ -322,7 +330,6 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
   const agents = agentStore.use();
   const objectives = objectiveStore.use();
   const sentries = sentryStore.use();
-  const names = nameStore.use();
   const [broken, setBroken] = useState(false);
   // Small is the 20px face in a replies line, where a worker's state dot would crowd it.
   const tile = cn("relative flex shrink-0 items-center justify-center rounded-full font-semibold", small ? "size-5 text-[10px] [&>svg]:size-3" : "size-9 text-sm");
@@ -344,17 +351,18 @@ export function Avatar({ from, small }: { from: string; small?: boolean }) {
         <Radar className="size-4 text-muted-foreground" />
       </span>
     );
-  // An agent's own face, its expression following its state; a list of them stays still, so a long inbox doesn't repaint.
+  // An agent's own face, its expression following its state; a list of them stays still, so a long inbox doesn't repaint. A click
+  // on it opens the agent.
   const a = agents.find(x => x.id === from);
   return (
-    <span title={a?.name ?? names[from] ?? from} className={cn("relative flex shrink-0", small ? "size-5" : "size-9")}>
+    <AgentLink id={from} className={cn("relative flex shrink-0", small ? "size-5" : "size-9")}>
       <AgentFace id={from} expression={expressionOf(a?.state)} small={small} still className="size-full" />
       {!small && a?.role === "router" && (
         <span className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-full bg-card shadow-card">
           <Network className="size-2.5 text-router" />
         </span>
       )}
-    </span>
+    </AgentLink>
   );
 }
 
