@@ -1,14 +1,13 @@
 import { AlarmClock, ArrowUpToLine, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, Pin, PinOff, Play, Quote, RotateCcw, type LucideIcon } from "lucide-react";
 import { ContextMenu, DropdownMenu } from "radix-ui";
-import { Kbd } from "@/components/ui/kbd";
 import type { Thread } from "@/mock";
 import { setPaused, setPinned } from "@/store";
 import { openPause } from "./Pause";
 import { repliesOf } from "./Replies";
 import { markRead, markUnread, unseenDeep } from "./seen";
 
-/** One line of a right-click menu, with the vim key that does the same where there is one; "-" draws a rule. */
-export type MenuItem = { label: string; icon: LucideIcon; keys?: string; run(): void; agent?: string; pressed?: boolean } | "-";
+/** One line of a right-click menu; "-" draws a rule. */
+export type MenuItem = { label: string; icon: LucideIcon; run(): void; agent?: string; pressed?: boolean } | "-";
 
 export const copy = (text: string) => void navigator.clipboard.writeText(text);
 export const threadLink = (id: string) => `${location.origin}${location.pathname}#thread/${id}`;
@@ -25,7 +24,7 @@ export function RowMenu({ items, agent, children }: { items: (MenuItem | false |
         {children}
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
-        {/* Its keys are its own: Escape closes the menu without also climbing a level, and the view keys don't switch views.
+        {/* Its keys are its own: Escape closes the menu without also climbing a level.
             Closing leaves focus where the chosen item put it (the box, for Quote), not back on the row. */}
         <ContextMenu.Content data-agent={`menu:${agent}`} onEscapeKeyDown={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()} onCloseAutoFocus={e => e.preventDefault()} className="z-50 min-w-48 border bg-background p-1 text-sm shadow-lg">
           {shown.map((x, i) =>
@@ -40,7 +39,6 @@ export function RowMenu({ items, agent, children }: { items: (MenuItem | false |
               >
                 <x.icon className="size-3.5 text-muted-foreground" />
                 <span className="flex-1">{x.label}</span>
-                {x.keys && <Kbd>{x.keys}</Kbd>}
               </ContextMenu.Item>
             ),
           )}
@@ -64,7 +62,6 @@ export function DropMenu({ items, agent, children }: { items: (MenuItem | false 
               <DropdownMenu.Item key={x.label} data-agent={x.agent} onSelect={x.run} className="flex cursor-pointer items-center gap-2 px-2 py-1 outline-none select-none data-highlighted:bg-muted">
                 <x.icon className="size-3.5 text-muted-foreground" />
                 <span className="flex-1">{x.label}</span>
-                {x.keys && <Kbd>{x.keys}</Kbd>}
               </DropdownMenu.Item>
             ),
           )}
@@ -81,13 +78,13 @@ export function DropMenu({ items, agent, children }: { items: (MenuItem | false 
  */
 export function threadItems(t: Thread, all: Thread[], on: { open?(): void; reply?(): void; resolve(): void; pause?(): void }): (MenuItem | false | undefined)[] {
   return [
-    on.open && { label: "Open", icon: ExternalLink, keys: "Enter", run: on.open },
-    on.reply && { label: "Reply", icon: MessageSquareReply, keys: "r", run: on.reply },
+    on.open && { label: "Open", icon: ExternalLink, run: on.open },
+    on.reply && { label: "Reply", icon: MessageSquareReply, run: on.reply },
     "-",
     unseenDeep(t, all) > 0 && { label: "Mark read", icon: MailOpen, run: () => markRead(t, all), agent: `mark-read:${t.id}` },
     unseenDeep(t, all) === 0 && repliesOf(t).length > 0 && { label: "Mark unread", icon: Mail, run: () => markUnread(t), agent: `mark-unread:${t.id}` },
-    { label: t.resolved ? "Reopen" : "Resolve", icon: t.resolved ? RotateCcw : Check, keys: "x", run: on.resolve, agent: `menu-resolve:${t.id}` },
-    !t.parentId && { label: t.paused ? "Pause again…" : "Pause…", icon: AlarmClock, keys: "p", run: on.pause ?? (() => openPause(t.id)), agent: `menu-pause:${t.id}` },
+    { label: t.resolved ? "Reopen" : "Resolve", icon: t.resolved ? RotateCcw : Check, run: on.resolve, agent: `menu-resolve:${t.id}` },
+    !t.parentId && { label: t.paused ? "Pause again…" : "Pause…", icon: AlarmClock, run: on.pause ?? (() => openPause(t.id)), agent: `menu-pause:${t.id}` },
     t.paused && { label: "Unpause", icon: Play, run: () => void setPaused(t.id, null), agent: `menu-unpause:${t.id}` },
     pinItem(t),
     "-",
@@ -97,14 +94,14 @@ export function threadItems(t: Thread, all: Thread[], on: { open?(): void; reply
 }
 
 /** Pin a thread to the sidebar, or unpin it: the same item in its menus and hover bars, on P. */
-export const pinItem = (t: Thread): MenuItem => ({ label: t.pinned ? "Unpin" : "Pin", icon: t.pinned ? PinOff : Pin, keys: "P", run: () => void setPinned(t.id, !t.pinned), agent: `pin:${t.id}`, pressed: !!t.pinned });
+export const pinItem = (t: Thread): MenuItem => ({ label: t.pinned ? "Unpin" : "Pin", icon: t.pinned ? PinOff : Pin, run: () => void setPinned(t.id, !t.pinned), agent: `pin:${t.id}`, pressed: !!t.pinned });
 
 /** What a message offers: its subthread if it has one, else a reply in thread; a quote; unread from it on; its link and text. */
 export function messageItems(text: string, on: { open?(): void; reply?(): void; quote?(): void; raise?(): void; unread?(): void; link?: string }): (MenuItem | false | undefined)[] {
   return [
-    on.open ? { label: "Open subthread", icon: MessageSquareReply, keys: "Enter", run: on.open } : on.reply && { label: "Reply in thread", icon: MessageSquareReply, keys: "r", run: on.reply },
-    on.quote && { label: "Quote", icon: Quote, keys: "y", run: on.quote },
-    on.raise && { label: "Raise to Threads", icon: ArrowUpToLine, keys: "R", run: on.raise, agent: "raise" },
+    on.open ? { label: "Open subthread", icon: MessageSquareReply, run: on.open } : on.reply && { label: "Reply in thread", icon: MessageSquareReply, run: on.reply },
+    on.quote && { label: "Quote", icon: Quote, run: on.quote },
+    on.raise && { label: "Raise to Threads", icon: ArrowUpToLine, run: on.raise, agent: "raise" },
     "-",
     on.unread && { label: "Mark unread from here", icon: Mail, run: on.unread },
     "-",

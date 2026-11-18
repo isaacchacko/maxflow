@@ -220,13 +220,10 @@
 .sparkles > svg { position: absolute; transform: scale(0); animation: sparkle 1.4s ease-in-out infinite; }
 @keyframes comet { to { stroke-dashoffset: -100; } }
 .comet { animation: comet 1.2s linear infinite; }
-/* Pointing at an agent fades its messages up and the rest down (ThreadPanel's AgentHighlight). */
-[data-messages] article[data-from], [data-messages] [data-faces] { transition: opacity 120ms ease, background-color 120ms ease, box-shadow 120ms ease; }
 @media (prefers-reduced-motion: reduce) {
   .working-ring, .working-pill::before, .shimmer, .shimmer-soft, .agent-face *, .dots > i, .sparkles > svg, .comet { animation: none !important; }
   .dots > i { opacity: .5; }
   .shimmer-soft { color: inherit; background: none; }
-  [data-messages] article[data-from], [data-messages] [data-faces] { transition: none; }
   .sparkles > svg { transform: none; opacity: .7; }
 }
 /* While the image viewer is open nothing under its scrim moves: a turning ring repaints the page beneath every frame, and with it

@@ -9,7 +9,7 @@ import { DropMenu, RowMenu, threadItems, type MenuItem } from "./RowMenu";
 import { resolveOrReopen, ThreadNavContext, ThreadPage, type ThreadNav } from "./ThreadPage";
 import { AgentStack } from "./ThreadPanel";
 import { PinToggle } from "./PinToggle";
-import { focusRegion } from "./vim";
+import { focusRegion } from "./region";
 
 /**
  * Slack's side pane: the thread he shift-clicked, beside the page, with everything a thread page does. Subthreads open inside it,
@@ -34,7 +34,7 @@ export function ThreadPane() {
     }),
     [],
   );
-  // Opening takes the keys, so j/k and Esc work in it at once.
+  // Opening puts him in it, so Esc closes it at once.
   useEffect(() => focusRegion(id ? "pane" : "main"), [id]);
   if (!id) return null;
   const thread = all.find(t => t.id === id);
@@ -43,7 +43,7 @@ export function ThreadPane() {
   // The row's menu, with "Open" as opening it in full and "Reply" as the pane's own box.
   const items: (MenuItem | false | undefined)[] = [
     { label: "Open in full", icon: Maximize2, run: () => void (location.hash = `#thread/${id}`), agent: "pane-open-full" },
-    { label: "Reply", icon: MessageSquareReply, keys: "r", run: () => document.querySelector<HTMLElement>('[data-agent="thread-pane"] [data-agent="thread-input"]')?.focus() },
+    { label: "Reply", icon: MessageSquareReply, run: () => document.querySelector<HTMLElement>('[data-agent="thread-pane"] [data-agent="thread-input"]')?.focus() },
     ...(thread ? threadItems(thread, all, { resolve: () => void resolveOrReopen(thread, climb), pause: () => openPause(thread.id, climb) }) : []),
   ];
 

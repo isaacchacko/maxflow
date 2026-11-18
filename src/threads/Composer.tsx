@@ -260,7 +260,7 @@ export function Composer({ onSend, onRaise, className, autoFocus, agent, draftKe
           onChange={e => (setDraft(e.target.value), mention.track(), emojiComplete.track())}
           onSelect={() => (mention.track(), emojiComplete.track())}
           // The @ picker takes its keys first while it is open, then the formatting shortcuts. Enter sends, Shift+Enter is a new line;
-          // Enter that confirms an IME composition is neither. Escape in an empty box leaves it, back to the keys that move through the page.
+          // Enter that confirms an IME composition is neither. Escape in an empty box leaves it, so the next Escape climbs a level.
           onKeyDown={e => {
             if (mention.onKeyDown(e) || emojiComplete.onKeyDown(e)) return;
             const f = formatFor(e);

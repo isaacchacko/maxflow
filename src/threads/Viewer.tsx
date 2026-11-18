@@ -25,7 +25,7 @@ const clamp = (s: number) => Math.min(MAX, Math.max(MIN, s));
 /**
  * Slack's attachment viewer: one image fit to the window over a dark scrim, its sender and "n of N" on top, a filmstrip below.
  * ←/→ or h/l move, +/-, the wheel or a pinch zoom toward the pointer, a drag pans once zoomed, 0 resets, Esc or a click outside closes.
- * It is a dialog, so the vim keys stand down while it is open, and it takes focus from the composer.
+ * It is a dialog, and it takes focus from the composer.
  */
 export function Viewer() {
   const open = viewing.use();

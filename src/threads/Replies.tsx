@@ -21,7 +21,7 @@ export function Replies({ t }: { t: Thread }) {
   const fresh = unseenDeep(t, all);
   const faces = [...new Set(replies.map(m => m.from).reverse())].slice(0, 4);
   return (
-    <a href={`#thread/${t.id}`} data-agent={`inbox:${t.id}`} data-faces={faces.join(" ")} className="mt-1 -ml-1 flex w-fit max-w-full min-w-0 items-center gap-2 rounded-full border border-transparent py-0.5 pr-2.5 pl-1 text-xs whitespace-nowrap hover:border-border hover:bg-card">
+    <a href={`#thread/${t.id}`} data-agent={`inbox:${t.id}`} className="mt-1 -ml-1 flex w-fit max-w-full min-w-0 items-center gap-2 rounded-full border border-transparent py-0.5 pr-2.5 pl-1 text-xs whitespace-nowrap hover:border-border hover:bg-card">
       {faces.length > 0 && (
         <span className="flex shrink-0 gap-0.5">
           {faces.map(f => (

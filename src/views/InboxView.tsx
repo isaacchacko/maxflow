@@ -3,7 +3,7 @@ import { DropdownMenu } from "radix-ui";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { localAt, type Thread } from "@/mock";
-import { markAskShown, objectiveStore, setResolved, startThread, threadStore, setPinned } from "@/store";
+import { markAskShown, objectiveStore, setResolved, startThread, threadStore } from "@/store";
 import { Composer, quoteInto, quoted } from "@/threads/Composer";
 import { HoverBar } from "@/threads/HoverBar";
 import { arrivedFrom, composeOnArrival, flash, useLayerScroll } from "@/threads/jump";
@@ -14,7 +14,6 @@ import { pinItem, RowMenu, threadItems } from "@/threads/RowMenu";
 import { ShotScope, shotsOf } from "@/threads/Viewer";
 import { openPause, pausedLabel } from "@/threads/Pause";
 import { unseenDeep, useSeen } from "@/threads/seen";
-import { useVim, vimRow } from "@/threads/vim";
 
 // The inbox is one channel, as Slack draws one: every thread's opening message, oldest at the top, under day dividers, with its
 // replies line; the box to start a thread sits at the bottom. Threads keep their place when replies come in.
@@ -134,25 +133,9 @@ export function InboxView() {
     if (t && m?.id) quoteInto(`thread:${t.id}`, quoted(m.text, t.id, m.id)), open(t.id);
   };
   const menu = (t: Thread) => threadItems(t, threads, { open: () => open(t.id), reply: () => reply(t.id), resolve: () => toggle(t), pause: () => pause(t.id) });
-  // j/k walk the channel top to bottom, starting from its newest thread.
-  const vim = useVim("inbox", rows.map(r => r.t.id), scrollRef, "last", {
-    compose: () => document.querySelector<HTMLElement>('[data-agent="inbox-input"]')?.focus(),
-    open,
-    reply,
-    resolve: id => {
-      const t = threads.find(x => x.id === id);
-      if (t) toggle(t);
-    },
-    pause: id => id && pause(id),
-    pin: id => {
-      const t = threads.find(x => x.id === id);
-      if (t) void setPinned(t.id, !t.pinned);
-    },
-    quote,
-  });
   const show = (id: string) => {
-    const row = scrollRef.current?.querySelector(`[data-vim="${CSS.escape(id)}"]`);
-    if (row) vim.move(id, false), flash(row);
+    const row = scrollRef.current?.querySelector(`[data-row="${CSS.escape(id)}"]`);
+    if (row) flash(row);
   };
 
   // Opening, it lands where he left it when coming back, on the thread he climbed out of, on the "New" line, or at the bottom.
@@ -207,7 +190,7 @@ export function InboxView() {
 
   const threadRow = (t: Thread, first: ReturnType<typeof openerOf>, grouped: boolean) => (
     <RowMenu key={t.id} agent={t.id} items={menu(t)}>
-      <div {...vimRow(t.id)} className={cn("group/row group/bar relative", !grouped && "mt-2.5")}>
+      <div data-row={t.id} className={cn("group/row group/bar relative", !grouped && "mt-2.5")}>
         <div className={cn((t.resolved || t.paused) && "opacity-50")}>
           {/* An image in the preview opens the viewer over the whole thread's. */}
           <ShotScope.Provider value={shotsOf(t.messages)}>
@@ -217,7 +200,6 @@ export function InboxView() {
               text={first.text}
               ext={first.ext}
               grouped={grouped}
-              active={vim.cursor === t.id}
               className="cursor-pointer"
               // A long opener or a pasted screenshot stays a preview here; the thread has it in full.
               bodyClassName="max-h-36 overflow-hidden [&_img]:max-h-28"
@@ -254,12 +236,11 @@ export function InboxView() {
         </div>
         <HoverBar
           agent={t.id}
-          active={vim.cursor === t.id}
           actions={[
-            { label: t.resolved ? "Reopen" : "Resolve", icon: t.resolved ? RotateCcw : Check, keys: "x", run: () => toggle(t), agent: `inbox-resolve:${t.id}` },
-            { label: t.paused ? "Pause again…" : "Pause…", icon: AlarmClock, keys: "p", run: () => pause(t.id), agent: `inbox-pause:${t.id}` },
-            { label: "Reply in thread", icon: MessageSquareReply, keys: "r", run: () => reply(t.id), agent: `inbox-reply:${t.id}` },
-            !!t.messages[0]?.id && { label: "Quote", icon: Quote, keys: "y", run: () => quote(t.id), agent: `inbox-quote:${t.id}` },
+            { label: t.resolved ? "Reopen" : "Resolve", icon: t.resolved ? RotateCcw : Check, run: () => toggle(t), agent: `inbox-resolve:${t.id}` },
+            { label: t.paused ? "Pause again…" : "Pause…", icon: AlarmClock, run: () => pause(t.id), agent: `inbox-pause:${t.id}` },
+            { label: "Reply in thread", icon: MessageSquareReply, run: () => reply(t.id), agent: `inbox-reply:${t.id}` },
+            !!t.messages[0]?.id && { label: "Quote", icon: Quote, run: () => quote(t.id), agent: `inbox-quote:${t.id}` },
             pinItem(t),
           ]}
           menu={menu(t)}
@@ -333,7 +314,6 @@ export function InboxView() {
               </section>
             ))}
           </div>
-          {vim.panel}
           <Composer autoFocus agent="inbox-input" draftKey="inbox" placeholder="Message Threads" onSend={text => ((atBottom.current = true), startThread(text))} className="px-4 pt-1 pb-3" />
         </section>
     </div>

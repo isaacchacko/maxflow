@@ -12,7 +12,7 @@ import type { PageRef } from "@/store";
 import { closePane, openPane, paneStore, restorePane } from "@/threads/pane";
 import { ThreadPage, threadUp } from "@/threads/ThreadPage";
 import { ThreadPane } from "@/threads/ThreadPane";
-import { activeRegion } from "@/threads/vim";
+import { activeRegion } from "@/threads/region";
 import { arrive } from "@/threads/jump";
 import { InboxView } from "@/views/InboxView";
 import { RoutingView } from "@/views/RoutingView";
@@ -20,13 +20,13 @@ import { SentriesView } from "@/views/SentriesView";
 import { TodoView } from "@/views/TodoView";
 
 export const views = [
-  { id: "todo", label: "Todo", key: "0" },
-  { id: "inbox", label: "Threads", key: "1" },
-  { id: "events", label: "Events", key: "2" },
-  { id: "objectives", label: "Objectives", key: "3" },
-  { id: "agents", label: "Agents", key: "4" },
-  { id: "threads", label: "Thread map", key: "5" },
-  { id: "sentries", label: "Sentries", key: "6" },
+  { id: "todo", label: "Todo" },
+  { id: "inbox", label: "Threads" },
+  { id: "events", label: "Events" },
+  { id: "objectives", label: "Objectives" },
+  { id: "agents", label: "Agents" },
+  { id: "threads", label: "Thread map" },
+  { id: "sentries", label: "Sentries" },
 ] as const;
 /** Views of one routing canvas, in snap order; the rest are pages of their own. */
 const ROUTING: readonly string[] = ["events", "objectives", "agents", "threads"];
@@ -66,7 +66,7 @@ function threadAt(target: EventTarget | null) {
   if (link) return link.getAttribute("href")?.match(/^#thread\/(.+)$/)?.[1];
   const card = el.closest<HTMLElement>("[data-node^='thread:']")?.dataset.node?.slice(7);
   if (card) return card;
-  const row = el.closest<HTMLElement>("[data-vim]")?.dataset.vim;
+  const row = el.closest<HTMLElement>("[data-row]")?.dataset.row;
   return row?.startsWith("th-") ? row : row?.match(/^thread\/(.+)$/)?.[1];
 }
 // As in Slack, a click on a thread opens it beside the page and ⇧-click opens it as the page (Enter and ⌘K do too). The press of a
@@ -105,8 +105,6 @@ export function App() {
       const { detail } = routeFromHash();
       if (e.key === "Escape" && detail?.kind === "thread") threadUp(detail.id, route.view);
       else if (e.key === "Escape" && detail) location.hash = route.view;
-      const match = !e.metaKey && !e.altKey && !e.ctrlKey && views.find(v => v.key === e.key);
-      if (match) location.hash = match.id;
     };
     addEventListener("hashchange", onHash);
     addEventListener("keydown", onKey);

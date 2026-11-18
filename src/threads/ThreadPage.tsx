@@ -7,7 +7,7 @@ import { AgentLink } from "@/components/AgentLink";
 import { Elapsed } from "@/components/Working";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
-import { agentStore, openSubthread, postToThread, setPinned, setResolved, threadStore } from "@/store";
+import { agentStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
 import { Composer, quoteInto, quoted } from "./Composer";
 import { composeOnArrival, flashMessage, goToMessage, takeCompose, useLayerScroll } from "./jump";
 import { MessageRow, when } from "./MessageRow";
@@ -16,12 +16,11 @@ import { pinItem, RowMenu, messageItems, threadItems } from "./RowMenu";
 import { firstUnseen, markSeen, setSeen } from "./seen";
 import { Rich } from "./Rich";
 import { ShotScope, shotsOf } from "./Viewer";
-import { AgentHighlight, AgentStack, ThreadPanel } from "./ThreadPanel";
+import { AgentStack, ThreadPanel } from "./ThreadPanel";
 import { PinToggle } from "./PinToggle";
 import { openRaise, raise, raisedTo } from "./Raise";
 import { HoverBar } from "./HoverBar";
 import { openPause, pausedLabel } from "./Pause";
-import { useVim, vimRow, type VimActions } from "./vim";
 
 /** Escape climbs one level: a subthread goes to its parent at the message it hangs off, a top thread to the view it came from. */
 export function threadUp(id: string, view: string) {
@@ -125,44 +124,37 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
   }, [thread?.id, thread?.messages.length]);
 
   const composer = () => (scrollRef.current?.closest("[data-region]") ?? document).querySelector<HTMLElement>('[data-agent="thread-input"]')?.focus();
-  // The keyboard cursor walks the root, then the replies: each by its id, or its place for an old message without one.
+  // The root, then the replies: each keyed by its id, or its place for an old message without one.
   const root = thread?.parentId ? all.find(t => t.id === thread.parentId)?.messages.find(m => m.id === thread.parentMessageId) : thread?.messages[0];
   const replies = thread ? repliesOf(thread) : [];
   // Whether his next message here asks for its answer in a subthread; each thread remembers it, as it does a draft.
   const [nudge, setNudge] = usePersistentDraft(`thread:${id}:nudge`);
   const keyOf = (m: { id?: string }, i: number) => m.id ?? `#${i}`;
-  const keys = [...(root ? [keyOf(root, -1)] : []), ...replies.map(keyOf)];
   const byKey = (k: string) => (root && k === keyOf(root, -1) ? root : replies.find((m, i) => keyOf(m, i) === k));
+  // What a message's menus and hover bar do to it, by its key.
   const actions = {
-    compose: composer,
-    up: climb,
-    resolve: () => thread && resolveOrReopen(thread, climb),
-    pause: () => thread && !thread.parentId && openPause(id, climb),
-    pin: () => thread && void setPinned(id, !thread.pinned),
-    open: k => {
+    open: (k: string) => {
       const sub = all.find(t => t.parentId === id && t.parentMessageId === k);
       if (sub && (sub.messages.length > 0 || sub.pending)) nav.open(sub.id);
     },
     // Replying to the root is replying here; any other message gets a subthread of its own.
-    reply: k => (k === root?.id || !byKey(k)?.id ? composer() : (composeOnArrival(), void openSubthread(id, k, nav.open))),
-    raise: k => {
+    reply: (k: string) => (k === root?.id || !byKey(k)?.id ? composer() : (composeOnArrival(), void openSubthread(id, k, nav.open))),
+    raise: (k: string) => {
       const m = byKey(k);
       if (m?.id) openRaise(m === root ? (thread?.parentId ?? id) : id, m.id, m.text);
     },
-    quote: k => {
+    quote: (k: string) => {
       const m = byKey(k);
       if (m?.id) quoteInto(`thread:${id}`, quoted(m.text, m === root ? (thread?.parentId ?? id) : id, m.id));
     },
-  } satisfies VimActions;
-  const vim = useVim(`thread:${id}`, keys, scrollRef, "last", actions);
+  };
   const firstNew = lineAt === undefined ? -1 : replies.findIndex(m => thread!.messages.indexOf(m) >= lineAt);
 
-  // Landing on a message (from its subthread, or a quote's link) puts the cursor there; replying from the keyboard opens in the box.
+  // Landing on a message (from its subthread, or a quote's link) flashes it; "Reply in thread" from a menu opens in the box.
   useEffect(() => {
-    // With nothing to land on, the cursor starts at the first unread, and the line is scrolled to after vim restores its cursor.
+    // With nothing to land on, the "New" line is brought into view, unless the page's scroll was put back as he left it.
     const landed = flashMessage();
     if (!landed && !restored.current) lineRef.current?.scrollIntoView({ block: "center" });
-    vim.move(landed ?? (firstNew >= 0 ? keyOf(replies[firstNew]!, firstNew) : undefined), false);
     if (takeCompose()) composer();
   }, [id]);
 
@@ -229,7 +221,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
         <AgentStack thread={thread} onOpen={() => document.getElementById(`agents-${thread.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })} />
         <PinToggle thread={thread} />
         {!thread.parentId && (
-          <Button variant="outline" size="sm" data-agent="thread-pause" title="Pause until a time (p)" onClick={() => openPause(thread.id, climb)}>
+          <Button variant="outline" size="sm" data-agent="thread-pause" title="Pause until a time" onClick={() => openPause(thread.id, climb)}>
             <AlarmClock />
             {thread.paused ? "Paused" : "Pause"}
           </Button>
@@ -246,13 +238,12 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {/* An image here opens the viewer over this thread's images, the root's included and its subthreads' not. */}
           <ShotScope.Provider value={shotsOf([...(root ? [root] : []), ...replies])}>
-          <div ref={scrollRef} data-messages className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-            <AgentHighlight />
+          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {root?.ext?.context && <EarlierLine />}
             {root && (
               <RowMenu agent={`msg:${keyOf(root, -1)}`} items={messageMenu(root, keyOf(root, -1))}>
-              <div data-msg={root.id} data-thread={thread.parentId ?? thread.id} {...vimRow(keyOf(root, -1))} className="group/bar relative">
-                <MessageRow from={root.from} at={root.at} text={root.text} ext={root.ext} active={vim.cursor === keyOf(root, -1)}>
+              <div data-msg={root.id} data-thread={thread.parentId ?? thread.id} data-row={keyOf(root, -1)} className="group/bar relative">
+                <MessageRow from={root.from} at={root.at} text={root.text} ext={root.ext}>
                   {root.nudge && <NudgeMark />}
                   {root.wake && <WakeMark />}
                   {root.id && <RaisedMark threads={all} thread={thread.parentId ?? thread.id} message={root.id} />}
@@ -260,12 +251,11 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
                 {/* The root stands for the thread: resolving or pausing it here is the thread's, as the header's buttons are. */}
                 <HoverBar
                   agent={`msg:${keyOf(root, -1)}`}
-                  active={vim.cursor === keyOf(root, -1)}
                   actions={[
-                    { label: thread.resolved ? "Reopen" : "Resolve", icon: thread.resolved ? RotateCcw : Check, keys: "x", run: () => resolveOrReopen(thread, climb), agent: `msg-resolve:${thread.id}` },
-                    !thread.parentId && { label: thread.paused ? "Pause again…" : "Pause…", icon: AlarmClock, keys: "p", run: () => openPause(thread.id, climb), agent: `msg-pause:${thread.id}` },
-                    { label: "Reply", icon: MessageSquareReply, keys: "r", run: () => actions.reply(keyOf(root, -1)) },
-                    !!root.id && { label: "Quote", icon: Quote, keys: "y", run: () => actions.quote(keyOf(root, -1)), agent: `quote:${root.id}` },
+                    { label: thread.resolved ? "Reopen" : "Resolve", icon: thread.resolved ? RotateCcw : Check, run: () => resolveOrReopen(thread, climb), agent: `msg-resolve:${thread.id}` },
+                    !thread.parentId && { label: thread.paused ? "Pause again…" : "Pause…", icon: AlarmClock, run: () => openPause(thread.id, climb), agent: `msg-pause:${thread.id}` },
+                    { label: "Reply", icon: MessageSquareReply, run: () => actions.reply(keyOf(root, -1)) },
+                    !!root.id && { label: "Quote", icon: Quote, run: () => actions.quote(keyOf(root, -1)), agent: `quote:${root.id}` },
                     pinItem(thread),
                   ]}
                   menu={messageMenu(root, keyOf(root, -1))}
@@ -312,8 +302,8 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
                   </div>
                 )}
                 <RowMenu agent={`msg:${keyOf(m, i)}`} items={messageMenu(m, keyOf(m, i))}>
-                <div data-msg={m.id} data-thread={thread.id} {...vimRow(keyOf(m, i))} className="group/bar relative">
-                  <MessageRow from={m.from} at={m.at} text={m.text} ext={m.ext} where={!!m.ext && conversationOf(m.ext.link) !== conversationOf((replies.slice(0, i).findLast(x => x.ext) ?? root)?.ext?.link)} grouped={grouped} active={vim.cursor === keyOf(m, i)} className={cn(!grouped && i > 0 && "mt-2.5")}>
+                <div data-msg={m.id} data-thread={thread.id} data-row={keyOf(m, i)} className="group/bar relative">
+                  <MessageRow from={m.from} at={m.at} text={m.text} ext={m.ext} where={!!m.ext && conversationOf(m.ext.link) !== conversationOf((replies.slice(0, i).findLast(x => x.ext) ?? root)?.ext?.link)} grouped={grouped} className={cn(!grouped && i > 0 && "mt-2.5")}>
                     {m.nudge && <NudgeMark />}
                     {m.wake && <WakeMark />}
                     {m.id && <RaisedMark threads={all} thread={thread.id} message={m.id} />}
@@ -321,10 +311,9 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
                   </MessageRow>
                   <HoverBar
                     agent={`msg:${keyOf(m, i)}`}
-                    active={vim.cursor === keyOf(m, i)}
                     actions={[
-                      !!m.id && { label: "Reply in thread", icon: MessageSquareReply, keys: "r", run: () => void openSubthread(thread.id, m.id!, nav.open), agent: `reply-in-thread:${m.id}` },
-                      !!m.id && { label: "Quote", icon: Quote, keys: "y", run: () => quoteInto(`thread:${thread.id}`, quoted(m.text, thread.id, m.id!)), agent: `quote:${m.id}` },
+                      !!m.id && { label: "Reply in thread", icon: MessageSquareReply, run: () => void openSubthread(thread.id, m.id!, nav.open), agent: `reply-in-thread:${m.id}` },
+                      !!m.id && { label: "Quote", icon: Quote, run: () => quoteInto(`thread:${thread.id}`, quoted(m.text, thread.id, m.id!)), agent: `quote:${m.id}` },
                     ]}
                     menu={messageMenu(m, keyOf(m, i))}
                   />
@@ -336,7 +325,6 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
             {thread.pending && <Pending pending={thread.pending} names={thread.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />}
           </div>
           </ShotScope.Provider>
-          {vim.panel}
           <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onRaise={text => void raise(text)} onSend={text => (setLine({ id }), postToThread(thread.id, "isaac", text, nudge ? "subthread" : undefined))} tools={<NudgeToggle on={nudge} set={on => setNudge(on ? "subthread" : "")} />} toolsOn={!!nudge} placeholder={thread.parentId ? "Reply in thread" : embedded ? "Reply to thread…" : "Reply…"} className="px-4 pt-1 pb-3" />
         </section>
 
@@ -346,7 +334,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
   );
 }
 
-/** Off by default: on, his message asks the router to answer it in a subthread of its own rather than inline. It never takes focus, so the vim keys and the box keep it. */
+/** Off by default: on, his message asks the router to answer it in a subthread of its own rather than inline. It never takes focus, so the box keeps it. */
 function NudgeToggle({ on, set }: { on: string; set: (on: boolean) => void }) {
   return (
     <button

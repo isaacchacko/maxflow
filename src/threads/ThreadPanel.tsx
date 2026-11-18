@@ -1,13 +1,12 @@
 import { Check, ChevronDown, Circle, ExternalLink, Pause, Waypoints } from "lucide-react";
 import { useState } from "react";
-import { AgentFace, faceOf } from "@/components/AgentFace";
+import { AgentFace } from "@/components/AgentFace";
 import { AgentLink } from "@/components/AgentLink";
 import { GitHubGlyph, SlackGlyph } from "@/lib/slack";
 import { cn } from "@/lib/utils";
 import { statusColor, type Thread } from "@/mock";
 import { agentStore, nameStore, objectiveStore, taskStore, threadStore } from "@/store";
 import { contributorsOf, stateOf, type Contributor } from "./contributors";
-import { hoverAgent, pointsAt } from "./hover";
 import { when } from "./MessageRow";
 import { pausedLabel } from "./Pause";
 import { ago } from "./Replies";
@@ -78,9 +77,6 @@ const span = (at?: string) => (at && Number.isFinite(Date.parse(at)) ? ago(Date.
 /** One agent on the thread: its face doing what it does, its name, and its state with how long. */
 function AgentRow({ c, t }: { c: Contributor; t: Thread }) {
   const s = stateOf(c, t);
-  // Pointing at its messages' pictures lights its row, as pointing at the row lights its messages.
-  const lit = hoverAgent.use() === c.id;
-  const litStyle = lit ? { backgroundColor: `hsl(${faceOf(c.id).hue} 80% 60% / 0.12)` } : undefined;
   const time = span(s.at);
   const word = c.agent ? `${s.word}${time ? ` ${time}` : ""}` : `done${time ? ` ${time} ago` : ""}`;
   const face = <AgentFace id={c.id} expression={s.expression} small still={!c.agent} className="size-5" />;
@@ -93,11 +89,11 @@ function AgentRow({ c, t }: { c: Contributor; t: Thread }) {
   );
   const title = [c.name, c.agent?.doing, `${c.why}${c.agent?.role === "router" ? " · router" : ""}`].filter(Boolean).join("\n");
   return c.agent ? (
-    <a href={`#agent/${c.id}`} title={title} data-agent={`contributor:${c.id}`} {...pointsAt(c.id)} style={litStyle} className={cn(row, hover, "transition-colors duration-[120ms] motion-reduce:transition-none")}>
+    <a href={`#agent/${c.id}`} title={title} data-agent={`contributor:${c.id}`} className={cn(row, hover)}>
       {body}
     </a>
   ) : (
-    <div title={title} data-agent={`contributor:${c.id}`} {...pointsAt(c.id)} style={litStyle} className={cn(row, "transition-colors duration-[120ms] motion-reduce:transition-none")}>
+    <div title={title} data-agent={`contributor:${c.id}`} className={row}>
       {body}
     </div>
   );
@@ -202,21 +198,6 @@ export function ThreadPanel({ thread }: { thread: Thread }) {
 }
 
 /**
- * While he points at an agent, its messages in the thread light up in its face's colour (a soft tint and a bar on the left) and the
- * rest dim; so do the replies lines its face is on. One style element, so pointing re-renders nothing else.
- */
-export function AgentHighlight() {
-  const id = hoverAgent.use();
-  if (!id || !/^[\w-]+$/.test(id)) return null;
-  const hue = faceOf(id).hue;
-  return (
-    <style>{`[data-messages] article[data-from]:not([data-from="${id}"]) { opacity: .55; }
-[data-messages] article[data-from="${id}"] { background-color: hsl(${hue} 80% 60% / .09); box-shadow: inset 2px 0 0 hsl(${hue} 60% 52%); }
-[data-messages] [data-faces~="${id}"] { background-color: hsl(${hue} 80% 60% / .14); }`}</style>
-  );
-}
-
-/**
  * The faces of the agents on a thread, up to four and a count, for a header. `onOpen` makes the stack a button (the page scrolls to
  * its Agents section); without it each face opens its agent (the side pane, which has no panel).
  */
@@ -227,7 +208,7 @@ export function AgentStack({ thread, onOpen }: { thread: Thread; onOpen?: () => 
   const faces = shown.map(c => {
     const face = <AgentFace id={c.id} expression={stateOf(c, thread).expression} small className="size-5" />;
     return (
-      <span key={c.id} {...pointsAt(c.id)} className="-ml-1 flex rounded-full bg-card ring-2 ring-card first:ml-0">
+      <span key={c.id} className="-ml-1 flex rounded-full bg-card ring-2 ring-card first:ml-0">
         {onOpen ? face : <AgentLink id={c.id}>{face}</AgentLink>}
       </span>
     );

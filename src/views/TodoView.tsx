@@ -6,7 +6,6 @@ import { agentStore, taskStore, threadStore } from "@/store";
 import { useLayerScroll } from "@/threads/jump";
 import { ago } from "@/threads/Replies";
 import { Avatar, Rich } from "@/threads/Rich";
-import { useVim, vimRow } from "@/threads/vim";
 
 // What is on him: agents waiting on his answer first, then his board's tasks that are on him, being done, or still to do.
 
@@ -35,15 +34,12 @@ export function TodoView() {
   const agents = agentStore.use();
   const asks = threads.filter(t => t.asks && !t.resolved && !t.paused).sort((a, b) => a.asks!.since.localeCompare(b.asks!.since));
   const groups = ORDER.map(status => ({ status, tasks: tasks.filter(t => t.board === status).sort((a, b) => b.start.localeCompare(a.start)) })).filter(g => g.tasks.length);
-  const places = [...asks.map(t => `thread/${t.id}`), ...groups.flatMap(g => g.tasks.map(t => placeOf(t, threads)))];
   const scrollRef = useRef<HTMLDivElement>(null);
-  const go = (place: string) => (location.hash = place);
-  const vim = useVim("todo", places, scrollRef, "first", { compose: () => {}, open: go });
   useLayerScroll("todo", scrollRef);
 
   const row = (place: string, body: React.ReactNode) => (
-    <li key={place} {...vimRow(place)}>
-      <a href={`#${place}`} className={cn("flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm hover:bg-muted/60", vim.cursor === place && "bg-muted/60 shadow-[inset_2px_0_0_var(--color-link)]")}>
+    <li key={place} data-row={place}>
+      <a href={`#${place}`} className="flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm hover:bg-muted/60">
         {body}
       </a>
     </li>
@@ -55,7 +51,6 @@ export function TodoView() {
         <h1 className="text-sm font-medium">Todo</h1>
       </header>
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-      {vim.panel}
       {asks.length > 0 && (
         <section className="mb-5">
           <h2 className="mb-1 px-2.5 text-[13px] font-medium text-muted-foreground">Needs you · {asks.length}</h2>

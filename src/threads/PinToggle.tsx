@@ -15,7 +15,7 @@ export function PinToggle({ thread, className }: { thread: Thread; className?: s
       data-agent="thread-pin"
       aria-pressed={on}
       aria-label={on ? "Unpin" : "Pin"}
-      title={on ? "Unpin from the sidebar (P)" : "Pin to the sidebar (P)"}
+      title={on ? "Unpin from the sidebar" : "Pin to the sidebar"}
       onClick={() => void setPinned(thread.id, !on)}
       className={cn("flex size-8 shrink-0 items-center justify-center rounded-md border transition-colors", on ? "border-link/30" : "border-border", pinLook(on), className)}
     >
