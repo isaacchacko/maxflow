@@ -58,19 +58,25 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // The router's acknowledgement: one line while Isaac's last message waits on an answer, gone when it lands.
 export function Pending({ pending, names }: { pending: NonNullable<Thread["pending"]>; names: string[] }) {
   const who = `${names.length > 1 ? "routers" : "router"} ${names.join(", ")}`;
+  // One line as wide as the row allows: the status ends in an ellipsis where the row does (in full in the tooltip), and its time
+  // stays whole beside it.
+  const since = <span className="shrink-0 whitespace-nowrap text-muted-foreground tabular-nums">since {when(pending.since)}</span>;
   if (pending.stale)
     return (
-      <p data-agent="thread-pending" className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <AgentFace id={pending.routerIds[0] ?? ""} expression="error" small still className="size-4" />
-        {who} stopped without answering · since {when(pending.since)}
+      <p data-agent="thread-pending" title={`${who} stopped without answering`} className="flex max-w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+        <AgentFace id={pending.routerIds[0] ?? ""} expression="error" small still className="size-4 shrink-0" />
+        <span className="min-w-0 truncate">{who} stopped without answering</span>
+        <span className="shrink-0">·</span>
+        {since}
       </p>
     );
+  const label = pending.status ? `${names[0]}: ${pending.status}` : `${who} ${names.length > 1 ? "are" : "is"} working on a response`;
   return (
-    <p data-agent="thread-pending" className="working-pill flex w-fit max-w-full min-w-0 items-center gap-2 py-0.5 pr-3 pl-1 text-xs font-medium">
-      <AgentFace id={pending.routerIds[0] ?? ""} expression="thinking" small className="size-5" />
+    <p data-agent="thread-pending" title={label} className="working-pill flex w-fit max-w-full min-w-0 items-center gap-2 py-0.5 pr-3 pl-1 text-xs font-medium">
+      <AgentFace id={pending.routerIds[0] ?? ""} expression="thinking" small className="size-5 shrink-0" />
       {/* A router's status is markdown with chips; it may sit inside the inbox row's link, so its chips stay text. */}
-      <span className="shimmer min-w-0 truncate">{pending.status ? <Rich still text={`${names[0]}: ${pending.status}…`} /> : `${who} ${names.length > 1 ? "are" : "is"} working on a response…`}</span>
-      <span className="text-muted-foreground tabular-nums">since {when(pending.since)}</span>
+      <span className="shimmer min-w-0 flex-1 truncate">{pending.status ? <Rich still text={`${label}…`} /> : `${label}…`}</span>
+      {since}
     </p>
   );
 }

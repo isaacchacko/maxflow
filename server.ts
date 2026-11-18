@@ -1952,7 +1952,8 @@ Bun.serve<WsData>({
       if (!t) return new Response("no such thread", { status: 404 });
       const text = ((await req.json().catch(() => ({}))) as { text?: string }).text?.trim();
       if (!t.pending) return new Response("nothing pending in this thread: he isn't waiting on an answer", { status: 409 });
-      t.pending.status = text?.slice(0, 160) || undefined;
+      // Kept whole: the pill cuts it where his window does.
+      t.pending.status = text || undefined;
       saveThreads();
       publish(`thread/${t.id}`, { thread: t.id, status: t.pending.status ?? null });
       return Response.json(t);
