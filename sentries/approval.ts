@@ -4,8 +4,8 @@
 // PRs (gh-status.json) and the review queue, scores each new head
 // into a risk tier from its paths, size, complexity delta (lizard, base vs head), churn, tests and spread, and runs a headless claude
 // review (sentries/approval.md) in a worktree of that head, at most MAX_REVIEWS at once. Each verdict goes to approval/<pr>/<sha>.json
-// and approval-log.md. A failed review's findings reach the PR's agent, and a review is posted on GitHub as a comment, only while
-// the WRITE_SWITCH file exists.
+// and approval-log.md. A failed review's findings reach the PR's agent only while the WRITE_SWITCH file exists; it writes nothing
+// to GitHub.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -25,6 +25,7 @@ const MAX_REVIEWS = 2;
 const DRAFT_RECHECK_MS = 30 * 60_000;
 const REVIEW_TIMEOUT_MS = 40 * 60_000;
 const MODEL = "claude-opus-5-5";
+const MAX_ROUNDS = 3;
 
 // The inbox sentry's risky paths, outside tests and snapshots; with the fast-lane deny list and CODEOWNERS, any hit makes a PR tier 3.
 const RISKY = /migrat|alembic|\.sql$|erp|sap|terraform|infra|helm|k8s|kubernetes|\.github\/workflows|dockerfile|auth|permission|secret/i;
@@ -42,12 +43,13 @@ type Review = { verdict: "approve" | "approve_with_nits" | "request_changes"; su
 type Head = {
   sha: string; url: string; title: string; author: string; status: "queued" | "reviewing" | "done" | "skipped" | "failed";
   why?: string; tier?: number; reasons?: string[]; signals?: Signals; lenses?: string[]; reviews?: (Review & { lens: string; usd: number; tokens: number })[];
-  started?: number; finished?: number; posted?: string;
+  started?: number; finished?: number; handed?: number;
 };
-type State = { heads: Record<string, Head> };
+// rounds: how many heads of each PR went back to its agent with findings.
+type State = { heads: Record<string, Head>; rounds: Record<string, number> };
 
 const readJson = <T>(path: string, fallback: T): T => { try { return JSON.parse(readFileSync(path, "utf8")); } catch { return fallback; } };
-const state: State = { heads: {}, ...readJson<Partial<State>>(STATE_FILE, {}) };
+const state: State = { heads: {}, rounds: {}, ...readJson<Partial<State>>(STATE_FILE, {}) };
 const save = () => writeFileSync(STATE_FILE, JSON.stringify(state, null, 1));
 const log = (line: string) => console.log(`${new Date().toLocaleTimeString()}  ${line}`);
 const run = (cmd: string[], cwd?: string) => { const r = Bun.spawnSync(cmd, { cwd, stderr: "pipe" }); return r.exitCode === 0 ? r.stdout.toString().trim() : ""; };
@@ -202,43 +204,35 @@ const findings = (h: Head) => (h.reviews ?? []).flatMap((r) => r.comments).filte
 const passed = (h: Head) => !!h.reviews?.length && h.reviews.every((r) => r.verdict !== "request_changes") && !findings(h).length;
 const decision = (h: Head) => (passed(h) ? "passed: notify Liudvikas" : "findings: back to its agent");
 
-function reviewBody(h: Head) {
-  const lines = [`**Reviewed by maxflow's approval sentry** (tier ${h.tier}: ${h.reasons!.join("; ")})`, ""];
-  for (const r of h.reviews!) lines.push(`**${r.lens}** — ${r.verdict.replace(/_/g, " ")}: ${r.summary}`, `- Ticket: ${r.ticket}`, `- Tests: ${r.tests}`, ...r.checked.map((c) => `- ${c}`), "");
-  return lines.join("\n");
-}
-
-function post(key: string, h: Head) {
-  const [repo, n] = key.split("#");
-  const event = "COMMENT";
-  const comments = h.reviews!.flatMap((r) => r.comments).map((c) => ({
-    path: c.path, line: c.line, side: "RIGHT", body: `**${c.severity}**: ${c.body}${c.suggestion ? `\n\n\`\`\`suggestion\n${c.suggestion}\n\`\`\`` : ""}`,
-  }));
-  const payload = join(OUT_DIR, "payload.json");
-  writeFileSync(payload, JSON.stringify({ commit_id: h.sha, event, body: reviewBody(h), comments }));
-  const r = Bun.spawnSync(["gh", "api", `repos/${repo}/pulls/${n}/reviews`, "-X", "POST", "--input", payload], { stderr: "pipe" });
-  return r.exitCode === 0 ? event : `failed: ${r.stderr.toString().trim().slice(0, 200)}`;
-}
-
 function record(key: string, h: Head) {
   const file = join(OUT_DIR, key.replace(/[/#]/g, "_"), `${h.sha}.json`);
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(h, null, 2));
   const usd = (h.reviews ?? []).reduce((n, r) => n + r.usd, 0);
   appendFileSync(LOG_FILE, [
-    `## ${key} @ ${h.sha.slice(0, 8)}: ${h.status === "done" ? decision(h) : h.status}${h.posted ? ` (posted: ${h.posted})` : " (shadow)"}`,
+    `## ${key} @ ${h.sha.slice(0, 8)}: ${h.status === "done" ? decision(h) : h.status}`,
     `${h.url} "${h.title}" by ${h.author} · tier ${h.tier ?? "?"}: ${(h.reasons ?? [h.why ?? ""]).join("; ")} · $${usd.toFixed(2)} · ${new Date().toISOString()}`,
     ...(h.reviews ?? []).flatMap((r) => [`- **${r.lens}** ${r.verdict}: ${r.summary}`, ...r.comments.map((c) => `  - ${c.severity} ${c.path}:${c.line} ${c.body}${c.suggestion ? ` → \`${c.suggestion.slice(0, 120)}\`` : ""}`)]),
     "", "",
   ].join("\n"));
 }
 
-// The blocking and major findings go to the maxflow sessions on the PR, to fix and push; the new head is reviewed again.
+// The blocking and major findings go to the PR's maxflow session to fix and push, and the new head is reviewed again. A PR with no
+// session goes to the review sentry, which revives the chat that opened it or starts one. After MAX_ROUNDS heads it stops asking.
 async function handBack(key: string, h: Head) {
+  const rounds = (state.rounds[key] ?? 0) + 1;
+  state.rounds[key] = rounds;
+  h.handed = Date.now();
+  if (rounds > MAX_ROUNDS) return log(`${key}: findings again after ${MAX_ROUNDS} rounds; left for a human`);
+  const list = findings(h).map((c) => `- ${c.severity} ${c.path}:${c.line} ${c.body}${c.suggestion ? `\n  suggestion: ${c.suggestion}` : ""}`).join("\n");
+  const ask = `The approval sentry's review of ${h.url} at ${h.sha.slice(0, 8)} (tier ${h.tier}, round ${rounds} of ${MAX_ROUNDS}) found these. Liudvikas is asked to approve it only once a head passes. Fix the real ones and push; the new head is reviewed again on its own. If one is wrong, leave it and say why in your commit message.\n${list}`;
   const sessions = readJson<{ pr: string; sessions: { id: string }[] }[]>(QUEUE_FILE, []).find((q) => q.pr === key)?.sessions ?? [];
-  const text = `[maxflow approval] The review of ${h.url} at ${h.sha.slice(0, 8)} found these before Liudvikas is asked to approve it. Fix them (or reply on the PR why not) and push; the new head gets reviewed again.\n${findings(h).map((c) => `- ${c.severity} ${c.path}:${c.line} ${c.body}${c.suggestion ? `\n  suggestion: ${c.suggestion}` : ""}`).join("\n")}`;
-  for (const s of sessions.slice(0, 1)) await fetch(`${BASE}/api/sessions/${s.id}/notify`, { method: "POST", body: JSON.stringify({ text }) }).catch(() => null);
-  log(`${key}: findings ${sessions.length ? `to ${sessions[0].id}` : "for no session (the review sentry revives one)"}`);
+  const all = (await fetch(`${BASE}/api/sessions`).then((r) => r.json()).catch(() => [])) as { id: string; name: string }[];
+  const reviewSentry = all.find((s) => s.name === "sentry:review")?.id;
+  const to = sessions[0]?.id ?? reviewSentry;
+  const text = sessions[0] ? `[maxflow approval] ${ask}` : `[maxflow approval] ${h.url} has no session. Get these findings to its chat as in your job 1 (revive the chat that opened it, or start one on its branch), verbatim, and tell it to fix and push:\n\n${ask}`;
+  if (to) await fetch(`${BASE}/api/sessions/${to}/notify`, { method: "POST", body: JSON.stringify({ text }) }).catch(() => null);
+  log(`${key}: findings (round ${rounds}) to ${sessions[0] ? sessions[0].id : `the review sentry ${to ?? "(not found)"}`}`);
 }
 
 async function work(key: string, h: Head, pr: any) {
@@ -264,17 +258,12 @@ async function work(key: string, h: Head, pr: any) {
     // A second reviewer starts only after the first, so MAX_REVIEWS holds across PRs.
     for (const lens of h.lenses) h.reviews.push(await review(dir, key, h, pr, meta.body ?? "", LENSES[lens]).then((r) => ({ ...r, lens })));
     Object.assign(h, { status: "done", finished: Date.now() });
-    const live = readJson<Record<string, { pr: any }>>(STATUS_FILE, {})[key]?.pr;
-    if (existsSync(WRITE_SWITCH) && live?.headRefOid === h.sha && live.state === "OPEN") {
-      h.posted = post(key, h);
-      if (!passed(h)) await handBack(key, h);
-    }
   } catch (e) {
     Object.assign(h, { status: "failed", why: String(e).slice(0, 300), finished: Date.now() });
   } finally {
     run(["git", "-C", clone, "worktree", "remove", "--force", dir]);
   }
-  log(`${key}@${h.sha.slice(0, 8)}: ${h.status} ${h.status === "done" ? decision(h) : h.why ?? ""}${h.posted ? `, posted ${h.posted}` : ""}`);
+  log(`${key}@${h.sha.slice(0, 8)}: ${h.status} ${h.status === "done" ? decision(h) : h.why ?? ""}`);
   return h;
 }
 
@@ -297,8 +286,11 @@ function tick() {
   }
   save();
   const live = new Map(waiting().map(({ key, pr }) => [key, pr.headRefOid]));
-  for (const [key, h] of Object.entries(state.heads))
-    if (h.status === "done" && passed(h) && live.get(key) === h.sha) enqueue(note(key, h));
+  for (const [key, h] of Object.entries(state.heads)) {
+    if (h.status !== "done" || live.get(key) !== h.sha) continue;
+    if (passed(h)) enqueue(note(key, h));
+    else if (!h.handed && existsSync(WRITE_SWITCH)) handBack(key, h).then(save);
+  }
   flush((n) => live.get(n.pr) === n.sha);
 }
 
@@ -308,6 +300,6 @@ const note = (key: string, h: Head): Note => ({
 });
 
 mkdirSync(OUT_DIR, { recursive: true });
-log(`approval sentry up as ${me || "?"}; ${existsSync(WRITE_SWITCH) ? "acting (posting reviews, handing findings back)" : `shadow mode (touch ${WRITE_SWITCH} to act)`}; notifier ${config().url ? "sending" : "shadow (no url)"}`);
+log(`approval sentry up as ${me || "?"}; ${existsSync(WRITE_SWITCH) ? "handing findings to the PRs' agents" : `shadow mode (touch ${WRITE_SWITCH} to act)`}; notifier ${config().url ? "sending" : "shadow (no url)"}`);
 tick();
 setInterval(tick, TICK_MS);
