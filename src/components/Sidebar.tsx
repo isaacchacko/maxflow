@@ -1,11 +1,11 @@
-import { CircleCheckBig, MessagesSquare, type LucideIcon } from "lucide-react";
+import { CircleCheckBig, MessagesSquare, X, type LucideIcon } from "lucide-react";
 import { AgentFace, expressionOf, faceOf } from "@/components/AgentFace";
 import { Working } from "@/components/Working";
 import type { Thread } from "@/mock";
 import { useEffect, useRef, useState } from "react";
 import { Mark } from "@/components/Mark";
 import { cn } from "@/lib/utils";
-import { agentStore, setPinOrder, taskStore, threadStore } from "@/store";
+import { agentStore, setPinned, setPinOrder, taskStore, threadStore } from "@/store";
 import { openPane } from "@/threads/pane";
 import { unseenDeep, useSeen } from "@/threads/seen";
 
@@ -76,7 +76,7 @@ function PinnedEntry({ t, open, unread, onDrop }: { t: Thread; open: boolean; un
       onDragLeave={() => setOver(false)}
       onDrop={e => (e.preventDefault(), setOver(false), onDrop(e.dataTransfer.getData("text/yarn-pin")))}
       onClick={e => e.metaKey || e.ctrlKey || (e.preventDefault(), e.shiftKey ? (location.hash = `thread/${t.id}`) : openPane(t.id))}
-      className={cn("relative flex h-8 items-center gap-2 rounded-lg px-2 text-sm whitespace-nowrap text-muted-foreground hover:bg-black/[0.04] hover:text-foreground", (t.resolved || t.paused) && "opacity-50", over && "ring-2 ring-link/40")}
+      className={cn("group/pin relative flex h-8 items-center gap-2 rounded-lg px-2 text-sm whitespace-nowrap text-muted-foreground hover:bg-black/[0.04] hover:text-foreground", (t.resolved || t.paused) && "opacity-50", over && "ring-2 ring-link/40")}
     >
       {/* Folded, pins share their routers' faces too often to tell apart, so each is its title's first letter on its own tint. */}
       {!open ? (
@@ -92,7 +92,17 @@ function PinnedEntry({ t, open, unread, onDrop }: { t: Thread; open: boolean; un
         <>
           <span className="min-w-0 flex-1 truncate">{t.title}</span>
           {working && <Working className="size-3" />}
-          {unread > 0 && <span className="rounded-full bg-new-soft px-1.5 text-xs font-medium text-new tabular-nums">{unread}</span>}
+          {unread > 0 && <span className="rounded-full bg-new-soft px-1.5 text-xs font-medium text-new tabular-nums group-hover/pin:hidden">{unread}</span>}
+          {/* Hovered, its × unpins it in place of the count, without opening it. */}
+          <button
+            aria-label="Unpin"
+            title="Unpin"
+            data-agent={`unpin:${t.id}`}
+            onClick={e => (e.preventDefault(), e.stopPropagation(), void setPinned(t.id, false))}
+            className="hidden shrink-0 rounded-md p-0.5 text-muted-foreground group-hover/pin:block hover:bg-black/[0.06] hover:text-foreground"
+          >
+            <X className="size-3.5" />
+          </button>
         </>
       ) : (
         unread > 0 && <span className="absolute top-1 left-[1.45rem] size-2 rounded-full bg-new ring-2 ring-window" />
