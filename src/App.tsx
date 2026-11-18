@@ -118,7 +118,7 @@ export function App() {
       {/* Installed as an app, the tint around the panel drags the window, and the panel starts below the overlaid title bar. */}
       <div className="flex h-full bg-window p-2 pl-0 [app-region:drag]">
         <Sidebar view={route.view} />
-        <main style={{ marginTop: "max(0px, calc(env(titlebar-area-height, 0px) - 0.5rem))" }} className="ml-2 flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-card [app-region:no-drag]">
+        <main style={{ marginTop: "max(0px, calc(env(titlebar-area-height, 0px) - 0.5rem))" }} className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-card [app-region:no-drag]">
         <div data-region="main" className="min-h-0 min-w-0 flex-1">
           {detail?.kind === "agent" ? (
             <AgentPage key={detail.id} id={detail.id} back={route.view} />

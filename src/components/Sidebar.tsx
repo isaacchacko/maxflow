@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { taskStore, threadStore } from "@/store";
 import { unseenDeep, useSeen } from "@/threads/seen";
 
+// The rail's 52px run from the window's edge to the panel's, so a glyph has as much room on its right as on its left.
 // The app's frame, as Linear's is: the mark, then where he goes. It rests as a rail of glyphs; hovering it (or tabbing into it)
 // opens it over the page without moving anything, and ⌘\ pins it open beside the page, at the width he dragged it to. Installed
 // as an app with its window controls overlaid, its top strip, the row of the traffic lights, drags the window.
@@ -101,7 +102,7 @@ export function Sidebar({ view }: { view: string }) {
           <Entry view="todo" label="Todo" icon={CircleCheckBig} count={needsYou} warn active={view === "todo"} open={open} />
           <Entry view="inbox" label="Threads" icon={MessagesSquare} count={unread} active={view === "inbox"} open={open} />
         </div>
-        <div className="mt-auto flex px-0.5">
+        <div className="mt-auto flex">
           <Capture />
         </div>
         {open && <div onPointerDown={drag} title={saved.pinned ? "Drag to resize · ⌘\\ to unpin" : "Drag to resize · ⌘\\ to pin open"} className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize" />}
