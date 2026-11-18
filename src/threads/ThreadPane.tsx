@@ -59,7 +59,7 @@ export function ThreadPane() {
           </button>
         )}
         <h2 className={cn("min-w-0 flex-1 truncate text-sm font-semibold", thread?.resolved && "text-muted-foreground")}>{thread?.title ?? "Thread"}</h2>
-        <a href={`#thread/${id}`} onClick={closePane} title="Open in full" aria-label="Open in full" data-agent="pane-open-full" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+        <a href={`#thread/${id}`} title="Open in full" aria-label="Open in full" data-agent="pane-open-full" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
           <Maximize2 className="size-4" />
         </a>
         <button onClick={closePane} title="Close (Esc)" aria-label="Close" data-agent="pane-close" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">

@@ -53,6 +53,7 @@ export function Sidebar({ view }: { view: string }) {
   const [saved, setSaved] = useState(load);
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [capturing, setCapturing] = useState(false);
   const timer = useRef(0);
   useEffect(() => {
     try {
@@ -75,7 +76,8 @@ export function Sidebar({ view }: { view: string }) {
   };
   const enter = () => (clearTimeout(timer.current), (timer.current = window.setTimeout(() => setHover(true), 150)));
   const leave = () => (clearTimeout(timer.current), setHover(false));
-  const open = saved.pinned || hover || focused;
+  // A capture (⌘⇧S) draws its overlay inside the rail and focuses its box there: neither opens it, and it stays folded out of the shot.
+  const open = saved.pinned || (!capturing && (hover || focused));
   const overlay = open && !saved.pinned;
 
   const tops = threads.filter(t => !t.parentId && !t.resolved && !t.paused);
@@ -88,7 +90,8 @@ export function Sidebar({ view }: { view: string }) {
         data-agent="sidebar"
         onMouseEnter={enter}
         onMouseLeave={leave}
-        onFocus={() => setFocused(true)}
+        // Only keyboard focus opens it, not a click or focus a script moved here.
+        onFocus={e => e.target.matches("a:focus-visible, button:focus-visible") && setFocused(true)}
         onBlur={e => e.currentTarget.contains(e.relatedTarget as Node) || setFocused(false)}
         style={{ width: open ? saved.width : RAIL }}
         className={cn("absolute inset-y-0 left-0 z-40 flex flex-col overflow-hidden bg-window px-2 pb-2 transition-[width] duration-150 ease-out", overlay && "rounded-r-xl border-r shadow-raised")}
@@ -103,7 +106,7 @@ export function Sidebar({ view }: { view: string }) {
           <Entry view="inbox" label="Threads" icon={MessagesSquare} count={unread} active={view === "inbox"} open={open} />
         </div>
         <div className="mt-auto flex">
-          <Capture />
+          <Capture onActive={on => (setCapturing(on), on || (setHover(false), setFocused(false)))} />
         </div>
         {open && <div onPointerDown={drag} title={saved.pinned ? "Drag to resize · ⌘\\ to unpin" : "Drag to resize · ⌘\\ to pin open"} className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize" />}
       </nav>

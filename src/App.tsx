@@ -7,7 +7,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Page } from "@/page/Page";
 import type { PageRef } from "@/store";
-import { closePane, openPane, paneStore } from "@/threads/pane";
+import { closePane, openPane, paneStore, restorePane } from "@/threads/pane";
 import { ThreadPage, threadUp } from "@/threads/ThreadPage";
 import { ThreadPane } from "@/threads/ThreadPane";
 import { activeRegion } from "@/threads/vim";
@@ -53,21 +53,30 @@ function routeFromHash(): Route {
   return { view };
 }
 
-/** The thread a shift-click lands on: a link to one, an inbox row, a Todo row, a mention or a card on the canvas. */
+/**
+ * The thread a click in the page lands on: a link to one, an inbox or Todo row, a mention or a card on the canvas. A button, a box, or
+ * a link to anything else inside a row is that control's, and the thread page's own way up (← and the breadcrumb) climbs as before.
+ */
 function threadAt(target: EventTarget | null) {
   const el = target instanceof Element ? target : null;
-  const href = el?.closest("a")?.getAttribute("href")?.match(/^#thread\/(.+)$/)?.[1];
-  if (href) return href;
-  const card = el?.closest<HTMLElement>("[data-node^='thread:']")?.dataset.node?.slice(7);
+  if (!el?.closest("[data-region=main]") || el.closest("button, input, textarea, [role=menuitem], [data-agent=back], [data-agent^='thread-up:']")) return;
+  const link = el.closest("a");
+  if (link) return link.getAttribute("href")?.match(/^#thread\/(.+)$/)?.[1];
+  const card = el.closest<HTMLElement>("[data-node^='thread:']")?.dataset.node?.slice(7);
   if (card) return card;
-  const row = el?.closest<HTMLElement>("[data-region=main] [data-vim]")?.dataset.vim;
+  const row = el.closest<HTMLElement>("[data-vim]")?.dataset.vim;
   return row?.startsWith("th-") ? row : row?.match(/^thread\/(.+)$/)?.[1];
 }
-// Shift-click opens a thread in the side pane, as in Slack; the press would otherwise select text between it and the cursor.
-const onShiftClick = (e: MouseEvent) => {
-  if (!e.shiftKey || e.metaKey || e.ctrlKey || e.button !== 0) return;
+// As in Slack, a click on a thread opens it beside the page and ⇧-click opens it as the page (Enter and ⌘K do too). The press of a
+// ⇧-click would otherwise select the text between it and the cursor.
+const onThreadClick = (e: MouseEvent) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.button !== 0) return;
   const id = threadAt(e.target);
-  if (id) (e.preventDefault(), e.stopPropagation(), openPane(id));
+  if (!id) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.shiftKey) location.hash = `thread/${id}`;
+  else openPane(id);
 };
 const onShiftDown = (e: MouseEvent) => e.shiftKey && e.button === 0 && threadAt(e.target) && e.preventDefault();
 
@@ -82,8 +91,9 @@ export function App() {
       const prev = current.current;
       const next = (current.current = routeFromHash());
       arrive(prev.detail?.kind === "thread" ? prev.detail.id : undefined, { thread: next.detail?.kind === "thread" ? next.detail.id : undefined, view: !next.detail });
-      // Opening a thread in full, by any means, cancels the side pane, the pane's own thread included (as its ↗ does).
-      if (next.detail?.kind === "thread") closePane();
+      // Each page brings back its own side pane: opening a thread in full leaves this page's pane behind (the pane's own thread
+      // included, as ↗ does), and coming back here opens it again.
+      restorePane();
       setRoute(next);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -98,12 +108,12 @@ export function App() {
     };
     addEventListener("hashchange", onHash);
     addEventListener("keydown", onKey);
-    addEventListener("click", onShiftClick, true);
+    addEventListener("click", onThreadClick, true);
     addEventListener("mousedown", onShiftDown, true);
     return () => {
       removeEventListener("hashchange", onHash);
       removeEventListener("keydown", onKey);
-      removeEventListener("click", onShiftClick, true);
+      removeEventListener("click", onThreadClick, true);
       removeEventListener("mousedown", onShiftDown, true);
     };
   }, [route.view]);

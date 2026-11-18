@@ -82,8 +82,10 @@ function contextOf(rect: Rect, overlay: Element | null) {
 }
 
 /** ⌘⇧S / Ctrl+Shift+S, or the camera: drag a region or click a thing, add a comment, and it goes to the funnel as an inbox message. */
-export function Capture() {
+/** `onActive` hears when a capture starts and ends, so the rail it sits in can stay folded out of the shot. */
+export function Capture({ onActive }: { onActive?(active: boolean): void }) {
   const [mode, setMode] = useState<"off" | "picking" | "shooting" | "comment">("off");
+  useEffect(() => void onActive?.(mode !== "off"), [mode !== "off"]);
   const [drag, setDrag] = useState<{ x0: number; y0: number; rect: Rect } | null>(null);
   const [hover, setHover] = useState<Rect | null>(null);
   const [shot, setShot] = useState<Shot | null>(null);

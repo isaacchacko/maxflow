@@ -100,7 +100,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
 
   // Back up from a subthread (or by Back/Forward) it is where he left it; opening with something unread scrolls to the line;
   // otherwise, and as messages arrive, to the bottom.
-  const restored = useLayerScroll(`thread:${id}`, scrollRef);
+  const restored = useLayerScroll(`${embedded ? "pane:" : ""}thread:${id}`, scrollRef);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !thread) return;
