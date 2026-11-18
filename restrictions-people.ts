@@ -7,8 +7,9 @@ import { parsePr, repoOf } from "./sentries/gh";
 
 // Who a tool call reaches or acts on, for restrictions scoped to people: a Slack DM's other member, each email recipient, a
 // Teams chat's members, the author of the PR a gh command reviews or merges, a mallory target. Read from what the sentries
-// keep on disk, never a live Slack or GitHub call. team is set only when it is known: a dryft.ai address, a PR author who is
-// a member of its org. A channel post reaches no one person, so it has none.
+// keep on disk, never a live Slack or GitHub call. team is set only when it is known: true for a dryft.ai address or a PR
+// author who is a member or collaborator of its repo, false for any other address or PR author. A channel post reaches no one
+// person, so it has none.
 const ME = "U0B33G87YH4";
 // mallory's devices: umbrella is his phone, which he reads himself; the others run his own agents, so a message to one reaches no person.
 const ISAAC: Person = { name: "Isaac", slack: ME, email: "isaac@dryft.ai", team: true };
@@ -20,9 +21,12 @@ const MAIL = /^mcp__claude_ai_(Gmail__(send_message|reply|forward|create_draft|u
 const TEAMS = /^mcp__claude_ai_Microsoft_365__teams_create_chat$/;
 
 const read = (file: string, dir: string) => { try { return JSON.parse(readFileSync(join(dir, file), "utf8")); } catch { return undefined; } };
+// A recipient: an address, or a calendar attendee {email, name}; a room booked as a resource is no one.
 const email = (a: unknown): Person[] => {
-  const e = String(typeof a === "object" && a ? ((a as { email?: string; address?: string }).email ?? (a as { address?: string }).address ?? "") : a).trim().toLowerCase();
-  return /@/.test(e) ? [{ email: e, team: e.endsWith(`@${TEAM_DOMAIN}`) || undefined }] : [];
+  const o = typeof a === "object" && a ? (a as { email?: string; address?: string; name?: string; type?: string }) : undefined;
+  if (o?.type === "resource") return [];
+  const e = String(o ? (o.email ?? o.address ?? "") : a).trim().toLowerCase();
+  return /@/.test(e) ? [{ email: e, team: e.endsWith(`@${TEAM_DOMAIN}`), ...(o?.name && { name: o.name }) }] : [];
 };
 const list = (v: unknown) => (Array.isArray(v) ? v : v ? [v] : []);
 
@@ -65,7 +69,7 @@ function bashPeople(command: string, cwd: string, dir: string): Person[] {
       } else key = /^#?\d+$/.test(ref) && repo ? `${repo}#${ref.replace("#", "")}` : parsePr(ref, cwd);
     }
     const pr = key && prs[key]?.pr;
-    if (pr?.author?.login) people.push({ github: pr.author.login.toLowerCase(), team: ["MEMBER", "OWNER"].includes(pr.authorAssociation) || undefined });
+    if (pr?.author?.login) people.push({ github: pr.author.login.toLowerCase(), team: pr.authorAssociation ? ["MEMBER", "OWNER", "COLLABORATOR"].includes(pr.authorAssociation) : undefined });
   }
   return people;
 }
