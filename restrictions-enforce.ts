@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { STATE_DIR } from "./instance";
-import { resolve, type Restriction } from "./restrictions";
+import { resolve, type Person, type Restriction } from "./restrictions";
 
 // Enforcing restrictions on a tool call an agent is about to make (hooks/restrictions.ts asks here). deny stops it; ask stops it
 // too, opens an ask to Isaac in a thread of its own naming the exact call, and keeps it pending; his yes there grants a one-time
@@ -12,7 +12,7 @@ const PASS_MS = 24 * 3_600_000;
 const pending: Pending[] = existsSync(PENDING) ? JSON.parse(readFileSync(PENDING, "utf8")) : [];
 const savePending = () => writeFileSync(PENDING, JSON.stringify(pending.filter((p) => Date.now() - p.at < 7 * 24 * 3_600_000)));
 
-export type Call = { session: string; tool: string; input?: Record<string, unknown>; cwd?: string; objective?: string };
+export type Call = { session: string; tool: string; input?: Record<string, unknown>; cwd?: string; objective?: string; people?: Person[] };
 export type Verdict = { decision: "allow" | "deny"; reason?: string };
 type Deps = {
   restrictions: () => Restriction[];
@@ -25,15 +25,17 @@ type Deps = {
 
 // The call as he reads it, and as a retry is recognized: a Bash command is its command, anything else its tool and input.
 const callOf = (c: Call) => (c.tool === "Bash" ? String(c.input?.command ?? "") : `${c.tool} ${JSON.stringify(c.input ?? {})}`);
+const whoOf = (p: Person) => [p.name, p.email, p.github && `@${p.github}`, !p.name && p.slack].filter(Boolean).join(" ") || "someone";
 const shown = (call: string) => (call.length > 600 ? `${call.slice(0, 600)}…` : call);
 
 export function enforce(c: Call, d: Deps): Verdict {
-  const { mode, restriction: r } = resolve(d.restrictions(), c);
+  const { mode, restriction: r, person } = resolve(d.restrictions(), c);
+  const to = person ? ` to ${whoOf(person)}` : "";
   if (mode === "allow" || !r) return { decision: "allow" };
   const call = callOf(c);
   const key = `${c.tool}\n${call}`;
   if (mode === "deny") {
-    d.log(c.session, `restriction: ${r.label}`, `Blocked ${c.tool}: restriction "${r.label}" (${r.id}) is set to block.\n\`\`\`\n${shown(call)}\n\`\`\``);
+    d.log(c.session, `restriction: ${r.label}`, `Blocked ${c.tool}${to}: restriction "${r.label}" (${r.id}) is set to block.\n\`\`\`\n${shown(call)}\n\`\`\``);
     return { decision: "deny", reason: `Blocked by maxflow restriction "${r.label}" (${r.id}), which Isaac set to block${r.note ? `: ${r.note.replace(/\.$/, "")}` : ""}. Don't retry it or work around it with another tool; if the task needs it, ask him with \`${d.cli} ask\`.` };
   }
   const mine = pending.filter((p) => p.session === c.session && p.key === key);
@@ -50,11 +52,11 @@ export function enforce(c: Call, d: Deps): Verdict {
     return { decision: "deny", reason: `Isaac said no to this call in thread ${refused.thread} (restriction "${r.label}"). Don't run it or work around it; if something changed, ask him again there with \`${d.cli} ask --re ${refused.thread} '<why>'\`.` };
   if (open)
     return { decision: "deny", reason: `Still waiting on Isaac: restriction "${r.label}" needs his approval, already asked in thread ${open.thread}. Run \`${d.cli} wait thread:${open.thread}\` and end your turn; on his yes, retry exactly this call.` };
-  const thread = d.ask(c.session, `May I run this? It falls under the restriction "${r.label}", set to ask you first.\n\n\`\`\`\n${shown(call)}\n\`\`\`\n\nReply yes to let it run once, or no.`);
+  const thread = d.ask(c.session, `May I run this${to ? `, which reaches ${whoOf(person!)}` : ""}? It falls under the restriction "${r.label}", set to ask you first.\n\n\`\`\`\n${shown(call)}\n\`\`\`\n\nReply yes to let it run once, or no.`);
   if (!thread) return { decision: "allow" };
   pending.push({ id: crypto.randomUUID().slice(0, 8), session: c.session, key, call, restriction: r.id, label: r.label, thread, at: Date.now() });
   savePending();
-  d.log(c.session, `restriction: ${r.label}`, `Held ${c.tool} for Isaac's approval in ${thread} (restriction "${r.label}" is set to ask).\n\`\`\`\n${shown(call)}\n\`\`\``);
+  d.log(c.session, `restriction: ${r.label}`, `Held ${c.tool}${to} for Isaac's approval in ${thread} (restriction "${r.label}" is set to ask).\n\`\`\`\n${shown(call)}\n\`\`\``);
   return { decision: "deny", reason: `Held by maxflow restriction "${r.label}" (${r.id}): Isaac wants to approve this first. maxflow asked him in thread ${thread}, naming this exact call. Don't retry it or work around it. Run \`${d.cli} wait thread:${thread}\` and end your turn (do other work first if any doesn't hang on it); when he says yes you get a one-time pass and the same call goes through.` };
 }
 

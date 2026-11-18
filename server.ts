@@ -2423,10 +2423,10 @@ Bun.serve<WsData>({
     }
     // The restrictions hook, on a call a restriction that asks or blocks matches: the verdict, with the session's objective.
     if (path === "/api/restrictions/enforce" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { tool?: string; input?: Record<string, unknown>; cwd?: string };
+      const body = (await req.json().catch(() => ({}))) as { tool?: string; input?: Record<string, unknown>; cwd?: string; people?: Person[] };
       const s = sessions.get(req.headers.get("x-maxflow-from") ?? "");
       if (!s || !body.tool) return Response.json({ decision: "allow" });
-      return Response.json(enforce({ session: s.id, tool: body.tool, input: body.input, cwd: body.cwd, objective: s.role?.objective }, enforcing));
+      return Response.json(enforce({ session: s.id, tool: body.tool, input: body.input, cwd: body.cwd, people: body.people, objective: s.role?.objective }, enforcing));
     }
     // `maxflow ask`: an agent's question to the user opens a thread from it, flagged as waiting on him.
     if (path === "/api/asks" && req.method === "POST") {
