@@ -470,6 +470,16 @@ if (import.meta.main) {
   while (!(await fetch(`${base}/api/sessions`).then((r) => r.ok, () => false))) await Bun.sleep(2_000);
   if (!state.seq) state.seq = Number((await fetch(`${base}/api/events?topic=none&after=now`)).headers.get("x-maxflow-seq") ?? 0);
   log(`inbox sentry as ${ghMe || "?"} / ${me || "?"}`);
+  // The conversations start from the last day of the bus log, so the first hand-offs after a fresh start have their context too.
+  if (!Object.keys(state.convo).length)
+    for (const line of (existsSync(join(STATE_DIR, "events.jsonl")) ? readFileSync(join(STATE_DIR, "events.jsonl"), "utf8") : "").split("\n")) {
+      if (!line.includes('"topic":"slack/')) continue;
+      try {
+        const e = JSON.parse(line), d = e.data;
+        if (Date.now() - e.at > 86_400_000 || !d?.link || !d.text || d.bot || !/^slack\/(dm|mention|own|\w+\/[\d.]+\/reply)$/.test(e.topic)) continue;
+        remember(keyOf(d), { at: Number(d.ts) * 1000, who: d.from ?? "?", text: readable(d.text), mine: e.topic === "slack/own" || d.user === me });
+      } catch {}
+    }
   let handledAt = 0;
   // Reply tasks opened before reactions were checked: watch their thread's first message.
   for (const [key, id] of Object.entries(state.tasks)) if (/^[CDG]\w+\/[\d.]+$/.test(key) && !Object.values(state.open).includes(key) && id) state.open[key.split("/")[1]] = key;
