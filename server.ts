@@ -573,9 +573,12 @@ function targetOf(source: Source, text: string, from?: Session) {
   return from ? from.name.replace(/^sentry:/, "") : source === "isaac" ? "chat" : "maxflow";
 }
 const live = (s?: Session): s is Session => !!s && s.exitCode === null;
+// A session that can take a message: up, and an agent. A routed session that is a plain shell (claude never ran in it, as in
+// 662ba653) would queue his messages where nothing reads them, so it doesn't count as a thread's owner and his reply goes on.
+const reachable = (s?: Session): s is Session => live(s) && isAgent(s);
 const funnel = () => [...sessions.values()].find((s) => s.name === "sentry:funnel" && isSentry(s) && live(s));
 function routersOf(objective: string) {
-  const all = [...sessions.values()].filter((s) => live(s) && s.role?.role === "router" && s.role.objective === objective);
+  const all = [...sessions.values()].filter((s) => reachable(s) && s.role?.role === "router" && s.role.objective === objective);
   const own = all.filter((s) => !s.role!.merged);
   return own.length ? own : all;
 }
@@ -656,7 +659,7 @@ async function feedMore(t: Thread, from: Session, text: string, posts?: FeedPost
   if (t.feed) t.feedSaid = [...(t.feedSaid ?? []), text];
   t.resolved = undefined;
   unpause(t);
-  const to = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(live);
+  const to = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(reachable);
   if (!to.length) await feedToFunnel(t, from, text, feed);
   else {
     for (const r of to) r.handed = t.id;
@@ -948,7 +951,7 @@ const agentMentions = (text: string) => [...new Set([...text.matchAll(/\[\[(?:ag
 // Whoever hears it already (the thread's routers, or the funnel routing it) isn't told twice.
 function tellMembers(t: Thread, m: Message, heard: Session[], woke = "") {
   for (const id of agentMentions(m.text)) if (!t.members?.includes(id) && sessions.get(id) && isAgent(sessions.get(id)!)) (t.members ??= []).push(id);
-  const to = (t.members ?? []).flatMap((id) => sessions.get(id) ?? []).filter((s) => live(s) && !heard.includes(s));
+  const to = (t.members ?? []).flatMap((id) => sessions.get(id) ?? []).filter((s) => reachable(s) && !heard.includes(s));
   if (!to.length) return;
   const owners = t.routers.map((r) => sessions.get(r)?.name ?? names[r] ?? r);
   dispatch({ source: "isaac", to, target: t.title, text: m.text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(m.text)}\n[maxflow] He @-mentioned you in this thread, so his messages in it reach you${owners.length ? `, as they reach its owner${owners.length > 1 ? "s" : ""} ${owners.join(", ")}` : ""}. Answer him inline with \`${CLI} thread post ${t.id} '<text>'\`; read the rest with \`${CLI} thread read ${t.id} --last 20\`.${woke}${mentionsIn(m.text)}` });
@@ -997,14 +1000,14 @@ function postIn(t: Thread, from: Session | undefined, text: string, nudge?: "sub
   if (from && t.feed) t.signal = undefined;
   // A router posting becomes one of the thread's routers only where the thread is its to own: on its own objective, or with no live
   // router of its own. A pointer posted in another objective's thread would otherwise bring it every reply there.
-  if (from?.role?.role === "router" && !t.routers.includes(from.id) && (!t.objective || t.objective === from.role.objective || !t.routers.some((id) => live(sessions.get(id)))))
+  if (from?.role?.role === "router" && !t.routers.includes(from.id) && (!t.objective || t.objective === from.role.objective || !t.routers.some((id) => reachable(sessions.get(id)))))
     t.routers.push(from.id);
   // Isaac's reply goes to the thread's routers through the event log, like any message; an agent's post answers him.
   if (!from) {
     t.resolved = undefined;
     unpause(t);
     // A subthread with no live router of its own goes to the nearest ancestor's.
-    const live_ = [t, ...ancestors(t).reverse()].map((x) => x.routers.flatMap((id) => sessions.get(id) ?? []).filter(live)).find((r) => r.length) ?? [];
+    const live_ = [t, ...ancestors(t).reverse()].map((x) => x.routers.flatMap((id) => sessions.get(id) ?? []).filter(reachable)).find((r) => r.length) ?? [];
     const to = live_.length ? live_ : routersOf(t.objective);
     // Nobody left to hear it (its agents ended, and it has no objective with a router): the funnel finds it an owner.
     const front = funnel();
