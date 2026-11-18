@@ -765,8 +765,11 @@ for (const t of threads as (Thread & { kind?: string; kindBy?: string; done?: nu
 // quoted under "Before it…", then the new lines under "New:" and the links); each becomes its messages, with the text kept for agents.
 {
   const uids: Record<string, string> = {};
+  // The hand-off text squashed each message's whitespace; the slack sentry's store has it as written, by its ts.
+  const raw: Record<string, string> = {};
   try {
-    for (const { msgs } of Object.values(JSON.parse(readFileSync(`${STATE_DIR}/slack-messages.json`, "utf8")) as Record<string, { msgs: { uid: string; who: string }[] }>)) for (const m of msgs) uids[m.who] ??= m.uid;
+    for (const { msgs } of Object.values(JSON.parse(readFileSync(`${STATE_DIR}/slack-messages.json`, "utf8")) as Record<string, { msgs: { ts: string; uid: string; who: string; text: string }[] }>))
+      for (const m of msgs) (uids[m.who] ??= m.uid), (raw[m.ts.replace(".", "")] ??= m.text.replace(/\s*No thread mess+ages\s*$/, ""));
   } catch {}
   for (const t of threads) {
     if (!t.feed || !t.messages.some((m) => m.from === "feed" && !m.ext)) continue;
@@ -794,10 +797,16 @@ for (const t of threads as (Thread & { kind?: string; kindBy?: string; done?: nu
       // Each new message was quoted with its continuation lines quoted too, so they split apart only when there is a link for each.
       const split = now.split(/\n(?=> )/).map(unquote).filter(Boolean);
       const lines = split.length === links.length ? split : [unquote(now)];
-      lines.forEach((text, i) => out.push({ ...said(text, i ? `${m.id}-${i}` : m.id), ext: { source, name: who, ...(source === "slack" ? uids[who] && { user: uids[who] } : { user: who }), link: links[Math.min(i, links.length - 1)], where } }));
+      lines.forEach((text, i) => out.push({ ...said((lines.length === links.length && raw[links[i].match(/\/p(\d+)/)?.[1] ?? ""]) || text, i ? `${m.id}-${i}` : m.id), ext: { source, name: who, ...(source === "slack" ? uids[who] && { user: uids[who] } : { user: who }), link: links[Math.min(i, links.length - 1)], where } }));
       return out.length ? out : [m];
     });
   }
+  // Threads split before the store's text was used get it now: a Slack message's own text, by its link.
+  for (const t of threads)
+    for (const m of t.messages) {
+      const ts = m.ext?.source === "slack" && !m.ext.context && m.ext.link.match(/\/p(\d+)/)?.[1];
+      if (ts && raw[ts] && !m.text.includes("\n") && raw[ts].includes("\n")) m.text = raw[ts];
+    }
 }
 const saveThreads = () => writeFileSync(THREADS, JSON.stringify(threads));
 // A paused thread comes back at its time: a timer for the ones due within a day, rebuilt at boot, and a sweep each minute for the
