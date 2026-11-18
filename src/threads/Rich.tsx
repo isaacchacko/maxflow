@@ -40,7 +40,14 @@ export function urlsIn(text: string) {
  * A link to a maxflow entity, opened in place; one that no longer exists is struck through and says so on hover. `still`
  * draws it as plain text in the same look, for a chip inside something that is itself a link or button.
  */
-export function RefChip({ r, still }: { r: Ref; still?: boolean }) {
+/**
+ * A chip is one line whatever it names: its label ends in an ellipsis past min(100%, 28ch) inline in text (the whole width of a
+ * list it sits in, `wide`), with the full label in its tooltip; its icon never shrinks. The label carries the baseline, so its text
+ * sits on the line's with the words around it; the icon is centred beside it.
+ */
+const pill = (wide?: boolean) => cn("inline-flex items-baseline gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline whitespace-nowrap hover:border-ring [&>:first-child]:shrink-0 [&>:first-child]:self-center", wide ? "max-w-full" : "max-w-[min(100%,28ch)]");
+
+export function RefChip({ r, still, wide }: { r: Ref; still?: boolean; wide?: boolean }) {
   const agents = agentStore.use();
   const tasks = taskStore.use();
   const objectives = objectiveStore.use();
@@ -52,11 +59,11 @@ export function RefChip({ r, still }: { r: Ref; still?: boolean }) {
     <Tag
       href={still ? undefined : href}
       onClick={e => e.stopPropagation()}
-      title={found ? undefined : `No ${r.kind} ${r.id} in yarn now`}
-      className={cn("inline-flex items-center gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline hover:border-ring", mono ? "font-mono text-[0.85em]" : "text-[0.92em]", !found && "border-dashed border-border bg-transparent text-muted-foreground line-through")}
+      title={found ? label : `No ${r.kind} ${r.id} in yarn now`}
+      className={cn(pill(wide), mono ? "font-mono text-[0.85em]" : "text-[0.92em]", !found && "border-dashed border-border bg-transparent text-muted-foreground line-through")}
     >
       {icon}
-      {label}
+      <span className="min-w-0 truncate">{label}</span>
     </Tag>
   );
 
@@ -76,11 +83,11 @@ export function RefChip({ r, still }: { r: Ref; still?: boolean }) {
       <Tag
         href={still ? undefined : `#thread/${threadId}`}
         onClick={e => (e.stopPropagation(), !still && (e.preventDefault(), goToMessage(threadId!, messageId)))}
-        title={m ? undefined : `No message ${r.id} in yarn now`}
-        className={cn("inline-flex items-center gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline text-[0.92em] not-italic hover:border-ring", !m && "border-dashed border-border bg-transparent text-muted-foreground line-through")}
+        title={m ? `${who} · ${m.at.slice(11, 16)}` : `No message ${r.id} in yarn now`}
+        className={cn(pill(wide), "text-[0.92em] not-italic", !m && "border-dashed border-border bg-transparent text-muted-foreground line-through")}
       >
         <MessageSquareQuote className="size-3 text-link" />
-        {m ? `${who} · ${m.at.slice(11, 16)}` : messageId}
+        <span className="min-w-0 truncate">{m ? `${who} · ${m.at.slice(11, 16)}` : messageId}</span>
       </Tag>
     );
   }
@@ -156,7 +163,7 @@ const prColor = { open: "text-ok", merged: "text-merged", closed: "text-destruct
 function PrChip({ repo, n }: { repo: string; n: string }) {
   const pr = prStore.use()[`${repo}#${n}`];
   return (
-    <a href={`https://github.com/${repo}/pull/${n}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title={pr?.title} className="inline-flex max-w-96 items-center gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline text-[0.92em] hover:border-ring">
+    <a href={`https://github.com/${repo}/pull/${n}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title={pr ? `${repo}#${n} ${pr.title}` : `${repo}#${n}`} className={cn(pill(), "text-[0.92em]")}>
       <GitPullRequest className={cn("size-3 shrink-0", pr ? prColor[pr.state] : "text-muted-foreground")} />
       <span className="shrink-0 tabular-nums">{repo === REPO ? "" : repo}#{n}</span>
       {pr && <span className="truncate text-muted-foreground">{pr.title}</span>}
@@ -166,9 +173,9 @@ function PrChip({ repo, n }: { repo: string; n: string }) {
 
 function LinearChip({ issue }: { issue: string }) {
   return (
-    <a href={`${LINEAR}/${issue}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline text-[0.92em] tabular-nums hover:border-ring">
+    <a href={`${LINEAR}/${issue}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} title={issue} className={cn(pill(), "text-[0.92em] tabular-nums")}>
       <SquareKanban className="size-3 text-link" />
-      {issue}
+      <span className="min-w-0 truncate">{issue}</span>
     </a>
   );
 }

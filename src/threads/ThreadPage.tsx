@@ -347,7 +347,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
             {mentioned.size === 0 && <p className="text-xs text-muted-foreground">None</p>}
             <div className="flex flex-wrap gap-1.5 text-sm">
               {[...mentioned.values()].map(r => (
-                <RefChip key={`${r.kind}:${r.id}`} r={r} />
+                <RefChip key={`${r.kind}:${r.id}`} r={r} wide />
               ))}
             </div>
           </Section>
@@ -357,7 +357,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
               <Section title={`Mentioned in · ${mentionedIn.length}`}>
                 <div className="flex flex-wrap gap-1.5 text-sm" data-agent="mentioned-in">
                   {mentionedIn.map(t => (
-                    <RefChip key={t.id} r={{ kind: "thread", id: t.id }} />
+                    <RefChip key={t.id} r={{ kind: "thread", id: t.id }} wide />
                   ))}
                 </div>
               </Section>
@@ -367,10 +367,10 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
           <Section title={`Links · ${links.size}`}>
             {links.size === 0 && <p className="text-xs text-muted-foreground">None</p>}
             {[...links.values()].map(l => (
-              <a key={l.url} href={l.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-muted">
+              <a key={l.url} href={l.url} target="_blank" rel="noreferrer" title={`${l.label}\n${l.url}`} className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-sm whitespace-nowrap hover:bg-muted">
                 <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate">{l.label}</span>
-                <span className="truncate text-xs text-muted-foreground">{new URL(l.url).hostname}</span>
+                <span className="min-w-0 truncate">{l.label}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{new URL(l.url).hostname}</span>
               </a>
             ))}
           </Section>
