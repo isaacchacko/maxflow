@@ -813,7 +813,13 @@ for (const t of threads as (Thread & { kind?: string; kindBy?: string; done?: nu
       if (ts && raw[ts] && !m.text.includes("\n") && raw[ts].includes("\n")) m.text = raw[ts];
     }
 }
-const saveThreads = () => writeFileSync(THREADS, JSON.stringify(threads));
+// Written a moment after the last change, not inside each request: a burst of changes writes once, and the request that made one
+// doesn't wait on serializing every thread (over half a megabyte). Flushed on the way out, so a restart loses nothing.
+let threadsDirty: ReturnType<typeof setTimeout> | undefined;
+const writeThreads = () => (clearTimeout(threadsDirty), (threadsDirty = undefined), writeFileSync(THREADS, JSON.stringify(threads)));
+const saveThreads = () => void (threadsDirty ??= setTimeout(writeThreads, 200));
+process.on("exit", () => threadsDirty && writeThreads());
+for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => process.exit(0));
 // A paused thread comes back at its time: a timer for the ones due within a day, rebuilt at boot, and a sweep each minute for the
 // rest (and for a timer lost to sleep). Coming back, it is unread from where it was paused, so his inbox puts it up top.
 const PAUSE_TIMER_MS = 86_400_000;

@@ -1,5 +1,5 @@
 import type { Agent, Objective, Sentry, SentrySession, Signal, Task, Thread } from "./mock";
-import { agentStore, liveStore, objectiveStore, nameStore, prStore, type Pr, refreshed, sentryStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
+import { agentStore, changes, liveStore, objectiveStore, nameStore, prStore, type Pr, refreshed, sentryStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
 
 type World = { objectives: Objective[]; agents: Agent[]; tasks: Task[]; threads: Thread[]; signals: Signal[]; sentries: SentrySession[]; names?: Record<string, string>; prs: Record<string, Pr> };
 
@@ -46,13 +46,16 @@ addEventListener("hashchange", setTitle);
 // again after that, the page reloads, so a restart's new code and a fresh world come in by themselves.
 let misses = 0;
 async function refresh() {
+  const n = changes.n;
   try {
     const res = await fetch("/api/world", { cache: "no-store" });
     if (res.headers.has("x-maxflow-down")) return location.reload();
     if (res.ok) {
       if (misses >= 2) return location.reload();
       misses = 0;
-      apply(await res.json());
+      const w = await res.json();
+      // Fetched across one of his own changes, it may not have it yet; the refetch that change asks for brings it.
+      if (changes.n === n) apply(w);
     }
   } catch {
     if (liveStore.get()) misses++;

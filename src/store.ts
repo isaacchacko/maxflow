@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { NOW_AT, sentries as seedSources, threads as seedThreads, agents as seedAgents, signals as seedSignals, tasks as seedTasks, objectives as seedObjectives, type Block, type Event, type Agent, type SentrySession, type Signal, type Status } from "./mock";
+import { NOW_AT, localAt, type Thread, sentries as seedSources, threads as seedThreads, agents as seedAgents, signals as seedSignals, tasks as seedTasks, objectives as seedObjectives, type Block, type Event, type Agent, type SentrySession, type Signal, type Status } from "./mock";
 
 export function createStore<T>(initial: T) {
   let state = initial;
@@ -42,6 +42,34 @@ export async function api(path: string, body?: unknown, method = "POST") {
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   await refreshed.current?.();
   return res.status === 204 ? null : res.json();
+}
+
+/**
+ * Bumped around each of his own changes; live.ts drops a world it fetched across one, so a poll that left before the server had
+ * the change can't draw the old state back over it.
+ */
+export const changes = { n: 0 };
+
+/**
+ * His own change to a thread shows at once: it is made here first, then sent, and the world is fetched again in the background
+ * to reconcile. Waiting for the server and a full world (over a megabyte, a few hundred ms to build) made pinning and resolving lag.
+ * A change the server refuses is put back.
+ */
+async function optimistic(threadId: string, change: (t: Thread) => Thread, path: string, body: unknown) {
+  const before = threadStore.get().find(t => t.id === threadId);
+  changes.n++;
+  threadStore.set(all => all.map(t => (t.id === threadId ? change(t) : t)));
+  if (!isLive()) return;
+  try {
+    const res = await fetch(path, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  } catch (e) {
+    if (before) threadStore.set(all => all.map(t => (t.id === threadId ? before : t)));
+    throw e;
+  } finally {
+    changes.n++;
+    void refreshed.current?.();
+  }
 }
 
 /** A page is addressed the same way as its route: "task/t1" or "objective/overdue". */
@@ -137,15 +165,13 @@ export async function openSubthread(threadId: string, messageId: string, open = 
 
 /** Isaac marks a thread done, or reopens it; it stays readable and postable either way. */
 export async function setResolved(threadId: string, resolved: boolean) {
-  if (isLive()) return void (await api(`/api/threads/${threadId}`, { resolved }, "PATCH"));
-  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: resolved ? { at: NOW_AT } : undefined } : t)));
+  await optimistic(threadId, t => ({ ...t, resolved: resolved ? { at: localAt() } : undefined }), `/api/threads/${threadId}`, { resolved });
 }
 
 /** Isaac pins a thread to his sidebar, at the end of his pins, or unpins it. */
 export async function setPinned(threadId: string, pinned: boolean) {
-  if (isLive()) return void (await api(`/api/threads/${threadId}`, { pinned }, "PATCH"));
   const next = Math.max(0, ...threadStore.get().map(t => (t.pinned ? t.pinned.order + 1 : 0)));
-  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, pinned: pinned ? (t.pinned ?? { at: NOW_AT, order: next }) : undefined } : t)));
+  await optimistic(threadId, t => ({ ...t, pinned: pinned ? (t.pinned ?? { at: localAt(), order: next }) : undefined }), `/api/threads/${threadId}`, { pinned });
 }
 
 /** The order he dragged his pins into, first to last; drawn at once, then kept by the server. */
@@ -156,8 +182,8 @@ export async function setPinOrder(ids: string[]) {
 
 /** Isaac puts a thread away until a time, or brings it back now (null); his own message in it brings it back too. */
 export async function setPaused(threadId: string, paused: { until: number; said: string; wake?: string } | null) {
-  if (isLive()) return void (await api(`/api/threads/${threadId}`, { paused }, "PATCH"));
-  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: undefined, paused: paused ? { until: new Date(paused.until).toISOString(), at: NOW_AT, said: paused.said, posts: 0, wake: paused.wake } : undefined } : t)));
+  const show = (t: Thread): Thread => ({ ...t, resolved: paused ? undefined : t.resolved, paused: paused ? { until: localAt(new Date(paused.until)), at: localAt(), said: paused.said, posts: 0, wake: paused.wake } : undefined });
+  await optimistic(threadId, show, `/api/threads/${threadId}`, { paused });
 }
 
 /** His inbox drew an ask flagged: its agent's 3h default counts from the first time it did. */
