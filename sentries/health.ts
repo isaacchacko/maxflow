@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// health sentry: the moment the maxflow server stops answering, it takes over the port with a "down" page, and if the
+// health sentry: the moment the maxflow server stops answering, it takes over the port with its "panic" page, and if the
 // server stays down it starts a claude agent to fix it, shown live on that page. A frontend build that stays broken
 // while the API still answers gets an agent too.
 // It runs in tmux, so it outlives the server it watches, and it starts the agent straight in tmux for the same reason;
@@ -26,7 +26,7 @@ const XTERM = join(DIR, "node_modules/@xterm");
 const INTER = join(DIR, "node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2");
 
 // Only the live server runs as a service, and a dev one is down whenever its developer stops it, so there is nothing to recover.
-// HEALTH_DEV=1 watches a dev instance anyway, as if it were a loaded service, to try the down page against it.
+// HEALTH_DEV=1 watches a dev instance anyway, as if it were a loaded service, to try the panic page against it.
 const DEV = !!process.env.HEALTH_DEV;
 if (!LIVE && !DEV) console.log("health sentry: not the live maxflow, nothing to watch"), process.exit(0);
 
@@ -36,7 +36,7 @@ const run = (cmd: string[]) => {
 };
 const stamp = () => new Date().toLocaleTimeString();
 
-// "refused" means nothing holds the port, so the down page can take it; "hung" means something holds it without answering.
+// "refused" means nothing holds the port, so the panic page can take it; "hung" means something holds it without answering.
 async function probe(): Promise<"up" | "refused" | "hung"> {
   try {
     return (await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) })).ok ? "up" : "hung";
@@ -124,7 +124,8 @@ function state() {
 }
 
 type WsData = { pty?: Subprocess };
-const DOWN_HEADERS = { "x-maxflow-down": "1", "cache-control": "no-store" };
+// x-yarn-panic marks every answer as the panic page's; x-maxflow-down is its old name, still sent for tabs open from before.
+const PANIC_HEADERS = { "x-yarn-panic": "1", "x-maxflow-down": "1", "cache-control": "no-store" };
 
 function openPage() {
   try {
@@ -133,18 +134,19 @@ function openPage() {
       port: PORT,
       idleTimeout: 0,
       fetch(req, server) {
-        const path = new URL(req.url).pathname;
-        if (path === "/__down/release" && req.method === "POST") {
+        // Its own routes live under /__panic/; /__down/ was their old name, kept for a server or page from before the rename.
+        const path = new URL(req.url).pathname.replace(/^\/__down\//, "/__panic/");
+        if (path === "/__panic/release" && req.method === "POST") {
           setTimeout(closePage, 50);
           return new Response("released");
         }
-        if (path === "/__down/state") return Response.json(state(), { headers: DOWN_HEADERS });
-        if (path === "/__down/ws") return server.upgrade(req, { data: {} }) ? undefined : new Response("upgrade failed", { status: 400 });
-        const asset = { "/__down/xterm.js": "xterm/lib/xterm.js", "/__down/xterm.css": "xterm/css/xterm.css", "/__down/fit.js": "addon-fit/lib/addon-fit.js" }[path];
+        if (path === "/__panic/state") return Response.json(state(), { headers: PANIC_HEADERS });
+        if (path === "/__panic/ws") return server.upgrade(req, { data: {} }) ? undefined : new Response("upgrade failed", { status: 400 });
+        const asset = { "/__panic/xterm.js": "xterm/lib/xterm.js", "/__panic/xterm.css": "xterm/css/xterm.css", "/__panic/fit.js": "addon-fit/lib/addon-fit.js" }[path];
         if (asset) return new Response(Bun.file(join(XTERM, asset)));
-        if (path === "/__down/inter.woff2") return new Response(Bun.file(INTER), { headers: { "content-type": "font/woff2" } });
-        if (path.startsWith("/api/")) return new Response("maxflow is down", { status: 503, headers: DOWN_HEADERS });
-        return new Response(Bun.file(join(import.meta.dir, "health.html")), { headers: { ...DOWN_HEADERS, "content-type": "text/html" } });
+        if (path === "/__panic/inter.woff2") return new Response(Bun.file(INTER), { headers: { "content-type": "font/woff2" } });
+        if (path.startsWith("/api/")) return new Response("maxflow is down", { status: 503, headers: PANIC_HEADERS });
+        return new Response(Bun.file(join(import.meta.dir, "panic.html")), { headers: { ...PANIC_HEADERS, "content-type": "text/html" } });
       },
       websocket: {
         open(ws: ServerWebSocket<WsData>) {
@@ -167,9 +169,9 @@ function openPage() {
         },
       },
     });
-    console.log(`${stamp()}  server down, serving the down page on ${base}`);
+    console.log(`${stamp()}  server down, serving the panic page on ${base}`);
   } catch (e) {
-    console.error(`${stamp()}  couldn't take ${base} for the down page:`, e);
+    console.error(`${stamp()}  couldn't take ${base} for the panic page:`, e);
   }
 }
 
@@ -181,10 +183,10 @@ function closePage() {
   console.log(`${stamp()}  server starting, handed the port back`);
 }
 
-console.log(`health sentry: polls ${base} every ${INTERVAL_MS / 1000}s; down page after ${PAGE_AFTER_MS / 1000}s, recovery agent after ${DOWN_MS / 1000}s down or ${BUILD_DOWN_MS / 1000}s with a broken build`);
+console.log(`health sentry: polls ${base} every ${INTERVAL_MS / 1000}s; panic page after ${PAGE_AFTER_MS / 1000}s, recovery agent after ${DOWN_MS / 1000}s down or ${BUILD_DOWN_MS / 1000}s with a broken build`);
 for (;;) {
   try {
-    // While the down page holds the port the server can't be listening, so there's nothing to probe.
+    // While the panic page holds the port the server can't be listening, so there's nothing to probe.
     const health = page ? "refused" : await probe();
     if (health === "up") {
       if (downSince) console.log(`${stamp()}  up again after ${Math.round((Date.now() - downSince) / 1000)}s`);

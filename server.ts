@@ -198,7 +198,7 @@ function adoptSessions() {
   if (sessions.size) console.log(`adopted ${sessions.size} tmux session(s)`);
 }
 // Panes in the live maxflow carry its port, so a plain `bun server.ts` run from one would otherwise adopt and respawn the live sessions.
-// The health sentry's down page answers 503, so a server started while live is down still takes over.
+// The health sentry's panic page answers 503, so a server started while live is down still takes over.
 if (LIVE && (await fetch(`${BASE}/api/sessions`).then((r) => r.ok, () => false)))
   console.error(`the live maxflow is already running on ${BASE}; run ./dev.sh for a dev instance`), process.exit(1);
 adoptSessions();
@@ -1891,9 +1891,9 @@ function sameOrigin(req: Request) {
   return host === `localhost:${PORT}` || host === `${HOST}:${PORT}`;
 }
 
-// While we're down the health sentry serves its down page on our port; ask it to hand the port back.
+// While we're down the health sentry serves its panic page on our port; ask it to hand the port back.
 for (let i = 0; i < 20; i++) {
-  if (!(await fetch(`http://${HOST}:${PORT}/__down/release`, { method: "POST" }).then((r) => r.ok, () => false))) break;
+  if (!(await fetch(`http://${HOST}:${PORT}/__panic/release`, { method: "POST" }).then((r) => r.ok, () => false))) break;
   await Bun.sleep(250);
 }
 

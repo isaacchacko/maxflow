@@ -40,8 +40,8 @@ function setTitle() {
 }
 addEventListener("hashchange", setTitle);
 
-// The health sentry answers in the server's place while it is down; reloading lands on its "Oh no!" page, which reloads back
-// once the server is up. While nothing answers at all (a restart, before the down page takes the port) the page waits it out:
+// The health sentry answers in the server's place while it is down; reloading lands on its panic page, which reloads back
+// once the server is up. While nothing answers at all (a restart, before the panic page takes the port) the page waits it out:
 // reloading then lands on the browser's own "can't connect" page, which never retries and needed ⌘R. When the server answers
 // again after that, the page reloads, so a restart's new code and a fresh world come in by themselves.
 let misses = 0;
@@ -49,7 +49,7 @@ async function refresh() {
   const n = changes.n;
   try {
     const res = await fetch("/api/world", { cache: "no-store" });
-    if (res.headers.has("x-maxflow-down")) return location.reload();
+    if (res.headers.has("x-yarn-panic") || res.headers.has("x-maxflow-down")) return location.reload();
     if (res.ok) {
       if (misses >= 2) return location.reload();
       misses = 0;
