@@ -56,28 +56,39 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-// The router's acknowledgement: one line while Isaac's last message waits on an answer, gone when it lands.
-export function Pending({ pending, names }: { pending: NonNullable<Thread["pending"]>; names: string[] }) {
+// The router's acknowledgement while Isaac's last message waits on an answer, gone when it lands; drawn as BoardUI's thinking line:
+// no pill, the router's face turning where a message's picture sits, then its status if it set one, else a shimmering "Thinking…",
+// and how long it has been at it. Who it is lives in the tooltip. `inline` is the inbox's replies line: a small face, no column.
+export function Pending({ pending, names, inline }: { pending: NonNullable<Thread["pending"]>; names: string[]; inline?: boolean }) {
   const who = `${names.length > 1 ? "routers" : "router"} ${names.join(", ")}`;
-  // One line as wide as the row allows: the status ends in an ellipsis where the row does (in full in the tooltip), and its time
-  // stays whole beside it.
-  const since = <span className="shrink-0 whitespace-nowrap text-muted-foreground tabular-nums">since {when(pending.since)}</span>;
+  const face = (expression: "working" | "error", still?: boolean) =>
+    inline ? (
+      <AgentFace id={pending.routerIds[0] ?? ""} expression={expression} still={still} small className="size-5 shrink-0" />
+    ) : (
+      <span className="flex w-9 shrink-0 justify-center">
+        <AgentFace id={pending.routerIds[0] ?? ""} expression={expression} still={still} className="size-7" />
+      </span>
+    );
+  const row = cn("flex max-w-full min-w-0 items-center text-muted-foreground", inline ? "gap-1.5 text-xs" : "gap-2.5 py-1 text-sm");
   if (pending.stale)
     return (
-      <p data-agent="thread-pending" title={`${who} stopped without answering`} className="flex max-w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-        <AgentFace id={pending.routerIds[0] ?? ""} expression="error" small still className="size-4 shrink-0" />
-        <span className="min-w-0 truncate">{who} stopped without answering</span>
-        <span className="shrink-0">·</span>
-        {since}
+      <p data-agent="thread-pending" title={`${who} stopped without answering (since ${when(pending.since)})`} className={row}>
+        {face("error", true)}
+        <span className="min-w-0 truncate">Stopped without answering</span>
       </p>
     );
-  const label = pending.status ? `${names[0]}: ${pending.status}` : `${who} ${names.length > 1 ? "are" : "is"} working on a response`;
   return (
-    <p data-agent="thread-pending" title={`${label} (since ${when(pending.since)})`} className="working-pill flex w-fit max-w-full min-w-0 items-center gap-2 py-0.5 pr-3 pl-1 text-xs font-medium">
-      <AgentFace id={pending.routerIds[0] ?? ""} expression="working" small className="size-5 shrink-0" />
+    <p data-agent="thread-pending" title={`${who}: ${pending.status ?? "working on a response"} (since ${when(pending.since)})`} className={row}>
+      {face("working")}
       {/* A router's status is markdown with chips; it may sit inside the inbox row's link, so its chips stay text. */}
-      <span className="shimmer min-w-0 flex-1 truncate">{pending.status ? <Rich still text={`${label}…`} /> : `${label}…`}</span>
-      <Elapsed since={pending.since} />
+      {pending.status ? (
+        <span className="min-w-0 truncate">
+          <Rich still text={pending.status} />
+        </span>
+      ) : (
+        <span className="shimmer-soft min-w-0 truncate">Thinking…</span>
+      )}
+      <Elapsed since={pending.since} className="text-[0.85em] opacity-80" />
     </p>
   );
 }

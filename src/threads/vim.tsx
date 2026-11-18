@@ -9,7 +9,7 @@ const HELP: [string, string][] = [
   ["j k", "next, previous"],
   ["gg G", "first, last"],
   ["Ctrl-d Ctrl-u", "half page down, up"],
-  ["Enter l", "open full page (a click opens a thread beside it, ⇧-click full)"],
+  ["Enter l", "open full page (a click opens a thread beside it, ⇧-click full; a pinned thread the reverse)"],
   ["h", "up a level"],
   ["i a", "write; Esc leaves an empty box"],
   ["r", "reply in thread"],

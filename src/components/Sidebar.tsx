@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Mark } from "@/components/Mark";
 import { cn } from "@/lib/utils";
 import { setPinned, setPinOrder, taskStore, threadStore } from "@/store";
-import { openPane } from "@/threads/pane";
+import { closePane, openPane } from "@/threads/pane";
 import { unseenDeep, useSeen } from "@/threads/seen";
 
 // The rail's 52px run from the window's edge to the panel's, so a glyph has as much room on its right as on its left.
@@ -61,8 +61,9 @@ const pinExpression = (t: Thread): Expression =>
   t.resolved ? "done" : t.paused ? "asleep" : t.pending ? (t.pending.stale ? "error" : "working") : t.asks ? "waiting" : "idle";
 
 /**
- * A pinned thread: its own face, its title, and whether it has news or a router at work on it. A click
- * opens it beside the page and ⇧-click as the page, as everywhere; resolved or paused, it stays pinned, drawn muted.
+ * A pinned thread: its own face, its title, and whether it has news or a router at work on it. A click opens it as the page
+ * (Isaac: "clicking a thread from sidebar should have it open as a full page") and ⇧-click beside it, the reverse of a thread in
+ * the page; resolved or paused, it stays pinned, drawn muted.
  */
 function PinnedEntry({ t, open, unread, onDrop }: { t: Thread; open: boolean; unread: number; onDrop(dragged: string): void }) {
   const working = !!t.pending && !t.pending.stale;
@@ -70,14 +71,14 @@ function PinnedEntry({ t, open, unread, onDrop }: { t: Thread; open: boolean; un
   return (
     <a
       href={`#thread/${t.id}`}
-      title={t.title}
+      title={`${t.title}\n⇧-click to open beside the page`}
       data-agent={`pinned:${t.id}`}
       draggable
       onDragStart={e => e.dataTransfer.setData("text/yarn-pin", t.id)}
       onDragOver={e => (e.preventDefault(), setOver(true))}
       onDragLeave={() => setOver(false)}
       onDrop={e => (e.preventDefault(), setOver(false), onDrop(e.dataTransfer.getData("text/yarn-pin")))}
-      onClick={e => e.metaKey || e.ctrlKey || (e.preventDefault(), e.shiftKey ? (location.hash = `thread/${t.id}`) : openPane(t.id))}
+      onClick={e => e.metaKey || e.ctrlKey || (e.preventDefault(), e.shiftKey ? openPane(t.id) : (closePane(), (location.hash = `thread/${t.id}`)))}
       className={cn("group/pin relative flex h-8 items-center gap-2 rounded-lg px-2 text-sm whitespace-nowrap text-muted-foreground hover:bg-black/[0.04] hover:text-foreground", (t.resolved || t.paused) && "opacity-50", over && "ring-2 ring-link/40")}
     >
       {/* Its own face, from the thread's id so pins under one router still tell apart, doing what the thread is doing. */}

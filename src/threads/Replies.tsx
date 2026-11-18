@@ -32,7 +32,7 @@ export function Replies({ t }: { t: Thread }) {
       {replies.length > 0 ? <span className="shrink-0 font-semibold text-link">{replies.length === 1 ? "1 reply" : `${replies.length} replies`}</span> : !t.pending && <span className="text-muted-foreground">No replies yet</span>}
       {fresh > 0 && <span className="shrink-0 rounded-full bg-new-soft px-1.5 font-medium text-new">{fresh} new</span>}
       {t.pending ? (
-        <Pending pending={t.pending} names={t.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />
+        <Pending inline pending={t.pending} names={t.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />
       ) : (
         replies.length > 0 && <span className="shrink-0 text-muted-foreground">Last reply {ago(Date.parse(replies.at(-1)!.at))} ago</span>
       )}
