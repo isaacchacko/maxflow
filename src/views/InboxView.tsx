@@ -1,4 +1,5 @@
 import { AlarmClock, Check, ChevronDown, MessageSquareReply, Pin, Quote, RotateCcw } from "lucide-react";
+import { DropdownMenu } from "radix-ui";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { localAt, type Thread } from "@/mock";
@@ -32,6 +33,46 @@ function dayLabel(day: string) {
   if (d.toDateString() === today.toDateString()) return "Today";
   if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).replace(",", "");
+}
+
+/**
+ * Slack's day divider: a hairline across the whole list where the day starts, with the day as a white pill on it. The line scrolls
+ * away with the day; the pill alone sticks to the top while that day scrolls by, floating over the rows (with a soft shadow then),
+ * and opens a jump-to menu: a week back, or any day in the channel. The line is the `data-day` mark the pill is placed against.
+ */
+function DayDivider({ day, days, jump }: { day: string; days: string[]; jump(day: string): void }) {
+  const weekAgo = new Date(Date.now() - 7 * 86_400_000).toLocaleDateString("sv");
+  const lastWeek = [...days].reverse().find(d => d >= weekAgo && d < new Date(Date.now() - 86_400_000).toLocaleDateString("sv"));
+  const item = "flex cursor-pointer items-center justify-between gap-6 px-2 py-1 outline-none select-none data-highlighted:bg-muted";
+  return (
+    <>
+      <div data-day={day} className="-mx-5 mt-5 h-px bg-border" />
+      {/* Only the pill takes clicks: the rows it floats over stay clickable on either side of it. */}
+      <div data-agent="inbox-day" className="group/day pointer-events-none sticky top-1.5 z-20 -mt-3 mb-1.5 flex justify-center">
+        <DropdownMenu.Root modal={false}>
+          <DropdownMenu.Trigger data-agent="inbox-day-jump" className="pointer-events-auto flex items-center gap-1 rounded-full border bg-card px-3 py-0.5 text-xs font-medium text-foreground outline-none group-data-stuck/day:shadow-[0_2px_6px_rgb(0_0_0/0.08)] hover:bg-muted data-[state=open]:bg-muted">
+            {dayLabel(day)}
+            <ChevronDown className="size-3 text-muted-foreground" />
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content align="center" sideOffset={4} onEscapeKeyDown={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()} onCloseAutoFocus={e => e.preventDefault()} className="z-50 max-h-80 min-w-44 overflow-y-auto border bg-background p-1 text-sm shadow-lg">
+              <DropdownMenu.Label className="px-2 py-1 text-xs text-muted-foreground">Jump to…</DropdownMenu.Label>
+              {lastWeek && (
+                <DropdownMenu.Item className={item} onSelect={() => jump(lastWeek)}>
+                  Last week <span className="text-xs text-muted-foreground">{dayLabel(lastWeek)}</span>
+                </DropdownMenu.Item>
+              )}
+              {days.map(d => (
+                <DropdownMenu.Item key={d} data-agent={`inbox-day-to:${d}`} className={cn(item, d === day && "font-medium")} onSelect={() => jump(d)}>
+                  {dayLabel(d)}
+                </DropdownMenu.Item>
+              ))}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      </div>
+    </>
+  );
 }
 
 /** When he last had the inbox open, kept in this browser; what opened after it sits under the red "New" line. */
@@ -138,7 +179,17 @@ export function InboxView() {
   function onScroll() {
     const el = scrollRef.current!;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    // A day's pill is stuck once the line where its day starts has scrolled up past where the pill sits.
+    const top = el.getBoundingClientRect().top;
+    for (const mark of el.querySelectorAll<HTMLElement>("[data-day]")) mark.nextElementSibling?.toggleAttribute("data-stuck", mark.getBoundingClientRect().top < top + 6);
   }
+  // The days in the channel, newest first, for the dividers' jump-to menu; a jump lands on the day's first thread under its bar.
+  const days = [...new Set(rows.map(r => r.first.at.slice(0, 10)).filter(d => d !== "9999"))].reverse();
+  const jump = (day: string) => {
+    const el = scrollRef.current;
+    const mark = el?.querySelector(`[data-day="${day}"]`);
+    if (el && mark) el.scrollTop += mark.getBoundingClientRect().top - el.getBoundingClientRect().top;
+  };
 
   // The bar at the top steps through the threads with replies he hasn't seen, in the channel's order.
   const [step, setStep] = useState(0);
@@ -259,11 +310,7 @@ export function InboxView() {
               return (
                 <Fragment key={t.id}>
                   {newDay && first.at !== "9999" && (
-                    <div data-agent="inbox-day" className="sticky top-0 z-10 mb-1 flex items-center gap-3 bg-card/95 py-2 text-xs font-medium text-muted-foreground backdrop-blur">
-                      <span className="h-px flex-1 bg-border" />
-                      <span>{dayLabel(day)}</span>
-                      <span className="h-px flex-1 bg-border" />
-                    </div>
+                    <DayDivider day={day} days={days} jump={jump} />
                   )}
                   {isNew && (
                     <div ref={lineRef} data-agent="unread-line" className="my-2 flex items-center gap-1.5 text-[11px] font-semibold text-destructive">
