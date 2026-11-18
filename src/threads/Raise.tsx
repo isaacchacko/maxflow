@@ -1,4 +1,4 @@
-import { ArrowUpToLine } from "lucide-react";
+import { Share } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { useEffect, useRef, useState } from "react";
 import type { Thread } from "@/mock";
@@ -58,7 +58,7 @@ export function RaiseDialog() {
           className="fixed top-[18%] left-1/2 z-50 flex w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 flex-col gap-3 rounded-2xl border bg-card p-4 shadow-raised outline-none"
         >
           <Dialog.Title className="flex items-center gap-2 text-sm font-medium">
-            <ArrowUpToLine className="size-4 text-muted-foreground" />
+            <Share className="size-4 text-muted-foreground" />
             Raise to Threads
           </Dialog.Title>
           <form
