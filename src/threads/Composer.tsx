@@ -1,7 +1,8 @@
-import { AtSign, Bold, Code, Ellipsis, Italic, Link2, List, ListOrdered, Plus, SendHorizontal, Smile, SquareCode, Strikethrough, Type, X } from "lucide-react";
+import { ArrowUpToLine, AtSign, Bold, Code, Ellipsis, Italic, Link2, List, ListOrdered, Plus, SendHorizontal, Smile, SquareCode, Strikethrough, Type, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { cn } from "@/lib/utils";
+import { EmojiPanel, useEmojiComplete } from "./Emoji";
 import { useMentionPicker } from "./Mention";
 import { Markdown } from "./Rich";
 
@@ -28,9 +29,6 @@ export function quoteInto(draftKey: string, markdown: string) {
 export const quoted = (text: string, thread: string, message: string) => `${text.trim().split("\n").map(l => `> ${l}`).join("\n")}\n>\n> — [[msg:${thread}/${message}]]`;
 
 const imagesIn = (files: FileList | undefined) => [...(files ?? [])].filter(f => f.type.startsWith("image/"));
-
-// The emoji a click puts in, the ones people reach for.
-const EMOJI = "👍 👎 🙏 🙌 👏 👀 🎉 🚀 🔥 ✅ ❌ ⚠️ 💯 ❤️ 😄 😂 😅 🙂 😉 🤔 😬 😭 😱 🤯 🫠 🫡 🤝 💪 👋 ☕ 💡 🐛 🛠️ 📌 📝 ⏳".split(" ");
 
 type Edit = { value: string; start: number; end: number };
 // Markdown around the selection, or taken off when it is already there: Slack's toolbar toggles the same way.
@@ -96,12 +94,15 @@ const formatShown = () => { try { return localStorage.getItem(FORMAT_KEY) === "1
  * is on), and send. It grows with its text up to 40% of the
  * window, and takes images pasted or dropped on it: each is uploaded at once, and its path is kept with the draft so a reload keeps it.
  */
-export function Composer({ onSend, className, autoFocus, agent, draftKey, tools, toolsOn, placeholder = "Message" }: { onSend: (text: string) => unknown; className?: string; autoFocus?: boolean; agent: string; draftKey: string; tools?: React.ReactNode; toolsOn?: boolean; placeholder?: string }) {
+export function Composer({ onSend, onRaise, className, autoFocus, agent, draftKey, tools, toolsOn, placeholder = "Message" }: { onSend: (text: string) => unknown; onRaise?: (text: string) => unknown; className?: string; autoFocus?: boolean; agent: string; draftKey: string; tools?: React.ReactNode; toolsOn?: boolean; placeholder?: string }) {
   const [draft, setDraft] = usePersistentDraft(draftKey);
   const [imageDraft, setImageDraft] = usePersistentDraft(`${draftKey}:images`);
   const images = imageDraft.split("\n").filter(Boolean);
   const setImages = (paths: string[]) => setImageDraft(paths.join("\n"));
   const [quote, setQuote] = usePersistentDraft(`${draftKey}:quote`);
+  // With a quote in the box, he can send it to the top of Threads as a new thread instead of replying here (`onRaise`).
+  const [raising, setRaising] = useState(false);
+  useEffect(() => void (quote || setRaising(false)), [quote]);
   const input = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [emoji, setEmoji] = useState(false);
@@ -144,6 +145,7 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools,
     return () => removeEventListener("composer-quote", onQuote);
   }, [draftKey]);
   const mention = useMentionPicker(input, draft, setDraft, draftKey.match(/^thread:([\w-]+)$/)?.[1]);
+  const emojiComplete = useEmojiComplete(input, draft, setDraft);
   const [uploading, setUploading] = useState(0);
   const [error, setError] = useState("");
 
@@ -165,7 +167,9 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools,
   function send(e: React.FormEvent) {
     e.preventDefault();
     if (uploading || empty) return;
-    onSend([quote && `${quote}\n`, draft.trim(), ...images.map(path => `![image](${path})`)].filter(Boolean).join("\n"));
+    if (raising && onRaise) onRaise([draft.trim(), quote, ...images.map(path => `![image](${path})`)].filter(Boolean).join("\n\n"));
+    else onSend([quote && `${quote}\n`, draft.trim(), ...images.map(path => `![image](${path})`)].filter(Boolean).join("\n"));
+    setRaising(false);
     setDraft("");
     setQuote("");
     setImages([]);
@@ -232,6 +236,19 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools,
             </button>
           </div>
         )}
+        {quote && onRaise && (
+          <button
+            type="button"
+            data-agent={`${agent}-raise`}
+            aria-pressed={raising}
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => setRaising(r => !r)}
+            className={cn("mx-3 mt-1.5 flex w-fit items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs", raising ? "bg-link/10 text-link" : "text-muted-foreground hover:bg-muted hover:text-foreground")}
+          >
+            <ArrowUpToLine className="size-3" />
+            {raising ? "Sends as a new thread in Threads" : "Post as a new thread"}
+          </button>
+        )}
         {/* The @ picker places itself by the caret, measured from the text's own top. */}
         <div className="relative">
         <textarea
@@ -240,12 +257,12 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools,
           autoFocus={autoFocus}
           data-agent={agent}
           value={draft}
-          onChange={e => (setDraft(e.target.value), mention.track())}
-          onSelect={mention.track}
+          onChange={e => (setDraft(e.target.value), mention.track(), emojiComplete.track())}
+          onSelect={() => (mention.track(), emojiComplete.track())}
           // The @ picker takes its keys first while it is open, then the formatting shortcuts. Enter sends, Shift+Enter is a new line;
           // Enter that confirms an IME composition is neither. Escape in an empty box leaves it, back to the keys that move through the page.
           onKeyDown={e => {
-            if (mention.onKeyDown(e)) return;
+            if (mention.onKeyDown(e) || emojiComplete.onKeyDown(e)) return;
             const f = formatFor(e);
             // ⌘K here is the link, not the switcher, which listens on the window first and leaves a key from this box alone.
             if (f) return e.preventDefault(), edit(f.apply);
@@ -260,6 +277,7 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools,
           className="block w-full resize-none overflow-y-auto bg-transparent px-3 pt-2.5 pb-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60"
         />
         {mention.panel}
+        {emojiComplete.panel}
         </div>
         <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
           <button type="button" aria-label="Attach an image" title="Attach an image" onMouseDown={keep} onClick={() => fileInput.current?.click()} className={cn(tool, "rounded-full bg-muted/70")}>
@@ -273,7 +291,11 @@ export function Composer({ onSend, className, autoFocus, agent, draftKey, tools,
             <button type="button" aria-label="Emoji" title="Emoji" aria-expanded={emoji} onMouseDown={keep} onClick={() => setEmoji(o => !o)} className={tool}>
               <Smile className="size-3.5" />
             </button>
-            {emoji && <EmojiPicker onPick={e => (insert(e), setEmoji(false))} onClose={() => setEmoji(false)} />}
+            {emoji && (
+              <Popover onClose={() => setEmoji(false)} agent="composer-emoji">
+                <EmojiPanel onPick={e => (insert(e), setEmoji(false))} />
+              </Popover>
+            )}
           </span>
           <button type="button" aria-label="Mention a thread" title="Mention a thread (@)" onMouseDown={keep} onClick={at} className={tool}>
             <AtSign className="size-3.5" />
@@ -310,17 +332,5 @@ function Popover({ onClose, className, children, agent }: { onClose: () => void;
     <div ref={ref} data-agent={agent} className={cn("absolute bottom-9 left-0 z-20 rounded-xl border bg-card shadow-card", className)}>
       {children}
     </div>
-  );
-}
-
-function EmojiPicker({ onPick, onClose }: { onPick: (emoji: string) => void; onClose: () => void }) {
-  return (
-    <Popover onClose={onClose} agent="composer-emoji" className="grid w-64 grid-cols-8 gap-0.5 p-1.5">
-      {EMOJI.map(e => (
-        <button key={e} type="button" onMouseDown={ev => ev.preventDefault()} onClick={() => onPick(e)} className="flex size-7 items-center justify-center rounded-md text-base hover:bg-muted">
-          {e}
-        </button>
-      ))}
-    </Popover>
   );
 }

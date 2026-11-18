@@ -7,7 +7,7 @@ const SHOWN = 8;
 const AT = /(?:^|\s)@([^\s@\]]{0,40}(?: [^\s@\]]{1,40}){0,3})$/;
 
 /** Where the caret sits inside a textarea, in px from its top-left: a hidden copy of the box with the same text wrapping finds it. */
-function caretAt(el: HTMLTextAreaElement, pos: number) {
+export function caretAt(el: HTMLTextAreaElement, pos: number) {
   const style = getComputedStyle(el);
   const copy = document.createElement("div");
   for (const p of ["font", "letterSpacing", "lineHeight", "padding", "border", "boxSizing", "whiteSpace", "wordWrap", "tabSize"] as const) copy.style[p] = style[p];

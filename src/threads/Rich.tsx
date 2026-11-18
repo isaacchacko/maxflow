@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import { AgentFace, expressionOf } from "@/components/AgentFace";
 import { AgentLink } from "@/components/AgentLink";
 import { GitHubGlyph, loadSlackNames, mrkdwn, SlackGlyph, slackLabel, slackLink, slackNameStore } from "@/lib/slack";
+import { emojify, emojiReady, loadEmoji } from "@/lib/emoji";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor, type External } from "@/mock";
 export type { External };
@@ -112,12 +113,19 @@ export function RefChip({ r, still, wide, row }: { r: Ref; still?: boolean; wide
   );
 }
 
+/** Text with a :shortcode: in it fetches the emoji table, and draws again once it has it. */
+function useEmoji(text: string) {
+  emojiReady.use();
+  if (text.includes(":")) void loadEmoji();
+}
+
 /** Agent-written text on one line: chips, links, code and emphasis as in a message, but no paragraphs, lists or headings. */
 export function Rich({ text, className, still }: { text: string; className?: string; still?: boolean }) {
+  useEmoji(text);
   return (
     <span className={className}>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips]} components={still ? inlineStill : inline} allowedElements={INLINE} unwrapDisallowed urlTransform={keepRefs}>
-        {asLinks(splitCapture(text).body.replace(/\s*\n\s*/g, " "))}
+        {emojify(asLinks(splitCapture(text).body.replace(/\s*\n\s*/g, " ")))}
       </ReactMarkdown>
     </span>
   );
@@ -317,11 +325,12 @@ const keepRefs = (url: string) => (/^(ref|pr|linear|slackuser|slackchan):/.test(
 /** A whole message as GitHub-flavored markdown, with Rich's chips, links and pasted images inside it. */
 export function Markdown({ text, className, slack }: { text: string; className?: string; slack?: boolean }) {
   const { body, caption, element } = splitCapture(text);
+  useEmoji(text);
   return (
     // Any long word or token (a URL, a hash, inline code) breaks where it must, so a message is never wider than its column.
     <div className={cn("min-w-0 [overflow-wrap:anywhere]", className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips, remarkBreaks]} components={md} urlTransform={keepRefs}>
-        {slack ? mrkdwn(body) : asLinks(showUploads(body))}
+        {slack ? mrkdwn(body) : emojify(asLinks(showUploads(body)))}
       </ReactMarkdown>
       {caption && (
         <p data-agent="capture-caption" title={element && `element ${element}`} className="mt-1 text-xs text-muted-foreground">

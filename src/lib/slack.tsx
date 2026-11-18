@@ -1,4 +1,5 @@
 import { createStore } from "@/store";
+import { emojiOf, SHORTCODE } from "./emoji";
 import { cn } from "./utils";
 
 /** Each Slack conversation's name by channel id ("#festo", "DM with Christoph Moser", "group DM with …"), from the server. */
@@ -21,22 +22,6 @@ export function slackLabel(channel: string, names: Record<string, string>) {
 }
 
 // The shortcodes people actually use, as the character Slack shows; any other stays as typed.
-const EMOJI: Record<string, string> = {
-  smile: "😄", smiley: "😃", grinning: "😀", laughing: "😆", joy: "😂", rolling_on_the_floor_laughing: "🤣", sweat_smile: "😅", slightly_smiling_face: "🙂",
-  wink: "😉", blush: "😊", heart_eyes: "😍", thinking_face: "🤔", neutral_face: "😐", expressionless: "😑", unamused: "😒", roll_eyes: "🙄",
-  grimacing: "😬", relieved: "😌", pensive: "😔", disappointed: "😞", worried: "😟", cry: "😢", sob: "😭", scream: "😱", rage: "😡",
-  sunglasses: "😎", upside_down_face: "🙃", face_with_rolling_eyes: "🙄", melting_face: "🫠", saluting_face: "🫡", eyes: "👀", skull: "💀",
-  pray: "🙏", clap: "👏", raised_hands: "🙌", wave: "👋", muscle: "💪", ok_hand: "👌", point_up: "☝️", point_right: "👉",
-  "+1": "👍", thumbsup: "👍", "-1": "👎", thumbsdown: "👎", heart: "❤️", green_heart: "💚", blue_heart: "💙", purple_heart: "💜",
-  fire: "🔥", tada: "🎉", rocket: "🚀", sparkles: "✨", star: "⭐", zap: "⚡", boom: "💥", "100": "💯", white_check_mark: "✅",
-  heavy_check_mark: "✔️", x: "❌", warning: "⚠️", rotating_light: "🚨", bulb: "💡", memo: "📝", pushpin: "📌", link: "🔗", calendar: "📅",
-  coffee: "☕", beers: "🍻", party_popper: "🎉", see_no_evil: "🙈", man_shrugging: "🤷‍♂️", woman_shrugging: "🤷‍♀️", shrug: "🤷",
-  facepalm: "🤦", face_palm: "🤦", hugging_face: "🤗", nerd_face: "🤓", sweat: "😓", partying_face: "🥳", pleading_face: "🥺",
-  slightly_frowning_face: "🙁", white_frowning_face: "☹️", hourglass: "⌛", stopwatch: "⏱️", chart_with_upwards_trend: "📈", bug: "🐛",
-  hammer_and_wrench: "🛠️", wrench: "🔧", gear: "⚙️", lock: "🔒", key: "🔑", mag: "🔍", thread: "🧵", speech_balloon: "💬", question: "❓",
-  exclamation: "❗", heavy_plus_sign: "➕", arrow_right: "➡️", arrow_up: "⬆️", arrow_down: "⬇️", dart: "🎯", trophy: "🏆", gift: "🎁",
-};
-
 const decode = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 const escapeLabel = (s: string) => s.replace(/[[\]]/g, "\\$&");
 
@@ -60,7 +45,7 @@ export function mrkdwn(text: string) {
         .replace(/(^|[\s(>])\*([^*\n]+?)\*(?=$|[\s).,!?:;])/gm, "$1**$2**")
         .replace(/(^|[\s(>])_([^_\n]+?)_(?=$|[\s).,!?:;])/gm, "$1*$2*")
         .replace(/(^|[\s(>])~([^~\n]+?)~(?=$|[\s).,!?:;])/gm, "$1~~$2~~")
-        .replace(/:([\w+-]+):/g, (all, code) => EMOJI[code] ?? all)
+        .replace(SHORTCODE, (all, code: string, tone?: string) => emojiOf(code.toLowerCase(), tone ? Number(tone) : undefined) ?? all)
         .replace(/&lt;/g, "\\<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
     })
     .join("");
