@@ -51,7 +51,7 @@ export function TodoView() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-11 shrink-0 items-center border-b px-5">
+      <header className="flex h-12 shrink-0 items-center border-b px-5">
         <h1 className="text-sm font-medium">Todo</h1>
       </header>
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">

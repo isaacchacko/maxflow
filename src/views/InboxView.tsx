@@ -270,7 +270,7 @@ export function InboxView() {
 
   return (
     <div className="flex h-full flex-col">
-        <header className="flex h-11 shrink-0 items-center gap-2 border-b px-5">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-5">
             <h1 className="text-sm font-medium">Threads</h1>
             {replied.length > 0 && (
               <button data-agent="inbox-new-replies" onClick={nextReplied} className="flex items-center gap-1.5 rounded-full bg-new-soft px-2.5 py-0.5 text-xs font-medium text-new hover:brightness-95">
