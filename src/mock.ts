@@ -56,7 +56,7 @@ export type Thread = {
   /** Pinned to his sidebar, in his order. */
   pinned?: { at: string; order: number };
   /** He put it away until a time, in his words (said); agents' posts since (posts) leave it paused, his own brings it back. */
-  paused?: { until: string; at: string; said: string; posts: number };
+  paused?: { until: string; at: string; said: string; posts: number; wake?: string };
   /** Its pause ran out at `at`: it is unread from message `from`, the count it had when he paused it. */
   resurfaced?: { at: string; from: number };
   /** Started by maxflow itself from his event feed (a Slack DM or mention, a PR comment, a CI failure), not by him. */
@@ -67,7 +67,7 @@ export type Thread = {
   parentId?: string;
   parentMessageId?: string;
   /** nudge: he asked for its answer in a subthread. */
-  messages: { id?: string; from: string; at: string; text: string; nudge?: "subthread" }[];
+  messages: { id?: string; from: string; at: string; text: string; nudge?: "subthread"; wake?: boolean }[];
 };
 
 export type AgentState = "working" | "waiting" | "idle" | "asleep";

@@ -214,7 +214,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
         ))}
         <h1 className={cn("truncate text-xl font-semibold tracking-tight", thread.resolved && "text-muted-foreground")}>{thread.title}</h1>
         {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
-        {thread.paused && <span data-agent="thread-paused" className="text-xs whitespace-nowrap text-muted-foreground">paused {pausedLabel(thread.paused)}</span>}
+        {thread.paused && <span data-agent="thread-paused" title={`paused ${pausedLabel(thread.paused)}`} className="min-w-0 truncate text-xs whitespace-nowrap text-muted-foreground">paused {pausedLabel(thread.paused)}</span>}
         <Button variant="outline" size="icon" className="ml-auto size-8" data-agent="thread-pin" title={thread.pinned ? "Unpin from the sidebar (P)" : "Pin to the sidebar (P)"} aria-pressed={!!thread.pinned} onClick={() => void setPinned(thread.id, !thread.pinned)}>
           {thread.pinned ? <PinOff /> : <Pin />}
         </Button>
@@ -242,6 +242,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
               <div data-msg={root.id} data-thread={thread.parentId ?? thread.id} {...vimRow(keyOf(root, -1))} className="group/bar relative">
                 <MessageRow from={root.from} at={root.at} text={root.text} active={vim.cursor === keyOf(root, -1)}>
                   {root.nudge && <NudgeMark />}
+                  {root.wake && <WakeMark />}
                 </MessageRow>
                 {/* The root stands for the thread: resolving or pausing it here is the thread's, as the header's buttons are. */}
                 <HoverBar
@@ -283,7 +284,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
               // What agents posted after he resolved it sits below a line saying so; where the "New" line falls too, that line says both.
               const resolvedHere = thread.resolved && m.at > thread.resolved.at && !(prev && prev.at > thread.resolved.at);
               const isNew = i === firstNew;
-              const grouped = !isNew && prev?.from === m.from && Date.parse(m.at) - Date.parse(prev.at) <= GROUP_MS;
+              const grouped = !isNew && !m.wake && prev?.from === m.from && Date.parse(m.at) - Date.parse(prev.at) <= GROUP_MS;
               return (
                 <Fragment key={i}>
                 {resolvedHere && !isNew && <p className="my-2 border-t pt-1 text-center text-xs text-muted-foreground">new since resolved</p>}
@@ -297,6 +298,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
                 <div data-msg={m.id} data-thread={thread.id} {...vimRow(keyOf(m, i))} className="group/bar relative">
                   <MessageRow from={m.from} at={m.at} text={m.text} grouped={grouped} active={vim.cursor === keyOf(m, i)} className={cn(!grouped && i > 0 && "mt-2.5")}>
                     {m.nudge && <NudgeMark />}
+                    {m.wake && <WakeMark />}
                     {sub && (sub.messages.length > 0 || sub.pending) && <Replies t={sub} />}
                   </MessageRow>
                   <HoverBar
@@ -414,5 +416,12 @@ const NudgeMark = () => (
   <span title="asked for the answer in a subthread" className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/70">
     <GitBranch className="size-2.5" />
     subthread asked
+  </span>
+);
+
+/** On his message a pause's end sent: he wrote it when he paused the thread. */
+const WakeMark = () => (
+  <span data-agent="wake-mark" title="written when he paused the thread, sent as it woke" className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/70">
+    ⏰ sent on wake
   </span>
 );

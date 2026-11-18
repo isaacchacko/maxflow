@@ -169,9 +169,9 @@ export function InboxView() {
                   {t.asks && <span className="shrink-0 rounded-full bg-warn-soft px-2 font-medium text-warn">needs you</span>}
                   <span className="truncate">{t.objectiveId ? objectives.find(o => o.id === t.objectiveId)?.title : t.asks ? "" : "routing…"}</span>
                   {t.paused && (
-                    <span data-agent={`inbox-paused:${t.id}`} className="flex shrink-0 items-center gap-1 whitespace-nowrap">
-                      <AlarmClock className="size-3 self-center" />
-                      {pausedLabel(t.paused)}
+                    <span data-agent={`inbox-paused:${t.id}`} title={pausedLabel(t.paused)} className="flex min-w-0 items-center gap-1 whitespace-nowrap">
+                      <AlarmClock className="size-3 shrink-0 self-center" />
+                      <span className="min-w-0 truncate">{pausedLabel(t.paused)}</span>
                     </span>
                   )}
                 </span>
@@ -253,7 +253,7 @@ export function InboxView() {
               const day = first.at.slice(0, 10);
               const newDay = day !== prev?.first.at.slice(0, 10);
               const isNew = i === firstNew;
-              const grouped = !newDay && !isNew && !t.asks && !t.feed && !prev?.t.asks && prev?.first.from === first.from && Date.parse(first.at) - Date.parse(prev.first.at) <= GROUP_MS;
+              const grouped = !newDay && !isNew && !t.asks && !t.feed && !t.paused && !prev?.t.asks && prev?.first.from === first.from && Date.parse(first.at) - Date.parse(prev.first.at) <= GROUP_MS;
               return (
                 <Fragment key={t.id}>
                   {newDay && first.at !== "9999" && (

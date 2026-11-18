@@ -155,9 +155,9 @@ export async function setPinOrder(ids: string[]) {
 }
 
 /** Isaac puts a thread away until a time, or brings it back now (null); his own message in it brings it back too. */
-export async function setPaused(threadId: string, paused: { until: number; said: string } | null) {
+export async function setPaused(threadId: string, paused: { until: number; said: string; wake?: string } | null) {
   if (isLive()) return void (await api(`/api/threads/${threadId}`, { paused }, "PATCH"));
-  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: undefined, paused: paused ? { until: new Date(paused.until).toISOString(), at: NOW_AT, said: paused.said, posts: 0 } : undefined } : t)));
+  threadStore.set(all => all.map(t => (t.id === threadId ? { ...t, resolved: undefined, paused: paused ? { until: new Date(paused.until).toISOString(), at: NOW_AT, said: paused.said, posts: 0, wake: paused.wake } : undefined } : t)));
 }
 
 /** His inbox drew an ask flagged: its agent's 3h default counts from the first time it did. */

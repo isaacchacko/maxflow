@@ -13,25 +13,27 @@ let afterPause: (() => void) | undefined;
 /** Asks him until when to put a thread away: from its menus, its header's button, or p. */
 export const openPause = (threadId: string, then?: () => void) => ((afterPause = then), pausing.set(threadId));
 
-/** "until Tue Nov 17, 9:00 AM", and what agents posted meanwhile. */
-export const pausedLabel = (p: NonNullable<Thread["paused"]>) => `until ${formatWhen(p.until)}${p.posts ? ` · ${p.posts} new` : ""}`;
+/** "until Tue Nov 17, 9:00 AM", what agents posted meanwhile, and what it sends him back with. */
+export const pausedLabel = (p: NonNullable<Thread["paused"]>) => `until ${formatWhen(p.until)}${p.posts ? ` · ${p.posts} new` : ""}${p.wake ? ` · will send: ${p.wake.replace(/\s+/g, " ")}` : ""}`;
 
 /**
  * A small box over the page: he types when ("tomorrow 9am", "in 2h", "monday", "after lunch") and sees the time it lands on
- * before Enter confirms it, or picks a chip. A paused thread offers to come back now.
+ * before Enter confirms it, or picks a chip. Below, what to send into the thread as his message when it wakes, for its router to take
+ * up (kept when he pauses it again, empty for nothing). A paused thread offers to come back now, sending nothing.
  */
 export function PauseDialog() {
   const id = pausing.use();
   const thread = threadStore.use().find(t => t.id === id);
   const [said, setSaid] = useState("");
+  const [wake, setWake] = useState("");
   const [now, setNow] = useState(() => new Date());
-  useEffect(() => (setSaid(""), setNow(new Date())), [id]);
+  useEffect(() => (setSaid(""), setWake(thread?.paused?.wake ?? ""), setNow(new Date())), [id]);
   const at = parseWhen(said, now);
   const close = () => pausing.set(undefined);
   const pause = (until: Date, words: string) => {
     const then = afterPause;
     close();
-    void setPaused(id!, { until: until.getTime(), said: words }).then(then);
+    void setPaused(id!, { until: until.getTime(), said: words, ...(wake.trim() && { wake: wake.trim() }) }).then(then);
   };
 
   return (
@@ -72,6 +74,19 @@ export function PauseDialog() {
                   {at ? `Back ${formatWhen(at, now)}` : said.trim() ? "No time I can read in that" : "Until when?"}
                 </p>
               </form>
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                When it wakes, send: <span className="sr-only">(optional)</span>
+                {/* Enter in the time box confirms; here it is a new line, and ⌘Enter confirms. */}
+                <textarea
+                  data-agent="pause-wake"
+                  value={wake}
+                  rows={2}
+                  onChange={e => setWake(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && (e.metaKey || e.ctrlKey) && at && (e.preventDefault(), pause(at, said.trim()))}
+                  placeholder="optional, e.g. check if CI passed and merge"
+                  className="w-full resize-y rounded-lg border bg-background px-3 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-ring"
+                />
+              </label>
               <div className="flex flex-wrap gap-1.5">
                 {CHIPS.map(c => {
                   const until = parseWhen(c.said, now);

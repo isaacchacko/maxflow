@@ -708,8 +708,9 @@ async function acceptTrust(s: Session) {
 // resolved: Isaac marked it done, from the browser only; his next message in it reopens it.
 // paused: he put it away until a time (until), from the browser only, saying when in his words (said); count is how many messages
 // it had then, posts how many agents added since, which leave it paused. At until it comes back as resurfaced, unread from count.
-// His own message in it unpauses it at once.
-type Paused = { until: number; at: number; said: string; count: number; posts?: number };
+// His own message in it unpauses it at once. wake: what he wrote to be sent when it comes back, posted then as his message, so its
+// routers take it up as if he had typed it; unpaused early (by hand, or by his own post) it isn't sent.
+type Paused = { until: number; at: number; said: string; count: number; posts?: number; wake?: string };
 // pending: his last message was handed to these routers, and none has answered yet; status is the line a router set on it.
 type Pending = { routers: string[]; since: number; status?: string };
 // asks: an agent asked him here and waits on his reply (see ask); default: its recommendation, taken after DEFAULT_AFTER_MS.
@@ -721,8 +722,8 @@ type Feed = { source: string; who: string; link: string; task?: number };
 // task: the board task a feed thread is on.
 // parent: a subthread hangs off a message in another thread, which is its root; its messages are that message's replies, and
 // any of them can have a subthread of its own. A top thread's root is its first message, so replying to that posts in it.
-// nudge: he asked for the answer to this message in a subthread of its own.
-type Message = { id: string; from: string; at: number; text: string; nudge?: "subthread" };
+// nudge: he asked for the answer to this message in a subthread of its own. wake: his message the end of a pause sent, as he wrote it then.
+type Message = { id: string; from: string; at: number; text: string; nudge?: "subthread"; wake?: true };
 type Thread = { id: string; title: string; objective: string; routers: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; task?: number; resolved?: { at: number }; paused?: Paused; pinned?: { at: number; order: number }; resurfaced?: { at: number; from: number }; asks?: Ask; q?: number; mergedInto?: string; feed?: Feed };
 const THREADS = `${STATE_DIR}/threads.json`;
 const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
@@ -744,11 +745,13 @@ function schedulePause(t: Thread) {
 }
 function resurface(t: Thread) {
   if (!t.paused) return;
+  const wake = t.paused.wake;
   t.resurfaced = { at: Date.now(), from: t.paused.count };
   unpause(t);
   saveThreads();
-  console.log(`thread ${t.id} resurfaced from its pause`);
+  console.log(`thread ${t.id} resurfaced from its pause${wake ? ", sending his wake message" : ""}`);
   publish(`thread/${t.id}`, { thread: t.id, resurfaced: true });
+  if (wake) postIn(t, undefined, wake, undefined, true);
 }
 function unpause(t: Thread) {
   t.paused = undefined;
@@ -831,8 +834,10 @@ const onIt = (s?: Session) => live(s) && (s.inbox.length > 0 || agentState(s) ==
 const pendingOf = (p?: Pending) => p && { routerIds: p.routers, since: iso(p.since), status: p.status, stale: Date.now() - p.since > PENDING_GRACE_MS && !p.routers.some((id) => onIt(sessions.get(id))) };
 
 // A message into a thread at any level: Isaac's goes to its routers and waits on them, an agent's answers him.
-function postIn(t: Thread, from: Session | undefined, text: string, nudge?: "subthread") {
-  const m = { ...message(from?.id ?? "isaac", text), ...(nudge && !from && { nudge }) };
+function postIn(t: Thread, from: Session | undefined, text: string, nudge?: "subthread", wake?: boolean) {
+  const m = { ...message(from?.id ?? "isaac", text), ...(nudge && !from && { nudge }), ...(wake && !from && { wake: true as const }) };
+  // Written when he paused it and sent as it came back: the agent hears that it is his, written ahead of time.
+  const woke = m.wake ? "\n[maxflow] He wrote this when he paused the thread; it was sent now, as the pause ended." : "";
   t.messages.push(m);
   // The funnel's FYI note on a feed thread settles it unrouted.
   if (from && t.feed) t.signal = undefined;
@@ -847,8 +852,8 @@ function postIn(t: Thread, from: Session | undefined, text: string, nudge?: "sub
     // Nobody left to hear it (its agents ended, and it has no objective with a router): the funnel finds it an owner.
     const front = funnel();
     if (!to.length && front)
-      dispatch({ source: "isaac", to: [front], target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] Nobody owns this thread any more: its agents ended and it has no objective with a router. Give it one with \`${CLI} thread move ${t.id} <objective id>\`, which hands it to that objective's routers, then tell them his message is waiting there.${mentionsIn(text)}` });
-    else dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] ${m.nudge ? `He asked for the answer in a subthread of its own: answer this message with \`${CLI} thread new --parent ${t.id}:${m.id} '<text>'\`, and post there from then on, not in the thread.` : `Answer inline in the thread with \`${CLI} thread post ${t.id} '<text>'\`.`} While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line.${mentionsIn(text)}` });
+      dispatch({ source: "isaac", to: [front], target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] Nobody owns this thread any more: its agents ended and it has no objective with a router. Give it one with \`${CLI} thread move ${t.id} <objective id>\`, which hands it to that objective's routers, then tell them his message is waiting there.${woke}${mentionsIn(text)}` });
+    else dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] ${m.nudge ? `He asked for the answer in a subthread of its own: answer this message with \`${CLI} thread new --parent ${t.id}:${m.id} '<text>'\`, and post there from then on, not in the thread.` : `Answer inline in the thread with \`${CLI} thread post ${t.id} '<text>'\`.`} While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line.${woke}${mentionsIn(text)}` });
     if (to.length) t.pending = { routers: to.map((s) => s.id), since: Date.now() };
     for (const s of to) s.handed = t.id;
     answered(t);
@@ -1467,7 +1472,7 @@ async function world() {
       events: t.timeline.map((e) => ({ from: e.session && sessions.get(e.session)?.role?.role === "router" ? "router" : e.session ? "agent" : "sentry", at: iso(e.at), text: e.text })),
       page: t.page ?? [],
     })),
-    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), ...(t.paused && { paused: { until: iso(t.paused.until), at: iso(t.paused.at), said: t.paused.said, posts: t.paused.posts ?? 0 } }), ...(t.resurfaced && { resurfaced: { at: iso(t.resurfaced.at), from: t.resurfaced.from } }), ...(t.pinned && { pinned: { at: iso(t.pinned.at), order: t.pinned.order } }), ...(t.feed && { feed: { source: t.feed.source, who: t.feed.who, link: t.feed.link } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, ...(m.nudge && { nudge: m.nudge }) })) })),
+    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), ...(t.paused && { paused: { until: iso(t.paused.until), at: iso(t.paused.at), said: t.paused.said, posts: t.paused.posts ?? 0, ...(t.paused.wake && { wake: t.paused.wake }) } }), ...(t.resurfaced && { resurfaced: { at: iso(t.resurfaced.at), from: t.resurfaced.from } }), ...(t.pinned && { pinned: { at: iso(t.pinned.at), order: t.pinned.order } }), ...(t.feed && { feed: { source: t.feed.source, who: t.feed.who, link: t.feed.link } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, ...(m.nudge && { nudge: m.nudge }), ...(m.wake && { wake: true }) })) })),
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({
       id: s.id,
@@ -1986,7 +1991,7 @@ Bun.serve<WsData>({
       const t = threads.find((x) => x.id === threadAct[1]);
       if (!t) return new Response("no such thread", { status: 404 });
       if (!req.headers.get("user-agent")?.includes("Mozilla")) return new Response("resolving or pausing a thread is Isaac's, from the browser: answer in it and leave it to him", { status: 403 });
-      const body = (await req.json().catch(() => ({}))) as { resolved?: boolean; paused?: { until?: number; said?: string } | null; pinned?: boolean };
+      const body = (await req.json().catch(() => ({}))) as { resolved?: boolean; paused?: { until?: number; said?: string; wake?: string } | null; pinned?: boolean };
       // Pinned, it stays in his sidebar until he unpins it, at the end of his pins; resolving or pausing it leaves it pinned.
       if ("pinned" in body) {
         if (typeof body.pinned !== "boolean") return new Response("pinned: true or false", { status: 400 });
@@ -1996,10 +2001,10 @@ Bun.serve<WsData>({
         return Response.json(t);
       }
       if ("paused" in body) {
-        const { until, said } = body.paused ?? {};
+        const { until, said, wake } = body.paused ?? {};
         if (body.paused && (typeof until !== "number" || until <= Date.now())) return new Response("paused: { until: a time to come, in ms, said } or null", { status: 400 });
         if (t.parent) return new Response("only a top thread pauses", { status: 400 });
-        if (body.paused) Object.assign(t, { paused: { until, at: Date.now(), said: String(said ?? "").slice(0, 200), count: t.messages.length }, resolved: undefined });
+        if (body.paused) Object.assign(t, { paused: { until, at: Date.now(), said: String(said ?? "").slice(0, 200), count: t.messages.length, ...(typeof wake === "string" && wake.trim() && { wake: wake.trim() }) }, resolved: undefined });
         else t.paused = undefined;
         schedulePause(t);
         saveThreads();
