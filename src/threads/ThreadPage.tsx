@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { AgentFace } from "@/components/AgentFace";
+import { AgentLink } from "@/components/AgentLink";
 import { Elapsed } from "@/components/Working";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
@@ -61,12 +62,17 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // and how long it has been at it. Who it is lives in the tooltip. `inline` is the inbox's replies line: a small face, no column.
 export function Pending({ pending, names, inline }: { pending: NonNullable<Thread["pending"]>; names: string[]; inline?: boolean }) {
   const who = `${names.length > 1 ? "routers" : "router"} ${names.join(", ")}`;
+  const router = pending.routerIds[0] ?? "";
   const face = (expression: "working" | "error", still?: boolean) =>
     inline ? (
-      <AgentFace id={pending.routerIds[0] ?? ""} expression={expression} still={still} small className="size-5 shrink-0" />
+      <AgentLink id={router} className="flex shrink-0">
+        <AgentFace id={router} expression={expression} still={still} small className="size-5" />
+      </AgentLink>
     ) : (
       <span className="flex w-9 shrink-0 justify-center">
-        <AgentFace id={pending.routerIds[0] ?? ""} expression={expression} still={still} className="size-7" />
+        <AgentLink id={router} className="flex">
+          <AgentFace id={router} expression={expression} still={still} className="size-7" />
+        </AgentLink>
       </span>
     );
   const row = cn("flex max-w-full min-w-0 items-center text-muted-foreground", inline ? "gap-1.5 text-xs" : "gap-2.5 py-1 text-sm");

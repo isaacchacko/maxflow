@@ -60,7 +60,7 @@ function routeFromHash(): Route {
  */
 function threadAt(target: EventTarget | null) {
   const el = target instanceof Element ? target : null;
-  if (!el?.closest("[data-region=main]") || el.closest("button, input, textarea, [role=menuitem], [data-agent=back], [data-agent^='thread-up:']")) return;
+  if (!el?.closest("[data-region=main]") || el.closest("button, input, textarea, [role=menuitem], [data-agent=back], [data-agent^='thread-up:'], [data-agent^='agent-link:']")) return;
   const link = el.closest("a");
   if (link) return link.getAttribute("href")?.match(/^#thread\/(.+)$/)?.[1];
   const card = el.closest<HTMLElement>("[data-node^='thread:']")?.dataset.node?.slice(7);
