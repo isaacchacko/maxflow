@@ -208,3 +208,44 @@ export function setArchived(id: string, archived: boolean) {
   agentStore.set(all => all.map(a => (a.id === id ? { ...a, state: archived ? "asleep" : "working" } : a)));
 }
 
+
+/** One of his todos, on a day: YYYY-MM-DD in his local time. */
+export type Todo = { id: string; text: string; day: string; done: boolean; at: string };
+/** His todo list, kept by the server in its own file; fetched by the Todo page, not part of the world. */
+export const todoStore = createStore<Todo[]>([]);
+
+export async function loadTodos() {
+  if (!isLive()) return;
+  const res = await fetch("/api/todos");
+  if (res.ok) todoStore.set(await res.json());
+}
+
+/** Each change shows at once, then is sent; one the server refuses is put back by fetching the list again. */
+async function sendTodo(path: string, method: string, body?: unknown) {
+  if (!isLive()) return;
+  try {
+    const res = await fetch(path, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    return res.status === 204 ? null : ((await res.json()) as Todo);
+  } catch (e) {
+    await loadTodos();
+    throw e;
+  }
+}
+
+export async function addTodo(text: string, day: string) {
+  const draft: Todo = { id: `new-${Date.now()}`, text, day, done: false, at: new Date().toISOString() };
+  todoStore.set(all => [...all, draft]);
+  const saved = await sendTodo("/api/todos", "POST", { text, day });
+  if (saved) todoStore.set(all => all.map(t => (t.id === draft.id ? saved : t)));
+}
+
+export async function editTodo(id: string, edit: Partial<Pick<Todo, "text" | "day" | "done">>) {
+  todoStore.set(all => all.map(t => (t.id === id ? { ...t, ...edit } : t)));
+  await sendTodo(`/api/todos/${id}`, "PATCH", edit);
+}
+
+export async function deleteTodo(id: string) {
+  todoStore.set(all => all.filter(t => t.id !== id));
+  await sendTodo(`/api/todos/${id}`, "DELETE");
+}
