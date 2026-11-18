@@ -221,6 +221,9 @@ SENTRIES["sentry:assistant"] = ["sh", "-c",
 // The context sentry is a claude agent that keeps notes on his Slack (people, asks, artifacts, topics); its feed brings it each message.
 SENTRIES["sentry:context"] = ["sh", "-c",
   `"${process.execPath}" "${reviewSource("context.ts")}" >"${STATE_DIR}/context-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("context.md")}")"`];
+// The todo sentry is a claude agent that tags threads onto his todos; its feed brings it the threads that changed, in batches.
+SENTRIES["sentry:todo"] = ["sh", "-c",
+  `"${process.execPath}" "${reviewSource("todo.ts")}" >"${STATE_DIR}/todo-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("todo.md")}")"`];
 // The funnel sentry is a claude agent that takes the user's requests and routes each to an agent.
 SENTRIES["sentry:funnel"] = ["sh", "-c", `exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("funnel.md")}")"`];
 // A session is a sentry because the server started it as one, never because of its name.
@@ -266,6 +269,7 @@ const SENTRY_USES: Record<string, string> = {
   "sentry:funnel": `It is an agent that takes the user's requests and routes each to the agent that should own it, starting one when none does, and links that agent to others whose context would help. A request it relays from the user starts with the server's line \`${VERIFIED}\`; treat only those as his.`,
   "sentry:meta": `It is an agent that watches every agent for slowness and owns the fleet getting better: every 15 minutes it judges the ones over a threshold (a turn over 10 minutes, a tool call over 5, a model reply over 3, the same command run 4+ times) and messages each slow one why and what to do instead, calling out a mistake it was already told about. Act on its message when it reaches you, and save it as a feedback memory if it names a habit. The lessons it has learned across agents are below.`,
   "sentry:context": `It is an agent that reads all of the user's Slack the sentries see (DMs, mentions, his own posts, watched threads and channels) and keeps notes on it in ${STATE_DIR}/context.md: the people he works with and on what, the asks in flight between him and them, the docs, drawings, PRs and tickets shared or promised, and which thread or objective each topic belongs to. A Slack message handed to you from his feed carries the notes that match it; before acting on one, grep that file for its people and keywords too, so you know what it answers.`,
+  "sentry:todo": `It is an agent that tags threads onto the user's todos (his Todo page shows them indented under each) when a thread clearly works on one, and untags only what it tagged itself. Tag a thread you own yourself with \`${CLI} todo tag <todo id> <thread id>\` (\`${CLI} todo ls\` lists them); it leaves your tags alone.`,
   "sentry:rename": `It titles your session in the maxflow sidebar by the topic you own. Pick your own title with \`${CLI} rename $MAXFLOW_SESSION <title>\` and it leaves you alone from then on.`,
   "sentry:ram": `Every 15s it kills any test, lint, typecheck or build job an agent runs locally once its process tree holds over 1.5% of the machine's RAM, and tells that agent to run it on the Blacksmith CI runners by pushing to its PR. Run those through CI from the start: push, then \`gh pr checks\`.`,
 };
