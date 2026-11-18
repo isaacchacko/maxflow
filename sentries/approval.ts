@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-// approval sentry: each of the user's open PRs waiting on an approval gets one good review per head, and once it passes, Liudvikas
-// is notified to review and approve it himself (approval-notify.ts). Plain code, no model turn of its own. It reads the gh sentry's
+// approval sentry: each of the user's open PRs waiting on an approval gets one good review per head, and once it passes, it goes to
+// Liudvikas' approval endpoint, which approves it as him (approval-notify.ts). Plain code, no model turn of its own. It reads the gh sentry's
 // PRs (gh-status.json) and the review queue, scores each new head
 // into a risk tier from its paths, size, complexity delta (lizard, base vs head), churn, tests and spread, and runs a headless claude
 // review (sentries/approval.md) in a worktree of that head, at most MAX_REVIEWS at once. Each verdict goes to approval/<pr>/<sha>.json

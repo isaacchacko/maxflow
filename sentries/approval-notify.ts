@@ -1,6 +1,7 @@
-// Tells Liudvikas that one of the user's PRs passed its review, so he reviews and approves it himself, through the endpoint the
-// user shares. $STATE_DIR/approval-notify.json holds {"url": "...", "perHour": 6, "headers": {...}}; with no url it is shadow mode
-// and a notification is only logged. Each PR head is notified at most once; past perHour in the last hour the rest wait their turn.
+// Sends Liudvikas' approval endpoint each of the user's PRs that passed its review: the same POST as the user's `b` alias
+// (~/Scripts/pr.zsh), {"pr": <n>} with the bearer token read from tokenFile at send time, never kept. $STATE_DIR/approval-notify.json
+// holds {"url": "...", "tokenFile": "...", "repo": "dryft-ai/app", "perHour": 6}; with no url a pass is only logged. Each PR head is
+// sent at most once, at most perHour in any hour; a failure is logged with its body and retried with backoff, never marked sent.
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { STATE_DIR } from "../instance";
@@ -8,13 +9,14 @@ import { STATE_DIR } from "../instance";
 const CONFIG_FILE = join(STATE_DIR, "approval-notify.json");
 const STATE_FILE = join(STATE_DIR, "approval-notified.json");
 const LOG_FILE = join(STATE_DIR, "approval-notify.log");
+const BACKOFF_MS = [60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000];
 
 export type Note = { pr: string; sha: string; title: string; url: string; tier: number; summary: string };
-type Config = { url?: string; perHour?: number; headers?: Record<string, string> };
-type Sent = { queue: Note[]; sent: Record<string, number>; logged: string[] };
+type Config = { url?: string; tokenFile?: string; repo?: string; perHour?: number };
+type Sent = { queue: Note[]; sent: Record<string, number>; logged: string[]; failures: number; retryAt: number };
 
 const readJson = <T>(path: string, fallback: T): T => { try { return JSON.parse(readFileSync(path, "utf8")); } catch { return fallback; } };
-const sent: Sent = { queue: [], sent: {}, logged: [], ...readJson<Partial<Sent>>(STATE_FILE, {}) };
+const sent: Sent = { queue: [], sent: {}, logged: [], failures: 0, retryAt: 0, ...readJson<Partial<Sent>>(STATE_FILE, {}) };
 const save = () => writeFileSync(STATE_FILE, JSON.stringify(sent, null, 1));
 const tag = (n: Note) => `${n.pr}@${n.sha}`;
 const note = (line: string) => appendFileSync(LOG_FILE, `${new Date().toISOString()}  ${line}\n`);
@@ -27,30 +29,40 @@ export function enqueue(n: Note) {
   save();
 }
 
-// What the endpoint gets, one POST per PR. Kept to these fields until its contract is known.
-const payload = (n: Note) => ({ title: n.title, summary: n.summary, url: n.url, tier: n.tier, pr: n.pr, sha: n.sha });
+async function send(cfg: Config, n: Note) {
+  const token = readFileSync(cfg.tokenFile!, "utf8").trim();
+  const res = await fetch(cfg.url!, {
+    method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ pr: Number(n.pr.split("#")[1]) }),
+  });
+  return { ok: res.ok, detail: `${res.status} ${(await res.text()).slice(0, 300)}` };
+}
 
 // Sends what is queued, up to perHour in any hour, dropping a note whose PR moved on (`current` false: new head, approved, closed).
 export async function flush(current: (n: Note) => boolean) {
-  const { url, perHour = 6, headers = {} } = config();
-  sent.queue = sent.queue.filter(current);
-  if (!url) {
+  const cfg = config();
+  sent.queue = sent.queue.filter((n) => current(n) && (!cfg.repo || n.pr.startsWith(`${cfg.repo.toLowerCase()}#`)));
+  if (!cfg.url || !cfg.tokenFile) {
     for (const n of sent.queue.filter((q) => !sent.logged.includes(tag(q)))) {
-      note(`shadow, would notify: ${JSON.stringify(payload(n))}`);
+      note(`no endpoint, queued: ${tag(n)} tier ${n.tier}`);
       sent.logged = [...sent.logged, tag(n)].slice(-1000);
     }
     return save();
   }
-  const budget = perHour - Object.values(sent.sent).filter((at) => Date.now() - at < 3_600_000).length;
+  if (Date.now() < sent.retryAt) return save();
+  const budget = (cfg.perHour ?? 6) - Object.values(sent.sent).filter((at) => Date.now() - at < 3_600_000).length;
   for (const n of sent.queue.slice(0, Math.max(0, budget))) {
-    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(payload(n)) }).catch((e) => e as Error);
-    if (res instanceof Error || !res.ok) {
-      note(`failed ${tag(n)}: ${res instanceof Error ? res.message : `${res.status} ${(await res.text()).slice(0, 200)}`}`);
+    const res = await send(cfg, n).catch((e) => ({ ok: false, detail: String(e) }));
+    if (!res.ok) {
+      sent.retryAt = Date.now() + BACKOFF_MS[Math.min(sent.failures, BACKOFF_MS.length - 1)];
+      sent.failures++;
+      note(`failed ${tag(n)}: ${res.detail}; retrying after ${new Date(sent.retryAt).toISOString()}`);
       break;
     }
+    sent.failures = 0;
     sent.sent[tag(n)] = Date.now();
     sent.queue = sent.queue.filter((q) => q !== n);
-    note(`notified ${tag(n)}`);
+    note(`sent ${tag(n)} tier ${n.tier}: ${res.detail}`);
   }
   save();
 }
