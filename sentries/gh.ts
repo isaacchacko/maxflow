@@ -49,7 +49,7 @@ export function parsePr(ref: string, cwd: string) {
 }
 
 // author (a User or a Bot) and authorAssociation: whose PR it is, for restrictions scoped to people (hooks/restrictions.ts reads them from gh-status.json).
-const FIELDS = `number url title state createdAt mergeable reviewDecision headRefOid headRefName author { __typename login } authorAssociation
+const FIELDS = `number url title state createdAt updatedAt mergeable reviewDecision headRefOid headRefName author { __typename login } authorAssociation
   commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
     __typename ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
   reviews(last: 30) { nodes { id state body author { login } } }
@@ -57,7 +57,7 @@ const FIELDS = `number url title state createdAt mergeable reviewDecision headRe
   reviewThreads(last: 50) { nodes { isResolved comments(last: 10) { nodes { id body path url author { login } } } } }`;
 
 type Pr = {
-  number: number; url: string; title: string; state: string; createdAt: string; mergeable: string; reviewDecision: string | null; headRefOid: string; headRefName: string;
+  number: number; url: string; title: string; state: string; createdAt: string; updatedAt?: string; mergeable: string; reviewDecision: string | null; headRefOid: string; headRefName: string;
   author: { __typename: string; login: string } | null; authorAssociation: string;
   commits: { nodes: { commit: { statusCheckRollup: { state: string; contexts: { nodes: { __typename: string; name?: string; conclusion?: string; context?: string; state?: string }[] } } | null } }[] };
   reviews: { nodes: { id: string; state: string; body: string; author: { login: string } | null }[] };
@@ -65,28 +65,46 @@ type Pr = {
   reviewThreads: { nodes: { isResolved: boolean; comments: { nodes: { id: string; body: string; path: string; url: string; author: { login: string } | null }[] } }[] };
 };
 
-// A repo's PRs watched by number and found by branch, asked 20 at a time: one query for ~80 runs into GitHub's 10s GraphQL timeout and comes back empty.
-const CHUNK = 20;
-export function fetchPrs(repo: string, numbers: number[], branches: string[]) {
+// Set when GitHub answers with a rate limit, so the loop backs off instead of spending what's left of the hour.
+let limited = false;
+function graphql(repo: string, q: string, what: string) {
+  const res = Bun.spawnSync(["gh", "api", "graphql", "-f", `query=${q}`], { stderr: "pipe" });
+  const err = res.stderr.toString().trim();
+  if (res.exitCode !== 0) console.error(`${new Date().toLocaleTimeString()}  ${repo}: graphql failed for ${what}: ${err.slice(0, 300)}`);
+  if (/rate limit/i.test(err)) limited = true;
+  // One PR number that doesn't resolve makes gh exit 1, but the rest of the data still comes back.
+  try { return (JSON.parse(res.stdout.toString()).data?.r ?? {}) as Record<string, any>; } catch { return {}; }
+}
+
+function query(repo: string, numbers: number[], branches: string[], fragment: string, chunk: number) {
   const [owner, name] = repo.split("/");
   const parts = [
     ...numbers.map((n) => `n${n}: pullRequest(number: ${n}) { ...F }`),
     ...branches.map((b, i) => `b${i}: pullRequests(headRefName: ${JSON.stringify(b)}, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { ...F } }`),
   ];
   const r: Record<string, any> = {};
-  for (let i = 0; i < parts.length; i += CHUNK) {
-    const q = `query { r: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${parts.slice(i, i + CHUNK).join("\n")} } }\nfragment F on PullRequest { ${FIELDS} }`;
-    const res = Bun.spawnSync(["gh", "api", "graphql", "-f", `query=${q}`], { stderr: "pipe" });
-    const out = res.stdout.toString();
-    if (res.exitCode !== 0) console.error(`${new Date().toLocaleTimeString()}  ${repo}: graphql failed for ${parts.length > CHUNK ? `chunk ${i / CHUNK + 1}` : "its PRs"}: ${res.stderr.toString().trim().slice(0, 300)}`);
-    // One PR number that doesn't resolve makes gh exit 1, but the rest of the chunk's data still comes back.
-    try { Object.assign(r, JSON.parse(out).data?.r ?? {}); } catch {}
+  for (let i = 0; i < parts.length; i += chunk) {
+    const q = `query { r: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${parts.slice(i, i + chunk).join("\n")} } }\nfragment F on PullRequest { ${fragment} }`;
+    Object.assign(r, graphql(repo, q, parts.length > chunk ? `chunk ${i / chunk + 1}` : "its PRs"));
   }
   return {
-    byNumber: new Map(numbers.flatMap((n) => (r[`n${n}`] ? [[n, r[`n${n}`] as Pr]] : []))),
-    byBranch: new Map(branches.flatMap((b, i) => (r[`b${i}`]?.nodes[0] ? [[b, r[`b${i}`].nodes[0] as Pr]] : []))),
+    byNumber: new Map(numbers.flatMap((n) => (r[`n${n}`] ? [[n, r[`n${n}`]]] : []))),
+    byBranch: new Map(branches.flatMap((b, i) => (r[`b${i}`]?.nodes[0] ? [[b, r[`b${i}`].nodes[0]]] : []))),
   };
 }
+
+// A repo's PRs watched by number and found by branch, asked 20 at a time: one query for ~80 runs into GitHub's 10s GraphQL timeout and comes back empty.
+// 20 PRs cost 11 of the token's 5,000 GraphQL points an hour, mostly for the review threads' comments, so the sentry asks this only of PRs that changed.
+export const fetchPrs = (repo: string, numbers: number[], branches: string[]) =>
+  query(repo, numbers, branches, FIELDS, 20) as { byNumber: Map<number, Pr>; byBranch: Map<string, Pr> };
+
+// What moves when anything worth a notice happens: a comment or review bumps updatedAt; a push, CI, a merge or the base moving shows in the rest.
+// 100 PRs of this cost 1 point.
+const HEAD = `number updatedAt state mergeable reviewDecision headRefOid commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
+type Head = { number: number; updatedAt: string; state: string; mergeable: string; reviewDecision: string | null; headRefOid: string; commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] } };
+export const fetchHeads = (repo: string, numbers: number[], branches: string[]) =>
+  query(repo, numbers, branches, HEAD, 100) as { byNumber: Map<number, Head>; byBranch: Map<string, Head> };
+const signature = (p: Head | Pr) => [p.updatedAt, p.state, p.mergeable, p.reviewDecision, p.headRefOid, p.commits.nodes[0]?.commit.statusCheckRollup?.state].join(" ");
 
 export type Link = { pr?: string; repo: string; branch?: string; session: string };
 
@@ -217,6 +235,9 @@ export async function markRead(id: string) {
   if ((await p.exited) !== 0) console.error(`${new Date().toLocaleTimeString()}  👀 on ${id} failed: ${(await new Response(p.stderr).text()).trim().slice(0, 300)}`);
 }
 
+// The last whole fetch of each PR, kept across restarts in the status file.
+const cache = new Map<string, { at: number; pr: Pr }>(Object.entries(readJson<Record<string, { at: number; pr: Pr }>>(STATUS_FILE, {})));
+
 const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", headers: caller, body: JSON.stringify(body) });
 
 async function tick(me: string, state: Record<string, PrState>) {
@@ -231,7 +252,19 @@ async function tick(me: string, state: Record<string, PrState>) {
   const listeners = new Map<string, Set<string>>();
   const prs = new Map<string, Pr>();
   for (const [repo, { numbers, branches }] of repos) {
-    const { byNumber, byBranch } = fetchPrs(repo, [...numbers], [...branches]);
+    const heads = fetchHeads(repo, [...numbers], [...branches]);
+    const found = [...heads.byNumber.values(), ...heads.byBranch.values()];
+    // A PR is fetched whole when it changed, and every few minutes anyway: the rollup stays PENDING while single checks finish.
+    const stale = [...new Set(found.flatMap((h) => {
+      const had = cache.get(`${repo}#${h.number}`);
+      const ci = h.commits.nodes[0]?.commit.statusCheckRollup?.state ?? "SUCCESS";
+      const pending = ci !== "SUCCESS" && !FAILED.has(ci);
+      return !had || signature(had.pr) !== signature(h) || Date.now() - had.at > (pending ? 2 : 10) * 60_000 ? [h.number] : [];
+    }))];
+    for (const pr of fetchPrs(repo, stale, []).byNumber.values()) cache.set(`${repo}#${pr.number}`, { at: Date.now(), pr });
+    const full = (h: Head) => cache.get(`${repo}#${h.number}`)?.pr;
+    const byNumber = new Map([...heads.byNumber].flatMap(([n, h]) => (full(h) ? [[n, full(h)!]] : [])));
+    const byBranch = new Map([...heads.byBranch].flatMap(([b, h]) => (full(h) ? [[b, full(h)!]] : [])));
     for (const pr of [...byNumber.values(), ...byBranch.values()]) prs.set(`${repo}#${pr.number}`, pr);
     for (const l of all.filter((l) => l.repo === repo)) {
       const pr = l.pr ? byNumber.get(Number(l.pr.split("#")[1])) : byBranch.get(l.branch!);
@@ -270,7 +303,7 @@ async function tick(me: string, state: Record<string, PrState>) {
   for (const [key, sessions] of listeners) for (const s of sessions) (onPrs.get(s) ?? onPrs.set(s, []).get(s)!).push(key);
   const label = (prs: string[]) => prs.map((k) => `#${k.split("#")[1]}`);
   writeFileSync(EDGES_FILE, JSON.stringify([...onPrs].map(([session, prs]) => ({ session, prs, label: prs.length > 2 ? `${label(prs).slice(0, 2).join(" ")} +${prs.length - 2}` : label(prs).join(" ") }))));
-  writeFileSync(STATUS_FILE, JSON.stringify(Object.fromEntries([...prs].map(([key, pr]) => [key, { at: Date.now(), pr }]))));
+  writeFileSync(STATUS_FILE, JSON.stringify(Object.fromEntries([...prs].map(([key, pr]) => [key, { at: cache.get(key)?.at ?? Date.now(), pr }]))));
   return prs.size;
 }
 
@@ -308,6 +341,8 @@ if (import.meta.main) {
     } catch (e) {
       console.error(`${new Date().toLocaleTimeString()}  tick failed:`, e);
     }
-    await Bun.sleep(INTERVAL_MS);
+    // GitHub's limits reset hourly; a rate-limited sentry waits 5 minutes rather than keep failing every 30s.
+    await Bun.sleep(limited ? 5 * 60_000 : INTERVAL_MS);
+    limited = false;
   }
 }
