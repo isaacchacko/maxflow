@@ -1,4 +1,4 @@
-import { AlarmClock, ArrowLeft, Check, ChevronRight, GitBranch, MessageSquareReply, MessagesSquare, Pin, PinOff, Quote, RotateCcw } from "lucide-react";
+import { AlarmClock, ArrowLeft, Check, ChevronRight, GitBranch, MessageSquareReply, MessagesSquare, Quote, RotateCcw } from "lucide-react";
 import { createContext, Fragment, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
@@ -17,6 +17,7 @@ import { firstUnseen, markSeen, setSeen } from "./seen";
 import { Rich } from "./Rich";
 import { ShotScope, shotsOf } from "./Viewer";
 import { AgentHighlight, AgentStack, ThreadPanel } from "./ThreadPanel";
+import { PinToggle } from "./PinToggle";
 import { HoverBar } from "./HoverBar";
 import { openPause, pausedLabel } from "./Pause";
 import { useVim, vimRow, type VimActions } from "./vim";
@@ -220,9 +221,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
         {thread.paused && <span data-agent="thread-paused" title={`paused ${pausedLabel(thread.paused)}`} className="min-w-0 truncate text-xs whitespace-nowrap text-muted-foreground">paused {pausedLabel(thread.paused)}</span>}
         <span className="ml-auto" />
         <AgentStack thread={thread} onOpen={() => document.getElementById(`agents-${thread.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })} />
-        <Button variant="outline" size="icon" className="size-8" data-agent="thread-pin" title={thread.pinned ? "Unpin from the sidebar (P)" : "Pin to the sidebar (P)"} aria-pressed={!!thread.pinned} onClick={() => void setPinned(thread.id, !thread.pinned)}>
-          {thread.pinned ? <PinOff /> : <Pin />}
-        </Button>
+        <PinToggle thread={thread} />
         {!thread.parentId && (
           <Button variant="outline" size="sm" data-agent="thread-pause" title="Pause until a time (p)" onClick={() => openPause(thread.id, climb)}>
             <AlarmClock />

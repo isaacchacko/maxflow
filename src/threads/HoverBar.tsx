@@ -3,6 +3,7 @@ import { DropdownMenu, Tooltip } from "radix-ui";
 import { useState } from "react";
 import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
+import { PinIcon, pinLook } from "./PinToggle";
 import { applying, type MenuItem } from "./RowMenu";
 
 type Action = Exclude<MenuItem, "-">;
@@ -25,9 +26,16 @@ export function HoverBar({ agent, active, actions, menu }: { agent: string; acti
       >
         {actions.filter((x): x is Action => !!x).map(a => (
           <Tip key={a.label} label={a.label} keys={a.keys}>
-            <button data-agent={a.agent} aria-label={a.label} onClick={a.run} className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
-              <a.icon className="size-4" />
-            </button>
+            {/* A toggle (the pin) shows whether it is on, as the header's does. */}
+            {a.pressed !== undefined ? (
+              <button data-agent={a.agent} aria-label={a.label} aria-pressed={a.pressed} onClick={a.run} className={cn("flex size-7 items-center justify-center rounded-md", pinLook(a.pressed))}>
+                <PinIcon on={a.pressed} className="size-4" />
+              </button>
+            ) : (
+              <button data-agent={a.agent} aria-label={a.label} onClick={a.run} className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+                <a.icon className="size-4" />
+              </button>
+            )}
           </Tip>
         ))}
         {items.length > 0 && (

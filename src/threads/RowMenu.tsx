@@ -8,7 +8,7 @@ import { repliesOf } from "./Replies";
 import { markRead, markUnread, unseenDeep } from "./seen";
 
 /** One line of a right-click menu, with the vim key that does the same where there is one; "-" draws a rule. */
-export type MenuItem = { label: string; icon: LucideIcon; keys?: string; run(): void; agent?: string } | "-";
+export type MenuItem = { label: string; icon: LucideIcon; keys?: string; run(): void; agent?: string; pressed?: boolean } | "-";
 
 export const copy = (text: string) => void navigator.clipboard.writeText(text);
 export const threadLink = (id: string) => `${location.origin}${location.pathname}#thread/${id}`;
@@ -97,7 +97,7 @@ export function threadItems(t: Thread, all: Thread[], on: { open?(): void; reply
 }
 
 /** Pin a thread to the sidebar, or unpin it: the same item in its menus and hover bars, on P. */
-export const pinItem = (t: Thread): MenuItem => ({ label: t.pinned ? "Unpin" : "Pin", icon: t.pinned ? PinOff : Pin, keys: "P", run: () => void setPinned(t.id, !t.pinned), agent: `pin:${t.id}` });
+export const pinItem = (t: Thread): MenuItem => ({ label: t.pinned ? "Unpin" : "Pin", icon: t.pinned ? PinOff : Pin, keys: "P", run: () => void setPinned(t.id, !t.pinned), agent: `pin:${t.id}`, pressed: !!t.pinned });
 
 /** What a message offers: its subthread if it has one, else a reply in thread; a quote; unread from it on; its link and text. */
 export function messageItems(text: string, on: { open?(): void; reply?(): void; quote?(): void; unread?(): void; link?: string }): (MenuItem | false | undefined)[] {

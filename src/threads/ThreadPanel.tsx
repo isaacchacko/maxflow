@@ -1,11 +1,11 @@
-import { Check, ChevronDown, Circle, ExternalLink, MessagesSquare, Pause, Pin, Waypoints } from "lucide-react";
+import { Check, ChevronDown, Circle, ExternalLink, Pause, Waypoints } from "lucide-react";
 import { useState } from "react";
 import { AgentFace, faceOf } from "@/components/AgentFace";
 import { AgentLink } from "@/components/AgentLink";
 import { GitHubGlyph, SlackGlyph } from "@/lib/slack";
 import { cn } from "@/lib/utils";
 import { statusColor, type Thread } from "@/mock";
-import { agentStore, nameStore, objectiveStore, setPinned, taskStore, threadStore } from "@/store";
+import { agentStore, nameStore, objectiveStore, taskStore, threadStore } from "@/store";
 import { contributorsOf, stateOf, type Contributor } from "./contributors";
 import { hoverAgent, pointsAt } from "./hover";
 import { when } from "./MessageRow";
@@ -156,11 +156,6 @@ export function ThreadPanel({ thread }: { thread: Thread }) {
         {thread.feed && (
           <Prop icon={thread.feed.source === "slack" ? <SlackGlyph className="size-3.5" /> : thread.feed.source === "gh" ? <GitHubGlyph className="size-3.5" /> : <ExternalLink className="size-3.5" />} href={thread.feed.link} title={thread.feed.link}>
             {thread.feed.who}
-          </Prop>
-        )}
-        {thread.pinned && (
-          <Prop icon={<Pin className="size-4" />} onClick={() => void setPinned(thread.id, false)} title="Pinned to the sidebar; click to unpin">
-            Pinned
           </Prop>
         )}
       </Group>
