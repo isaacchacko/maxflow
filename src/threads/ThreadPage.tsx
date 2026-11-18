@@ -1,4 +1,4 @@
-import { AlarmClock, ArrowLeft, ArrowUpToLine, Check, ChevronRight, GitBranch, MessageSquareReply, MessagesSquare, Quote, RotateCcw } from "lucide-react";
+import { AlarmClock, ArrowLeft, ArrowUpToLine, Check, ChevronRight, GitBranch, MessageSquareReply, MessagesSquare, PanelRight, Quote, RotateCcw } from "lucide-react";
 import { createContext, Fragment, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
@@ -18,6 +18,7 @@ import { Rich } from "./Rich";
 import { ShotScope, shotsOf } from "./Viewer";
 import { AgentStack, ThreadPanel } from "./ThreadPanel";
 import { PinToggle } from "./PinToggle";
+import { paneStore } from "./pane";
 import { openRaise, raise, raisedTo } from "./Raise";
 import { HoverBar } from "./HoverBar";
 import { openPause, pausedLabel } from "./Pause";
@@ -95,6 +96,10 @@ export function Pending({ pending, names, inline }: { pending: NonNullable<Threa
 export function ThreadPage({ id, back, embedded }: { id: string; back: string; embedded?: boolean }) {
   const nav = useContext(ThreadNavContext);
   const climb = () => nav.up(id, back);
+  const paneOpen = !embedded && !!paneStore.use();
+  const [detailWithPane, setDetailWithPane] = useState(false);
+  const detail = !paneOpen || detailWithPane;
+  useEffect(() => void (paneOpen || setDetailWithPane(false)), [paneOpen]);
   const all = threadStore.use();
   const thread = all.find(t => t.id === id);
   const agents = agentStore.use();
@@ -218,7 +223,12 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
         {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
         {thread.paused && <span data-agent="thread-paused" title={`paused ${pausedLabel(thread.paused)}`} className="min-w-0 truncate text-xs whitespace-nowrap text-muted-foreground">paused {pausedLabel(thread.paused)}</span>}
         <span className="ml-auto" />
-        <AgentStack thread={thread} onOpen={() => document.getElementById(`agents-${thread.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+        <AgentStack thread={thread} onOpen={() => (setDetailWithPane(true), requestAnimationFrame(() => document.getElementById(`agents-${thread.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })))} />
+        {paneOpen && (
+          <button data-agent="thread-detail-toggle" aria-pressed={detail} title={detail ? "Hide details" : "Show details"} onClick={() => setDetailWithPane(!detail)} className={cn("flex size-8 shrink-0 items-center justify-center rounded-md border transition-colors", detail ? "border-link/30 bg-link/10 text-link" : "border-border text-muted-foreground hover:bg-muted hover:text-foreground")}>
+            <PanelRight className="size-4" />
+          </button>
+        )}
         <PinToggle thread={thread} />
         {!thread.parentId && (
           <Button variant="outline" size="sm" data-agent="thread-pause" title="Pause until a time" onClick={() => openPause(thread.id, climb)}>
@@ -330,7 +340,13 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
           <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onRaise={text => void raise(text)} onSend={text => (setLine({ id }), postToThread(thread.id, "isaac", text, nudge ? "subthread" : undefined))} tools={<NudgeToggle on={nudge} set={on => setNudge(on ? "subthread" : "")} />} toolsOn={!!nudge} placeholder={thread.parentId ? "Reply in thread" : embedded ? "Reply to thread…" : "Reply…"} className="px-4 pt-1 pb-3" />
         </section>
 
-        {!embedded && <ThreadPanel thread={thread} />}
+        {/* With a thread open in the side pane, the details fold away so the messages and the pane share the width; they come back
+            when the pane closes, or from the header's toggle for as long as he stays on this page. */}
+        {!embedded && (
+          <div data-agent="thread-detail" style={{ width: detail ? "18rem" : 0 }} className="shrink-0 overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none">
+            <ThreadPanel thread={thread} />
+          </div>
+        )}
       </div>
     </div>
   );

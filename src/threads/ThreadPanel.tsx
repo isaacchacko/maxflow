@@ -121,7 +121,7 @@ export function ThreadPanel({ thread }: { thread: Thread }) {
   const mentionedIn = all.filter(t => t.id !== thread.id && t.messages.some(m => m.text.includes(`[[thread:${thread.id}]]`)));
 
   return (
-    <aside data-agent="thread-panel" className="flex w-1/4 max-w-80 min-w-64 shrink-0 flex-col gap-6 overflow-y-auto border-l bg-window/60 px-3 py-4">
+    <aside data-agent="thread-panel" className="flex h-full w-72 shrink-0 flex-col gap-6 overflow-y-auto border-l bg-window/60 px-3 py-4">
       <Group title="Properties">
         {thread.resolved ? (
           <Prop icon={<Check className="size-4 text-ok" />}>Resolved {when(thread.resolved.at)}</Prop>
