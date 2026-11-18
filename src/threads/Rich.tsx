@@ -117,7 +117,7 @@ export function Rich({ text, className, still }: { text: string; className?: str
   return (
     <span className={className}>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips]} components={still ? inlineStill : inline} allowedElements={INLINE} unwrapDisallowed urlTransform={keepRefs}>
-        {asLinks(text.replace(/\s*\n\s*/g, " "))}
+        {asLinks(splitCapture(text).body.replace(/\s*\n\s*/g, " "))}
       </ReactMarkdown>
     </span>
   );
@@ -316,14 +316,46 @@ const keepRefs = (url: string) => (/^(ref|pr|linear|slackuser|slackchan):/.test(
 
 /** A whole message as GitHub-flavored markdown, with Rich's chips, links and pasted images inside it. */
 export function Markdown({ text, className, slack }: { text: string; className?: string; slack?: boolean }) {
+  const { body, caption, element } = splitCapture(text);
   return (
     // Any long word or token (a URL, a hash, inline code) breaks where it must, so a message is never wider than its column.
     <div className={cn("min-w-0 [overflow-wrap:anywhere]", className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkChips, remarkBreaks]} components={md} urlTransform={keepRefs}>
-        {slack ? mrkdwn(text) : asLinks(showUploads(text))}
+        {slack ? mrkdwn(body) : asLinks(showUploads(body))}
       </ReactMarkdown>
+      {caption && (
+        <p data-agent="capture-caption" title={element && `element ${element}`} className="mt-1 text-xs text-muted-foreground">
+          <Rich text={`📷 ${caption}`} />
+        </p>
+      )}
     </div>
   );
+}
+
+const PAGES: Record<string, string> = { inbox: "Threads", todo: "Todo", routing: "Routing", sentries: "Sentries" };
+/**
+ * A ⌘⇧S shot's "[maxflow · screenshot] page … · message from … · pointing at … · element …" line is where it was taken, for the
+ * agent it goes to; a person reads it as a caption under the picture: "📷 from Threads · on Susanna's message · pointing at <chip>",
+ * with the element only in its tooltip.
+ */
+export function splitCapture(text: string) {
+  const line = text.match(/^\[maxflow · screenshot\] (.*)$/m);
+  if (!line) return { body: text };
+  const body = text.replace(line[0], "").replace(/\n{3,}/g, "\n\n").trim();
+  let element: string | undefined;
+  const parts = line[1]!.split(" · ").flatMap(part => {
+    const page = part.match(/^page (.*)$/);
+    if (page) {
+      const hash = page[1]!.match(/^`#?([\w-]+)`$/);
+      return [`from ${hash ? (PAGES[hash[1]!] ?? hash[1]) : page[1]}`];
+    }
+    const message = part.match(/^message from (.+?) at [\d:]+/);
+    if (message) return [message[1] === "Isaac" ? "on your message" : `on ${message[1]}'s message`];
+    const marked = part.match(/^element `(.*)`$/);
+    if (marked) return (element = marked[1]), [];
+    return [part];
+  });
+  return { body, caption: parts.join(" · "), element };
 }
 
 const GITHUB_LOGIN = "isaacchacko";
