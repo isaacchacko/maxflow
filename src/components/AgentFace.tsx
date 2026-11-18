@@ -73,7 +73,13 @@ function eyePath(cx: number, cy: number, w: number, h: number, angle: number, sm
   return `M${pts.join("L")}Z`;
 }
 
-type Geometry = { lx: number; ly: number; rx: number; ry: number; k: number; brows: boolean; small: boolean };
+type Geometry = { lx: number; ly: number; rx: number; ry: number; k: number; brows: boolean; small: boolean; face: string; back: string; line: string; round: boolean };
+
+// Turning, the body is a slab DEPTH thick: the face plane narrows by cos θ, SLABS copies of the silhouette in the edge colour
+// fill the side as it comes round (sin θ · DEPTH wide), and past 90° the plain back faces out instead, eyes hidden.
+const DEPTH = 5;
+const SLABS = 10;
+const squash = (c: number, off: number) => `translate(${r1(16 + off)} 0) scale(${r1(Math.max(Math.abs(c), 0.015) * 1000) / 1000} 1) translate(-16 0)`;
 
 /** Everything a frame sets on the face's elements, as attributes, so React draws the first and the ticker the rest. */
 function paint(f: Frame, g: Geometry) {
@@ -93,7 +99,13 @@ function paint(f: Frame, g: Geometry) {
   };
   const deg = (f.rot * 180) / Math.PI;
   const zCount = g.small ? 2 : 3;
+  const c = Math.cos(f.turn);
+  const side = Math.sin(f.turn) * DEPTH;
   return {
+    cap: squash(c, (c >= 0 ? -side : side) / 2),
+    capFill: c >= 0 ? g.face : g.back,
+    eyes: r1(Math.max(0, Math.min(1, (c - 0.2) * 4))),
+    slabs: Array.from({ length: SLABS }, (_, i) => squash(c, side * (i / (SLABS - 1) - 0.5))),
     head: `translate(${r1(f.x)} ${r1(f.y)}) rotate(${r1(deg)} 16 18) translate(16 27) scale(${r1(f.scale * 1000) / 1000}) translate(-16 -27)`,
     left: eye(g.lx, g.ly, f.leftOpen, f.leftAngle, Math.max(0, f.gx)),
     right: eye(g.rx, g.ry, f.rightOpen, f.rightAngle, Math.max(0, -f.gx)),
@@ -112,7 +124,7 @@ function paint(f: Frame, g: Geometry) {
 // only drift. It draws nothing while the tab is hidden, while the image viewer is open (data-viewing: a moving face under its scrim
 // re-rastered the page beneath every frame) or for a face scrolled out of view.
 type Live = { life: Life; target: Expression; geometry: Geometry; els: Els; visible: boolean };
-type Els = { head: SVGGElement; left: SVGPathElement; right: SVGPathElement; browL: SVGPathElement; browR: SVGPathElement; brows: SVGGElement; zs: SVGTextElement[] };
+type Els = { cap: SVGGElement; shadow: SVGGElement; capFill: SVGPathElement; eyes: SVGGElement; slabs: SVGPathElement[]; head: SVGGElement; left: SVGPathElement; right: SVGPathElement; browL: SVGPathElement; browR: SVGPathElement; brows: SVGGElement; zs: SVGTextElement[] };
 const live = new Set<Live>();
 let frame = 0;
 let last = 0;
@@ -122,6 +134,12 @@ function apply(l: Live, f: Frame) {
   const p = paint(f, l.geometry);
   const { els } = l;
   els.head.setAttribute("transform", p.head);
+  els.cap.setAttribute("transform", p.cap);
+  els.shadow.setAttribute("transform", p.cap);
+  els.capFill.setAttribute("fill", p.capFill);
+  els.capFill.setAttribute("stroke", l.geometry.round ? p.capFill : l.geometry.line);
+  els.eyes.setAttribute("opacity", String(p.eyes));
+  p.slabs.forEach((t, i) => els.slabs[i]?.setAttribute("transform", t));
   els.left.setAttribute("d", p.left);
   els.right.setAttribute("d", p.right);
   els.browL.setAttribute("d", p.browL);
@@ -165,9 +183,9 @@ export function AgentFace({ id, expression = "idle", still, small, shape, colors
   const k = body.scale ?? 1;
   const spread = body.spread * f.spread;
   const [[lx, ly], [rx, ry]] = body.eyes ?? [[16 - spread, body.cy], [16 + spread, body.cy]];
-  const geometry: Geometry = { lx, ly, rx, ry, k, brows: !small && body.brows !== false, small: !!small };
   const { face, edge, line, ink } = colors ?? { face: `hsl(${f.hue} 82% 83%)`, edge: `hsl(${f.hue} 52% 54%)`, line: `hsl(${f.hue} 48% 58%)`, ink: INK };
   const r = body.round ?? 0;
+  const geometry: Geometry = { lx, ly, rx, ry, k, brows: !small && body.brows !== false, small: !!small, face, back: line, line, round: r > 0 };
 
   const svg = useRef<SVGSVGElement>(null);
   const self = useRef<Live | null>(null);
@@ -184,7 +202,7 @@ export function AgentFace({ id, expression = "idle", still, small, shape, colors
       target: first.current,
       geometry,
       visible: true,
-      els: { head: q("[data-face=head]"), left: q("[data-face=left]"), right: q("[data-face=right]"), browL: q("[data-face=brow-l]"), browR: q("[data-face=brow-r]"), brows: q("[data-face=brows]"), zs: [...el.querySelectorAll("[data-face=z]")] as SVGTextElement[] },
+      els: { cap: q("[data-face=cap]"), shadow: q("[data-face=shadow]"), capFill: q("[data-face=cap-fill]"), eyes: q("[data-face=eyes]"), slabs: [...el.querySelectorAll("[data-face=slab]")] as SVGPathElement[], head: q("[data-face=head]"), left: q("[data-face=left]"), right: q("[data-face=right]"), browL: q("[data-face=brow-l]"), browR: q("[data-face=brow-r]"), brows: q("[data-face=brows]"), zs: [...el.querySelectorAll("[data-face=z]")] as SVGTextElement[] },
     };
     self.current = me;
     live.add(me);
@@ -207,14 +225,21 @@ export function AgentFace({ id, expression = "idle", still, small, shape, colors
     <svg ref={svg} viewBox="0 0 32 32" aria-hidden overflow="visible" className={cn("agent-face shrink-0", className)}>
       <g data-face="head" transform={p.head}>
         <g transform={small && body.smallZoom ? `translate(16 16) scale(${body.smallZoom}) translate(-16 -16)` : undefined}>
-          <path d={body.d} transform="translate(1.1 1.5)" fill={edge} stroke={edge} strokeWidth={r} strokeLinejoin="round" />
-          {r > 0 && <path d={body.d} fill="none" stroke={line} strokeWidth={r + 1.4} strokeLinejoin="round" />}
-          <path d={body.d} fill={face} stroke={r > 0 ? face : line} strokeWidth={r || 0.7} strokeLinejoin="round" />
-          <path data-face="left" d={p.left} fill={ink} />
-          <path data-face="right" d={p.right} fill={ink} />
-          <g data-face="brows" opacity={p.browOpacity} stroke={ink} strokeWidth={1.2 * k} strokeLinecap="round" fill="none">
-            <path data-face="brow-l" d={p.browL} />
-            <path data-face="brow-r" d={p.browR} />
+          <g data-face="shadow" transform={p.cap}>
+            <path d={body.d} transform="translate(1.1 1.5)" fill={edge} stroke={edge} strokeWidth={r} strokeLinejoin="round" />
+          </g>
+          {animated && p.slabs.map((t, i) => <path key={i} data-face="slab" d={body.d} transform={t} fill={edge} stroke={edge} strokeWidth={r + 0.8} strokeLinejoin="round" />)}
+          <g data-face="cap" transform={p.cap}>
+            {r > 0 && <path d={body.d} fill="none" stroke={line} strokeWidth={r + 1.4} strokeLinejoin="round" />}
+            <path data-face="cap-fill" d={body.d} fill={p.capFill} stroke={r > 0 ? p.capFill : line} strokeWidth={r || 0.7} strokeLinejoin="round" />
+            <g data-face="eyes" opacity={p.eyes}>
+              <path data-face="left" d={p.left} fill={ink} />
+              <path data-face="right" d={p.right} fill={ink} />
+              <g data-face="brows" opacity={p.browOpacity} stroke={ink} strokeWidth={1.2 * k} strokeLinecap="round" fill="none">
+                <path data-face="brow-l" d={p.browL} />
+                <path data-face="brow-r" d={p.browR} />
+              </g>
+            </g>
           </g>
         </g>
       </g>

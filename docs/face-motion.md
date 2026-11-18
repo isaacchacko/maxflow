@@ -110,12 +110,22 @@ draw the resting pose with no loop.
 | state | face | motion |
 |---|---|---|
 | idle | neutral | blinks, wanders anywhere, drifts, sways |
-| working | narrowed, level, brows low | reads: a sweep left to right in 1.1s and a quick return; every 3–6s a page-turn hop (up, then a soft dip, a slight turn) |
-| thinking | one eye narrowed under a raised brow, head tilted | gaze wanders in the upper right |
+| working | narrowed, level, brows low | reads left to right (1.1s sweep, quick return) and turns all the way round about its vertical axis every 1.6s (below) |
+| thinking | one eye narrowed under a raised brow, head tilted | gaze wanders in the upper right; turns as working does |
 | waiting (on Isaac) | wide, brows up | gaze held near centre (at him); every 2.6–5s a nudge: a lift and lean |
 | done | ^ ^ | three hops, each lower, over 1.35s as it lands, then rests smiling |
 | error | worried brows, wide narrow eyes | a small tremble |
 | asleep | lines, head tilted | no blinks; breathes on a 4.8s cycle; z's rise and fade |
+
+**The turn** (working and thinking; Isaac: "the thing rotates when its processing"). BoardUI's working beat, measured from its
+`workingPose`: a 1.15s turn through 2π under smootherstep with an 8% hold at each end, a hop (down `sin²` over the first 18%,
+then up `sin²(π·smootherstep)`) and a lean of `-.055·sin(turn)`. yarn adds 0.45s face-on between turns, so one comes every 1.6s,
+and a turn already under way finishes when the state changes. It's faked in 2D:
+- the face plane narrows by `cos θ`;
+- 10 copies of the silhouette in the edge colour, spread over `sin θ · 5`, make the side slab;
+- past 90° the plain back (the outline colour) faces out, and the eyes fade out from `cos θ < .45`.
+
+Still faces never turn.
 
 **Working marks** (`src/components/Working.tsx`).
 - `Working`: the iridescent ring.

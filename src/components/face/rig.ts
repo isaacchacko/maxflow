@@ -97,9 +97,9 @@ export function createLife(seed: number, expression: Expression) {
     wander: { from: [0, 0], to: [0, 0], point: [0, 0], elapsed: 0, travel: 0.2, hold: 0.4 + 1.3 * r() },
     drift: { from: [0, 0, 0], to: [0, 0, 0], elapsed: 0, duration: 2.2 },
     gaze: [0, 0] as [number, number],
-    // While working: where the eyes are along the line they read, and the next small hop.
+    // While working: where the eyes are along the line they read, and how far into a turn the body is.
     scan: 0,
-    hop: 2 + 3 * r(),
+    spin: 0,
     nudge: 1.5 + 2 * r(),
   };
 }
@@ -160,10 +160,13 @@ function drift(d: Life["drift"], r: () => number, dt: number) {
 }
 
 /** What the face draws this frame: the pose, plus the motion that isn't part of the expression. */
-export type Frame = Pose & { blink: number; gx: number; gy: number; x: number; y: number; rot: number; scale: number; z: number };
+export type Frame = Pose & { blink: number; gx: number; gy: number; x: number; y: number; rot: number; scale: number; z: number; turn: number };
 
 /** The pose an expression holds, with no life in it: the still face, and the first frame of a living one. */
-export const restFrame = (e: Expression): Frame => ({ ...POSES[e], blink: 1, gx: POSES[e].lookX, gy: POSES[e].lookY, x: 0, y: 0, rot: POSES[e].tilt, scale: 1, z: 0 });
+export const restFrame = (e: Expression): Frame => ({ ...POSES[e], blink: 1, gx: POSES[e].lookX, gy: POSES[e].lookY, x: 0, y: 0, rot: POSES[e].tilt, scale: 1, z: 0, turn: 0 });
+
+const SPIN_TURN = 1.15;
+const SPIN_BEAT = 1.6;
 
 export function step(l: Life, target: Expression, dt: number): Frame {
   if (target !== l.expression) (l.expression = target), (l.since = 0);
@@ -206,15 +209,19 @@ export function step(l: Life, target: Expression, dt: number): Frame {
   let rot = p.tilt + Math.sin(a) * 0.03 + l.gaze[0] * 0.04;
   let scale = 1 + Math.sin(a) * 0.006;
   let z = 0;
-  if (e === "working") {
-    // Every few seconds a small hop, as if turning a page: up, then a soft dip.
-    l.hop -= dt;
-    if (l.hop < -1.15) l.hop = 3 + 3 * l.r();
-    if (l.hop < 0) {
-      const t = -l.hop / 1.15;
-      y += (t < 0.18 ? Math.sin((Math.PI * t) / 0.18) ** 2 * 0.4 : 0) - 1.4 * Math.sin(Math.PI * smoother((t - 0.12) / 0.72)) ** 2;
-      rot += -0.05 * Math.sin(2 * Math.PI * smoother((t - 0.08) / 0.84));
-    }
+  // Working or thinking, the body turns all the way round about its vertical axis, as BoardUI's does while it processes: each
+  // beat a 1.15s turn (smootherstep, holding face-on for 8% at either end) with a small hop and a lean into it, then 0.45s
+  // face-on before the next. A turn under way when the state changes finishes rather than snapping back.
+  let turn = 0;
+  if (e === "working" || e === "thinking" || l.spin > 0) {
+    l.spin += dt;
+    if (l.spin >= SPIN_BEAT) l.spin = e === "working" || e === "thinking" ? l.spin % SPIN_BEAT : 0;
+    const t = Math.min(1, l.spin / SPIN_TURN);
+    if (l.spin < SPIN_TURN) {
+      turn = smoother((t - 0.08) / 0.84) * Math.PI * 2;
+      y += (t < 0.18 ? Math.sin((Math.PI * t) / 0.18) ** 2 * 0.32 : 0) - 1.45 * Math.sin(Math.PI * smoother((t - 0.12) / 0.72)) ** 2;
+      rot += -0.055 * Math.sin(turn);
+    } else if (e !== "working" && e !== "thinking") l.spin = 0;
   }
   if (e === "done" && l.since < 1.35) {
     // Done celebrates: three hops, each lower, when it lands, then it rests in its smile.
@@ -235,5 +242,5 @@ export function step(l: Life, target: Expression, dt: number): Frame {
     y = -Math.sin(a) * 0.4;
     z = (l.time / 3.2) % 1;
   }
-  return { ...p, blink: b, gx: l.gaze[0], gy: l.gaze[1], x, y, rot, scale, z };
+  return { ...p, blink: b, gx: l.gaze[0], gy: l.gaze[1], x, y, rot, scale, z, turn };
 }
