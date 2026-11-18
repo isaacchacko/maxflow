@@ -10,11 +10,11 @@ import { ago } from "@/threads/Replies";
 // it. The catalog comes seeded and explains itself; a builtin takes only its setting and the exceptions that make sense for it,
 // picked from lists. Patterns on tools and commands belong to his own rules, written under Advanced.
 
-// meaning: what the setting does to an agent about to take the action, said of one of it ("message", "merge").
-const MODES: { mode: Mode; label: string; on: string; meaning: (noun: string) => string }[] = [
-  { mode: "allow", label: "Allow", on: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400", meaning: () => "The agent goes ahead on its own." },
-  { mode: "ask", label: "Ask me", on: "bg-amber-500/15 text-amber-700 dark:text-amber-400", meaning: noun => `The agent stops and asks you in its thread; your yes lets that one ${noun} go through.` },
-  { mode: "deny", label: "Block", on: "bg-red-500/15 text-red-700 dark:text-red-400", meaning: () => "The agent is told no, and doesn't do it." },
+// short: the legend's line. meaning: what the setting does to an agent about to take the action, said of one of it ("message").
+const MODES: { mode: Mode; label: string; on: string; dot: string; short: string; meaning: (noun: string) => string }[] = [
+  { mode: "allow", label: "Allow", on: "bg-ok/10 text-ok", dot: "bg-ok", short: "Goes ahead on its own", meaning: () => "The agent goes ahead on its own." },
+  { mode: "ask", label: "Ask me", on: "bg-warn-soft text-warn", dot: "bg-warn", short: "Stops and asks you first", meaning: noun => `The agent asks you in its thread first; your yes lets that one ${noun} through.` },
+  { mode: "deny", label: "Block", on: "bg-destructive/10 text-destructive", dot: "bg-destructive", short: "Is told no", meaning: () => "The agent is told no, and doesn't do it." },
 ];
 const KINDS: Record<string, string> = {
   message: "Message people",
@@ -93,25 +93,22 @@ export function RestrictionsView() {
       </header>
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-5 py-4">
-          <div className="mb-5 px-2.5 text-[13px] text-muted-foreground">
-            <p className="mb-1.5">Choose what your agents may do without you. Each action below says what it covers.</p>
-            <ul className="flex flex-col gap-0.5">
-              {MODES.map(m => (
-                <li key={m.mode} className="flex items-baseline gap-2">
-                  <span className={cn("w-14 shrink-0 rounded px-1.5 text-center text-xs font-medium", m.on)}>{m.label}</span>
-                  {m.meaning("action")}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-1.5">An exception sets an action differently for some people, one objective or one repository, and wins over the general setting there.</p>
-          </div>
+          <p className="mb-3 px-2.5 text-sm text-muted-foreground">What your agents may do without asking you.</p>
+          <ul className="mb-6 grid grid-cols-3 divide-x rounded-xl border">
+            {MODES.map(m => (
+              <li key={m.mode} className="flex flex-col items-start gap-1.5 px-3 py-2.5">
+                <span className={cn("w-16 rounded-md py-0.5 text-center text-xs font-medium", m.on)}>{m.label}</span>
+                <span className="text-[13px] text-muted-foreground">{m.short}</span>
+              </li>
+            ))}
+          </ul>
           {tab === "people" && <PeopleList list={list} sections={sections} onEdit={edit} onDelete={remove} onAdd={add} onLinked={load} />}
           {tab === "actions" && (
             <>
               {sections.map(section => (
                 <section key={section} className="mb-6">
                   <h2 className="mb-1 px-2.5 text-[13px] font-medium text-muted-foreground">{section}</h2>
-                  <ol className="flex flex-col gap-1">
+                  <ol className="flex flex-col divide-y">
                     {builtins
                       .filter(r => kindLabel(r.action) === section)
                       .map(r => (
@@ -123,7 +120,7 @@ export function RestrictionsView() {
               {custom.length > 0 && (
                 <section className="mb-6">
                   <h2 className="mb-1 px-2.5 text-[13px] font-medium text-muted-foreground">Your own rules</h2>
-                  <ol className="flex flex-col gap-1">
+                  <ol className="flex flex-col divide-y">
                     {custom.map(r => (
                       <ActionRow key={r.id} r={r} exceptions={list.filter(o => o.parent === r.id)} {...rowProps} />
                     ))}
@@ -220,8 +217,8 @@ function ActionRow({ r, exceptions, onEdit, onDelete, onAdd }: RowProps & { r: R
       </li>
     );
   return (
-    <li data-row={`restriction/${r.id}`} className="group rounded-lg px-2.5 py-2 hover:bg-muted/40">
-      <div className="flex items-start gap-3">
+    <li data-row={`restriction/${r.id}`} className="group px-2.5 py-3">
+      <div className="flex items-start gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-sm font-medium">
             {r.label}
@@ -231,38 +228,38 @@ function ActionRow({ r, exceptions, onEdit, onDelete, onAdd }: RowProps & { r: R
               </button>
             )}
           </div>
-          {(r.about ?? r.note) && <p className="text-[13px] text-muted-foreground">{r.about ?? r.note}</p>}
-          {r.examples?.length ? <p className="text-xs text-muted-foreground/80">For example: {r.examples.join("; ")}.</p> : null}
+          {(r.about ?? r.note) && <p className="mt-0.5 text-[13px] text-muted-foreground">{r.about ?? r.note}</p>}
+          {r.examples?.length ? <p className="text-[13px] text-muted-foreground/70">e.g. {r.examples.join("; ")}</p> : null}
+          <p className="mt-1.5 flex items-start gap-2 text-[13px] text-foreground/80">
+            <span className={cn("mt-[7px] size-1.5 shrink-0 rounded-full", m.dot)} />
+            {m.meaning(r.noun ?? "action")}
+          </p>
         </div>
         <ModeToggle mode={r.mode} onChange={mode => void onEdit(r.id, { mode })} />
       </div>
-      <p className="mt-1 flex items-baseline gap-1.5 text-xs">
-        <span className={cn("rounded px-1.5 font-medium", m.on)}>{m.label}</span>
-        <span className="text-muted-foreground">{m.meaning(r.noun ?? "action")}</span>
-      </p>
       {(exceptions.length > 0 || adding) && (
-        <ol className="mt-1.5 flex flex-col">
+        <ol className="mt-2 flex flex-col gap-0.5">
           {exceptions.map(o => (
-            <li key={o.id} className="group/exception flex min-w-0 items-center gap-2 rounded-md py-0.5 pl-1 text-[13px] hover:bg-muted/60">
+            <li key={o.id} className="group/exception flex min-w-0 items-center gap-2 rounded-md py-0.5 text-[13px]">
               <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="shrink-0 text-muted-foreground">Except</span>
               <ScopeChips r={o} />
-              <span className="min-w-0 flex-1" />
               <button onClick={() => void onDelete(o.id)} title="Remove this exception" className="shrink-0 text-muted-foreground opacity-0 group-hover/exception:opacity-100 hover:text-destructive">
                 <X className="size-3.5" />
               </button>
+              <span className="min-w-0 flex-1" />
               <ModeToggle mode={o.mode} onChange={mode => void onEdit(o.id, { mode })} />
             </li>
           ))}
           {adding && (
-            <li className="mt-1 rounded-lg border p-2.5">
+            <li className="mt-1 rounded-lg border p-3">
               <ExceptionForm r={r} kinds={kinds} onAdd={async c => (await onAdd({ ...c, parent: r.id }), setAdding(false))} onCancel={() => setAdding(false)} />
             </li>
           )}
         </ol>
       )}
       {kinds.length > 0 && !adding && (
-        <button onClick={() => setAdding(true)} className="mt-0.5 flex items-center gap-1 rounded-md px-1 text-xs text-muted-foreground/70 hover:text-foreground">
+        <button onClick={() => setAdding(true)} className="mt-1.5 flex items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground">
           <Plus className="size-3.5" /> Add an exception
         </button>
       )}
@@ -351,7 +348,7 @@ function ModeToggle({ mode, inherited, onChange }: { mode: Mode; inherited?: boo
           role="radio"
           aria-checked={mode === m.mode}
           onClick={() => (inherited || mode !== m.mode) && onChange(m.mode)}
-          className={cn("rounded px-2 py-0.5 font-medium", mode === m.mode ? cn(m.on, inherited && "opacity-45") : "text-muted-foreground hover:text-foreground")}
+          className={cn("w-14 rounded py-0.5 text-center font-medium", mode === m.mode ? cn(m.on, inherited && "opacity-45") : "text-muted-foreground hover:text-foreground")}
         >
           {m.label}
         </button>
@@ -537,15 +534,15 @@ function PeopleList({ list, sections, onEdit, onDelete, onAdd, onLinked }: { lis
           const Chevron = open === key ? ChevronDown : ChevronRight;
           return (
             <li key={key}>
-              <div className={cn("group flex min-w-0 items-center gap-2 rounded-lg pr-2.5 hover:bg-muted/60", open === key && "bg-muted/60")}>
+              <div className={cn("group flex min-w-0 items-center gap-3 rounded-lg pr-2.5 hover:bg-muted/60", open === key && "bg-muted/60")}>
                 <button onClick={() => setOpen(open === key ? undefined : key)} className="flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2.5 text-left text-sm">
                   <Chevron className="size-4 shrink-0 text-muted-foreground" />
                   <PersonFace p={p} className="size-6" />
                   <span className="truncate">{personName(p)}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">{sourceOf(p)}</span>
-                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">{count ? `${count} set` : "everyone's rules"}</span>
+                  <span className="truncate text-xs text-muted-foreground">{sourceOf(p)}</span>
                 </button>
                 {!isGroup(p) && !p.email && <LinkAccount p={p} known={known} onLink={relink} />}
+                <span className="shrink-0 text-xs text-muted-foreground">{count ? `${count} set` : "everyone's rules"}</span>
               </div>
               {open === key && (
                 <div className="mb-3 ml-[26px]">
