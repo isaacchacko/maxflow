@@ -752,44 +752,6 @@ for (const t of threads as (Thread & { kind?: string; kindBy?: string; done?: nu
   delete t.kind, delete t.kindBy, delete t.done;
   for (const m of t.messages as (Message & { re?: unknown })[]) delete m.re;
 }
-// Feed threads from before the feed posted each message as its author hold one text per hand-off ("<who> in <where>:", the context
-// quoted under "Before it…", then the new lines under "New:" and the links); each becomes its messages, with the text kept for agents.
-{
-  const uids: Record<string, string> = {};
-  try {
-    for (const { msgs } of Object.values(JSON.parse(readFileSync(`${STATE_DIR}/slack-messages.json`, "utf8")) as Record<string, { msgs: { uid: string; who: string }[] }>)) for (const m of msgs) uids[m.who] ??= m.uid;
-  } catch {}
-  for (const t of threads) {
-    if (!t.feed || !t.messages.some((m) => m.from === "feed" && !m.ext)) continue;
-    const source = t.feed.source === "slack" ? "slack" : "github";
-    const blobs = t.messages.filter((m) => m.from === "feed" && !m.ext).map((m) => m.text);
-    t.feedSaid = [...(t.feedSaid ?? []), ...blobs.filter((b) => !t.feedSaid?.includes(b))];
-    t.messages = t.messages.flatMap((m) => {
-      const head = m.from === "feed" && !m.ext && m.text.match(/^(.+?) in (.+?):\n([\s\S]*)$/);
-      if (!head) return [m];
-      const [, who, where, rest] = head;
-      const links = rest.match(/^https?:\/\/\S+$/gm) ?? [t.feed!.link];
-      const body = rest.replace(/^https?:\/\/\S+$/gm, "").trim();
-      const [before, now] = body.includes("\n\nNew:\n") ? body.split("\n\nNew:\n") : ["", body];
-      const unquote = (x: string) => x.replace(/^> ?/gm, "").trim();
-      // `message` is defined further down, so these are built by hand.
-      const said = (text: string, id = `m-${crypto.randomUUID().slice(0, 6)}`) => ({ id, from: "feed", at: m.at, text });
-      const out: Message[] = [];
-      for (const c of before.replace(/^Before it[^\n]*\n/, "").split(/\n(?=> \*\*)/).filter((x) => x.trim())) {
-        const n = c.match(/^> \*\*(.+?):\*\* ?([\s\S]*)$/);
-        if (!n || !unquote(n[2])) continue;
-        const own = n[1].startsWith("Isaac (him");
-        const name = own ? "Isaac" : n[1];
-        out.push({ ...said(unquote(n[2])), ext: { source, name, ...(uids[name] && source === "slack" && { user: uids[name] }), ...(source === "github" && !own && { user: name }), link: links[0], where, context: true, ...(own && { own: true }) } });
-      }
-      // Each new message was quoted with its continuation lines quoted too, so they split apart only when there is a link for each.
-      const split = now.split(/\n(?=> )/).map(unquote).filter(Boolean);
-      const lines = split.length === links.length ? split : [unquote(now)];
-      lines.forEach((text, i) => out.push({ ...said(text, i ? `${m.id}-${i}` : m.id), ext: { source, name: who, ...(source === "slack" ? uids[who] && { user: uids[who] } : { user: who }), link: links[Math.min(i, links.length - 1)], where } }));
-      return out.length ? out : [m];
-    });
-  }
-}
 const saveThreads = () => writeFileSync(THREADS, JSON.stringify(threads));
 // A paused thread comes back at its time: a timer for the ones due within a day, rebuilt at boot, and a sweep each minute for the
 // rest (and for a timer lost to sleep). Coming back, it is unread from where it was paused, so his inbox puts it up top.
@@ -1533,7 +1495,7 @@ async function world() {
       events: t.timeline.map((e) => ({ from: e.session && sessions.get(e.session)?.role?.role === "router" ? "router" : e.session ? "agent" : "sentry", at: iso(e.at), text: e.text })),
       page: t.page ?? [],
     })),
-    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), ...(t.asks && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), ...(t.paused && { paused: { until: iso(t.paused.until), at: iso(t.paused.at), said: t.paused.said, posts: t.paused.posts ?? 0, ...(t.paused.wake && { wake: t.paused.wake }) } }), ...(t.resurfaced && { resurfaced: { at: iso(t.resurfaced.at), from: t.resurfaced.from } }), ...(t.pinned && { pinned: { at: iso(t.pinned.at), order: t.pinned.order } }), ...(t.feed && { feed: { source: t.feed.source, who: t.feed.who, link: t.feed.link } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, ...(m.nudge && { nudge: m.nudge }), ...(m.wake && { wake: true }) })) })),
+    threads: threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), ...(t.asks && !t.paused && !t.resolved && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), ...(t.paused && { paused: { until: iso(t.paused.until), at: iso(t.paused.at), said: t.paused.said, posts: t.paused.posts ?? 0, ...(t.paused.wake && { wake: t.paused.wake }) } }), ...(t.resurfaced && { resurfaced: { at: iso(t.resurfaced.at), from: t.resurfaced.from } }), ...(t.pinned && { pinned: { at: iso(t.pinned.at), order: t.pinned.order } }), ...(t.feed && { feed: { source: t.feed.source, who: t.feed.who, link: t.feed.link } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, ...(m.nudge && { nudge: m.nudge }), ...(m.wake && { wake: true }) })) })),
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({
       id: s.id,
