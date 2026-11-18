@@ -60,12 +60,13 @@ function link({ value, start, end }: Edit): Edit {
 }
 const codeBlock = (e: Edit) => wrap(e, "```\n", "\n```");
 
-type Format = { label: string; keys: string; icon: React.ComponentType<{ className?: string }>; apply: (e: Edit) => Edit };
+type Format = { label: string; keys?: string; icon: React.ComponentType<{ className?: string }>; apply: (e: Edit) => Edit };
 const FORMATS: Format[] = [
   { label: "Bold", keys: "⌘B", icon: Bold, apply: e => wrap(e, "**") },
   { label: "Italic", keys: "⌘I", icon: Italic, apply: e => wrap(e, "_") },
   { label: "Strikethrough", keys: "⌘⇧X", icon: Strikethrough, apply: e => wrap(e, "~~") },
-  { label: "Link", keys: "⌘K", icon: Link2, apply: link },
+  // No ⌘K: that is the quick switcher's, in this box too.
+  { label: "Link", icon: Link2, apply: link },
   { label: "Numbered list", keys: "⌘⇧7", icon: ListOrdered, apply: e => list(e, true) },
   { label: "Bulleted list", keys: "⌘⇧8", icon: List, apply: e => list(e, false) },
   { label: "Code", keys: "⌘⇧C", icon: Code, apply: e => wrap(e, "`") },
@@ -77,7 +78,7 @@ function formatFor(e: React.KeyboardEvent) {
   const k = e.code.replace(/^(Key|Digit)/, "").toLowerCase();
   const name = e.shiftKey
     ? e.altKey ? (k === "c" ? "Code block" : undefined) : ({ x: "Strikethrough", 7: "Numbered list", 8: "Bulleted list", c: "Code" } as Record<string, string>)[k]
-    : e.altKey ? undefined : ({ b: "Bold", i: "Italic", k: "Link" } as Record<string, string>)[k];
+    : e.altKey ? undefined : ({ b: "Bold", i: "Italic" } as Record<string, string>)[k];
   return FORMATS.find(f => f.label === name);
 }
 
@@ -89,8 +90,7 @@ const formatShown = () => { try { return localStorage.getItem(FORMAT_KEY) === "1
 
 /**
  * A message box drawn as Slack's: one rounded box that lights up while focused, the text, and one row under it: + to attach an image,
- * Aa to show the formatting row (which wraps the selection in markdown; its shortcuts work hidden too, ⌘K among them only while the
- * box has focus), emoji, @ to mention an agent or thread, ⋯ for the box's rarer `tools` (a thread's subthread nudge; `toolsOn` tints it while one
+ * Aa to show the formatting row (which wraps the selection in markdown; its shortcuts work hidden too), emoji, @ to mention an agent or thread, ⋯ for the box's rarer `tools` (a thread's subthread nudge; `toolsOn` tints it while one
  * is on), and send. It grows with its text up to 40% of the
  * window, and takes images pasted or dropped on it: each is uploaded at once, and its path is kept with the draft so a reload keeps it.
  */
@@ -208,7 +208,7 @@ export function Composer({ onSend, onRaise, className, autoFocus, agent, draftKe
           {FORMATS.map((f, i) => (
             <span key={f.label} className="contents">
               {(i === 3 || i === 4 || i === 6) && <span className="mx-1 h-4 w-px bg-border" />}
-              <button type="button" tabIndex={-1} aria-label={f.label} title={`${f.label} (${f.keys})`} onMouseDown={keep} onClick={() => edit(f.apply)} className={tool}>
+              <button type="button" tabIndex={-1} aria-label={f.label} title={f.keys ? `${f.label} (${f.keys})` : f.label} onMouseDown={keep} onClick={() => edit(f.apply)} className={tool}>
                 <f.icon className="size-3.5" />
               </button>
             </span>
@@ -264,7 +264,6 @@ export function Composer({ onSend, onRaise, className, autoFocus, agent, draftKe
           onKeyDown={e => {
             if (mention.onKeyDown(e) || emojiComplete.onKeyDown(e)) return;
             const f = formatFor(e);
-            // ⌘K here is the link, not the switcher, which listens on the window first and leaves a key from this box alone.
             if (f) return e.preventDefault(), edit(f.apply);
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) e.preventDefault(), e.currentTarget.form?.requestSubmit();
             else if (e.key === "Escape" && !draft) e.currentTarget.blur();
