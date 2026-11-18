@@ -1,4 +1,4 @@
-import { AlarmClock, Check, ChevronDown, MessageSquareReply, Pin, Quote, RotateCcw, Share } from "lucide-react";
+import { AlarmClock, ArrowUpToLine, Check, ChevronDown, MessageSquareReply, Pin, Quote, RotateCcw } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -242,7 +242,7 @@ export function InboxView() {
             { label: t.paused ? "Pause again…" : "Pause…", icon: AlarmClock, run: () => pause(t.id), agent: `inbox-pause:${t.id}` },
             { label: "Reply in thread", icon: MessageSquareReply, run: () => reply(t.id), agent: `inbox-reply:${t.id}` },
             !!t.messages[0]?.id && { label: "Quote", icon: Quote, run: () => quote(t.id), agent: `inbox-quote:${t.id}` },
-            !!t.messages[0]?.id && { label: "Raise to Threads", icon: Share, run: () => openRaise(t.id, t.messages[0]!.id!, t.messages[0]!.text), agent: `inbox-raise:${t.id}` },
+            !!t.messages[0]?.id && { label: "Raise to Threads", icon: ArrowUpToLine, run: () => openRaise(t.id, t.messages[0]!.id!, t.messages[0]!.text), agent: `inbox-raise:${t.id}` },
             pinItem(t),
           ]}
           menu={menu(t)}

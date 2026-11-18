@@ -1,4 +1,4 @@
-import { AlarmClock, ArrowLeft, ArrowUpToLine, Share, Check, ChevronRight, GitBranch, MessageSquareReply, MessagesSquare, Quote, RotateCcw } from "lucide-react";
+import { AlarmClock, ArrowLeft, ArrowUpToLine, Check, ChevronRight, GitBranch, MessageSquareReply, MessagesSquare, Quote, RotateCcw } from "lucide-react";
 import { createContext, Fragment, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
@@ -256,7 +256,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
                     !thread.parentId && { label: thread.paused ? "Pause again…" : "Pause…", icon: AlarmClock, run: () => openPause(thread.id, climb), agent: `msg-pause:${thread.id}` },
                     { label: "Reply", icon: MessageSquareReply, run: () => actions.reply(keyOf(root, -1)) },
                     !!root.id && { label: "Quote", icon: Quote, run: () => actions.quote(keyOf(root, -1)), agent: `quote:${root.id}` },
-                    !!root.id && { label: "Raise to Threads", icon: Share, run: () => actions.raise(keyOf(root, -1)), agent: `raise:${root.id}` },
+                    !!root.id && { label: "Raise to Threads", icon: ArrowUpToLine, run: () => actions.raise(keyOf(root, -1)), agent: `raise:${root.id}` },
                     pinItem(thread),
                   ]}
                   menu={messageMenu(root, keyOf(root, -1))}
@@ -315,7 +315,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
                     actions={[
                       !!m.id && { label: "Reply in thread", icon: MessageSquareReply, run: () => void openSubthread(thread.id, m.id!, nav.open), agent: `reply-in-thread:${m.id}` },
                       !!m.id && { label: "Quote", icon: Quote, run: () => quoteInto(`thread:${thread.id}`, quoted(m.text, thread.id, m.id!)), agent: `quote:${m.id}` },
-                      !!m.id && { label: "Raise to Threads", icon: Share, run: () => actions.raise(keyOf(m, i)), agent: `raise:${m.id}` },
+                      !!m.id && { label: "Raise to Threads", icon: ArrowUpToLine, run: () => actions.raise(keyOf(m, i)), agent: `raise:${m.id}` },
                     ]}
                     menu={messageMenu(m, keyOf(m, i))}
                   />

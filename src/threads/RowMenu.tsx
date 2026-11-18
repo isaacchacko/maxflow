@@ -1,4 +1,4 @@
-import { AlarmClock, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, Pin, PinOff, Play, Quote, RotateCcw, Share, type LucideIcon } from "lucide-react";
+import { AlarmClock, ArrowUpToLine, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, Pin, PinOff, Play, Quote, RotateCcw, type LucideIcon } from "lucide-react";
 import { ContextMenu, DropdownMenu } from "radix-ui";
 import type { Thread } from "@/mock";
 import { setPaused, setPinned } from "@/store";
@@ -101,7 +101,7 @@ export function messageItems(text: string, on: { open?(): void; reply?(): void; 
   return [
     on.open ? { label: "Open subthread", icon: MessageSquareReply, run: on.open } : on.reply && { label: "Reply in thread", icon: MessageSquareReply, run: on.reply },
     on.quote && { label: "Quote", icon: Quote, run: on.quote },
-    on.raise && { label: "Raise to Threads", icon: Share, run: on.raise, agent: "raise" },
+    on.raise && { label: "Raise to Threads", icon: ArrowUpToLine, run: on.raise, agent: "raise" },
     "-",
     on.unread && { label: "Mark unread from here", icon: Mail, run: on.unread },
     "-",
