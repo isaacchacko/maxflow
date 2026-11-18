@@ -36,7 +36,9 @@ type ReviewPr = { url: string; title: string; author: string; why: "review" | "a
 type Question = { key: string; at: number; who: string; text: string; link: string };
 // source: slack, slack bot, ci, github or review request.
 // key: the Slack conversation (DM, or channel/thread ts), PR or alert it came from, which its feed thread is kept by.
-type Routed = { task: number; key: string; source: string; who: string; where: string; text: string; link: string };
+type Routed = { task: number; key: string; source: string; who: string; where: string; text: string; link: string; at?: number };
+// A message in a Slack conversation or on a PR, his own (mine) included, kept so what goes to an agent carries what led up to it.
+type Said = { at: number; who: string; text: string; mine?: boolean };
 type State = {
   seq: number;
   // The board task each Slack thread, DM or PR is on.
@@ -58,11 +60,14 @@ type State = {
   // The feed thread each Slack conversation, PR or alert went to the funnel as, so more from it lands there. A Slack message that
   // links a PR is kept by that PR too, so a review request and a ping about one PR share a thread.
   feedThreads: Record<string, string>;
+  // The last day of each conversation and PR, and the newest message of each an agent has been handed, so context isn't repeated.
+  convo: Record<string, Said[]>;
+  ctxSent: Record<string, number>;
   prsAt: number;
   stallAt: number;
 };
 const state: State = {
-  seq: 0, tasks: {}, prs: {}, questions: {}, answered: {}, seen: [], flagged: [], alerts: {}, open: {}, reruns: [], batch: [], batchAt: 0, feedThreads: {}, prsAt: 0, stallAt: 0,
+  seq: 0, tasks: {}, prs: {}, questions: {}, answered: {}, seen: [], flagged: [], alerts: {}, open: {}, reruns: [], batch: [], batchAt: 0, feedThreads: {}, convo: {}, ctxSent: {}, prsAt: 0, stallAt: 0,
   ...(existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {}),
 };
 // Feed threads were kept by board task before; each task's key carries its thread over.
@@ -156,6 +161,7 @@ async function onSlack(topic: string, d: any, me: string) {
   const key = keyOf(d);
   if (d.user && d.from) names[d.user] = d.from;
   const text = readable(d.text);
+  remember(key, { at: Number(d.ts) * 1000, who: d.from ?? "?", text, mine: topic === "slack/own" || d.user === me });
   // His own posts answer what was asked there before them, whoever typed them.
   if (topic === "slack/own" || d.user === me) {
     state.answered[key] = Math.max(state.answered[key] ?? 0, Number(d.ts));
@@ -182,7 +188,7 @@ async function onSlack(topic: string, d: any, me: string) {
   if (task) state.open[d.ts] = key;
   if (/\?/.test(text)) state.questions[d.ts] = { key, at: Date.now(), who: d.from, text, link: d.link };
   // A mention or DM nobody owns goes to the funnel, which starts an agent on it; thread replies stay on the board.
-  if (!owner && task && kind !== "reply") feed({ task, key, source: "slack", who: d.from, where, text: short(text, 500), link: d.link });
+  if (!owner && task && kind !== "reply") feed({ task, key, source: "slack", who: d.from, where, text: short(text, 500), link: d.link, at: Number(d.ts) * 1000 });
 }
 
 // A bot's mention of him ("a run on main is red", a skipped deploy) is one task per kind of alert, however often it repeats: its text
@@ -226,6 +232,28 @@ async function handled(me: string) {
   }
 }
 
+const CONTEXT_MS = 2 * 3_600_000, CONTEXT_MAX = 12;
+function remember(key: string, said: Said) {
+  const list = (state.convo[key] ??= []);
+  if (list.some((x) => x.at === said.at && x.text === said.text)) return;
+  list.push(said);
+  state.convo[key] = list.filter((x) => Date.now() - x.at < 86_400_000).sort((a, b) => a.at - b.at).slice(-40);
+}
+// What came before the new messages in their conversation that no agent was handed yet: everything since the last hand-off on that
+// key, or the last 2h the first time, at most 12 messages, his own marked as his.
+function contextOf(items: Routed[]) {
+  const fresh = new Set(items.map((i) => i.at));
+  const first = Math.min(...items.map((i) => i.at ?? Date.now()));
+  const lines: string[] = [];
+  for (const key of new Set(items.map((i) => i.key))) {
+    const since = state.ctxSent[key] ?? first - CONTEXT_MS;
+    for (const x of (state.convo[key] ?? []).filter((x) => x.at > since && x.at < first && !fresh.has(x.at)).slice(-CONTEXT_MAX))
+      lines.push(`> **${x.mine ? "Isaac (him, on Slack/GitHub)" : x.who}:** ${short(x.text, 400).replace(/\n/g, "\n> ")}`);
+    state.ctxSent[key] = Math.max(state.ctxSent[key] ?? 0, ...items.filter((i) => i.key === key).map((i) => i.at ?? Date.now()));
+  }
+  return lines;
+}
+
 const feed = (item: Routed) => (state.batch.push(item), (state.batchAt ||= Date.now()));
 
 // The keys an item's feed thread is kept by: its own, and every PR a Slack message links.
@@ -253,7 +281,9 @@ async function flushBatch() {
   }
   for (const { thread, items } of groups.values()) {
     const [i] = items;
-    const text = `${i.who} in ${i.where}:\n${items.map((x) => `> ${x.text.replace(/\n/g, "\n> ")}`).join("\n")}\n${[...new Set(items.map((x) => x.link))].join("\n")}`;
+    const before = contextOf(items);
+    const said = items.map((x) => `> ${x.text.replace(/\n/g, "\n> ")}`).join("\n");
+    const text = `${i.who} in ${i.where}:\n${before.length ? `Before it, in the same conversation (context, not new):\n${before.join("\n")}\n\nNew:\n` : ""}${said}\n${[...new Set(items.map((x) => x.link))].join("\n")}`;
     let id = thread;
     if (id) {
       const res = await post(`/api/threads/${id}/messages`, { text, feed: true });
@@ -395,12 +425,16 @@ async function onGh(topic: string, d: any) {
     return;
   }
   if (reviewing && (kind === "merged" || kind === "closed")) return closeTask(key, `the PR was ${kind}`);
+  if (["comment", "review", "thread"].includes(kind) && d.body && d.who && !BOT.test(d.author ?? "") && !BOT.test(d.who)) {
+    const his = d.who.startsWith("the user");
+    remember(key, { at: Date.now(), who: his ? "Isaac" : d.who, text: short(d.body, 600), mine: his });
+  }
   // A person's comment or review that no session heard: on his own PRs the review sentry revives the owner, so this only notes it on
   // a task he already has; on a PR he reviews, it puts the task back on him.
   if (!["comment", "review", "thread"].includes(kind) || d.told?.length || !d.who || d.who.startsWith("the user") || BOT.test(d.author ?? "") || BOT.test(d.who)) return;
   const what = kind === "review" ? `${d.who} reviewed (${String(d.state).toLowerCase().replace("_", " ")})` : `${d.who} commented${d.path ? ` on ${d.path}` : ""}`;
   const task = await onBoard(key, url, `${what}: "${short(d.body ?? "", 120)}"`, { title: `${what} on ${key.split("/")[1]}`, ...(!mine && { status: "you" }) });
-  if (task) feed({ task, key, source: "github", who: d.who, where: key, text: `${what}: "${short(d.body ?? "", 500)}"${d.path ? ` (${d.path})` : ""}`, link: d.url ?? url });
+  if (task) feed({ task, key, source: "github", who: d.who, where: key, text: `${what}: "${short(d.body ?? "", 500)}"${d.path ? ` (${d.path})` : ""}`, link: d.url ?? url, at: Date.now() });
 }
 
 // ---- Stalls, raised once each as a board task, never as a ping.

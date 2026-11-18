@@ -537,7 +537,8 @@ function enqueue(s: Session, text: string) {
 type Source = "isaac" | "gh" | "slack" | "agent" | "sentry" | "maxflow";
 // An external message (see externalSignal) also carries who wrote it, where, a link to it, its thread or PR's link (on, which its board
 // task links), the bus event it came on and when that was.
-type Signal = { source: Source; from?: string; target: string; text: string; routedTo: string[]; objective?: string; who?: string; where?: string; link?: string; on?: string; event?: number; at?: number };
+// own: his own post (on Slack, or on GitHub as himself or through an agent).
+type Signal = { source: Source; from?: string; target: string; text: string; routedTo: string[]; objective?: string; who?: string; where?: string; link?: string; on?: string; event?: number; at?: number; own?: boolean };
 const sourceOf = (from?: Session): Source =>
   !from ? "maxflow" : isSentry(from) ? (from.name === "sentry:gh" ? "gh" : from.name === "sentry:slack" ? "slack" : "sentry") : "agent";
 // What a signal is about, for the event log: a PR, a Slack channel, or who sent it.
@@ -645,7 +646,7 @@ function externalSignal(e: { seq: number; at: number; topic: string; data: unkno
     : gh === "review" ? `${String(d.state ?? "reviewed").toLowerCase().replace("_", " ")}${d.body ? `: ${d.body}` : ""}` : String(d.body ?? "");
   const on = slack ? (d.thread ? slackThreadLink(String(d.thread)) : link) : `https://github.com/${String(d.pr).replace("#", "/pull/")}`;
   const source: Source = slack ? "slack" : "gh";
-  publish(`signal/${source}`, { source, target: where, text, routedTo: Array.isArray(d.told) ? d.told : [], who: String(d.from ?? d.who), where, link, on, event: e.seq, at: e.at } satisfies Signal);
+  publish(`signal/${source}`, { source, target: where, text, routedTo: Array.isArray(d.told) ? d.told : [], who: String(d.from ?? d.who), where, link, on, event: e.seq, at: e.at, ...((slack === "own" || String(d.who ?? "").startsWith("the user")) && { own: true }) } satisfies Signal);
 }
 setTimeout(() => {
   const since = Date.now() - 86_400_000;
@@ -1413,6 +1414,12 @@ async function world() {
     const head = d.text.slice(0, 80);
     return [id, !s || !live(s) ? "gone" : s.inbox.some((t) => t.includes(head)) ? "queued" : "delivered"];
   }));
+  // An external message's conversation: a DM as a whole (each message there is its own Slack thread), else its thread or PR. The
+  // drawer shows what came before it there in the last 2h, his own posts included.
+  const convOf = (d: Signal) => d.link?.match(/^(.*\/archives\/D\w+)\//)?.[1] ?? d.on;
+  const external = events.filter((e) => e.topic.startsWith("signal/") && (e.data as Signal).event !== undefined).map((e) => e.data as Signal);
+  const contextOf = (d: Signal) => external.filter((x) => convOf(x) === convOf(d) && (x.at ?? 0) < (d.at ?? 0) && (d.at ?? 0) - (x.at ?? 0) < 2 * 3_600_000).slice(-8)
+    .map((x) => ({ who: x.who, at: iso(x.at ?? 0), text: x.text, ...(x.own && { own: true }) }));
   const signals = events.filter((e) => e.topic.startsWith("signal/")).slice(-500).reverse().map((e) => {
     const d = e.data as Signal;
     const r = routes.get(e.seq);
@@ -1426,10 +1433,10 @@ async function world() {
       const on = [...new Set([...(fed?.routers ?? []), ...(task?.sessions ?? [])])];
       const objective = fed?.objective || task?.objective;
       const hops = [...(d.routedTo.length ? [{ at: iso(d.at ?? e.at), to: d.routedTo }] : []), ...(on.length || objective ? [{ at: iso(d.at ?? e.at), to: on, objective, routed: true }] : [])];
-      return { id: `s${e.seq}`, seq: e.seq, source: d.source, at: iso(d.at ?? e.at), target: d.target, text: d.text, from: d.who, who: d.who, where: d.where, link: d.link, routedTo: [...new Set([...d.routedTo, ...on])], objective, route: hops, thread: fed?.id, taskId: task && taskRef(task.id), delivery: delivery(d, [...new Set([...d.routedTo, ...on])]) };
+      return { id: `s${e.seq}`, seq: e.seq, source: d.source, at: iso(d.at ?? e.at), target: d.target, text: d.text, from: d.who, who: d.who, where: d.where, link: d.link, routedTo: [...new Set([...d.routedTo, ...on])], objective, route: hops, thread: fed?.id, taskId: task && taskRef(task.id), context: contextOf(d), ...(d.own && { own: true }), delivery: delivery(d, [...new Set([...d.routedTo, ...on])]) };
     }
     const thread = d.source === "isaac" ? threads.find((t) => t.messages.some((m) => m.from === "isaac" && m.text === d.text))?.id : undefined;
-    return { id: `s${e.seq}`, seq: e.seq, source: d.source, at: iso(e.at), target: d.target, text: d.text, from: d.from, routedTo: r ? [...d.routedTo, ...r.routedTo] : d.routedTo, objective: r?.objective ?? d.objective, route, thread, delivery: delivery(d, [...d.routedTo, ...(r?.routedTo ?? [])]) } as { id: string; seq: number; source: Source; at: string; target: string; text: string; from?: string; routedTo: string[]; objective?: string; route: unknown[]; thread?: string; delivery: Record<string, string>; who?: string; where?: string; link?: string; taskId?: string };
+    return { id: `s${e.seq}`, seq: e.seq, source: d.source, at: iso(e.at), target: d.target, text: d.text, from: d.from, routedTo: r ? [...d.routedTo, ...r.routedTo] : d.routedTo, objective: r?.objective ?? d.objective, route, thread, delivery: delivery(d, [...d.routedTo, ...(r?.routedTo ?? [])]) } as { id: string; seq: number; source: Source; at: string; target: string; text: string; from?: string; routedTo: string[]; objective?: string; route: unknown[]; thread?: string; delivery: Record<string, string>; who?: string; where?: string; link?: string; taskId?: string; context?: unknown[]; own?: boolean };
   }).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   const mergedInto = (id?: string): string | undefined => { const o = objectives.find((x) => x.id === id); return o?.mergedInto ? mergedInto(o.mergedInto) : id; };
   const objectiveOf = (sig: (typeof signals)[number]) => mergedInto(sig.objective ?? sig.routedTo.map((id) => sessions.get(id)?.role?.objective).find(Boolean));

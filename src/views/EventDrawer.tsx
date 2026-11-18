@@ -99,6 +99,19 @@ function EventDetail({ signal, onClose }: { signal: Signal; onClose: () => void 
             </ol>
           )}
         </section>
+        {signal.context && signal.context.length > 0 && (
+          <section data-agent="event-context" className="flex flex-col gap-2 border-t pt-4">
+            <h3 className="text-xs font-medium text-muted-foreground">Before it, in the same conversation</h3>
+            {signal.context.map((c, i) => (
+              <div key={i} className={cn("border-l-2 pl-3 text-sm", c.own ? "border-link" : "border-border")}>
+                <span className="text-xs text-muted-foreground">
+                  <span className={cn("font-medium", c.own ? "text-link" : "text-foreground")}>{c.own ? "you" : c.who}</span> · {when(c.at)}
+                </span>
+                <Markdown text={c.text} className="leading-relaxed" />
+              </div>
+            ))}
+          </section>
+        )}
         <div className="border-t pt-4">
           <Markdown text={signal.text} className="text-sm leading-relaxed" />
         </div>

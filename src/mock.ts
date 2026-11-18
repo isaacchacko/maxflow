@@ -107,6 +107,9 @@ export type Signal = {
   where?: string;
   link?: string;
   taskId?: string;
+  /** What came before it in the same DM, Slack thread or PR in the last 2h; own: his. */
+  context?: { who?: string; at: string; text: string; own?: boolean }[];
+  own?: boolean;
   /** Live only: per recipient, whether it still waits in its inbox, reached its prompt, or the session is gone. */
   delivery?: Record<string, "queued" | "delivered" | "gone">;
 };
