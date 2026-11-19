@@ -89,7 +89,12 @@ export function RefChip({ r, still, wide, row }: { r: Ref; still?: boolean; wide
     return (
       <Tag
         href={still ? undefined : `#thread/${threadId}`}
-        onClick={e => (e.stopPropagation(), !still && (e.preventDefault(), goToMessage(threadId!, messageId)))}
+        onClick={e => {
+          e.stopPropagation();
+          if (still === true) return;
+          e.preventDefault();
+          goToMessage(threadId!, messageId);
+        }}
         title={m ? `${who} · ${m.at.slice(11, 16)}` : `No message ${r.id} in yarn now`}
         className={cn(row ? ROW : cn(pill(wide), "text-[0.92em]"), "not-italic", !m && (row ? "text-muted-foreground line-through" : "border-dashed border-border bg-transparent text-muted-foreground line-through"))}
       >
@@ -299,7 +304,9 @@ function Upload({ name, className, children }: { name: string; className: string
   const url = `/api/uploads/${name}`;
   const onClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (shots?.length && !e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault(), openViewer(shots, url);
+    if (!shots?.length || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault();
+    openViewer(shots, url);
   };
   return (
     <a href={url} target="_blank" rel="noreferrer" onClick={onClick} className={className}>
