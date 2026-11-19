@@ -1,7 +1,7 @@
 import { closeSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { matches, type Call, type Restriction } from "./restrictions";
+import { doesMatch, type Call, type Restriction } from "./restrictions";
 
 const TRANSCRIPT_DIRS = join(homedir(), ".claude", "projects");
 const NEWEST_TRANSCRIPTS = 40;
@@ -93,7 +93,7 @@ const commandText = (call: Call) => {
 export function preview(match: Restriction["match"]) {
   const draft: Restriction = { id: "", action: "", label: "", mode: "ask", match };
   const calls = recentCalls();
-  const caught = calls.filter((c) => matches(draft, c));
+  const caught = calls.filter((c) => doesMatch(draft, c));
   return {
     checked: calls.length,
     count: caught.length,

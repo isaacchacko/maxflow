@@ -1,10 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { invalid, matches, resolve, SEED, type Call, type Restriction } from "../restrictions";
+import { doesMatch, invalid, resolve, SEED, type Call, type Restriction } from "../restrictions";
 import { commandStarts, shellText } from "../restrictions-shell";
 import { DIR } from "../instance";
 
 const verdict = (command: string) => resolve(SEED, { tool: "Bash", input: { command } });
-const hit = (id: string, command: string) => matches(SEED.find((r) => r.id === id)!, { tool: "Bash", input: { command } }, SEED);
+function seedNamed(id: string) {
+  const restriction = SEED.find((r) => r.id === id);
+  if (restriction === undefined) throw new Error(`no seed restriction ${id}`);
+  return restriction;
+}
+const doesHit = (id: string, command: string) => doesMatch(seedNamed(id), { tool: "Bash", input: { command } }, SEED);
+const words = (s: string) => commandStarts(s).map((i) => s.slice(i).split(/[\s;&|()]/, 1)[0]);
+const judged = (call: Call, list: Restriction[] = SEED) => {
+  const v = resolve(list, call);
+  return [v.mode, v.restriction?.id];
+};
+const bash = (command: string, extra: Partial<Call> = {}): Call => ({ tool: "Bash", input: { command }, ...extra });
+const mergeByTeammateOrNot = (isTeammate: boolean) => judged(bash("gh pr merge 12", { people: [{ github: "someone", team: isTeammate }] }));
 
 describe("restrictions match command words, not substrings", () => {
   test.each([
@@ -39,20 +51,19 @@ describe("restrictions match command words, not substrings", () => {
   ])("denies %p", (command) => expect(verdict(command).mode).toBe("deny"));
 
   test("other restrictions anchor at the command too", () => {
-    expect(hit("pr-merge", "gh pr merge 12 --squash")).toBe(true);
-    expect(hit("pr-merge", "cat notes-on-gh pr merge.txt")).toBe(false);
-    expect(hit("pr-merge", "echo gh pr merge")).toBe(false);
-    expect(hit("pr-merge", "git commit -m 'run gh pr merge later'")).toBe(false);
-    expect(hit("push-default", "git push origin master")).toBe(true);
-    expect(hit("mallory-phone", "~/.local/bin/mallory send --to umbrella hi")).toBe(true);
-    expect(hit("pr-reviewers", "gh pr create --title x --reviewer felix")).toBe(true);
-    expect(hit("delete-files", "rm -rf build")).toBe(true);
-    expect(hit("delete-files", "cat rm -rf.md")).toBe(false);
+    expect(doesHit("pr-merge", "gh pr merge 12 --squash")).toBe(true);
+    expect(doesHit("pr-merge", "cat notes-on-gh pr merge.txt")).toBe(false);
+    expect(doesHit("pr-merge", "echo gh pr merge")).toBe(false);
+    expect(doesHit("pr-merge", "git commit -m 'run gh pr merge later'")).toBe(false);
+    expect(doesHit("push-default", "git push origin master")).toBe(true);
+    expect(doesHit("mallory-phone", "~/.local/bin/mallory send --to umbrella hi")).toBe(true);
+    expect(doesHit("pr-reviewers", "gh pr create --title x --reviewer felix")).toBe(true);
+    expect(doesHit("delete-files", "rm -rf build")).toBe(true);
+    expect(doesHit("delete-files", "cat rm -rf.md")).toBe(false);
   });
 });
 
 describe("commandStarts", () => {
-  const words = (s: string) => commandStarts(s).map((i) => s.slice(i).split(/[\s;&|()]/)[0]);
   test("first word of each segment, past assignments and keywords", () => {
     expect(words("A=1 git status && cat x | wc -l; if true; then ls; fi")).toEqual(["git", "cat", "wc", "if", "true", "then", "ls", "fi"]);
   });
@@ -62,12 +73,6 @@ describe("commandStarts", () => {
 });
 
 describe("the seed catalog", () => {
-  const judged = (call: Call, list: Restriction[] = SEED) => {
-    const v = resolve(list, call);
-    return [v.mode, v.restriction?.id];
-  };
-  const bash = (command: string, extra: Partial<Call> = {}): Call => ({ tool: "Bash", input: { command }, ...extra });
-
   test("quoted text and data heredocs are data, not commands", () => {
     expect(shellText(`git commit -m "gh pr merge 12"`)).not.toContain("gh pr merge");
     expect(shellText("cat > notes.md <<'EOF'\ngh pr merge 12\nEOF\n")).not.toContain("gh pr merge");
@@ -89,9 +94,8 @@ describe("the seed catalog", () => {
   });
 
   test("an outsider's PR asks first where a teammate's is allowed", () => {
-    const merge = (team: boolean) => judged(bash("gh pr merge 12", { people: [{ github: "someone", team }] }));
-    expect(merge(true)).toEqual(["allow", "pr-merge"]);
-    expect(merge(false)).toEqual(["ask", "pr-merge-outsiders"]);
+    expect(mergeByTeammateOrNot(true)).toEqual(["allow", "pr-merge"]);
+    expect(mergeByTeammateOrNot(false)).toEqual(["ask", "pr-merge-outsiders"]);
   });
 
   test("a call reaching several people gets the strictest verdict", () => {
