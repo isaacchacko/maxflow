@@ -51,7 +51,7 @@ async function shadow(route: BusEvent) {
   const candidates = candidatesAt(objectives, signal.at, (o) => o.closed !== true);
   const { funnel, thread } = settledLabel({ seq: signalSeq, at: signal.at, text }, objective, objectives, threads);
   const called = Date.now();
-  const base = { seq: signalSeq, at: signal.at, called, source, funnel, thread, routedTo: route.data["routedTo"], candidates: candidates.length, model: config.model, prompt: ROUTE_PROMPT };
+  const base = { question: "objective", seq: signalSeq, at: signal.at, called, source, funnel, thread, routedTo: route.data["routedTo"], candidates: candidates.length, model: config.model, prompt: ROUTE_PROMPT };
   try {
     const jev = await routeObjective(config, text, candidates);
     const top = Object.entries(jev.probabilities).toSorted(([, a], [, b]) => b - a).slice(0, 3);
