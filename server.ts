@@ -441,3 +441,4 @@ watch(`${DIR}/src`, { recursive: true }, (_, file) => {
   setTimeout(() => process.exit(0), 500);
 });
 for (const f of new Bun.Glob("**/*.{ts,tsx,css}").scanSync(`${DIR}/src`)) known.add(`${DIR}/src/${f}`);
+
