@@ -18,7 +18,7 @@ function collapsed(lines: string[]): string[] {
   const runs: { line: string; count: number }[] = [];
   for (const line of lines) {
     const run = runs.at(-1);
-    if (run?.line === line) run.count++;
+    if (run?.line === line) run.count += 1;
     else runs.push({ line, count: 1 });
   }
   return runs.map(({ line, count }) => (count > 1 ? `${line}  (×${String(count)})` : line));

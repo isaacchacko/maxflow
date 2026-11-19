@@ -100,7 +100,7 @@ async function attach(session: string, port: number): Promise<Browser> {
     browser.console.push(line);
     if (browser.console.length <= CONSOLE_KEPT) return;
     browser.console.shift();
-    browser.consoleDropped++;
+    browser.consoleDropped += 1;
   });
   await Promise.all(["Page.enable", "Runtime.enable", "Log.enable"].map(async (method) => page.send(method)));
   await page.send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFactor: 1, mobile: false });
