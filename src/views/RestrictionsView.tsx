@@ -436,7 +436,7 @@ function CustomEditor({ r, onSave, onCancel, onDelete }: { r?: Restriction; onSa
           <textarea value={tools} onChange={e => setTools(e.target.value)} rows={2} className={cn(field, "resize-y font-mono text-xs")} />
         </label>
         <label className="flex flex-1 flex-col gap-1">
-          <span className="text-xs text-muted-foreground">Shell commands it catches, one pattern a line (found anywhere in the command)</span>
+          <span className="text-xs text-muted-foreground">Shell commands it catches, one pattern a line (matched where a command starts, so a file named pkill.md isn't pkill)</span>
           <textarea value={bash} onChange={e => setBash(e.target.value)} rows={2} className={cn(field, "resize-y font-mono text-xs")} />
         </label>
       </div>

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { STATE_DIR } from "./instance";
-import { shellText } from "./restrictions-shell";
+import { commandStarts, shellText } from "./restrictions-shell";
 
 // His autonomy restrictions: what his agents may do on their own (allow), must ask him first (ask), or may never do (deny).
 // The server serves and edits them (/api/restrictions), the Restrictions page shows them, and the enforcement hook
@@ -9,7 +9,8 @@ import { shellText } from "./restrictions-shell";
 // and the CLI can import it alone.
 export const MODES = ["allow", "ask", "deny"] as const;
 export type Mode = (typeof MODES)[number];
-// match.tools: regexes on the whole Claude Code tool_name; match.bash: regexes found anywhere in a Bash command.
+// match.tools: regexes on the whole Claude Code tool_name; match.bash: regexes matched where a command
+// in a Bash command starts (commandStarts), so a file named pkill.md isn't pkill.
 // scope: it applies only on that objective, only under that path prefix, and only to those people; no scope applies everywhere.
 // parent: an override of another restriction, for some people or some place, which uses that one's matchers instead of its own.
 // reaches: the account the person on the other end of the call is known by (a Slack message's recipient, an email's, a PR's
@@ -183,11 +184,19 @@ const personFit = (r: Restriction, who?: Person) => {
   if (!who) return 0;
   return people.some((p) => p.team === undefined && samePerson(p, who)) ? 3 : people.some((p) => p.team !== undefined && p.team === who.team) ? 2 : 0;
 };
-// Bash patterns test the command with quoted text and heredocs blanked, so a commit message naming `gh pr merge` isn't one.
+const testAt = (pattern: string, text: string, starts: number[]) => {
+  try {
+    const re = new RegExp(pattern, "y");
+    return starts.some((s) => ((re.lastIndex = s), re.test(text)));
+  } catch { return false; }
+};
+// Bash patterns test the command with quoted text and heredocs blanked, so a commit message naming `gh pr merge` isn't one,
+// and only where a command starts, so `cat live-watch-and-pkill.md` isn't pkill.
 export const matches = (r: Restriction, call: Call, list: Restriction[] = []) => {
   const m = r.parent ? list.find((o) => o.id === r.parent)?.match : r.match;
   const command = call.tool === "Bash" && typeof call.input?.command === "string" ? shellText(call.input.command) : undefined;
-  return !!m && ((m.tools ?? []).some((p) => test(p, call.tool, true)) || (command !== undefined && (m.bash ?? []).some((p) => test(p, command, false))));
+  const starts = command === undefined ? [] : commandStarts(command);
+  return !!m && ((m.tools ?? []).some((p) => test(p, call.tool, true)) || (command !== undefined && (m.bash ?? []).some((p) => testAt(p, command, starts))));
 };
 const applies = (r: Restriction, call: Call, who?: Person) =>
   (!r.scope?.objective || r.scope.objective === call.objective) && (!r.scope?.cwd || (!!call.cwd && under(call.cwd, r.scope.cwd))) && personFit(r, who) > 0;

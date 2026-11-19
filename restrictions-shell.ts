@@ -1,7 +1,7 @@
 // What a Bash command runs, for matching restrictions against: quoted strings and heredoc bodies are data (a PR body, an
 // ask naming a held command), so they are blanked to ''. What the shell runs from inside them stays: a $(…) or `…` in
 // double quotes, and the script handed to `sh|bash|zsh -c`, `eval` or `ssh host`, or fed as a heredoc to a shell or ssh,
-// each cleaned the same way in its turn.
+// each cleaned the same way in its turn, and set off with ; so its first word starts a command.
 const RUNS_ARG = (words: string[]) => /^-[a-z]*c$/.test(words.at(-1) ?? "") || words.at(-1) === "eval" || words.includes("ssh");
 const RUNS_STDIN = (words: string[]) => /^(sh|bash|zsh|ssh)$/.test(words[0]?.split("/").at(-1) ?? "");
 
@@ -36,7 +36,7 @@ export function shellText(command: string, depth = 0): string {
         inner += command[j];
       }
       endWord();
-      out += RUNS_ARG(words) ? ` ${shellText(inner, depth + 1)} ` : `''${subs.map((s) => ` ; ${shellText(s, depth + 1)} ;`).join("")}`;
+      out += RUNS_ARG(words) ? ` ; ${shellText(inner, depth + 1)} ; ` : `''${subs.map((s) => ` ; ${shellText(s, depth + 1)} ;`).join("")}`;
       words.push("''");
       i = j;
       continue;
@@ -72,6 +72,36 @@ export function shellText(command: string, depth = 0): string {
     else word += c;
   }
   return out;
+}
+
+// Where each command in shellText's output starts, for anchoring restrictions there: so `sed … pkill.md` doesn't read as
+// pkill, and `/usr/bin/pkill`, `sudo pkill`, `FOO=1 pkill` and `if pkill` still do. A command starts the text, follows a
+// separator, follows a keyword, or is a word past `VAR=x` assignments; its basename counts too. Every word after a
+// wrapper (sudo, xargs, ssh host, …) may be the command it runs, so all of them count.
+const SEPARATOR = /[;&|()`\n]/;
+const KEYWORD = new Set(["if", "then", "else", "elif", "do", "while", "until", "!", "{", "time", "exec", "command", "builtin", "nohup", "noglob"]);
+const WRAPPER = new Set(["sudo", "doas", "env", "xargs", "timeout", "nice", "ionice", "stdbuf", "watch", "caffeinate", "ssh", "-exec", "-execdir", "-ok", "parallel"]);
+export function commandStarts(text: string): number[] {
+  const starts: number[] = [];
+  let atCommand = true;
+  let wrapped = false;
+  for (let i = 0; i < text.length; ) {
+    if (SEPARATOR.test(text[i])) (atCommand = true), (wrapped = false), i++;
+    else if (/\s/.test(text[i])) i++;
+    else {
+      let end = i;
+      while (end < text.length && !/\s/.test(text[end]) && !SEPARATOR.test(text[end])) end++;
+      const word = text.slice(i, end);
+      const name = word.split("/").at(-1) ?? word;
+      if (atCommand || wrapped) {
+        if (!(atCommand && /^\w+=/.test(word))) starts.push(i), name !== word && starts.push(end - name.length);
+        if (WRAPPER.has(name)) wrapped = true;
+        else if (!KEYWORD.has(word) && !/^\w+=/.test(word)) atCommand = false;
+      }
+      i = end;
+    }
+  }
+  return starts;
 }
 
 // The index of the ) that closes the ( at open, past nested parens and quotes.
