@@ -36,11 +36,11 @@ test.skipIf(chromeBinary() === undefined)(
     expect(await (await browse(id, "open", { url: `127.0.0.1:${String(site.port)}` })).json()).toEqual({ url: `http://127.0.0.1:${String(site.port)}/`, title: "Form" });
     expect(await (await browse(id, "read", { ax: true })).text()).toContain('textbox "Email"');
     expect(await (await browse(id, "type", { target: "#email", text: "ada@example.com", enter: true })).text()).toBe("typed into input, then Enter");
-    expect(await (await browse(id, "eval", { code: "out.textContent" })).json()).toEqual({ value: "sent ada@example.com" });
+    expect(await (await browse(id, "eval", { code: "out.textContent" })).json()).toEqual({ value: "sent ada@example.com", type: "string" });
     await browse(id, "type", { target: "Email", text: "bob@example.com" });
-    expect(await (await browse(id, "eval", { code: "email.value" })).json()).toEqual({ value: "bob@example.com" });
+    expect(await (await browse(id, "eval", { code: "email.value" })).json()).toEqual({ value: "bob@example.com", type: "string" });
     expect(await (await browse(id, "click", { target: "Second link" })).text()).toBe('clicked a "Second link"');
-    expect(await (await browse(id, "eval", { code: "location.hash" })).json()).toEqual({ value: "#two" });
+    expect(await (await browse(id, "eval", { code: "location.hash" })).json()).toEqual({ value: "#two", type: "string" });
     expect(await (await browse(id, "console")).text()).toContain("log: sent ada@example.com");
     expect((await browse(id, "screenshot")).headers.get("content-type")).toBe("image/png");
   },
@@ -106,7 +106,7 @@ test.skipIf(chromeBinary() === undefined)(
     viewer.socket.send(JSON.stringify({ type: "key", kind: "keyDown", key: "Enter", code: "Enter", keyCode: 13, text: "\r", modifiers: 0 }));
     viewer.socket.send(JSON.stringify({ type: "hold", isTaking: false }));
     await untilTrue(() => isHeldBy(viewer) === false);
-    expect(await (await browse(id, "eval", { code: "out.textContent" })).json()).toEqual({ value: "sent isaac" });
+    expect(await (await browse(id, "eval", { code: "out.textContent" })).json()).toEqual({ value: "sent isaac", type: "string" });
     viewer.socket.close();
   },
   60_000,

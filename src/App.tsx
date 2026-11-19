@@ -22,12 +22,14 @@ import { SentriesView } from "@/views/SentriesView";
 import { RestrictionsView } from "@/views/RestrictionsView";
 import { TodoView } from "@/views/TodoView";
 import { DocsView } from "@/views/DocsView";
+import { BrowsersView } from "@/views/BrowsersView";
 import { StatsView } from "@/views/StatsView";
 
 export const views = [
   { id: "todo", label: "Todo" },
   { id: "inbox", label: "Threads" },
   { id: "docs", label: "Docs" },
+  { id: "browsers", label: "Browsers" },
   { id: "events", label: "Events" },
   { id: "objectives", label: "Objectives" },
   { id: "agents", label: "Agents" },
@@ -113,6 +115,7 @@ function MainView({ route }: { route: Route }) {
   if (route.view === "inbox") return <InboxView />;
   if (route.view === "todo") return <TodoView />;
   if (route.view === "docs") return <DocsView path={route.sub} />;
+  if (route.view === "browsers") return <BrowsersView id={route.sub} />;
   if (route.view === "restrictions") return <RestrictionsView />;
   if (route.view === "stats") return route.sub === undefined ? <StatsView /> : <StatsView tab={route.sub} />;
   if (route.view === "sentries") return <SentriesView />;

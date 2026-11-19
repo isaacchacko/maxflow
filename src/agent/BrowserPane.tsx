@@ -24,7 +24,7 @@ function pageFrom(text: string, shown: Page): Page {
   return { ...shown, url: String(said["url"]), title: String(said["title"]), problem: undefined };
 }
 
-function useScreencast(id: string) {
+export function useScreencast(id: string) {
   const [page, setPage] = useState<Page>({ url: "", title: "", isHeld: false });
   const socket = useRef<WebSocket | null>(null);
   const mount = useCallback(

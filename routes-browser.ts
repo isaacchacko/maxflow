@@ -1,5 +1,5 @@
 import { accessibilityTree, click, evalIn, goTo, pageText, screenshot, typeInto } from "./browser-verbs";
-import { BrowserCap, browserFor, closeBrowser, hasBrowser, isHeld, pageSocketUrl, type Browser } from "./browsers";
+import { BrowserCap, browserFor, CONSOLE_KEPT, closeBrowser, hasBrowser, isHeld, pageSocketUrl, type Browser } from "./browsers";
 import { CdpError } from "./cdp";
 import { sessions } from "./sessions";
 import { isRecord, stringOr } from "./shared/guards";
@@ -12,6 +12,29 @@ const NONE_OPEN = "no browser open: start one with `browser open <url>`. A brows
 
 const HELD = "Isaac has taken over this browser from the agent page. Wait for him to hand it back, then run this again.";
 
+const CONSOLE_LAST = 100;
+
+function collapsed(lines: string[]): string[] {
+  const runs: { line: string; count: number }[] = [];
+  for (const line of lines) {
+    const run = runs.at(-1);
+    if (run?.line === line) run.count++;
+    else runs.push({ line, count: 1 });
+  }
+  return runs.map(({ line, count }) => (count > 1 ? `${line}  (×${String(count)})` : line));
+}
+
+function consoleReport(browser: Browser, asked: number): string {
+  const last = Number.isSafeInteger(asked) && asked > 0 ? asked : CONSOLE_LAST;
+  const lines = collapsed(browser.console);
+  const shown = lines.slice(-last);
+  const notes: string[] = [];
+  if (browser.consoleDropped > 0) notes.push(`(${String(browser.consoleDropped)} older lines were dropped: only the last ${String(CONSOLE_KEPT)} are kept)`);
+  if (shown.length < lines.length) notes.push(`(showing the last ${String(shown.length)} of ${String(lines.length)} lines: --last N for more)`);
+  if (lines.length === 0) return "the console is empty";
+  return [...notes, ...shown].join("\n");
+}
+
 const text = (body: string) => new Response(body, { headers: { "content-type": "text/plain; charset=utf-8" } });
 
 const ACTS: Record<string, Act> = {
@@ -20,8 +43,8 @@ const ACTS: Record<string, Act> = {
   read: async (browser, body) => text(body["ax"] === true ? await accessibilityTree(browser) : await pageText(browser)),
   click: async (browser, body) => text(await click(browser, stringOr(body["target"]))),
   type: async (browser, body) => text(await typeInto(browser, stringOr(body["target"]), stringOr(body["text"]), body["enter"] === true)),
-  eval: async (browser, body) => Response.json({ value: await evalIn(browser, stringOr(body["code"])) }),
-  console: (browser, body) => text(browser.console.slice(-Number(body["last"] ?? 100)).join("\n")),
+  eval: async (browser, body) => Response.json(await evalIn(browser, stringOr(body["code"]))),
+  console: (browser, body) => text(consoleReport(browser, Number(body["last"] ?? CONSOLE_LAST))),
   cdp: async (browser) => text(await pageSocketUrl(browser.port)),
 };
 

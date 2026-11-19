@@ -28,8 +28,10 @@ async function shoot(args: string[]) {
 
 async function evaluate(args: string[]) {
   const code = args.length > 1 ? args.slice(1).join(" ") : await Bun.stdin.text();
-  const { value } = (await (await ask("eval", { code })).json()) as { value: unknown };
-  console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
+  const { value, type } = (await (await ask("eval", { code })).json()) as { value?: unknown; type?: string };
+  if (type === "undefined") console.log("(the result is undefined: end the code with the value you want back, e.g. `document.title`)");
+  else if (value === undefined) console.log(`(the result is a ${type ?? "value"} that can't be turned into JSON: return a plain value instead)`);
+  else console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
 }
 
 const BROWSER_VERBS: Record<string, (args: string[]) => Promise<void>> = {

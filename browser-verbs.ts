@@ -12,14 +12,18 @@ export function pageUrl(input: string): string {
   return `${LOCAL_HOST.test(url) ? "http" : "https"}://${url}`;
 }
 
-async function evaluated(browser: Browser, expression: string): Promise<unknown> {
+async function evaluatedResult(browser: Browser, expression: string): Promise<Record<string, unknown>> {
   const reply = await browser.page.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
   const thrown = reply["exceptionDetails"];
   if (isRecord(thrown)) {
     const exception = thrown["exception"];
     throw new CdpError(String(isRecord(exception) ? (exception["description"] ?? exception["value"]) : thrown["text"]));
   }
-  return isRecord(reply["result"]) ? reply["result"]["value"] : undefined;
+  return isRecord(reply["result"]) ? reply["result"] : {};
+}
+
+async function evaluated(browser: Browser, expression: string): Promise<unknown> {
+  return (await evaluatedResult(browser, expression))["value"];
 }
 
 export async function whereItIs(browser: Browser) {
@@ -52,7 +56,8 @@ export async function screenshot(browser: Browser) {
 }
 
 export async function evalIn(browser: Browser, code: string) {
-  return evaluated(browser, code);
+  const result = await evaluatedResult(browser, code);
+  return { value: result["value"], type: stringOr(result["type"], "undefined") };
 }
 
 export async function pageText(browser: Browser) {

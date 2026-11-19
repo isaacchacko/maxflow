@@ -108,15 +108,13 @@ function AgentBody({ agent, back }: { agent: Agent; back: string }) {
       <AgentHeader agent={agent} crew={crew} back={back} isLive={isLive} />
       <div className="flex min-h-0 flex-1 gap-4 pl-3">
         {isLive ? (
-          <>
-            <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-background p-2">
-              <Terminal key={agent.id} id={agent.id} />
-            </section>
-            {agent.browser === true && <BrowserPane key={agent.id} id={agent.id} />}
-          </>
+          <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-background p-2">
+            <Terminal key={agent.id} id={agent.id} />
+          </section>
         ) : (
           <Tty agent={agent} lines={lines} />
         )}
+        {agent.browser === true && <BrowserPane key={agent.id} id={agent.id} />}
         <aside className="-my-3 flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto border-l px-4 py-4">
           {agent.role === "router" ? <RouterSidebar router={agent} /> : <WorkerSidebar known={{ agent, parent, objective, task }} isLive={isLive} routedHere={routedHere} siblings={siblings} />}
         </aside>
