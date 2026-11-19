@@ -189,3 +189,27 @@ export function appendStateText(name: string, text: string) {
 export function removeState(name: string) {
   rmSync(stateFile(name), { force: true });
 }
+
+const DEPLOY_LOCK = stateFile("deploy.lock");
+const lockHolder = () => {
+  try {
+    return Number(readFileSync(DEPLOY_LOCK, "utf8"));
+  } catch {
+    return 0;
+  }
+};
+export const deployLock = {
+  holder: lockHolder,
+  claim: () => {
+    try {
+      writeFileSync(DEPLOY_LOCK, String(process.pid), { flag: "wx" });
+      return 0;
+    } catch {
+      const holder = lockHolder();
+      return holder === 0 ? -1 : holder;
+    }
+  },
+  dropIfHeldBy: (pid: number) => {
+    if (lockHolder() === pid) rmSync(DEPLOY_LOCK, { force: true });
+  },
+};

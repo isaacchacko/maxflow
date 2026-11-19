@@ -1,9 +1,10 @@
 // `cli.ts deploy`: the one way the live yarn changes. The live checkout holds only commits from origin, so a restart ships
 // exactly what is on its branch there, never someone's half-saved edit. Changes are made in a worktree and pushed first.
-import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import { BASE, LIVE, STATE_DIR } from "./instance";
 import { LOG, checkout, restartCommand } from "./service";
+import { deployLock } from "./state";
 
 const run = (cmd: string[], cwd?: string) => {
   const r = Bun.spawnSync(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
@@ -102,42 +103,21 @@ export async function restartSentries(stale: { name: string; fresh: boolean }[],
   console.log(`restarted ${done.join(", ")}, whose code changed`);
 }
 
-const DEPLOY_LOCK = join(STATE_DIR, "deploy.lock");
 const LOCK_WAIT_MS = 30 * 60_000;
-function lockHolder() {
-  try {
-    return Number(readFileSync(DEPLOY_LOCK, "utf8"));
-  } catch {
-    return 0;
-  }
-}
 const isDeploying = (pid: number) => run(["ps", "-o", "command=", "-p", String(pid)]).out.includes("cli.ts deploy");
-function tryLock() {
-  try {
-    writeFileSync(DEPLOY_LOCK, String(process.pid), { flag: "wx" });
-    return true;
-  } catch {
-    return false;
-  }
-}
 async function takeDeployLock() {
   const deadline = Date.now() + LOCK_WAIT_MS;
   const announced = new Set<number>();
-  while (!tryLock()) {
-    const holder = lockHolder();
-    if (holder === 0) continue;
-    if (!isDeploying(holder)) {
-      if (lockHolder() === holder) rmSync(DEPLOY_LOCK, { force: true });
-      continue;
+  for (let holder = deployLock.claim(); holder !== 0; holder = deployLock.claim()) {
+    if (!isDeploying(holder)) deployLock.dropIfHeldBy(holder);
+    else if (Date.now() > deadline) fail(`the deploy in pid ${holder} has held the deploy lock for ${LOCK_WAIT_MS / 60_000} minutes`);
+    else {
+      if (!announced.has(holder)) console.log(`waiting for the deploy already running (pid ${holder}) to finish`);
+      announced.add(holder);
+      await Bun.sleep(2000);
     }
-    if (Date.now() > deadline) fail(`the deploy in pid ${holder} has held ${DEPLOY_LOCK} for ${LOCK_WAIT_MS / 60_000} minutes`);
-    if (!announced.has(holder)) console.log(`waiting for the deploy already running (pid ${holder}) to finish`);
-    announced.add(holder);
-    await Bun.sleep(2000);
   }
-  process.on("exit", () => {
-    if (lockHolder() === process.pid) rmSync(DEPLOY_LOCK, { force: true });
-  });
+  process.on("exit", () => deployLock.dropIfHeldBy(process.pid));
 }
 
 export async function deploy() {
