@@ -21,7 +21,8 @@ const COLD_START_MS = 60_000;
 beforeAll(async () => {
   const binary = chromeBinary();
   if (binary === undefined) return;
-  const chrome = Bun.spawn([binary, "--headless=new", `--user-data-dir=${mkdtempSync(join(tmpdir(), "maxflow-chrome-warm-"))}`, "--no-first-run", ...KEYCHAIN_UNTOUCHED, "--dump-dom", "about:blank"], { stdout: "ignore", stderr: "ignore", timeout: COLD_START_MS });
+  const profile = mkdtempSync(join(tmpdir(), "maxflow-chrome-warm-"));
+  const chrome = Bun.spawn([binary, "--headless=new", `--user-data-dir=${profile}`, "--no-first-run", ...KEYCHAIN_UNTOUCHED, "--dump-dom", "about:blank"], { stdout: "ignore", stderr: "ignore", timeout: COLD_START_MS });
   await chrome.exited;
 }, COLD_START_MS + 5000);
 
@@ -53,7 +54,8 @@ test.skipIf(chromeBinary() === undefined)(
   async () => {
     const id = await newSession();
     expect((await browse(id, "read")).status).toBe(409);
-    expect(await jsonOf(await browse(id, "open", { url: `127.0.0.1:${String(site.port)}` }))).toEqual({ url: `http://127.0.0.1:${String(site.port)}/`, title: "Form" });
+    const opened = await browse(id, "open", { url: `127.0.0.1:${String(site.port)}` });
+    expect(await jsonOf(opened)).toEqual({ url: `http://127.0.0.1:${String(site.port)}/`, title: "Form" });
     expect(await (await browse(id, "read", { ax: true })).text()).toContain('textbox "Email"');
     expect(await (await browse(id, "type", { target: "#email", text: "ada@example.com", enter: true })).text()).toBe("typed into input, then Enter");
     expect(await (await browse(id, "eval", { code: "out.textContent" })).json()).toEqual({ value: "sent ada@example.com", type: "string" });
