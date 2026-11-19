@@ -13,6 +13,8 @@ function ownSession() {
 async function ask(verb: string, body: Record<string, unknown> = {}): Promise<Response> {
   const res = await fetch(`${base}/api/browsers/${ownSession()}/${verb}`, { method: "POST", headers: caller ?? {}, body: JSON.stringify(body), signal: AbortSignal.timeout(BROWSER_TIMEOUT_MS) });
   if (!res.ok) fail(`browser ${verb}: ${await res.text()}`);
+  const news = res.headers.get("x-maxflow-browser-news");
+  if (news !== null) console.error(`(${news})`);
   return res;
 }
 
@@ -50,6 +52,7 @@ const BROWSER_VERBS: Record<string, (args: string[]) => Promise<void>> = {
     await printed(await ask("console", { last }));
   },
   cdp: async () => printed(await ask("cdp")),
+  size: async (args) => printed(await ask("size", { size: argAt(args, 1) })),
   close: async () => {
     await ask("close");
     console.log("closed");

@@ -1,10 +1,11 @@
+import { applyView, FIRST_VIEW, keptView, type View } from "./browser-size";
 import { publish } from "./bus";
 import { Cdp, CdpError, unlessItFails } from "./cdp";
 import { chromeBinary } from "./chrome";
 import { isRecord } from "./shared/guards";
 import { listState, readStateText, removeState, removeStateDirectory, stateDirectory } from "./state";
 
-export type Browser = { session: string; port: number; page: Cdp; usedAt: number; console: string[]; consoleDropped: number; watchers: number; isHeld: boolean };
+export type Browser = { session: string; port: number; page: Cdp; usedAt: number; console: string[]; consoleDropped: number; watchers: number; isHeld: boolean; view: View; resized: Set<() => void>; sizeNews?: string | undefined };
 
 const MAX_BROWSERS = Number(process.env["MAXFLOW_BROWSERS_MAX"] ?? 3);
 const IDLE_MS = Number(process.env["MAXFLOW_BROWSER_IDLE_MS"] ?? 10 * 60_000);
@@ -107,7 +108,7 @@ function consoleLine(method: string, params: Record<string, unknown>): string | 
 
 async function attach(session: string, port: number): Promise<Browser> {
   const page = await Cdp.connect(await pageSocketUrl(port));
-  const browser: Browser = { session, port, page, usedAt: Date.now(), console: [], consoleDropped: 0, watchers: 0, isHeld: false };
+  const browser: Browser = { session, port, page, usedAt: Date.now(), console: [], consoleDropped: 0, watchers: 0, isHeld: false, view: FIRST_VIEW, resized: new Set() };
   page.on(({ method, params }) => {
     const line = consoleLine(method, params);
     if (line === undefined) return;
@@ -117,7 +118,7 @@ async function attach(session: string, port: number): Promise<Browser> {
     browser.consoleDropped += 1;
   });
   await Promise.all(["Page.enable", "Runtime.enable", "Log.enable"].map(async (method) => page.send(method)));
-  await page.send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFactor: 1, mobile: false });
+  await applyView(browser, keptView(session));
   browsers.set(session, browser);
   publish(`browser/${session}/opened`, { session });
   return browser;

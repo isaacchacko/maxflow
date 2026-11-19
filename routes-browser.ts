@@ -1,3 +1,4 @@
+import { resize } from "./browser-size";
 import { accessibilityTree, click, evalIn, goTo, pageText, screenshot, typeInto } from "./browser-verbs";
 import { BrowserCap, browserFor, CONSOLE_KEPT, closeBrowser, hasBrowser, isHeld, pageSocketUrl, type Browser } from "./browsers";
 import { CdpError } from "./cdp";
@@ -46,7 +47,15 @@ const ACTS: Record<string, Act> = {
   eval: async (browser, body) => Response.json(await evalIn(browser, stringOr(body["code"]))),
   console: (browser, body) => text(consoleReport(browser, Number(body["last"] ?? CONSOLE_LAST))),
   cdp: async (browser) => text(await pageSocketUrl(browser.port)),
+  size: async (browser, body) => text(await resize(browser, stringOr(body["size"]))),
 };
+
+function withSizeNews(browser: Browser, res: Response) {
+  if (browser.sizeNews === undefined) return res;
+  res.headers.set("x-maxflow-browser-news", browser.sizeNews);
+  browser.sizeNews = undefined;
+  return res;
+}
 
 function refusal(error: unknown): Response {
   if (error instanceof BrowserCap) return new Response(error.message, { status: 429 });
@@ -65,7 +74,8 @@ async function act(session: string, verb: string, req: Request): Promise<Respons
   if (isHeld(session)) return new Response(HELD, { status: 409 });
   const body: unknown = await unlessItFails(req.json());
   try {
-    return await run(await browserFor(session), isRecord(body) ? body : {});
+    const browser = await browserFor(session);
+    return withSizeNews(browser, await run(browser, isRecord(body) ? body : {}));
   } catch (error) {
     return refusal(error);
   }

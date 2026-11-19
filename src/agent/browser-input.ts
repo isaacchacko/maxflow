@@ -31,21 +31,24 @@ export function modifiersOf(e: Modified) {
   return (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
 }
 
-function pagePoint(e: MouseEvent<HTMLImageElement>) {
+export type Layout = { width: number; height: number };
+
+function pagePoint(e: MouseEvent<HTMLImageElement>, layout?: Layout) {
   const img = e.currentTarget;
   const box = img.getBoundingClientRect();
-  return { x: Math.round(((e.clientX - box.left) * img.naturalWidth) / box.width), y: Math.round(((e.clientY - box.top) * img.naturalHeight) / box.height) };
+  const { width, height } = layout ?? { width: img.naturalWidth, height: img.naturalHeight };
+  return { x: Math.round(((e.clientX - box.left) * width) / box.width), y: Math.round(((e.clientY - box.top) * height) / box.height) };
 }
 
-export function mouseAsk(e: MouseEvent<HTMLImageElement>): InputAsk | undefined {
+export function mouseAsk(e: MouseEvent<HTMLImageElement>, layout?: Layout): InputAsk | undefined {
   const kind = MOUSE_KINDS[e.type];
   if (kind === undefined) return;
   const button = kind === "mouseMoved" ? "none" : (BUTTONS[e.button] ?? "left");
-  return { type: "mouse", kind, ...pagePoint(e), button, clickCount: kind === "mouseMoved" ? 0 : e.detail, modifiers: modifiersOf(e) };
+  return { type: "mouse", kind, ...pagePoint(e, layout), button, clickCount: kind === "mouseMoved" ? 0 : e.detail, modifiers: modifiersOf(e) };
 }
 
-export function wheelAsk(e: WheelEvent<HTMLImageElement>): InputAsk {
-  return { type: "wheel", ...pagePoint(e), deltaX: e.deltaX, deltaY: e.deltaY, modifiers: modifiersOf(e) };
+export function wheelAsk(e: WheelEvent<HTMLImageElement>, layout?: Layout): InputAsk {
+  return { type: "wheel", ...pagePoint(e, layout), deltaX: e.deltaX, deltaY: e.deltaY, modifiers: modifiersOf(e) };
 }
 
 const typedText = (e: KeyboardEvent) => {

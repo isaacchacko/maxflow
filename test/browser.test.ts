@@ -133,3 +133,27 @@ test.skipIf(chromeBinary() === undefined)(
   },
   60_000,
 );
+
+const zoomOf = (viewer: Awaited<ReturnType<typeof viewerOf>>) => (viewer.said.get("size") as { zoom?: number } | undefined)?.zoom;
+
+test.skipIf(chromeBinary() === undefined)(
+  "an agent sizes its page, Isaac zooms it from the pane, and the agent hears of it once",
+  async () => {
+    const id = await newSession();
+    await browse(id, "open", { url: `127.0.0.1:${String(site.port)}` });
+    expect(await (await browse(id, "size", { size: "phone" })).text()).toBe("phone 390x844, mobile at 3x");
+    expect(await (await browse(id, "eval", { code: "[screen.width, devicePixelRatio]" })).json()).toEqual({ value: [390, 3], type: "object" });
+    expect((await browse(id, "size", { size: "huge" })).status).toBe(400);
+    await browse(id, "eval", { code: "location.reload()" });
+    expect(await (await browse(id, "size")).text()).toBe("phone 390x844, mobile at 3x");
+    const viewer = await viewerOf(id);
+    viewer.socket.send(JSON.stringify({ type: "zoom", zoom: 2 }));
+    await untilTrue(() => zoomOf(viewer) === 2);
+    const told = await browse(id, "eval", { code: "screen.width" });
+    expect(told.headers.get("x-maxflow-browser-news")).toBe("Isaac set your browser to phone 390x844, mobile at 3x at 200% zoom");
+    expect(await told.json()).toEqual({ value: 195, type: "number" });
+    expect((await browse(id, "eval", { code: "screen.width" })).headers.get("x-maxflow-browser-news")).toBeNull();
+    viewer.socket.close();
+  },
+  60_000,
+);

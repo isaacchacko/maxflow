@@ -53,6 +53,7 @@ const usage = `usage:
   maxflow browser open <url> | goto <url>   your own headless Chrome (started on demand, closed after 10 min unused): load a page, print its url and title
   maxflow browser screenshot [path] | read [--ax] | console [--last N]   a PNG (prints its path), the page's text or accessibility tree, its console
   maxflow browser click <selector | visible text> | type <selector | text> <text...> [--enter] | eval <js> | cdp | close   real input events; cdp prints the page's DevTools socket
+  maxflow browser size [phone | tablet | laptop | desktop | WxH]   set the page size (phone 390x844 mobile at 3x, tablet 768x1024, laptop 1280x800, desktop 1920x1080); no size prints the current one
   maxflow deploy                             ship origin's feat/v2 to the live yarn: refuses a dirty live checkout or a commit whose CI check isn't green,
                                              fast-forwards, restarts, checks every session and sentry came back,
                                              and restarts the sentries whose code changed;

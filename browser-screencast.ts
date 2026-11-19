@@ -1,4 +1,5 @@
 import type { ServerWebSocket } from "bun";
+import { applyView, describeView, parseSize, viewMessage, zoomWithin, type View } from "./browser-size";
 import { goTo, whereItIs } from "./browser-verbs";
 import { browserFor, hasBrowser, type Browser } from "./browsers";
 import { unlessItFails, type CdpEvent } from "./cdp";
@@ -8,7 +9,7 @@ import type { WsData } from "./sessions";
 type Viewer = ServerWebSocket<WsData>;
 type Cast = { browser: Browser; viewers: Set<Viewer>; stopListening: () => void; holder?: Viewer | undefined };
 
-const FRAME = { format: "jpeg", quality: 70, maxWidth: 1280, maxHeight: 800 };
+const frameOf = ({ size }: View) => ({ format: "jpeg", quality: 70, maxWidth: size.width, maxHeight: size.height });
 const casts = new Map<string, Cast>();
 const castStarts = new Map<string, Promise<Cast>>();
 
@@ -37,14 +38,28 @@ function onPageEvent(cast: Cast, { method, params }: CdpEvent) {
   if (isMainFrame || method === "Page.navigatedWithinDocument" || method === "Page.loadEventFired") void unlessItFails(tellWhereItIs(cast));
 }
 
+async function recast(cast: Cast) {
+  await cast.browser.page.send("Page.stopScreencast");
+  await cast.browser.page.send("Page.startScreencast", frameOf(cast.browser.view));
+  toEveryViewer(cast, viewMessage(cast.browser.view));
+}
+
 async function startCast(session: string): Promise<Cast> {
   const browser = await browserFor(session);
   const cast: Cast = { browser, viewers: new Set(), stopListening: () => false };
-  cast.stopListening = browser.page.on((event) => {
+  const stopEvents = browser.page.on((event) => {
     onPageEvent(cast, event);
   });
+  const resized = () => {
+    void unlessItFails(recast(cast));
+  };
+  browser.resized.add(resized);
+  cast.stopListening = () => {
+    browser.resized.delete(resized);
+    stopEvents();
+  };
   casts.set(session, cast);
-  await browser.page.send("Page.startScreencast", FRAME);
+  await browser.page.send("Page.startScreencast", frameOf(browser.view));
   return cast;
 }
 
@@ -63,6 +78,7 @@ async function watch(viewer: Viewer) {
   cast.viewers.add(viewer);
   cast.browser.watchers = cast.viewers.size;
   await tellWhereItIs(cast);
+  viewer.sendText(viewMessage(cast.browser.view));
   viewer.sendText(JSON.stringify({ type: "held", isHeld: cast.holder !== undefined }));
 }
 
@@ -122,7 +138,14 @@ async function didForwardInput(cast: Cast, viewer: Viewer, asked: Record<string,
   return true;
 }
 
+async function viewAsked(browser: Browser, view: View) {
+  await applyView(browser, view);
+  browser.sizeNews = `Isaac set your browser to ${describeView(view)}`;
+}
+
 const NAVIGATIONS: Record<string, (browser: Browser, asked: Record<string, unknown>) => Promise<unknown>> = {
+  size: async (browser, asked) => viewAsked(browser, { ...browser.view, size: parseSize(String(asked["size"])) }),
+  zoom: async (browser, asked) => viewAsked(browser, { ...browser.view, zoom: zoomWithin(Number(asked["zoom"])) }),
   goto: async (browser, asked) => goTo(browser, String(asked["url"])),
   back: async (browser) => stepThroughHistory(browser, -1),
   forward: async (browser) => stepThroughHistory(browser, 1),
