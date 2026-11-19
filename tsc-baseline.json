@@ -1,8 +1,5 @@
 {
-  "deploy.ts": 8,
   "eslint.config.ts": 1,
-  "lifecycle.ts": 1,
-  "mentions.ts": 3,
   "pages.ts": 1,
   "repos.ts": 1,
   "routes-files.ts": 1,
@@ -14,12 +11,10 @@
   "routes-signals.ts": 2,
   "routes-stats.ts": 2,
   "routes-threads.ts": 5,
-  "routing.ts": 30,
   "sentries/health.ts": 6,
   "sentry-commands.ts": 7,
   "server.ts": 24,
   "state.ts": 1,
-  "tmux.ts": 1,
   "transcripts.ts": 1,
   "world.ts": 3
 }
