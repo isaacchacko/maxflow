@@ -32,6 +32,8 @@
   .status { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--code); font-weight: 500; font-variant-numeric: tabular-nums; }
   .status .spin { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--link); border-top-color: transparent; animation: spin 1s linear infinite; flex: none; }
   .status.ok .spin { animation: none; border-color: var(--ok); background: var(--ok); }
+  .status.stuck .spin { animation: none; border-color: var(--dim); }
+  .steps li#pane { display: block; padding-left: 20px; font-size: 12px; } #pane::before { content: none; } #pane a { color: var(--link); } #pane code { font: 11px ui-monospace, Menlo, monospace; }
   @keyframes spin { to { transform: rotate(360deg) } }
   .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--dim); }
   .steps li { display: flex; gap: 8px; align-items: baseline; }
@@ -61,6 +63,7 @@
       <li class="done" id="s1">Noticed the tangle <span id="since"></span></li>
       <li class="now" id="s2">Rewinding the ball (restart) <span id="runs"></span></li>
       <li id="s3">Calling in a helper if it's still knotted</li>
+      <li id="pane" hidden></li>
       <li id="s4">Back to knitting: this page reloads itself, where you were</li>
     </ol>
     <details><summary>server log</summary><pre id="log"></pre></details>
@@ -77,19 +80,22 @@
   const span = (s) => s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`;
   const secs = (t) => Math.max(0, Math.round((Date.now() - t) / 1000));
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  let last = null, termOpen = false, agentId = null, back = false, buildWaitSince = 0;
+  let last = null, termAgent = null, agentId = null, back = false, buildWaitSince = 0, ws = null, term = null;
 
   // The helper's terminal, once one starts: the panel widens to make room for it (no space is kept for it before), and he can type to it.
+  // A new helper (the last one stopped while yarn was still down) gets a fresh terminal on the same panel.
   function openTerm() {
-    termOpen = true;
+    termAgent = agentId;
     $("panel").classList.add("wide");
     $("tty").hidden = false;
-    const term = new Terminal({ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12.5, lineHeight: 1.2, cursorBlink: true, theme: { background: css("--code"), foreground: css("--fg"), cursor: css("--link"), selectionBackground: "#2673fe33" } });
+    if (ws) ws.onclose = null, ws.close();
+    if (term) term.dispose();
+    term = new Terminal({ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12.5, lineHeight: 1.2, cursorBlink: true, theme: { background: css("--code"), foreground: css("--fg"), cursor: css("--link"), selectionBackground: "#2673fe33" } });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit); term.open($("term"));
     // Fitted again once the panel has finished widening.
     setTimeout(() => (fit.fit(), term.focus()), 500);
-    const ws = new WebSocket(`ws://${location.host}/__panic/ws`);
+    ws = new WebSocket(`ws://${location.host}/__panic/ws`);
     ws.binaryType = "arraybuffer";
     const send = (m) => ws.readyState === 1 && ws.send(JSON.stringify(m));
     ws.onopen = () => { $("ttystate").textContent = "live · you can type"; send({ type: "resize", cols: term.cols, rows: term.rows }); };
@@ -106,17 +112,33 @@
     const down = secs(last.downSince);
     $("since").textContent = `· ${span(down)} ago`;
     const { attempts, lastExit } = last.launchd;
+    const left = Math.max(0, Math.round((last.helperDueAt - Date.now()) / 1000));
     const failed = /^-?\d+$/.test(String(lastExit ?? "").trim()) && Number(lastExit) !== 0 ? `last exit code ${lastExit}` : "";
     $("runs").textContent = [attempts ? `· ${attempts} restart${attempts > 1 ? "s" : ""}` : "", failed && `· ${failed}`].filter(Boolean).join(" ");
+    // No line ever counts down from more than 10s: a helper starts 10s after this page appears, or 10s after a deploy's
+    // restart passes its usual time; a running helper and a gave-up are shown as they are, with no timer.
+    $("pane").hidden = !last.agent;
+    const helping = last.agent?.running && !last.gaveUp;
+    $("status").classList.toggle("stuck", !helping && !!last.gaveUp);
     if (last.agent) {
+      $("pane").innerHTML = `${helping ? "Its" : "The last helper's"} pane: the terminal here, <a href="/#agent/${last.agent.id}">${last.agent.id}</a> in yarn once it's back, or <code>${last.agent.attach}</code>`;
+      agentId = last.agent.id;
+      if (termAgent !== agentId) openTerm();
+    }
+    if (helping) {
       $("s2").className = "done"; $("s3").className = "now";
       $("s3").textContent = "Calling in a helper: it's on it";
       $("line").textContent = `A helper is untangling it · ${span(secs(last.agent.at))}`;
-      agentId = last.agent.id;
-      if (!termOpen) openTerm();
+    } else if (last.gaveUp) {
+      $("s2").className = "done"; $("s3").className = "now";
+      $("s3").textContent = "Gave up calling helpers";
+      $("line").textContent = `Gave up: ${last.gaveUp.why}. Restart it by hand: ${last.gaveUp.restart}`;
+    } else if (last.deploy) {
+      const late = Date.now() - last.deploy.at > last.deploy.expectedMs;
+      $("s2").textContent = `Deploying ${last.deploy.commit}: restarting onto it`;
+      $("line").textContent = late ? (left ? `The deploy's restart is running late, calling in a helper in ${span(left)}` : "Calling in a helper…") : `Deploying ${last.deploy.commit} · restarting ${span(secs(last.deploy.at))}`;
     } else {
-      const left = Math.max(0, Math.round((last.agentDueAt - Date.now()) / 1000));
-      $("line").textContent = down < 10 ? `Restarting… ${span(down)}` : left ? `Still down, calling in a helper in ${span(left)}` : "Calling in a helper…";
+      $("line").textContent = left ? `Still down, calling in a helper in ${span(left)}` : "Calling in a helper…";
     }
     $("log").textContent = last.log;
   }
@@ -129,7 +151,7 @@
     try { await w.json(); } catch { return false; }
     // Its frontend may still be building; give that a little while, then reload anyway (a broken build has its own agent).
     const page = await fetch(location.pathname, { cache: "no-store" }).catch(() => null);
-    if (page && page.status >= 500 && Date.now() - (buildWaitSince ||= Date.now()) < 20_000) return false;
+    if (page && page.status >= 500 && Date.now() - (buildWaitSince ||= Date.now()) < 10_000) return false;
     return true;
   }
 

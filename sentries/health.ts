@@ -7,7 +7,8 @@
 // the server adopts that session like any other once it is back.
 import type { ServerWebSocket, Subprocess } from "bun";
 import { join } from "node:path";
-import { BASE as base, CLI, LIVE, PORT, TMUX_SCOPE, TMUX_SOCKET } from "../instance";
+import { BASE as base, CLI, LIVE, PORT, STATE_DIR, TMUX_SCOPE, TMUX_SOCKET } from "../instance";
+import { deployRestart } from "../deploy-restart";
 import { LABEL, LOG, loaded, restartCommand, status as serviceStatus } from "../service";
 import { takeOver } from "./singleton";
 
@@ -15,16 +16,20 @@ if (import.meta.main) takeOver("health");
 
 const INTERVAL_MS = Number(process.env.HEALTH_INTERVAL ?? 1000);
 const PAGE_AFTER_MS = Number(process.env.HEALTH_PAGE_AFTER_MS ?? 3000);
-const DOWN_MS = Number(process.env.HEALTH_DOWN_MS ?? 45_000);
-// Hot reload catches agents mid-edit, so a build broken for a few seconds is normal; only one that stays broken counts.
-const BUILD_DOWN_MS = Number(process.env.HEALTH_BUILD_DOWN_MS ?? 60_000);
-const BUILD_EVERY_MS = 5000;
+// Isaac never waits on a timer over 10s for a helper: one starts this long after the panic page appears, after a broken build
+// is seen, or after a deploy's restart runs past its usual time. A deploy's restart before then is not a panic.
+const HELPER_AFTER_MS = Number(process.env.HEALTH_HELPER_AFTER_MS ?? 10_000);
+// Nobody edits the live checkout, so a broken build is a deployed commit that doesn't build, not an agent mid-save.
+const BUILD_EVERY_MS = 2000;
+// Helpers are bounded by count, never by a wait: one at a time, the next as soon as the last one stops while yarn is still
+// down, and once this many have started within the window the page says it gave up, until yarn is back.
+const HELPERS_MAX = Number(process.env.HEALTH_HELPERS_MAX ?? 3);
+const HELPERS_WINDOW_MS = 10 * 60_000;
 const MCP_EVERY_MS = 30_000;
 // mcp.ts alerts at most once per registry refresh (10 min); one agent per server covers that many hours of them.
 const MCP_AGENT_EVERY_MS = 6 * 3_600_000;
-const COOLDOWN_MS = Number(process.env.HEALTH_COOLDOWN_MS ?? 15 * 60_000);
-// After handing the port back, give the server this long to bind before covering for it again.
-const RELEASE_GRACE_MS = 15_000;
+// After handing the port back, give the server this long to bind before covering for it again (it binds right after asking).
+const RELEASE_GRACE_MS = 5000;
 const DIR = join(import.meta.dir, "..");
 const TMUX = ["tmux", "-L", TMUX_SOCKET, "-f", join(DIR, "tmux.conf")];
 const HOST = "127.0.0.1";
@@ -98,7 +103,7 @@ async function startStateRecovery(): Promise<ReturnType<typeof startAgent> | und
   const alerts = await stateAlerts();
   for (const alert of alerts) console.log(`${stamp()}  state: ${alert.name} unreadable (${alert.problem})${alert.isGating ? ", its sentry refuses to start" : `, kept as ${alert.kept}`}`);
   const due = alerts.find((alert) => Date.now() - (stateAgentAt.get(alert.name) ?? -MCP_AGENT_EVERY_MS) >= MCP_AGENT_EVERY_MS);
-  if (due === undefined || !canStartAgent()) return;
+  if (due === undefined || helperRunning()) return;
   const started = startAgent(stateTask(due));
   stateAgentAt.set(due.name, started.at);
   console.log(`${stamp()}  started recovery agent for ${due.name} in ${started.tmux}`);
@@ -106,14 +111,44 @@ async function startStateRecovery(): Promise<ReturnType<typeof startAgent> | und
   return started;
 }
 
+// A dev instance's helper gets a harmless prompt: the real ones restart and redeploy the live service.
+const INERT = "Reply with the single word ok, and do nothing else.";
 function startAgent(prompt: string) {
   const id = crypto.randomUUID().slice(0, 8);
   const meta = { name: "maxflow recovery", cmd: ["claude"], cwd: DIR, createdAt: Date.now() };
   const t = `mf-${id}`;
-  const created = run([...TMUX_SCOPE, ...TMUX, "new-session", "-d", "-s", t, "-x", "120", "-y", "34", "-c", DIR, "-e", `MAXFLOW_SESSION=${id}`, "--", "claude", "--permission-mode", "bypassPermissions", prompt]);
+  const created = run([...TMUX_SCOPE, ...TMUX, "new-session", "-d", "-s", t, "-x", "120", "-y", "34", "-c", DEV ? STATE_DIR : DIR, "-e", `MAXFLOW_SESSION=${id}`, "--", "claude", "--permission-mode", "bypassPermissions", ...(DEV ? ["--model", "haiku", INERT] : [prompt])]);
   if (!created.ok) throw new Error(`tmux new-session failed: ${created.out}`);
   run([...TMUX, "set-option", "-t", t, "@mf", JSON.stringify(meta)]);
-  return { id, tmux: t, at: Date.now() };
+  return { id, tmux: t, at: Date.now(), wasWorking: false, idleTicks: 0 };
+}
+
+// A helper has stopped once its session is gone or its claude has sat at the prompt for a few ticks after working (it
+// never exits on its own); claude shows "esc to interrupt" the whole time it works, tool calls included.
+const IDLE_TICKS = 3;
+function helperRunning() {
+  if (!agent || !run([...TMUX, "has-session", "-t", agent.tmux]).ok) return false;
+  const screen = run([...TMUX, "capture-pane", "-p", "-t", agent.tmux]).out;
+  const isWorking = /esc to interrupt/i.test(screen);
+  // A turn too quick to catch working still leaves its reply (⏺) and "Worked for" behind.
+  agent.wasWorking ||= isWorking || /⏺|Worked for/.test(screen);
+  agent.idleTicks = isWorking ? 0 : agent.idleTicks + 1;
+  return !(agent.wasWorking && agent.idleTicks >= IDLE_TICKS);
+}
+
+// A helper for an outage (down or broken build), unless one is on it or the outage has used up its helpers.
+function startHelper(prompt: string, why: string) {
+  if (helperRunning() || gaveUp) return;
+  const recent = helperStarts.filter((at) => Date.now() - at < HELPERS_WINDOW_MS);
+  if (recent.length >= HELPERS_MAX) {
+    gaveUp = `${recent.length} helpers since ${new Date(recent[0]).toLocaleTimeString()} didn't bring yarn back, so no more start on their own until it's up`;
+    console.log(`${stamp()}  gave up: ${gaveUp}`);
+    return;
+  }
+  agent = startAgent(prompt);
+  helperStarts.push(agent.at);
+  console.log(`${stamp()}  ${why}, started recovery agent in ${agent.tmux}`);
+  return agent;
 }
 
 // The maxflow folder isn't a trusted claude workspace, so the agent opens on the trust dialog; accept it for this session only.
@@ -129,12 +164,14 @@ async function acceptTrust(t: string) {
 let downSince: number | null = null;
 // The service manager's run count when this outage began: the page counts this outage's restarts, not the service's lifetime runs.
 let runsAtDown = 0;
-let agent: { id: string; tmux: string; at: number } | null = null;
+let agent: ReturnType<typeof startAgent> | null = null;
 let page: ReturnType<typeof Bun.serve> | null = null;
 let releasedAt = 0;
 let buildBrokenSince: number | null = null;
 let buildCheckedAt = 0;
-let lastAgentAt = -COOLDOWN_MS;
+const helperStarts: number[] = [];
+// Why no more helpers start on their own, once too many have; cleared when yarn is back.
+let gaveUp: string | null = null;
 let mcpSeq: number | null = null;
 let mcpCheckedAt = 0;
 const mcpAgentAt = new Map<string, number>();
@@ -148,7 +185,6 @@ async function stateAlerts(): Promise<StateAlert[]> {
   stateCursor.seq = events.at(-1)?.seq ?? Number(res.headers.get("x-maxflow-seq"));
   return isFirst ? [] : events.map((e) => e.data);
 }
-const canStartAgent = () => !(agent && run([...TMUX, "has-session", "-t", agent.tmux]).ok) && Date.now() - lastAgentAt >= COOLDOWN_MS;
 // health/mcp/<server> events since the last check; the first check only notes where the bus is, so old alerts aren't replayed.
 async function mcpAlerts(): Promise<{ server: string; error: string }[]> {
   const res = await fetch(`${base}/api/events?topic=health/mcp/**&after=${mcpSeq ?? "now"}`, { signal: AbortSignal.timeout(5000) });
@@ -158,16 +194,28 @@ async function mcpAlerts(): Promise<{ server: string; error: string }[]> {
   return first ? [] : events.map((e) => e.data);
 }
 
-// A server asking for the port back is alive and booting (adopting every tmux session takes ~20s), so the agent's clock restarts.
-const agentDueAt = () => downSince && Math.max(downSince, releasedAt) + DOWN_MS;
+// A deploy's restart that began before this outage (or broken build) did is the outage's cause, so it isn't a panic until it
+// runs HELPER_AFTER_MS past its usual time; anything else is a panic from the moment the page shows.
+function deployFor(since: number) {
+  const restart = deployRestart();
+  return restart && restart.at <= since ? restart : undefined;
+}
+const helperDueAt = (since: number, firstSign: number) => {
+  const restart = deployFor(since);
+  return restart ? restart.at + restart.expectedMs + HELPER_AFTER_MS : firstSign + HELPER_AFTER_MS;
+};
 
 function state() {
   const service = serviceStatus();
+  const restart = downSince ? deployFor(downSince) : undefined;
   return {
     down: true,
     downSince,
-    agentDueAt: downSince && Math.max(agentDueAt()!, lastAgentAt + COOLDOWN_MS),
-    agent: agent && run([...TMUX, "has-session", "-t", agent.tmux]).ok ? { id: agent.id, at: agent.at } : null,
+    deploy: restart && { commit: restart.commit.slice(0, 7), at: restart.at, expectedMs: restart.expectedMs },
+    helperDueAt: downSince && helperDueAt(downSince, downSince + PAGE_AFTER_MS),
+    // The last helper, its pane still open; running is false once it stopped (the loop's helperRunning keeps the count).
+    agent: agent && run([...TMUX, "has-session", "-t", agent.tmux]).ok ? { id: agent.id, at: agent.at, attach: `tmux -L ${TMUX_SOCKET} attach -t ${agent.tmux}`, running: !(agent.wasWorking && agent.idleTicks >= IDLE_TICKS) } : null,
+    gaveUp: gaveUp && { why: gaveUp, restart: restartCommand },
     launchd: { attempts: Math.max(0, Number(service.runs ?? 0) - runsAtDown), lastExit: service.lastExit },
     log: run(["tail", "-n", "40", LOG]).out,
   };
@@ -233,7 +281,7 @@ function closePage() {
   console.log(`${stamp()}  server starting, handed the port back`);
 }
 
-console.log(`health sentry: polls ${base} every ${INTERVAL_MS / 1000}s; panic page after ${PAGE_AFTER_MS / 1000}s, recovery agent after ${DOWN_MS / 1000}s down or ${BUILD_DOWN_MS / 1000}s with a broken build`);
+console.log(`health sentry: polls ${base} every ${INTERVAL_MS / 1000}s; panic page after ${PAGE_AFTER_MS / 1000}s, a helper ${HELPER_AFTER_MS / 1000}s after the page, a broken build, or a deploy's restart running late; at most ${HELPERS_MAX} helpers in ${HELPERS_WINDOW_MS / 60_000} min`);
 for (;;) {
   try {
     // While the panic page holds the port the server can't be listening, so there's nothing to probe.
@@ -248,30 +296,24 @@ for (;;) {
           buildBrokenSince = null;
           // An agent belongs to the outage it was started for; its session stays open in the sidebar, but the next outage gets its own.
           agent = null;
+          gaveUp = null;
           if (Date.now() - mcpCheckedAt >= MCP_EVERY_MS) {
             mcpCheckedAt = Date.now();
             for (const { server, error } of await mcpAlerts()) {
               console.log(`${stamp()}  mcp: ${server} unreachable after a registry refresh: ${error}`);
-              if (Date.now() - (mcpAgentAt.get(server) ?? -MCP_AGENT_EVERY_MS) < MCP_AGENT_EVERY_MS || !canStartAgent()) continue;
+              if (Date.now() - (mcpAgentAt.get(server) ?? -MCP_AGENT_EVERY_MS) < MCP_AGENT_EVERY_MS || helperRunning()) continue;
               agent = startAgent(mcpTask(server, error));
-              lastAgentAt = agent.at;
               mcpAgentAt.set(server, agent.at);
               console.log(`${stamp()}  started recovery agent for ${server} in ${agent.tmux}`);
               await acceptTrust(agent.tmux);
             }
-            const recovery = await startStateRecovery();
-            agent = recovery ?? agent;
-            lastAgentAt = recovery?.at ?? lastAgentAt;
+            agent = (await startStateRecovery()) ?? agent;
           }
         } else {
           if (!buildBrokenSince) console.log(`${stamp()}  frontend build broken`);
           buildBrokenSince ??= Date.now();
-          if (Date.now() - buildBrokenSince >= BUILD_DOWN_MS && canStartAgent()) {
-            agent = startAgent(buildTask(buildBrokenSince));
-            lastAgentAt = agent.at;
-            console.log(`${stamp()}  build broken ${Math.round((Date.now() - buildBrokenSince) / 1000)}s, started recovery agent in ${agent.tmux}`);
-            await acceptTrust(agent.tmux);
-          }
+          const started = Date.now() >= helperDueAt(buildBrokenSince, buildBrokenSince) && startHelper(buildTask(buildBrokenSince), `build broken ${Math.round((Date.now() - buildBrokenSince) / 1000)}s`);
+          if (started) await acceptTrust(started.tmux);
         }
       }
     } else if (!DEV && !loaded()) {
@@ -281,12 +323,8 @@ for (;;) {
     } else {
       if (!downSince) (downSince = Date.now()), (runsAtDown = Number(serviceStatus().runs ?? 0));
       if (!page && health === "refused" && Date.now() - downSince >= PAGE_AFTER_MS && Date.now() - releasedAt >= RELEASE_GRACE_MS) openPage();
-      if (Date.now() >= agentDueAt()! && canStartAgent()) {
-        agent = startAgent(downTask(downSince));
-        lastAgentAt = agent.at;
-        console.log(`${stamp()}  down ${Math.round((Date.now() - downSince) / 1000)}s, started recovery agent in ${agent.tmux}`);
-        await acceptTrust(agent.tmux);
-      }
+      const started = Date.now() >= helperDueAt(downSince, downSince + PAGE_AFTER_MS) && startHelper(downTask(downSince), `down ${Math.round((Date.now() - downSince) / 1000)}s`);
+      if (started) await acceptTrust(started.tmux);
     }
   } catch (e) {
     console.error(`${stamp()}  tick failed:`, e);

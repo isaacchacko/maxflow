@@ -4,6 +4,7 @@ import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import { BASE, LIVE, STATE_DIR } from "./instance";
 import { LOG, checkout, restartCommand } from "./service";
+import { isDeploying, noteRestartAnswered, noteRestartBegins } from "./deploy-restart";
 import { deployLock } from "./state";
 
 const run = (cmd: string[], cwd?: string) => {
@@ -104,7 +105,6 @@ export async function restartSentries(stale: { name: string; fresh: boolean }[],
 }
 
 const LOCK_WAIT_MS = 30 * 60_000;
-const isDeploying = (pid: number) => run(["ps", "-o", "command=", "-p", String(pid)]).out.includes("cli.ts deploy");
 async function takeDeployLock() {
   const deadline = Date.now() + LOCK_WAIT_MS;
   const announced = new Set<number>();
@@ -140,6 +140,7 @@ export async function deploy() {
 
   const before = await sessions();
   const seq = Number((await fetch(`${BASE}/api/events?after=now`).catch(() => undefined))?.headers.get("x-maxflow-seq") ?? 0);
+  noteRestartBegins(to);
   if (!run(["git", "merge", "--ff-only", to], live).ok) fail(`couldn't fast-forward ${live} to ${to.slice(0, 7)}`);
   if (!run(["bun", "install", "--frozen-lockfile"], live).ok) fail(`bun install --frozen-lockfile failed in ${live}, which is now at ${to.slice(0, 7)} but not restarted`);
   console.log(`live ${from.slice(0, 7)} -> ${to.slice(0, 7)}:\n${run(["git", "log", "--oneline", "--no-decorate", `${from}..${to}`], live).out.split("\n").map((l) => `  ${l.slice(0, 120)}`).join("\n")}`);
@@ -149,8 +150,12 @@ export async function deploy() {
   const deadline = Date.now() + 120_000;
   let after: Session[] | undefined;
   const settled = (list?: Session[]) => !!list && (!before || sentries(before).every((n) => sentries(list).includes(n)));
-  while (Date.now() < deadline && !settled((after = await sessions()))) await Bun.sleep(2_000);
-  if (!after) fail(`the server isn't answering ${BASE} after 2 minutes; see ${LOG}. The health sentry starts a recovery agent once it has been down 45s.`);
+  while (Date.now() < deadline && !settled((after = await sessions()))) {
+    if (after) noteRestartAnswered();
+    await Bun.sleep(2_000);
+  }
+  if (!after) fail(`the server isn't answering ${BASE} after 2 minutes; see ${LOG}. The health sentry started a recovery agent once the restart ran 10s past its usual time.`);
+  noteRestartAnswered();
   // A session killed on purpose while the server restarted isn't lost.
   const killed = new Set(seq ? ((await (await fetch(`${BASE}/api/events?topic=session/*/killed&after=${seq}`)).json()) as { data: { session: string } }[]).map((e) => e.data.session) : []);
   const lost = before?.filter((s) => s.running && !after!.some((a) => a.id === s.id) && !killed.has(s.id)) ?? [];
