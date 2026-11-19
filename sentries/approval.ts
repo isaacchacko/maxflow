@@ -4,8 +4,8 @@
 // PRs (the gh_status table) and the review queue, scores each new head
 // into a risk tier from its paths, size, complexity delta (lizard, base vs head), churn, tests and spread, and runs a headless claude
 // review (sentries/approval.md) in a worktree of that head, at most MAX_REVIEWS at once. Each verdict goes to approval/<pr>/<sha>.json
-// and approval-log.md. A failed review's findings reach the PR's agent only while the WRITE_SWITCH file exists; it writes nothing
-// to GitHub.
+// and approval-log.md. A failed review's findings reach the PR's agent only while the WRITE_SWITCH file exists. On GitHub it writes
+// only one comment per PR, once a head passes, saying what was checked and fixed (approval-comment.ts).
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -14,6 +14,7 @@ import { BASE, STATE_DIR } from "../instance";
 import { enqueue, flush, config, type Note } from "./approval-notify";
 import { ghStatusTable } from "../state";
 import { takeOver } from "./singleton";
+import { compose, post, COMMENT_SWITCH, type Posted } from "./approval-comment";
 
 if (import.meta.main) takeOver("approval");
 
@@ -48,11 +49,11 @@ type Head = {
   why?: string; tier?: number; reasons?: string[]; signals?: Signals; lenses?: string[]; reviews?: (Review & { lens: string; usd: number; tokens: number })[];
   started?: number; finished?: number; handed?: number;
 };
-// rounds: how many heads of each PR went back to its agent with findings.
-type State = { heads: Record<string, Head>; rounds: Record<string, number> };
+// rounds: how many heads of each PR went back to its agent with findings. comments: the PR comment posted on each, by head.
+type State = { heads: Record<string, Head>; rounds: Record<string, number>; comments: Record<string, Posted> };
 
 const readJson = <T>(path: string, fallback: T): T => { try { return JSON.parse(readFileSync(path, "utf8")); } catch { return fallback; } };
-const state: State = { heads: {}, rounds: {}, ...readJson<Partial<State>>(STATE_FILE, {}) };
+const state: State = { heads: {}, rounds: {}, comments: {}, ...readJson<Partial<State>>(STATE_FILE, {}) };
 const save = () => writeFileSync(STATE_FILE, JSON.stringify(state, null, 1));
 const log = (line: string) => console.log(`${new Date().toLocaleTimeString()}  ${line}`);
 const run = (cmd: string[], cwd?: string) => { const r = Bun.spawnSync(cmd, { cwd, stderr: "pipe" }); return r.exitCode === 0 ? r.stdout.toString().trim() : ""; };
@@ -270,6 +271,21 @@ async function work(key: string, h: Head, pr: any) {
   return h;
 }
 
+// Posts or updates the PR's comment for a head that passed; a PR whose comment for this head is up, or being written, is left alone.
+const commenting = new Set<string>();
+async function comment(key: string, h: Head) {
+  if (state.comments[key]?.sha === h.sha || commenting.has(key) || !existsSync(COMMENT_SWITCH)) return;
+  commenting.add(key);
+  try {
+    const body = await compose(key, h.title);
+    const posted = body && post(key, h.sha, body, state.comments[key]);
+    // Marked even when nothing was posted, so a head whose comment didn't survive clean() isn't written again every tick.
+    state.comments[key] = posted || { ...(state.comments[key] ?? { id: 0, body: "" }), sha: h.sha };
+    log(`${key}@${h.sha.slice(0, 8)}: comment ${posted ? `posted (${posted.id})` : body ? "refused by GitHub" : "dropped"}`);
+    save();
+  } finally { commenting.delete(key); }
+}
+
 const active = new Set<string>();
 function tick() {
   for (const { key, pr } of waiting()) {
@@ -291,7 +307,7 @@ function tick() {
   const live = new Map(waiting().map(({ key, pr }) => [key, pr.headRefOid]));
   for (const [key, h] of Object.entries(state.heads)) {
     if (h.status !== "done" || live.get(key) !== h.sha) continue;
-    if (passed(h)) enqueue(note(key, h));
+    if (passed(h)) { enqueue(note(key, h)); comment(key, h); }
     else if (!h.handed && existsSync(WRITE_SWITCH)) handBack(key, h).then(save);
   }
   flush((n) => live.get(n.pr) === n.sha);
