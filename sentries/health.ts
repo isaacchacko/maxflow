@@ -128,13 +128,14 @@ function isHelperRunning() {
   return !(agent.wasWorking && agent.idleTicks >= IDLE_TICKS);
 }
 
-function startHelper(prompt: string, why: string) {
-  if (outage.gaveUp !== undefined || isHelperRunning()) return undefined;
+const secondsSince = (at: number) => String(Math.round((Date.now() - at) / 1000));
+function startHelper(prompt: string, why: string): ReturnType<typeof startAgent> | undefined {
+  if (outage.gaveUp !== undefined || isHelperRunning()) return;
   const recent = outage.helperStarts.filter((at) => Date.now() - at < HELPERS_WINDOW_MS);
   if (recent.length >= HELPERS_MAX) {
     outage.gaveUp = `${String(recent.length)} helpers since ${new Date(recent[0]).toLocaleTimeString()} didn't bring yarn back, so no more start on their own until it's up`;
     console.log(`${stamp()}  gave up: ${outage.gaveUp}`);
-    return undefined;
+    return;
   }
   const started = startAgent(prompt);
   outage.helperStarts.push(started.at);
@@ -299,7 +300,7 @@ for (;;) {
         } else {
           if (!buildBrokenSince) console.log(`${stamp()}  frontend build broken`);
           buildBrokenSince ??= Date.now();
-          const started = Date.now() >= helperDueAt(buildBrokenSince, buildBrokenSince) ? startHelper(buildTask(buildBrokenSince), `build broken ${String(Math.round((Date.now() - buildBrokenSince) / 1000))}s`) : undefined;
+          const started = Date.now() >= helperDueAt(buildBrokenSince, buildBrokenSince) ? startHelper(buildTask(buildBrokenSince), `build broken ${secondsSince(buildBrokenSince)}s`) : undefined;
           agent = started ?? agent;
           if (started !== undefined) await acceptTrust(started.tmux);
         }
@@ -311,7 +312,7 @@ for (;;) {
     } else {
       if (!downSince) (downSince = Date.now()), (runsAtDown = Number(serviceStatus().runs ?? 0));
       if (!page && health === "refused" && Date.now() - downSince >= PAGE_AFTER_MS && Date.now() - releasedAt >= RELEASE_GRACE_MS) openPage();
-      const started = Date.now() >= helperDueAt(downSince, downSince + PAGE_AFTER_MS) ? startHelper(downTask(downSince), `down ${String(Math.round((Date.now() - downSince) / 1000))}s`) : undefined;
+      const started = Date.now() >= helperDueAt(downSince, downSince + PAGE_AFTER_MS) ? startHelper(downTask(downSince), `down ${secondsSince(downSince)}s`) : undefined;
       agent = started ?? agent;
       if (started !== undefined) await acceptTrust(started.tmux);
     }
