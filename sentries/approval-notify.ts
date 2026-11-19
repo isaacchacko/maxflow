@@ -5,7 +5,8 @@ import { appendStateText, didClaimState, hasState, listState, readGatingStateJso
 
 const STATE_FILE = "approval-notified.json";
 const BOARD_FILE = "review-board.json";
-const HELD = "Held: tier 3, waiting on Isaac";
+const HELD = "Held: waiting on Isaac or a code owner";
+const HELD_PREFIX = "Held:";
 const CLAIMS_NAME = "approval-claims";
 const MAX_BACKOFF_MS = 30 * 60_000;
 const BACKOFF_MS = [60_000, 5 * 60_000, 15 * 60_000, MAX_BACKOFF_MS];
@@ -14,7 +15,7 @@ const HOUR_MS = 3_600_000;
 const DEFAULT_PER_HOUR = 6;
 const LOGGED_KEPT = 1000;
 
-export type Note = { pr: string; sha: string; title: string; url: string; tier: number; summary: string };
+export type Note = { pr: string; sha: string; title: string; url: string; tier: number; summary: string; codeOwnedPaths?: string[] };
 type Config = { url?: string; tokenFile?: string; repo?: string; perHour?: number; holdTier?: number };
 type Endpoint = Config & { url: string; tokenFile: string };
 type Standing = "waiting" | "moved" | "unknown";
@@ -86,8 +87,13 @@ function standingOnGitHub(n: Note): Standing {
   return isAwaitingReviewAt(pr, n.sha) ? "waiting" : "moved";
 }
 
+const OWNED_TIER = 3;
+const requiresCodeOwner = (n: Note) => (n.codeOwnedPaths === undefined ? n.tier >= OWNED_TIER : n.codeOwnedPaths.length > 0);
+const isHeld = (cfg: Config, n: Note) => requiresCodeOwner(n) || (cfg.holdTier !== undefined && n.tier >= cfg.holdTier);
+const heldWhy = (n: Note) => (requiresCodeOwner(n) ? "review passed, a code owner must review" : "review passed");
+
 function heldSection(held: Note[]) {
-  const items = held.map((n) => ({ pr: n.pr.split("/", 2)[1], url: n.url, note: `review passed; ${n.title}` }));
+  const items = held.map((n) => ({ pr: n.pr.split("/", 2)[1], url: n.url, note: `${heldWhy(n)}; ${n.title}` }));
   return items.length === 0 ? [] : [{ title: HELD, items }];
 }
 
@@ -95,7 +101,7 @@ function showHeld(held: Note[]) {
   const board = readStateJson(BOARD_FILE, isRecord) ?? {};
   const sections: unknown = board["sections"];
   const list: unknown[] = Array.isArray(sections) ? sections : [];
-  const rest = list.filter((section) => !(isRecord(section) && section["title"] === HELD));
+  const rest = list.filter((section) => !(isRecord(section) && typeof section["title"] === "string" && section["title"].startsWith(HELD_PREFIX)));
   writeStateJson(BOARD_FILE, { ...board, sections: [...rest, ...heldSection(held)] });
 }
 
@@ -155,7 +161,7 @@ export async function flush(isCurrent: (n: Note) => boolean) {
     save();
     return;
   }
-  const held = sent.queue.filter((n) => cfg.holdTier !== undefined && n.tier >= cfg.holdTier);
+  const held = sent.queue.filter((n) => isHeld(cfg, n));
   showHeld(held);
   if (Date.now() >= sent.retryAt) await sendQueued(cfg, held);
   save();
