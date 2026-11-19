@@ -265,7 +265,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
   });
   const typedHere = new Set(typed.flatMap(l => (l.kind === "user" ? [l.text] : [])));
   const history = routedHere.filter(s => !(s.source === "isaac" && typedHere.has(s.text))).reverse();
-  const lines = [...transcriptFor(agent, crew, parent, task, history), ...typed, closing[agent.state](agent)];
+  const lines = [...transcriptFor(agent, { crew, parent, task, signals: history }), ...typed, closing[agent.state](agent)];
 
   // Pause interrupts the turn in progress, as Esc does in the terminal.
   const pause = () => (live ? void api(`/api/sessions/${agent.id}/input`, { keys: ["Escape"] }) : agentStore.set(all => all.map(a => (a.id === agent.id ? { ...a, state: "idle" } : a))));
