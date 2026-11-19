@@ -1,13 +1,13 @@
 import { ArrowLeft, GitPullRequest, Waypoints } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, hasText } from "@/lib/utils";
 import { GRID_COLS, GRID_ROWS, statusColor, objectiveStatus, type Block } from "@/mock";
 import { editedStore, taskStore, objectiveStore, type PageRef } from "@/store";
 import { BlockView, type Subject } from "./blocks";
 
 function useSubject(ref: PageRef) {
-  const [type, id] = ref.split("/");
+  const [type, id] = ref.split("/", 2);
   const tasks = taskStore.use();
   const objectives = objectiveStore.use();
   if (type === "task") {
@@ -19,14 +19,43 @@ function useSubject(ref: PageRef) {
   }
   const objective = objectives.find(th => th.id === id);
   if (!objective) return;
-  const status = objectiveStatus(objective.taskIds.map(tid => tasks.find(t => t.id === tid)!.status));
+  const status = objectiveStatus(
+    objective.taskIds
+      .map(tid => tasks.find(t => t.id === tid))
+      .filter(task => task !== undefined)
+      .map(task => task.status),
+  );
   const subject: Subject = { ref, status, events: objective.events, objectiveId: objective.id };
   return { subject, title: objective.title, page: objective.page, agent: undefined, objective: undefined };
 }
 
+function PageGrid({ pageRef, page, subject }: { pageRef: PageRef; page: Block[]; subject: Subject }) {
+  const edited = editedStore.use();
+  return (
+    <div
+      data-agent="page"
+      className="grid min-h-0 flex-1 grid-flow-row-dense gap-3"
+      style={{ gridTemplateColumns: `repeat(${GRID_COLS}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${GRID_ROWS}, minmax(0, 1fr))` }}
+    >
+      {page.map(block => {
+        const stamp = edited[`${pageRef}/${block.id}`];
+        return (
+          <div
+            key={`${block.id}-${stamp ?? 0}`}
+            data-agent={`block:${block.id}`}
+            className={cn("min-h-0 rounded-xl", Boolean(stamp) && "agent-edited animate-in fade-in zoom-in-95")}
+            style={{ gridColumn: `span ${block.w}`, gridRow: `span ${block.h}` }}
+          >
+            <BlockView block={block} subject={subject} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Page({ pageRef, back }: { pageRef: PageRef; back: string }) {
   const found = useSubject(pageRef);
-  const edited = editedStore.use();
   if (!found) return <p className="p-6 text-muted-foreground">Nothing at {pageRef}.</p>;
   const { subject, title, page, agent, objective } = found;
   const isObjective = pageRef.startsWith("objective/");
@@ -38,13 +67,12 @@ export function Page({ pageRef, back }: { pageRef: PageRef; back: string }) {
           <a href={`#${back}`}><ArrowLeft /></a>
         </Button>
         {isObjective ? <Waypoints className="size-5 shrink-0 text-agent" /> : <span className={cn("size-2.5 shrink-0 rounded-full", statusColor[subject.status])} />}
-        {/* One line whatever the width: the title gives way first, cut short with its whole text on hover, and the chips keep their size. */}
         <h1 title={title} className="min-w-0 truncate text-xl font-semibold tracking-tight">
           {title}
         </h1>
         {isObjective && <Badge variant="outline" className="shrink-0 capitalize">{subject.status}</Badge>}
-        {agent && <Badge variant="secondary" className="shrink-0">{agent}</Badge>}
-        {subject.pr && (
+        {hasText(agent) && <Badge variant="secondary" className="shrink-0">{agent}</Badge>}
+        {subject.pr !== undefined && (
           <Badge variant="outline" className="shrink-0 gap-1">
             <GitPullRequest className="size-3" />#{subject.pr}
           </Badge>
@@ -56,25 +84,7 @@ export function Page({ pageRef, back }: { pageRef: PageRef; back: string }) {
           </a>
         )}
       </header>
-      <div
-        data-agent="page"
-        className="grid min-h-0 flex-1 grid-flow-row-dense gap-3"
-        style={{ gridTemplateColumns: `repeat(${GRID_COLS}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${GRID_ROWS}, minmax(0, 1fr))` }}
-      >
-        {page.map((block: Block) => {
-          const stamp = edited[`${pageRef}/${block.id}`];
-          return (
-            <div
-              key={`${block.id}-${stamp ?? 0}`}
-              data-agent={`block:${block.id}`}
-              className={cn("min-h-0 rounded-xl", stamp && "agent-edited animate-in fade-in zoom-in-95")}
-              style={{ gridColumn: `span ${block.w}`, gridRow: `span ${block.h}` }}
-            >
-              <BlockView block={block} subject={subject} />
-            </div>
-          );
-        })}
-      </div>
+      <PageGrid pageRef={pageRef} page={page} subject={subject} />
     </div>
   );
 }

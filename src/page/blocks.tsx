@@ -11,7 +11,7 @@ import { agentStateColor, statusColor, type Block, type Event, type Status } fro
 import { addEvent, agentStore, putBlock, taskStore, objectiveStore, type PageRef } from "@/store";
 import { Rich } from "@/threads/Rich";
 
-export type Subject = { ref: PageRef; status: Status; events: Event[]; pr?: number; objectiveId?: string };
+export type Subject = { ref: PageRef; status: Status; events: Event[]; pr?: number | undefined; objectiveId?: string | undefined };
 
 type Of<K extends Block["kind"]> = Extract<Block, { kind: K }>;
 type Props<K extends Block["kind"]> = { block: Of<K>; subject: Subject };
