@@ -6,14 +6,13 @@ import {
   ciStateOf, fetchHeads, fetchPrs, fetchSessions, INBOX_WATCH, isFailed, isFinished, isOwnComment, links, prNumber, rateLimit, readStatus, readWatches, repoOfKey,
   REVIEW_WATCH, rollupOf, run, short, watchLinks, writeWatches, type Head, type Link, type PolledPr, type Pr, type Session,
 } from "../gh";
-import { BASE as base, STATE_DIR } from "../instance";
+import { BASE as base } from "../instance";
 import { isRecord } from "../shared/guards";
 import { ghStatusTable, readStateJson, writeStateJson } from "../state";
 import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("gh");
 
-export const INBOX_WATCH_FILE = join(STATE_DIR, INBOX_WATCH);
 const PROJECTS = join(homedir(), ".claude", "projects");
 const INTERVAL_MS = Number(process.env["GH_SENTRY_INTERVAL"] ?? 30_000);
 const RATE_LIMITED_WAIT_MS = 5 * 60_000;
