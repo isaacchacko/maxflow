@@ -61,7 +61,7 @@ async function buildOk() {
   }
 }
 
-const RULES = `Live runs only committed code, and nobody edits its checkout (${DIR}): a fix to the code goes in your own worktree (\`git -C ${DIR} worktree add ~/Worktrees/maxflow-v2-recovery -b fix/recovery-<what> origin/feat/v2\`), is committed, rebased onto origin/feat/v2 and pushed to feat/v2, and ships with \`${CLI} deploy\`, which refuses a dirty live checkout or a commit that fails \`bun run check\`. If the live checkout is dirty, don't revert or stash it; find whose it is. Don't kill any tmux session on the maxflow socket; they are the user's running work. When it is fixed, say in a few lines what broke and what you changed.`;
+const RULES = `Live runs only committed code, and nobody edits its checkout (${DIR}): a fix to the code goes in your own worktree (\`git -C ${DIR} worktree add ~/Worktrees/maxflow-v2-recovery -b fix/recovery-<what> origin/feat/v2\`), is committed, rebased onto origin/feat/v2 and pushed to feat/v2, and ships with \`${CLI} deploy\`, which refuses a dirty live checkout or a commit whose CI check isn't green. If the live checkout is dirty, don't revert or stash it; find whose it is. Don't kill any tmux session on the maxflow socket; they are the user's running work. When it is fixed, say in a few lines what broke and what you changed.`;
 
 function downTask(since: number) {
   const status = serviceStatus().text;

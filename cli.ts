@@ -40,7 +40,7 @@ const usage = `usage:
   maxflow thread merge <thread id> <into thread id>   fold a duplicate into another thread: messages, routers, ask and waits move, the duplicate leaves the inbox
   maxflow thread move <thread id> <objective id>   re-home a thread and its subthreads onto that objective and its routers
   maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
-  maxflow deploy                             ship origin's feat/v2 to the live yarn: refuses a dirty live checkout or a commit that doesn't build,
+  maxflow deploy                             ship origin's feat/v2 to the live yarn: refuses a dirty live checkout or a commit whose CI check isn't green,
                                              fast-forwards, restarts, checks every session and sentry came back,
                                              and restarts the sentries whose code changed
   maxflow install                            run this checkout as the login service and add its hooks to ~/.claude/settings.json`;

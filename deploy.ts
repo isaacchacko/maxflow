@@ -1,7 +1,6 @@
 // `cli.ts deploy`: the one way the live yarn changes. The live checkout holds only commits from origin, so a restart ships
 // exactly what is on its branch there, never someone's half-saved edit. Changes are made in a worktree and pushed first.
-import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import { BASE, LIVE, STATE_DIR } from "./instance";
 import { LOG, checkout, restartCommand } from "./service";
@@ -22,22 +21,18 @@ async function sessions(): Promise<Session[] | undefined> {
 }
 const sentries = (list: Session[]) => list.filter((s) => s.name.startsWith("sentry:") && s.running).map((s) => s.name);
 
-// The commit about to go live must pass `bun run check` (or, at a commit from before it existed, build with every import
-// resolved) in a throwaway worktree, so live never holds a commit that doesn't build.
-function check(live: string, commit: string) {
-  const dir = mkdtempSync(join(tmpdir(), "yarn-deploy-"));
-  if (!run(["git", "-C", live, "worktree", "add", "--detach", dir, commit]).ok) fail(`couldn't check out ${commit} to check it`);
-  const install = run(["bun", "install", "--frozen-lockfile"], dir);
-  if (!install.ok) run(["git", "-C", live, "worktree", "remove", "--force", dir]), fail(`bun install --frozen-lockfile failed at ${commit.slice(0, 7)}:\n${install.err}`);
-  const pkg = JSON.parse(run(["git", "show", `${commit}:package.json`], live).out);
-  const ts = (sub: string) => readdirSync(join(dir, sub)).filter((f) => f.endsWith(".ts")).map((f) => `${sub}/${f}`);
-  const r = pkg.scripts?.check
-    ? run(["bun", "run", "check"], dir)
-    : run(["bun", "build", "--target=bun", "--packages=external", "--outdir", join(dir, ".deploy-build"), "server.ts", "cli.ts", ...ts("sentries"), ...ts("hooks")], dir);
-  run(["git", "-C", live, "worktree", "remove", "--force", dir]);
-  // Bun's bundler doesn't know Tailwind's at-rules and warns on each; they aren't the failure.
-  const output = `${r.out}\n${r.err}`.split("\n").filter((l) => l.trim() && !l.includes("invalid @ rule")).join("\n");
-  if (!r.ok) fail(`${commit.slice(0, 7)} doesn't build, so live stays where it is:\n${output}`);
+type CiRun = { status: string; conclusion: string };
+const CI_WAIT_MS = 15 * 60_000;
+async function awaitGreenCi(live: string, commit: string) {
+  const short = commit.slice(0, 7);
+  for (const deadline = Date.now() + CI_WAIT_MS; Date.now() < deadline; await Bun.sleep(10_000)) {
+    const listed = run(["timeout", "-s", "KILL", "30", "gh", "run", "list", "--commit", commit, "--workflow", "check", "--json", "status,conclusion"], live);
+    const latest = listed.ok ? (JSON.parse(listed.out) as CiRun[]).at(0) : undefined;
+    if (latest?.status !== "completed") continue;
+    if (latest.conclusion === "success") return;
+    fail(`CI's check is ${latest.conclusion} on ${short}, so live stays where it is: gh run list --commit ${commit}`);
+  }
+  fail(`CI's check hasn't passed on ${short} after ${CI_WAIT_MS / 60_000} minutes, so live stays where it is`);
 }
 
 // The files under dir that file pulls in through relative imports, itself included.
@@ -118,7 +113,7 @@ export async function deploy() {
   const to = run(["git", "rev-parse", "FETCH_HEAD"], live).out;
   if (!run(["git", "merge-base", "--is-ancestor", from, to], live).ok)
     fail(`live has commits origin/${branch} doesn't:\n${run(["git", "log", "--oneline", `${to}..${from}`], live).out}\nPush them to origin/${branch} first.`);
-  check(live, to);
+  await awaitGreenCi(live, to);
 
   const before = await sessions();
   const seq = Number((await fetch(`${BASE}/api/events?after=now`).catch(() => undefined))?.headers.get("x-maxflow-seq") ?? 0);
