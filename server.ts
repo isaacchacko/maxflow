@@ -4,7 +4,7 @@ import { backgroundShells } from "./background";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
 import { slackAvatar, slackNames } from "./slack-meta";
 import { agents, calendar, health, stats } from "./stats";
-import { ghStatusTable, inboxesTable, namesTable, objectivesTable, slackMessagesTable, tasksTable, threadsTable, todosTable } from "./state";
+import { ghStatusTable, inboxesTable, slackMessagesTable } from "./state";
 import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { isOwnComment as ownComment, markRead } from "./gh";
@@ -19,6 +19,7 @@ import { TMUX, flushOptions, launchable, named, paneEnv, paste, pressEnter, resp
 import { type ClaudeState, type Role, type Session, type Wait, type WsData, chatOf, isAgent, isSentry, sessions } from "./sessions";
 import { candidates } from "./mentions";
 import { type Block, type Feed, type FeedPost, type GhPr, type Message, type Objective, type Pending, type Shell, type Signal, type Source, TASK_STATUSES, TODO_STATES, type Task, type TaskEdit, type Thread, type Todo, type UserComment } from "./model";
+import { live, names, objectives, rememberNames, saveObjectives, saveTasks, saveThreads, saveTodos, tasks, threads, threadsDirty, todos, writeThreads } from "./stores";
 
 const HOST = "127.0.0.1";
 const SCROLLBACK_BYTES = 2 * 1024 * 1024;
@@ -400,7 +401,6 @@ function targetOf(source: Source, text: string, from?: Session) {
   if (source === "slack") return text.match(/#[\w-]+/)?.[0] ?? "slack";
   return from ? from.name.replace(/^sentry:/, "") : source === "isaac" ? "chat" : "maxflow";
 }
-const live = (s?: Session): s is Session => !!s && s.exitCode === null;
 // A session that can take a message: up, and an agent. A routed session that is a plain shell (claude never ran in it, as in
 // 662ba653) would queue his messages where nothing reads them, so it doesn't count as a thread's owner and his reply goes on.
 const reachable = (s?: Session): s is Session => live(s) && isAgent(s);
@@ -559,8 +559,6 @@ setTimeout(() => {
     writeFileSync(EXTERNAL_SEEN, JSON.stringify([...externalSeen].slice(-5000)));
   } catch (err) { console.error(`external backfill failed: ${err}`); }
 }, 3_000);
-const objectives = objectivesTable.read() as Objective[];
-const saveObjectives = () => objectivesTable.write(objectives);
 const slug = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "objective";
 
 function setRole(s: Session, role: Role) {
@@ -596,7 +594,6 @@ async function acceptTrust(s: Session) {
     if (/esc to interrupt|bypass permissions on/i.test(text)) return;
   }
 }
-const threads = threadsTable.read() as Thread[];
 const STUBS_SINCE_HIS_MIDNIGHT = Date.parse("2026-11-18T08:00:00Z");
 for (const t of threads) {
   const lastAt = Math.max(...t.messages.map((m) => m.at));
@@ -657,11 +654,6 @@ for (const t of threads as (Thread & { kind?: string; kindBy?: string; done?: nu
       if (ts && raw[ts] && !m.text.includes("\n") && raw[ts].includes("\n")) m.text = raw[ts];
     }
 }
-// Written a moment after the last change, not inside each request: a burst of changes writes once, and the request that made one
-// doesn't wait on serializing every thread. Flushed on the way out, so a restart loses nothing.
-let threadsDirty: ReturnType<typeof setTimeout> | undefined;
-const writeThreads = () => (clearTimeout(threadsDirty), (threadsDirty = undefined), threadsTable.write(threads));
-const saveThreads = () => void (threadsDirty ??= setTimeout(writeThreads, 200));
 process.on("exit", () => threadsDirty && writeThreads());
 for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => {
     flushOptions();
@@ -737,13 +729,6 @@ function mergeThread(from: Thread, into: Thread) {
   Object.assign(from, { mergedInto: into.id, asks: undefined, pending: undefined, ...(from.messages.some((m) => m.from === "isaac") && { moved: { at: Date.now() } }) });
   saveThreads();
   for (const t of [from, into]) publish(`thread/${t.id}`, { thread: t.id, ...(t === from && { mergedInto: into.id }) });
-}
-// The last name each session went by, so a message from one that has ended reads as it rather than as a bare id.
-const names = namesTable.all();
-function rememberNames() {
-  let changed = false;
-  for (const s of sessions.values()) if (names[s.id] !== s.name) (names[s.id] = s.name), (changed = true);
-  if (changed) namesTable.write(names);
 }
 const pathTitle = (t: Thread) => [...ancestors(t), t].map((x) => x.title).join(" › ");
 // A thread he @-mentions ([[thread:<id>]]) reaches the router as a line of context: where it sits, who owns it, how it last stood,
@@ -1321,13 +1306,6 @@ function migrateQuestions() {
   }
 }
 setTimeout(migrateQuestions, 5_000);
-const tasks = tasksTable.read() as Task[];
-const saveTasks = () => tasksTable.write(tasks);
-// Todos saved before states were a done flag, or before a todo held several threads.
-const todos: Todo[] = (todosTable.read() as (Todo & { done?: boolean; threadId?: string })[]).map(
-  ({ done, threadId, ...t }: Todo & { done?: boolean; threadId?: string }) => ({ ...t, state: t.state ?? (done ? "done" : "todo"), threadIds: t.threadIds ?? (threadId ? [threadId] : []) }),
-);
-const saveTodos = () => todosTable.write(todos);
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 // His autonomy restrictions (restrictions.ts): the Restrictions page edits them, the enforcement hook reads them.
