@@ -12,7 +12,7 @@ import { describe } from "./world-session";
 import { externalSignal, feedMore } from "./routing";
 import { doesPointAtItself, relayRefusal } from "./objectives";
 import { onEvent } from "./events";
-import { reviewBoard, reviewQueue, touchFrom } from "./sentry-files";
+import { reviewBoard, reviewQueueOfEveryOpenPr, touchFrom } from "./sentry-files";
 import { favicons, fetchFavicon } from "./favicons";
 import { SENTRIES, restartSentry } from "./sentry-commands";
 import { pageOf } from "./pages";
@@ -121,7 +121,7 @@ export async function miscRoute(req: Request, url: URL, path: string): Promise<R
     return (await favicons.get(host))?.clone() ?? new Response("no favicon", { status: 404 });
   }
 
-  if (path === "/api/review" && req.method === "GET") return Response.json({ board: reviewBoard(), queue: reviewQueue() });
+  if (path === "/api/review" && req.method === "GET") return Response.json({ board: reviewBoard(), queue: reviewQueueOfEveryOpenPr() });
 
   // An agent using a sentry through the CLI (gh status, slack read, ...), drawn in the graph as it touching that sentry.
   if (path === "/api/touch" && req.method === "POST") {
