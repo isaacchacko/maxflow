@@ -15,13 +15,17 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function hookInput(value: unknown): HookInput {
+function textOf(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function asObject(value: unknown): object {
   return typeof value === "object" && value !== null ? value : {};
 }
 
 const session = process.env["MAXFLOW_SESSION"];
 if (session === undefined || session === "") process.exit(0);
-const input = hookInput(JSON.parse(await Bun.stdin.text()));
+const input: HookInput = asObject(JSON.parse(await Bun.stdin.text()));
 const cli = process.env["MAXFLOW_CLI"] ?? new URL("../cli.ts", import.meta.url).pathname;
 const askThroughAThreadInHisInbox = `ask only for a decision truly his, and decide the rest yourself. Run \`${cli} ask '<question>' [--default '<rec>']\`, which opens a thread in his inbox flagged as waiting on him and prints its id. Make it stand on its own (what you found, the options, your recommendation; --default only when the step is reversible), keep working on whatever doesn't hang on the answer, then \`${cli} wait thread:<id>\`; his reply is typed into your prompt as a [maxflow] message`;
 
@@ -39,11 +43,11 @@ function denyAskUserQuestion(): never {
 // constraint: a SendMessage reply goes to the sender's socket (uds:/…/<pid>.sock), and only `claude agents --json` maps that pid to a session name
 function agentNameOf(to: string) {
   const pid = Number(/^uds:.*\/(\d+)\.sock$/.exec(to)?.[1]);
-  if (Number.isNaN(pid) || pid === 0) return to;
+  if (pid === 0 || Number.isNaN(pid)) return to;
   const agents: unknown = JSON.parse(Bun.spawnSync(["claude", "agents", "--json"]).stdout.toString() || "[]");
   if (!Array.isArray(agents)) throw new TypeError("claude agents --json did not print a list");
   const agent: unknown = agents.find((a) => isObject(a) && a["pid"] === pid);
-  return String((isObject(agent) ? agent["name"] : undefined) ?? "");
+  return isObject(agent) ? textOf(agent["name"]) : "";
 }
 
 async function postToPeer(target: string, text: string, from: string) {
@@ -67,10 +71,9 @@ async function wasQueuedForAnAsleepAgent(res: Response | null) {
 
 async function logSendMessageInMaxflowsEventLog(from: string) {
   const toolInput = isObject(input.tool_input) ? input.tool_input : {};
-  const target = /^mf-([\w-]+)/.exec(agentNameOf(String(toolInput["to"] ?? "")))?.[1];
-  const text = String(toolInput["message"] ?? "");
-  if (target === undefined || text === "") return;
-  if (!(await wasQueuedForAnAsleepAgent(await postToPeer(target, text, from)))) return;
+  const target = /^mf-([\w-]+)/.exec(agentNameOf(textOf(toolInput["to"])))?.[1];
+  const text = textOf(toolInput["message"]);
+  if (target === undefined || text === "" || !(await wasQueuedForAnAsleepAgent(await postToPeer(target, text, from)))) return;
   console.log(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
@@ -80,24 +83,24 @@ async function logSendMessageInMaxflowsEventLog(from: string) {
   }));
 }
 
-function assistantTextOf(entry: TranscriptEntry) {
+function textOfTranscriptLine(line: string): { text: string } | undefined {
+  const entry: TranscriptEntry = asObject(JSON.parse(line));
+  if (entry.type === "user" && typeof entry.message?.content === "string") return { text: "" };
+  if (entry.type !== "assistant") return;
   const content = entry.message?.content ?? [];
-  if (!Array.isArray(content)) return undefined;
-  const texts = content.filter((c) => isObject(c) && c["type"] === "text").map((c: Record<string, unknown>) => String(c["text"] ?? ""));
-  return texts.length > 0 ? texts.join("\n") : undefined;
+  if (!Array.isArray(content)) return { text: "" };
+  const items: unknown[] = content;
+  const texts = items.filter(isObject).filter((c) => c["type"] === "text").map((c) => textOf(c["text"]));
+  return texts.length > 0 ? { text: texts.join("\n") } : undefined;
 }
 
 function lastAssistantText(path: string | undefined): string {
   if (path === undefined || path === "") return "";
   try {
-    const lines = readFileSync(path, "utf8").trimEnd().split("\n");
-    for (const line of lines.toReversed()) {
-      const entry: TranscriptEntry = hookInput(JSON.parse(line));
-      if (entry.type === "user" && typeof entry.message?.content === "string") return "";
-      if (entry.type !== "assistant") continue;
-      if (entry.message?.content !== undefined && entry.message.content !== null && !Array.isArray(entry.message.content)) return "";
-      const text = assistantTextOf(entry);
-      if (text !== undefined) return text;
+    const newestFirst = readFileSync(path, "utf8").trimEnd().split("\n").toReversed();
+    for (const line of newestFirst) {
+      const found = textOfTranscriptLine(line);
+      if (found !== undefined) return found.text;
     }
   } catch {
     return "";
@@ -123,4 +126,4 @@ if (input.hook_event_name === "PreToolUse" && input.tool_name === "SendMessage")
 }
 
 const isStopHookActive = Boolean(input.stop_hook_active);
-if (input.hook_event_name === "Stop" && !isStopHookActive) sendBackATurnEndingOnAQuestion();
+if (!isStopHookActive && input.hook_event_name === "Stop") sendBackATurnEndingOnAQuestion();
