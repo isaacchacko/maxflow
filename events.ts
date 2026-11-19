@@ -59,10 +59,21 @@ function onPrEvent(kind: string, pr: string, data: EventData, from?: Session) {
       if (why !== null) endWait(s, why);
     }
 }
+const COMMIT_CI_TOPIC = /^gh\/[^/]+\/[^/]+\/commit\/\w+\/ci$/;
+const failedChecks = (names: string[]) => (names.length > 0 ? `: ${names.join(", ")}` : "");
+function endCommitCiWaits(commit: string, data: EventData & { failed?: unknown }) {
+  const failed = failedChecks(stringsIn(data.failed) ?? []);
+  const why = data.state === "NONE" ? "no CI finished on it in 2h" : `CI ${String(data.state).toLowerCase()}${failed}`;
+  for (const s of sessions.values()) if (s.wait?.kind === "ci" && s.wait.ref === commit) endWait(s, why);
+}
 export function onEvent(topic: string, payload: unknown, from?: Session) {
   const data: EventData = isRecord(payload) ? payload : {};
   onIntent(topic, data);
   if (topic.startsWith("slack/") && typeof data.target === "string" && data.target !== "") endSlackWaitsOnFirstNewMessage(data);
+  if (COMMIT_CI_TOPIC.test(topic) && isRecord(payload) && typeof payload["commit"] === "string") {
+    endCommitCiWaits(payload["commit"], { ...data, failed: payload["failed"] });
+    return;
+  }
   const kind = /^gh\/[^/]+\/[^/]+\/pr\/\d+\/(\w+)$/.exec(topic)?.[1];
   if (kind === undefined || typeof data.pr !== "string" || data.pr === "") return;
   onPrEvent(kind, data.pr, data, from);

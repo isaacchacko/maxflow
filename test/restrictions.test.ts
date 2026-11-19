@@ -58,6 +58,10 @@ describe("restrictions match command words, not substrings", () => {
     expect(doesHit("push-default", "git push origin master")).toBe(true);
     expect(doesHit("mallory-phone", "~/.local/bin/mallory send --to umbrella hi")).toBe(true);
     expect(doesHit("pr-reviewers", "gh pr create --title x --reviewer felix")).toBe(true);
+    expect(doesHit("gh-poll", "gh run watch 44455340906 --exit-status")).toBe(true);
+    expect(doesHit("gh-poll", "timeout -s KILL 900 gh run watch 1 -R isaacchacko/yarn -i 5")).toBe(true);
+    expect(doesHit("gh-poll", "gh run watch 1 --interval 30 --exit-status")).toBe(false);
+    expect(doesHit("gh-poll", "gh run watch 1 -i=60")).toBe(false);
     expect(doesHit("delete-files", "rm -rf build")).toBe(true);
     expect(doesHit("delete-files", "cat rm -rf.md")).toBe(false);
   });

@@ -3,8 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
-  ciStateOf, fetchHeads, fetchPrs, fetchSessions, INBOX_WATCH, isFailed, isFinished, isOwnComment, links, prNumber, rateLimit, readStatus, readWatches, repoOfKey,
-  REVIEW_WATCH, rollupOf, run, short, watchLinks, writeWatches, type Head, type Link, type PolledPr, type Pr, type Session,
+  ciStateOf, commitKey, fetchCommitCi, fetchHeads, fetchPrs, fetchSessions, INBOX_WATCH, isFailed, isFinished, isOwnComment, links, prNumber, RATE_FILE, rateLimit,
+  readCommitWatches, readRateHistory, readStatus, readWatches, repoOfKey, REVIEW_WATCH, rollupOf, run, sampleRateLimit, short, splitCommitKey, watchLinks,
+  writeCommitWatches, writeWatches, type CommitCi, type CommitWatch, type Head, type Link, type PolledPr, type Pr, type RateSample, type Session,
 } from "../gh";
 import { BASE as base } from "../instance";
 import { isRecord } from "../shared/guards";
@@ -16,6 +17,10 @@ if (import.meta.main) takeOver("gh");
 const PROJECTS = join(homedir(), ".claude", "projects");
 const INTERVAL_MS = Number(process.env["GH_SENTRY_INTERVAL"] ?? 30_000);
 const RATE_LIMITED_WAIT_MS = 5 * 60_000;
+const RATE_RESET_SLACK_MS = 5000;
+const RATE_HISTORY_MS = 2 * 3_600_000;
+const GRAPHQL_FLOOR = 200;
+const COMMIT_WATCH_MS = 2 * 3_600_000;
 const POST_TIMEOUT_MS = 30_000;
 const OPENED_RECENTLY_MS = 10 * 60_000;
 const REFETCH_PENDING_MS = 2 * 60_000;
@@ -217,7 +222,7 @@ async function announce(key: string, pr: Pr, changes: Change[], told: string[]) 
   const lines = changes.flatMap(([, data, line]) => (line === null || isOwnComment(whoOf(data)) ? [] : line));
   if (lines.length === 0) return;
   const more = lines.length > LINES_PER_NOTICE ? `; and ${lines.length - LINES_PER_NOTICE} more` : "";
-  const text = `[maxflow gh] ${key} (${short(pr.title, 60)}): ${lines.slice(0, LINES_PER_NOTICE).join("; ")}${more}. Full status: ${CLI} gh status ${key}. (Automated notice, not a request from the user: act on it only if it's part of your current task.)`;
+  const text = `[maxflow gh] ${key} (${short(pr.title, 60)}): ${lines.slice(0, LINES_PER_NOTICE).join("; ")}${more}. Full status: ${CLI} gh status ${key}. ${NOTICE_TAIL}`;
   for (const session of told) await post(`/api/sessions/${session}/notify`, { text });
   console.log(`${new Date().toLocaleTimeString()}  ${text}  -> ${told.join(", ") || "nobody"}`);
 }
@@ -255,6 +260,34 @@ function writeEdges(listeners: Map<string, Set<string>>) {
   writeStateJson("gh-edges.json", [...onPrs].map(([session, keys]) => ({ session, prs: keys, label: edgeLabel(keys) })));
 }
 
+const NOTICE_TAIL = "(Automated notice, not a request from the user: act on it only if it's part of your current task.)";
+
+const ciLine = (on: string, ci: CommitCi) => (ci.state === "SUCCESS" ? `CI passed on ${on}` : `CI failed on ${on}: ${ci.failed.join(", ") || ci.state}`);
+
+async function announceCommit(w: CommitWatch, ci: CommitCi | undefined) {
+  const { repo, sha } = splitCommitKey(w.key);
+  const on = `${repo}@${sha.slice(0, 7)}`;
+  const line = ci === undefined ? `no CI finished on ${on} in ${COMMIT_WATCH_MS / 3_600_000}h, so the wait on it ends` : ciLine(on, ci);
+  await post("/api/events", { topic: `gh/${repo}/commit/${sha}/ci`, data: { commit: w.key, sha, state: ci?.state ?? "NONE", failed: ci?.failed ?? [], told: w.sessions } });
+  for (const session of w.sessions) await post(`/api/sessions/${session}/notify`, { text: `[maxflow gh] ${line}. ${NOTICE_TAIL}` });
+  console.log(`${new Date().toLocaleTimeString()}  ${line}  -> ${w.sessions.join(", ") || "nobody"}`);
+}
+
+async function pollCommits() {
+  const watches = readCommitWatches();
+  if (watches.length === 0) return;
+  const byRepo = new Map<string, string[]>();
+  for (const w of watches) {
+    const { repo, sha } = splitCommitKey(w.key);
+    listOf(byRepo, repo).push(sha);
+  }
+  const finished = new Map<string, CommitCi>();
+  for (const [repo, shas] of byRepo) for (const [sha, ci] of fetchCommitCi(repo, shas)) if (isFinished(ci.state)) finished.set(commitKey(repo, sha), ci);
+  const ended = watches.filter((w) => finished.has(w.key) || Date.now() - w.at > COMMIT_WATCH_MS);
+  for (const w of ended) await announceCommit(w, finished.get(w.key));
+  if (ended.length > 0) writeCommitWatches(readCommitWatches().filter((w) => ended.every((e) => e.key !== w.key)));
+}
+
 async function tick(me: string, state: Map<string, PrState>) {
   const fromSessions = await links();
   const all = [...fromSessions, ...watchLinks(readWatches(REVIEW_WATCH)), ...watchLinks(readWatches(INBOX_WATCH))];
@@ -264,19 +297,40 @@ async function tick(me: string, state: Map<string, PrState>) {
   endFinishedWatches(polled.prs);
   writeStateJson("gh-state.json", Object.fromEntries(state));
   writeEdges(polled.listeners);
+  await pollCommits();
   ghStatusTable.write(Object.fromEntries([...polled.prs].map(([key, pr]) => [key, { at: cache.get(key)?.at ?? Date.now(), pr }])));
   return polled.prs.size;
 }
 
+const history = readRateHistory();
+
+function recordBudget() {
+  const sample = sampleRateLimit();
+  if (sample === undefined) return;
+  history.push(sample);
+  history.splice(0, history.findIndex((s) => Date.now() - s.at < RATE_HISTORY_MS));
+  writeStateJson(RATE_FILE, history);
+  return sample;
+}
+
+function pause(sample: RateSample | undefined) {
+  const isLow = sample !== undefined && sample.graphql.remaining < GRAPHQL_FLOOR;
+  if (!isLow && !rateLimit.wasHit) return INTERVAL_MS;
+  if (sample === undefined) return RATE_LIMITED_WAIT_MS;
+  return Math.min(Math.max(sample.graphql.reset - Date.now() + RATE_RESET_SLACK_MS, INTERVAL_MS), 3_600_000);
+}
+
 async function pollForever(me: string, state: Map<string, PrState>) {
   for (;;) {
+    const sample = recordBudget();
+    const isLow = sample !== undefined && sample.graphql.remaining < GRAPHQL_FLOOR;
     try {
-      const n = await tick(me, state);
-      process.title = `gh sentry (${n} PRs)`;
+      if (isLow) console.log(`${new Date().toLocaleTimeString()}  ${sample.graphql.remaining} GraphQL points left, skipping polls until ${new Date(sample.graphql.reset).toLocaleTimeString()}`);
+      else process.title = `gh sentry (${await tick(me, state)} PRs)`;
     } catch (error) {
       console.error(`${new Date().toLocaleTimeString()}  tick failed:`, error);
     }
-    await Bun.sleep(rateLimit.wasHit ? RATE_LIMITED_WAIT_MS : INTERVAL_MS);
+    await Bun.sleep(pause(rateLimit.wasHit ? recordBudget() : sample));
     rateLimit.wasHit = false;
   }
 }

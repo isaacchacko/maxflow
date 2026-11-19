@@ -1,7 +1,9 @@
 import { argAt, base, fail, flag, isBlank, isTruthy, mySession, positional, post, replyOf, str, type Verb } from "./cli-shared";
-import { parsePr, readWatches, writeWatches } from "./gh";
+import { commitKey, parsePr, readCommitWatches, readWatches, repoOf, run, writeCommitWatches, writeWatches } from "./gh";
 import * as slackRead from "./slack-read";
 
+const DEFAULT_RUN_WATCH = /\bgh\s+run\s+watch\b(?!.*(--interval|\s-i)[\s=]+([3-9]\d|\d{3,})\b)/;
+const AS_COMMIT = "^{commit}";
 const WAIT_KIND = /^(thread|q|approval|ci|agent|slack):.|^done$/;
 
 function sessionOrFail() {
@@ -18,6 +20,7 @@ async function waitUntil(args: string[]) {
   const pid = flag(head, "--pid");
   const pane = flag(head, "--pane");
   const desc = positional(head, ["--pid", "--pane"]).join(" ");
+  if (DEFAULT_RUN_WATCH.test(cmd ?? "")) fail(`gh run watch asks GitHub every 3s and drains the budget every agent shares; wait on CI with \`maxflow wait ci:<pr | branch | sha>\` instead, or pass --interval 30`);
   if (desc === "" || (isBlank(cmd) && isBlank(pid) && isBlank(pane))) fail("usage: maxflow wait until '<what you wait for>' -- <command...> | --pane <session> | --pid <pid>");
   const until = { kind: "until", desc, cmd, cwd: process.cwd(), path: process.env["PATH"], pane, pid: isBlank(pid) ? undefined : Number(pid) };
   const wait = replyOf(await post(`/api/sessions/${me}/await`, until))["wait"];
@@ -33,6 +36,21 @@ function watchPr(pr: string, me: string) {
   writeWatches([...readWatches().filter((w) => w.pr !== pr), { pr, sessions: [...new Set([...prev, me])] }]);
 }
 
+function watchCommit(key: string, me: string) {
+  const prev = readCommitWatches().find((w) => w.key === key);
+  writeCommitWatches([...readCommitWatches().filter((w) => w.key !== key), { key, sessions: [...new Set([...(prev?.sessions ?? []), me])], at: prev?.at ?? Date.now() }]);
+}
+
+function commitOf(ref: string) {
+  const cwd = process.cwd();
+  const sha = run(["git", "rev-parse", "--verify", "--quiet", `${ref}${AS_COMMIT}`], cwd) || run(["git", "rev-parse", "--verify", "--quiet", `origin/${ref}${AS_COMMIT}`], cwd);
+  if (sha === "") return null;
+  const repo = repoOf(cwd);
+  if (repo === "") fail(`${cwd} has no GitHub origin, so CI on ${ref} can't be watched`);
+  if (run(["git", "branch", "-r", "--contains", sha], cwd) === "") fail(`${sha.slice(0, 7)} isn't on any branch on origin; push it first, since CI runs only on pushed commits`);
+  return commitKey(repo, sha);
+}
+
 function watchSlack(target: string, me: string) {
   const prev = slackRead.readWatches().find((w) => w.target === target)?.sessions ?? [];
   slackRead.writeWatches([...slackRead.readWatches().filter((w) => w.target !== target), { target, sessions: [...new Set([...prev, me])] }]);
@@ -40,6 +58,12 @@ function watchSlack(target: string, me: string) {
 
 async function waitTarget(kind: string, named: string, args: string[], me: string) {
   if (kind === "agent") return [named, ...args.slice(1).filter((a) => a.startsWith("agent:")).map((a) => a.slice(6))].join(",");
+  if (kind === "ci" && parsePr(named, process.cwd()) === null) {
+    const commit = commitOf(named);
+    if (commit === null) fail(`${named} is neither a PR nor a branch or commit in ${process.cwd()}`);
+    watchCommit(commit, me);
+    return commit;
+  }
   if (kind === "approval" || kind === "ci") {
     const pr = parsePr(named, process.cwd());
     if (pr === null || pr === "") fail(`can't tell which repo ${named} is in; use owner/repo#n or a PR url`);

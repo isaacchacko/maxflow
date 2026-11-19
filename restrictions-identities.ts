@@ -50,12 +50,11 @@ const lookingUp = new Set<string>();
 
 async function recordProfileName(login: string, lookup: ProfileLookup) {
   const out = await new Response(lookup.stdout).text();
-  if ((await lookup.exited) === 0) {
-    const l = loadLinks();
-    const name = out.trim();
-    l.ghNames[login.toLowerCase()] = name === "" ? null : name;
-    saveLinks(l);
-  }
+  if ((await lookup.exited) !== 0) return;
+  const l = loadLinks();
+  const name = out.trim();
+  l.ghNames[login.toLowerCase()] = name === "" ? null : name;
+  saveLinks(l);
   lookingUp.delete(login);
 }
 

@@ -5,6 +5,9 @@ import { Distributions } from "./charts";
 import { Columns, SectionHead, Tile, duration, short, sum, weekday, type Peek, type Stats } from "./parts";
 import { LatencyTiles, YarnNote } from "./sections";
 
+type Budget = { used: number; limit: number; remaining: number; reset: number };
+type RateSample = { at: number; core: Budget; graphql: Budget };
+
 type Health = {
   days: string[];
   server: { upSince: number; rssMb: number; starts: number[]; logSince?: number };
@@ -14,6 +17,7 @@ type Health = {
   events: number[];
   ramKills: number[];
   resyncs: number[];
+  github: RateSample[];
 };
 
 const since = (at: number) => duration(Date.now() - at);
@@ -52,6 +56,76 @@ function DailyTile({ label, values, days, hint, unit }: { label: string; values:
         format={v => `${v.toLocaleString()} ${unit}`}
         onPeek={setPeek}
       />
+    </Tile>
+  );
+}
+
+const LOW = 0.2;
+const BUCKET_MS = 5 * 60_000;
+const clock = (at: number) => new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+function spentPerBucket(samples: RateSample[], key: "core" | "graphql") {
+  const first = samples[0];
+  if (!first) return [];
+  const buckets = Array.from({ length: Math.floor((Date.now() - first.at) / BUCKET_MS) + 1 }, () => 0);
+  for (const [i, s] of samples.entries()) {
+    const prev = samples[i - 1];
+    if (!prev) continue;
+    const spent = s[key].reset === prev[key].reset ? Math.max(0, s[key].used - prev[key].used) : s[key].used;
+    const at = Math.floor((s.at - first.at) / BUCKET_MS);
+    buckets[at] = (buckets[at] ?? 0) + spent;
+  }
+  return buckets;
+}
+
+function BudgetMeter({ label, b }: { label: string; b: Budget }) {
+  const left = b.remaining / Math.max(1, b.limit);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="text-[var(--viz-text-2)]">{label}</span>
+        <span className="tabular-nums">
+          <span className={cn("font-medium", left < LOW && "text-rose-700 dark:text-rose-300")}>{b.remaining.toLocaleString()}</span>
+          <span className="text-[var(--viz-text-2)]"> of {b.limit.toLocaleString()} · resets {clock(b.reset)}</span>
+        </span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-[var(--viz-track)]">
+        <div className={cn("h-full rounded-full", left < LOW ? "bg-rose-500" : "bg-[var(--viz)]")} style={{ width: `${left * 100}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function GitHubBudget({ samples }: { samples: RateSample[] }) {
+  const [peek, setPeek] = useState<Peek>();
+  const last = samples.at(-1);
+  if (!last) return null;
+  const left = Math.min(last.core.remaining / Math.max(1, last.core.limit), last.graphql.remaining / Math.max(1, last.graphql.limit));
+  const spent = spentPerBucket(samples, "core");
+  const start = samples[0]?.at ?? last.at;
+  return (
+    <Tile
+      label="GitHub API left"
+      hint="Isaac's hourly budget, shared by every agent, sentry and his own work; sampled by the gh sentry every poll"
+      value={`${Math.round(left * 100)}%`}
+      delta={left < LOW ? <span className="rounded-md bg-rose-500/15 px-1.5 py-px text-xs font-medium text-rose-700 dark:text-rose-300">low</span> : <span className="text-xs text-[var(--viz-text-2)]">as of {clock(last.at)}</span>}
+      peek={peek}
+    >
+      <div className="flex flex-col gap-3">
+        <BudgetMeter label="REST (gh run, gh api)" b={last.core} />
+        <BudgetMeter label="GraphQL (sentries, gh pr)" b={last.graphql} />
+      </div>
+      {spent.length > 1 && (
+        <Columns
+          values={spent}
+          labels={spent.map((_, i) => `REST calls · ${clock(start + i * BUCKET_MS)}`)}
+          ticks={spent.map((_, i) => clock(start + i * BUCKET_MS))}
+          strong={i => i === spent.length - 1}
+          format={v => `${v.toLocaleString()} calls`}
+          onPeek={setPeek}
+          height="h-20"
+        />
+      )}
     </Tile>
   );
 }
@@ -119,6 +193,7 @@ function HealthSection({ h }: { h: Health }) {
             </ul>
           </Tile>
         </div>
+        <GitHubBudget samples={h.github} />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <DailyTile label="Bus events" values={h.events} days={h.days} unit="events" hint="Everything published on yarn's event bus" />
           <DailyTile label="Jobs killed for RAM" values={h.ramKills} days={h.days} unit="kills" hint="Local tests or builds the ram sentry stopped" />

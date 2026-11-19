@@ -2,6 +2,7 @@
 // exactly what is on its branch there, never someone's half-saved edit. Changes are made in a worktree and pushed first.
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
+import { fetchCommitCi, isFailed, repoOf } from "./gh";
 import { BASE, LIVE, STATE_DIR } from "./instance";
 import { LOG, checkout, restartCommand } from "./service";
 import { isDeploying, noteRestartAnswered, noteRestartBegins } from "./deploy-restart";
@@ -26,15 +27,15 @@ const sentries = (list: Session[]) => list.filter((s) => s.name.startsWith("sent
 const CI_WAIT_MS = 15 * 60_000;
 async function awaitGreenCi(live: string, commit: string) {
   const short = commit.slice(0, 7);
+  const repo = repoOf(live);
   const deadline = Date.now() + CI_WAIT_MS;
   while (Date.now() < deadline) {
-    const listed = run(["timeout", "-s", "KILL", "30", "gh", "run", "list", "--commit", commit, "--workflow", "check", "--json", "status,conclusion"], live);
-    const latest = listed.ok ? (JSON.parse(listed.out) as { status: string; conclusion: string }[]).at(0) : undefined;
-    if (latest?.status === "completed" && latest.conclusion === "success") return;
-    if (latest?.status === "completed") fail(`CI's check is ${latest.conclusion} on ${short}, so live stays where it is: gh run list --commit ${commit}`);
+    const ci = fetchCommitCi(repo, [commit]).get(commit);
+    if (ci?.state === "SUCCESS") return;
+    if (ci !== undefined && isFailed(ci.state)) fail(`CI is ${ci.state.toLowerCase()} on ${short}${ci.failed.length > 0 ? ` (${ci.failed.join(", ")})` : ""}, so live stays where it is: gh run list --commit ${commit}`);
     await Bun.sleep(10_000);
   }
-  fail(`CI's check hasn't passed on ${short} after ${CI_WAIT_MS / 60_000} minutes, so live stays where it is`);
+  fail(`CI hasn't passed on ${short} after ${CI_WAIT_MS / 60_000} minutes, so live stays where it is`);
 }
 
 // The files under dir that file pulls in through relative imports, itself included.

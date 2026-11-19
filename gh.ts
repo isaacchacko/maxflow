@@ -221,3 +221,60 @@ export function render(key: string, pr: Pr, at: number) {
     ...latestCommentLines(pr),
   ].join("\n");
 }
+
+export type CommitWatch = { key: string; sessions: string[]; at: number };
+export type CommitCi = { sha: string; state: string; failed: string[] };
+const COMMIT_WATCH = "gh-commit-watch.json";
+const SHA = /^[0-9a-f]{40}$/;
+const isContext = (value: unknown): value is CheckContext => isRecord(value);
+const isCommitWatchList = (value: unknown): value is CommitWatch[] =>
+  Array.isArray(value) && value.every((w) => isRecord(w) && typeof w["key"] === "string" && Array.isArray(w["sessions"]));
+
+export const commitKey = (repo: string, sha: string) => `${repo}@${sha}`;
+export const splitCommitKey = (key: string) => {
+  const [repo = "", sha = ""] = key.split("@", 2);
+  return { repo, sha };
+};
+export const readCommitWatches = (): CommitWatch[] => readStateJson(COMMIT_WATCH, isCommitWatchList) ?? [];
+export const writeCommitWatches = (watches: CommitWatch[]) => writeStateJson(COMMIT_WATCH, watches);
+
+export function fetchCommitCi(repo: string, shas: string[]): Map<string, CommitCi> {
+  const [owner, name] = repo.split("/", 2);
+  const wanted = shas.filter((s) => SHA.test(s));
+  if (wanted.length === 0) return new Map();
+  const parts = wanted.map((s, i) => `c${i}: object(oid: "${s}") { ... on Commit { statusCheckRollup { state contexts(first: 100) { nodes {
+    __typename ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } }`);
+  const r = graphql(repo, `query { r: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${parts.join("\n")} } }`, "its watched commits");
+  return new Map(wanted.flatMap((sha, i): [string, CommitCi][] => {
+    const commit = r[`c${i}`];
+    const rollup = isRecord(commit) ? commit["statusCheckRollup"] : undefined;
+    if (!isRecord(rollup) || typeof rollup["state"] !== "string") return [];
+    const contextsOf: unknown = rollup["contexts"];
+    const nodes: unknown = isRecord(contextsOf) ? contextsOf["nodes"] : [];
+    const contexts = (Array.isArray(nodes) ? nodes : []).filter(isContext);
+    const failed = contexts.filter((c) => isFailed(c.conclusion ?? c.state ?? "")).map((c) => c.name ?? c.context ?? "");
+    return [[sha, { sha, state: rollup["state"], failed }]];
+  }));
+}
+
+// constraint: GET /rate_limit doesn't count against GitHub's budget
+export type Budget = { used: number; limit: number; remaining: number; reset: number };
+export type RateSample = { at: number; core: Budget; graphql: Budget };
+export const RATE_FILE = "gh-rate.json";
+export const RATE_LOW = 0.2;
+const isBudget = (value: unknown): value is Budget => isRecord(value) && typeof value["remaining"] === "number" && typeof value["limit"] === "number";
+export const isRateSample = (value: unknown): value is RateSample => isRecord(value) && isBudget(value["core"]) && isBudget(value["graphql"]);
+export const isRateHistory = (value: unknown): value is RateSample[] => Array.isArray(value) && value.every(isRateSample);
+export const readRateHistory = () => readStateJson(RATE_FILE, isRateHistory) ?? [];
+export const lowBudgets = (s: RateSample) => (["core", "graphql"] as const).filter((k) => s[k].remaining < s[k].limit * RATE_LOW);
+
+export function sampleRateLimit(): RateSample | undefined {
+  try {
+    const parsed: unknown = JSON.parse(run(["timeout", "-s", "KILL", "15", "gh", "api", "rate_limit", "--jq", ".resources | {core, graphql}"]) || "null");
+    if (!isRecord(parsed) || !isBudget(parsed["core"]) || !isBudget(parsed["graphql"])) return undefined;
+    const budget = (b: Budget): Budget => ({ used: b.used, limit: b.limit, remaining: b.remaining, reset: b.reset * 1000 });
+    return { at: Date.now(), core: budget(parsed["core"]), graphql: budget(parsed["graphql"]) };
+  } catch {
+    return undefined;
+  }
+}

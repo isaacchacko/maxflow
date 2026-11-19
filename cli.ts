@@ -14,7 +14,7 @@ const usage = `usage:
   maxflow keys <id> <key...>                 tmux key names: Enter Escape C-c Up BTab ...
   maxflow screen <id> [--history N]          print the screen as plain text
   maxflow wait <id> [--idle MS] [--match RE] [--timeout MS]   block until quiet / RE on screen / exit, print screen
-  maxflow wait thread:<id> | approval:<pr> | ci:<pr> | agent:<id> [agent:<id>…] | slack:<permalink | channel | #channel | query> | done   declare what you wait on; you sleep from your turn's end until a message wakes you
+  maxflow wait thread:<id> | approval:<pr> | ci:<pr | branch | sha> | agent:<id> [agent:<id>…] | slack:<permalink | channel | #channel | query> | done   declare what you wait on; you sleep from your turn's end until a message wakes you
   maxflow wait until '<what you wait for, in words>' -- <command...> | --pane <session> | --pid <pid>   sleep until a shell concludes: the server runs the command in its own pane (or watches the session or process), and you wake with its exit code and last lines
   maxflow rename <id> <name...> | maxflow kill <id>
   maxflow notify <id> <text...> [--isaac]    deliver text once the session is idle at an empty claude prompt; --isaac as for send

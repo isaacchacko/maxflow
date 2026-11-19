@@ -9,6 +9,7 @@ import type { ServerWebSocket, Subprocess } from "bun";
 import { join } from "node:path";
 import { BASE as base, CLI, LIVE, PORT, TMUX_SCOPE, TMUX_SOCKET } from "../instance";
 import { deployRestartUnderway } from "../deploy-restart";
+import { lowBudgets, RATE_LOW, readRateHistory, type RateSample } from "../gh";
 import { LABEL, LOG, isLoaded, restartCommand, status as serviceStatus } from "../service";
 import { stateDirectory } from "../state";
 import { takeOver } from "./singleton";
@@ -118,6 +119,38 @@ function startAgent(prompt: string) {
   return { id, tmux: t, at: Date.now(), wasWorking: false, idleTicks: 0 };
 }
 
+function ghCallers() {
+  return run(["ps", "-Ao", "etime=,args="]).out.split("\n").filter((l) => /(^|\/|\s)gh\s+(run|api|pr)\b/.test(l)).map((l) => l.trim().slice(0, 160)).slice(0, 10);
+}
+
+const FENCE = "```";
+const pt = (at: number) => new Date(at).toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" });
+
+async function warnGithubBudget() {
+  const last: RateSample | undefined = readRateHistory().at(-1);
+  if (last === undefined || Date.now() - last.at > 5 * 60_000) return;
+  for (const key of lowBudgets(last)) {
+    const b = last[key];
+    const id = `${key}@${b.reset}`;
+    if (githubWarned.has(id)) continue;
+    githubWarned.add(id);
+    const name = key === "core" ? "REST" : "GraphQL";
+    const callers = ghCallers();
+    const text = [
+      `GitHub's ${name} budget for Isaac's account is down to ${b.remaining} of ${b.limit} (under ${RATE_LOW * 100}%), and it resets at ${pt(b.reset)} PT. Every agent, sentry and his own Dryft work share it, and at zero every gh call fails until the reset.`,
+      callers.length > 0 ? `gh calls running now:\n${FENCE}\n${callers.join("\n")}\n${FENCE}` : "No gh process is running now.",
+      `Spend over the last two hours: Stats → Performance, "GitHub API left".`,
+    ].join("\n\n");
+    const title = `GitHub ${name} budget at ${Math.round((b.remaining / b.limit) * 100)}%`;
+    try {
+      await fetch(`${base}/api/threads`, { method: "POST", headers: { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" }, body: JSON.stringify({ title, text }), signal: AbortSignal.timeout(10_000) });
+      console.log(`${stamp()}  warned: ${title}`);
+    } catch (error) {
+      console.error(`${stamp()}  couldn't post the GitHub budget warning:`, error);
+    }
+  }
+}
+
 const IDLE_TICKS = 3;
 function isHelperRunning() {
   if (!agent || !run([...TMUX, "has-session", "-t", agent.tmux]).ok) return false;
@@ -165,6 +198,7 @@ const outage: { helperStarts: number[]; gaveUp?: string } = { helperStarts: [] }
 let mcpSeq: number | null = null;
 let mcpCheckedAt = 0;
 const mcpAgentAt = new Map<string, number>();
+const githubWarned = new Set<string>();
 const stateCursor: { seq: number | null } = { seq: null };
 const stateAgentAt = new Map<string, number>();
 type StateAlert = { name: string; problem: string; kept: string; isGating: boolean };
@@ -296,6 +330,7 @@ for (;;) {
               await acceptTrust(agent.tmux);
             }
             agent = (await startStateRecovery()) ?? agent;
+            await warnGithubBudget();
           }
         } else {
           if (!buildBrokenSince) console.log(`${stamp()}  frontend build broken`);

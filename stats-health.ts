@@ -1,3 +1,4 @@
+import { readRateHistory } from "./gh";
 import { DIR } from "./instance";
 import { busLog, type BusEvent } from "./stats-sources";
 import { DAY_MS, dayKey, lastDays } from "./stats-week";
@@ -65,5 +66,6 @@ export function health(sessions: SessionInfo[]) {
     events: daysTheLogCovers.map((d) => perDay.get(d) ?? 0),
     ramKills: perDayOf(events, daysTheLogCovers, (t) => t.startsWith("ram/killed")),
     resyncs: perDayOf(events, daysTheLogCovers, (t) => t.startsWith("claude-resync/")),
+    github: readRateHistory(),
   };
 }
