@@ -4,6 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { STATE_DIR } from "./instance";
+import { mcp } from "./mcp";
 import { slackMessagesTable } from "./state";
 
 const AVATARS = join(STATE_DIR, "avatars");
@@ -53,8 +54,7 @@ export function slackAvatar(user: string, name: string) {
 async function lookUp(user: string, name: string) {
   let file: string | undefined;
   try {
-    const proc = Bun.spawn(["mcp", "--json", "--timeout", "60", "call", "claude.ai/slack", "slack_search_users", JSON.stringify({ query: name || user })], { stdout: "pipe", stderr: "ignore" });
-    const out = (await new Response(proc.stdout).text()).replace(/\\\\?\//g, "/");
+    const out = (await mcp("claude.ai/slack", "slack_search_users", { query: name || user })).out.replace(/\\\\?\//g, "/");
     // Each result is a block; the one with this user's id carries the picture.
     const block = out.split(/### Result/).find((b) => b.includes(`User ID: ${user}`));
     const url = block?.match(/Profile Pic: \[Photo\]\((https:[^)]+)\)/)?.[1];

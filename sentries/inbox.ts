@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { INBOX_WATCH_FILE, repoOf, type Watch } from "./gh";
 import { BASE as base, STATE_DIR } from "../instance";
+import { mcpSync } from "../mcp";
 import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("inbox");
@@ -93,6 +94,7 @@ const readable = (text: unknown) => String(text ?? "")
 const log = (line: string) => console.log(`${new Date().toLocaleTimeString()}  ${line}`);
 const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", headers: caller, body: JSON.stringify(body) });
 const run = (cmd: string[]) => { const r = Bun.spawnSync(cmd, { stderr: "pipe" }); return r.exitCode === 0 ? r.stdout.toString().trim() : ""; };
+const slackOut = (tool: string, args: Record<string, unknown>) => { const r = mcpSync("claude.ai/slack", tool, args); return r.ok ? r.out.trim() : ""; };
 
 type Task = { id: number; title: string; status: string; sessions: string[]; links: string[] };
 const OPEN = (t?: Task) => !!t && t.status !== "done" && t.status !== "dropped";
@@ -214,7 +216,7 @@ async function onBotAlert(d: any) {
 
 // Whether the user put an emoji reaction on a message.
 function reactedBy(channel: string, ts: string, me: string) {
-  const out = run(["mcp", "--json", "--timeout", "60", "call", "claude.ai/slack", "slack_get_reactions", JSON.stringify({ channel_id: channel, message_ts: ts })]);
+  const out = slackOut("slack_get_reactions", { channel_id: channel, message_ts: ts });
   return !!me && out.includes(`(${me})`);
 }
 
@@ -484,7 +486,7 @@ async function stalls() {
 
 if (import.meta.main) {
   const ghMe = run(["gh", "api", "user", "-q", ".login"]);
-  const profile = run(["mcp", "--json", "--timeout", "60", "call", "claude.ai/slack", "slack_read_user_profile", "{}"]);
+  const profile = slackOut("slack_read_user_profile", {});
   const me = profile.match(/User ID: (\w+)/)?.[1] ?? "";
   while (!(await fetch(`${base}/api/sessions`).then((r) => r.ok, () => false))) await Bun.sleep(2_000);
   if (!state.seq) state.seq = Number((await fetch(`${base}/api/events?topic=none&after=now`)).headers.get("x-maxflow-seq") ?? 0);

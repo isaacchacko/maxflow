@@ -9,6 +9,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base, STATE_DIR } from "../instance";
+import { mcp } from "../mcp";
 import { slackMessagesTable } from "../state";
 import { watchNotices, type Notice } from "./slack-notify";
 import { takeOver } from "./singleton";
@@ -78,11 +79,8 @@ export async function parseTarget(ref: string) {
 }
 
 async function slack(tool: string, args: Record<string, unknown>) {
-  const proc = Bun.spawn(["mcp", "--json", "--timeout", "60", "call", "claude.ai/slack", tool, JSON.stringify(args)], { stdout: "pipe", stderr: "pipe" });
-  const timer = setTimeout(() => proc.kill(9), 90_000);
-  const [out, err] = [await new Response(proc.stdout).text(), await new Response(proc.stderr).text()];
-  clearTimeout(timer);
-  if ((await proc.exited) !== 0) throw new Error(`${tool}: ${(err || out).trim().slice(0, 300)}`);
+  const { ok, out, err } = await mcp("claude.ai/slack", tool, args);
+  if (!ok) throw new Error(`${tool}: ${(err || out).trim().slice(0, 300)}`);
   const text = JSON.parse(out).content[0].text;
   try {
     return JSON.parse(text);

@@ -6,6 +6,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base, STATE_DIR } from "../instance";
+import { mcpSync } from "../mcp";
 import { slackMessagesTable } from "../state";
 import { takeOver } from "./singleton";
 
@@ -100,7 +101,7 @@ if (import.meta.main) {
     if (Bun.spawnSync(["ps", "-p", old, "-o", "command="]).stdout.toString().includes("sentries/context.ts")) process.kill(Number(old));
   } catch {}
   writeFileSync(PID_FILE, String(process.pid));
-  const profile = Bun.spawnSync(["mcp", "--json", "--timeout", "60", "call", "claude.ai/slack", "slack_read_user_profile", "{}"]).stdout.toString();
+  const profile = mcpSync("claude.ai/slack", "slack_read_user_profile", {}).out;
   const me = profile.match(/User ID: (\w+)/)?.[1] ?? "";
   while (!(await fetch(`${base}/api/sessions`).then((r) => r.ok, () => false))) await Bun.sleep(2_000);
   log(`context feed as ${me || "?"}`);

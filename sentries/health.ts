@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // health sentry: the moment the maxflow server stops answering, it takes over the port with its "panic" page, and if the
 // server stays down it starts a claude agent to fix it, shown live on that page. A frontend build that stays broken
-// while the API still answers gets an agent too.
+// while the API still answers gets an agent too, and so does an MCP server that sentries can't reach even after
+// refreshing the mcp CLI's registry (health/mcp/<server>, published by mcp.ts).
 // It runs in tmux, so it outlives the server it watches, and it starts the agent straight in tmux for the same reason;
 // the server adopts that session like any other once it is back.
 import type { ServerWebSocket, Subprocess } from "bun";
@@ -18,6 +19,9 @@ const DOWN_MS = Number(process.env.HEALTH_DOWN_MS ?? 45_000);
 // Hot reload catches agents mid-edit, so a build broken for a few seconds is normal; only one that stays broken counts.
 const BUILD_DOWN_MS = Number(process.env.HEALTH_BUILD_DOWN_MS ?? 60_000);
 const BUILD_EVERY_MS = 5000;
+const MCP_EVERY_MS = 30_000;
+// mcp.ts alerts at most once per registry refresh (10 min); one agent per server covers that many hours of them.
+const MCP_AGENT_EVERY_MS = 6 * 3_600_000;
 const COOLDOWN_MS = Number(process.env.HEALTH_COOLDOWN_MS ?? 15 * 60_000);
 // After handing the port back, give the server this long to bind before covering for it again.
 const RELEASE_GRACE_MS = 15_000;
@@ -81,6 +85,10 @@ ${run(["tail", "-n", "80", LOG]).out}
 Look at \`git -C ${DIR} status\` (an edit made in the live checkout despite the rule: find its owner with \`${CLI} ls\` and \`${CLI} screen <id>\`) and \`git -C ${DIR} log -3\` (a deployed commit that doesn't build). Fix it forward and deploy, as below, then confirm \`curl -s -o /dev/null -w '%{http_code}' ${base}/\` gives 200. ${RULES}`;
 }
 
+function mcpTask(server: string, error: string) {
+  return `Sentries can't reach the MCP server ${server} through the standalone \`mcp\` CLI, even after \`mcp --refresh servers\`: "${error}". The health sentry started you to fix it. Run the /exfilmcp skill (Skill tool, "exfilmcp") to repair the CLI and its connector registry, then confirm with a real read-only \`mcp call ${server} ...\` that it works. If it needs a human reauth in /mcp or on claude.ai, say so exactly, with the steps, and stop. ${RULES}`;
+}
+
 function startAgent(prompt: string) {
   const id = crypto.randomUUID().slice(0, 8);
   const meta = { name: "maxflow recovery", cmd: ["claude"], cwd: DIR, createdAt: Date.now() };
@@ -110,7 +118,19 @@ let releasedAt = 0;
 let buildBrokenSince: number | null = null;
 let buildCheckedAt = 0;
 let lastAgentAt = -COOLDOWN_MS;
+let mcpSeq: number | null = null;
+let mcpCheckedAt = 0;
+const mcpAgentAt = new Map<string, number>();
 const canStartAgent = () => !(agent && run([...TMUX, "has-session", "-t", agent.tmux]).ok) && Date.now() - lastAgentAt >= COOLDOWN_MS;
+// health/mcp/<server> events since the last check; the first check only notes where the bus is, so old alerts aren't replayed.
+async function mcpAlerts(): Promise<{ server: string; error: string }[]> {
+  const res = await fetch(`${base}/api/events?topic=health/mcp/**&after=${mcpSeq ?? "now"}`, { signal: AbortSignal.timeout(5000) });
+  const events = (await res.json()) as { seq: number; data: { server: string; error: string } }[];
+  const first = mcpSeq === null;
+  mcpSeq = events.at(-1)?.seq ?? Number(res.headers.get("x-maxflow-seq"));
+  return first ? [] : events.map((e) => e.data);
+}
+
 // A server asking for the port back is alive and booting (adopting every tmux session takes ~20s), so the agent's clock restarts.
 const agentDueAt = () => downSince && Math.max(downSince, releasedAt) + DOWN_MS;
 
@@ -201,6 +221,18 @@ for (;;) {
           buildBrokenSince = null;
           // An agent belongs to the outage it was started for; its session stays open in the sidebar, but the next outage gets its own.
           agent = null;
+          if (Date.now() - mcpCheckedAt >= MCP_EVERY_MS) {
+            mcpCheckedAt = Date.now();
+            for (const { server, error } of await mcpAlerts()) {
+              console.log(`${stamp()}  mcp: ${server} unreachable after a registry refresh: ${error}`);
+              if (Date.now() - (mcpAgentAt.get(server) ?? -MCP_AGENT_EVERY_MS) < MCP_AGENT_EVERY_MS || !canStartAgent()) continue;
+              agent = startAgent(mcpTask(server, error));
+              lastAgentAt = agent.at;
+              mcpAgentAt.set(server, agent.at);
+              console.log(`${stamp()}  started recovery agent for ${server} in ${agent.tmux}`);
+              await acceptTrust(agent.tmux);
+            }
+          }
         } else {
           if (!buildBrokenSince) console.log(`${stamp()}  frontend build broken`);
           buildBrokenSince ??= Date.now();
