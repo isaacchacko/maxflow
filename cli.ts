@@ -331,7 +331,7 @@ if (verb === "ls") {
   console.log(`${rest[1]} merged into ${t.id} (${t.messages.length} messages)`);
 } else if (verb === "thread" && rest[0] === "move" && rest[2]) {
   const r = await call(`/api/threads/${rest[1]}/objective`, { method: "POST", body: JSON.stringify({ objective: rest[2] }) });
-  console.log(`moved ${r.threads.join(" ")} to ${r.objective} (routers ${r.routers.join(" ") || "none"})`);
+  console.log(`moved ${r.threads.join(" ")} to ${r.objective} (routers ${r.routers.join(" ") || "none"})${r.handed?.length ? `; handed them his unanswered ${r.handed.join(" ")}` : ""}`);
 } else if (verb === "thread" && rest[0] === "status" && rest[2]) {
   await call(`/api/threads/${rest[1]}/status`, { method: "POST", body: JSON.stringify({ text: rest.slice(2).join(" ") }) });
 } else if (verb === "page" && (rest[0] === "put" || rest[0] === "rm") && rest[2]) {

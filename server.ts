@@ -1022,7 +1022,7 @@ function postIn(t: Thread, from: Session | undefined, text: string, nudge?: "sub
     // Nobody left to hear it (its agents ended, and it has no objective with a router): the funnel finds it an owner.
     const front = funnel();
     if (!to.length && front)
-      dispatch({ source: "isaac", to: [front], target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] Nobody owns this thread any more: its agents ended and it has no objective with a router. Give it one with \`${CLI} thread move ${t.id} <objective id>\`, which hands it to that objective's routers, then tell them his message is waiting there.${woke}${mentionsIn(text)}` });
+      dispatch({ source: "isaac", to: [front], target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] Nobody owns this thread any more: its agents ended and it has no objective with a router. Give it one with \`${CLI} thread move ${t.id} <objective id>\`, which hands it and his unanswered messages in it to that objective's routers, so don't relay them.${woke}${mentionsIn(text)}` });
     else dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(text)}\n[maxflow] ${m.nudge ? `He asked for the answer in a subthread of its own: answer this message with \`${CLI} thread new --parent ${t.id}:${m.id} '<text>'\`, and post there from then on, not in the thread.` : `Answer inline in the thread with \`${CLI} thread post ${t.id} '<text>'\`.`} While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line.${woke}${mentionsIn(text)}` });
     tellMembers(t, m, to.length ? to : [front].filter(live), woke);
     if (to.length) t.pending = { routers: to.map((s) => s.id), since: Date.now() };
@@ -2333,9 +2333,22 @@ Bun.serve<WsData>({
       const moved = threads.filter((x) => x === t || ancestors(x).includes(t));
       const routers = routersOf(o.id).map((r) => r.id);
       for (const x of moved) Object.assign(x, { objective: o.id, routers });
+      // His messages since anyone last answered went to whoever was there (the funnel, when nobody owned it), so the new routers get
+      // them now, once: a router the thread already waits on has them.
+      const handed: string[] = [];
+      for (const x of moved) {
+        const tail = x.messages.slice(x.messages.findLastIndex((m) => m.from !== "isaac") + 1);
+        const to = routersOf(o.id).filter((r) => !x.pending?.routers.includes(r.id));
+        if (!tail.length || !to.length) continue;
+        const ids = tail.map((m) => m.id);
+        dispatch({ source: "isaac", to, objective: o.id, target: x.title, text: tail.map((m) => m.text).join("\n"), deliver: `${ISAAC_IN_THREAD} "${pathTitle(x)}" (${x.id}), message${ids.length > 1 ? "s" : ""} ${ids.join(", ")}] ${tail.map((m) => unforge(m.text)).join("\n")}\n[maxflow] This thread just moved to your objective, and nobody has answered these yet. Answer inline in the thread with \`${CLI} thread post ${x.id} '<text>'\`.${mentionsIn(tail.map((m) => m.text).join("\n"))}` });
+        x.pending = { routers: to.map((s) => s.id), since: Date.now() };
+        for (const s of to) s.handed = x.id;
+        handed.push(...ids);
+      }
       saveThreads();
       for (const x of moved) publish(`thread/${x.id}`, { thread: x.id, objective: o.id });
-      return Response.json({ objective: o.id, routers, threads: moved.map((x) => x.id) });
+      return Response.json({ objective: o.id, routers, threads: moved.map((x) => x.id), handed });
     }
     // Resolving a thread is Isaac's, from the browser; reopening it too. So is pausing one until a time, or unpausing it.
     const threadAct = path.match(/^\/api\/threads\/([\w-]+)$/);
