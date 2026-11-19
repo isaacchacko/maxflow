@@ -120,10 +120,32 @@ async function tmuxAsync(...args: string[]) {
   const [out, code] = await Promise.all([new Response(p.stdout).text(), p.exited]);
   return { ok: code === 0, out };
 }
-// Options are only read back when a server adopts its sessions, so writes needn't block: they run in order, off the event loop.
-let optionWrites = Promise.resolve();
+// Options are only read back when a server adopts its sessions, so writes needn't block. Agents' hook state alone rewrites one
+// several times a second across the fleet, and one tmux call at a time fell minutes behind, so a session created in that time
+// came back from a restart with no name or command. Only the latest value of each option is kept, written up to 100 to a tmux
+// call, and a stopping server writes what is left (flushOptions).
+const pendingOptions = new Map<string, string[]>();
+let drainingOptions = false;
 function setOption(id: string, key: string, value: string) {
-  optionWrites = optionWrites.then(() => tmuxAsync("set-option", "-t", tmuxName(id), key, value)).then(() => {}, () => {});
+  pendingOptions.set(`${id} ${key}`, ["set-option", "-t", tmuxName(id), key, value]);
+  if (!drainingOptions) void drainOptions();
+}
+const chained = (writes: string[][]) => writes.flatMap((w, i) => (i ? [";", ...w] : w));
+function takeOptions() {
+  const batch = [...pendingOptions].slice(0, 100);
+  for (const [key] of batch) pendingOptions.delete(key);
+  return batch.map(([, write]) => write);
+}
+// tmux stops a chain at its first failing command, such as a write to a session killed since, so a failed batch goes again one by one.
+async function drainOptions() {
+  drainingOptions = true;
+  for (let writes = takeOptions(); writes.length; writes = takeOptions())
+    if (!(await tmuxAsync(...chained(writes))).ok) for (const w of writes) await tmuxAsync(...w);
+  drainingOptions = false;
+}
+function flushOptions() {
+  for (let writes = takeOptions(); writes.length; writes = takeOptions())
+    if (!tmux(...chained(writes)).ok) for (const w of writes) tmux(...w);
 }
 // A pane scrolled back in the browser is in tmux's copy mode, which takes keys for itself: Enter there never reaches claude, so a
 // pasted message sat unsent while the log called it delivered. Whatever the server types leaves that mode first.
@@ -188,11 +210,12 @@ function createSession(name: string, cmd: string[], cwd: string, chatId?: string
   const id = crypto.randomUUID().slice(0, 8);
   const session = { id, name, cmd, cwd, chatId, createdAt: Date.now(), lastOutputAt: Date.now(), chunks: [], bytes: 0, clients: new Set(), exitCode: null, inbox: [] } as unknown as Session;
   const t = tmuxName(id);
-  const created = scoped("new-session", "-d", "-s", t, "-x", String(cols), "-y", String(rows), "-c", cwd, ...paneEnv(id), "--", ...launchable(id, cmd));
-  if (!created.ok) throw new Error(`tmux new-session failed for ${cmd.join(" ").slice(0, 200)}`);
   const meta = { name, cmd: cmd.map((a) => (a.length > 2000 ? `${a.slice(0, 2000)}…` : a)), cwd, chatId, createdAt: session.createdAt };
-  setOption(id, "@mf", JSON.stringify(meta));
-  if (role) setRole(session, role);
+  // Its name, command and role are set in the same tmux call that creates it, so no restart finds it without them.
+  const created = scoped("new-session", "-d", "-s", t, "-x", String(cols), "-y", String(rows), "-c", cwd, ...paneEnv(id), "--", ...launchable(id, cmd),
+    ";", "set-option", "-t", t, "@mf", JSON.stringify(meta), ...(role ? [";", "set-option", "-t", t, "@mf-role", JSON.stringify(role)] : []));
+  if (!created.ok) throw new Error(`tmux new-session failed for ${cmd.join(" ").slice(0, 200)}`);
+  if (role) session.role = role;
   sessions.set(id, session);
   attachViewer(session, cols, rows);
   return session;
@@ -927,7 +950,7 @@ let threadsDirty: ReturnType<typeof setTimeout> | undefined;
 const writeThreads = () => (clearTimeout(threadsDirty), (threadsDirty = undefined), threadsTable.write(threads));
 const saveThreads = () => void (threadsDirty ??= setTimeout(writeThreads, 200));
 process.on("exit", () => threadsDirty && writeThreads());
-for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => process.exit(0));
+for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => (flushOptions(), process.exit(0)));
 // A paused thread comes back at its time: a timer for the ones due within a day, rebuilt at boot, and a sweep each minute for the
 // rest (and for a timer lost to sleep). Coming back, it is unread from where it was paused, so his inbox puts it up top.
 const PAUSE_TIMER_MS = 86_400_000;

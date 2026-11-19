@@ -13,11 +13,13 @@ const socket = `maxflow-v2-${instance}`;
 // A CI runner is a systemd service, and INVOCATION_ID would have server.ts start panes through systemd-run --user,
 // which needs a user session the runner doesn't have.
 const { INVOCATION_ID, ...env } = process.env;
-const server = Bun.spawn(["bun", join(import.meta.dir, "../server.ts"), `--maxflow-dev=${instance}`], {
-  env: { ...env, HOME: home, MAXFLOW_INSTANCE: instance, MAXFLOW_PORT: String(port), MAXFLOW_SENTRIES: "0", MAXFLOW_SESSION: "" },
-  stdout: "pipe",
-  stderr: "pipe",
-});
+const start = () =>
+  Bun.spawn(["bun", join(import.meta.dir, "../server.ts"), `--maxflow-dev=${instance}`], {
+    env: { ...env, HOME: home, MAXFLOW_INSTANCE: instance, MAXFLOW_PORT: String(port), MAXFLOW_SENTRIES: "0", MAXFLOW_SESSION: "" },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+let server = start();
 
 afterAll(async () => {
   server.kill();
@@ -54,3 +56,18 @@ test("it starts a session in tmux and lists it", async () => {
   expect(listed.map((s) => [s.id, s.name])).toEqual([[id, "boot-test"]]);
   expect(Bun.spawnSync(["tmux", "-L", socket, "has-session", "-t", `mf-${id}`]).exitCode).toBe(0);
 }, 30_000);
+
+// A restart (SIGTERM, as launchd's kickstart sends) right after a session is made or renamed: the next server adopts it from tmux
+// by the options written there, so they must be written before the reply, or flushed on the way out.
+test("a session made or renamed just before a restart comes back with its name", async () => {
+  const made = (await (await fetch(`${base}/api/sessions`, { method: "POST", body: JSON.stringify({ name: "made-before-restart", cmd: ["sh", "-c", "sleep 60"], cwd: home }) })).json()) as { id: string };
+  const renamed = (await (await fetch(`${base}/api/sessions`, { method: "POST", body: JSON.stringify({ name: "old-name", cmd: ["sh", "-c", "sleep 60"], cwd: home }) })).json()) as { id: string };
+  await fetch(`${base}/api/sessions/${renamed.id}`, { method: "PATCH", body: JSON.stringify({ name: "renamed-before-restart" }) });
+  server.kill("SIGTERM");
+  await server.exited;
+  server = start();
+  await up();
+  const listed = (await (await fetch(`${base}/api/sessions`)).json()) as { id: string; name: string }[];
+  expect(listed.find((s) => s.id === made.id)?.name).toBe("made-before-restart");
+  expect(listed.find((s) => s.id === renamed.id)?.name).toBe("renamed-before-restart");
+}, 60_000);
