@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { STATE_DIR } from "./instance";
 import type { Person } from "./restrictions";
 import { shellText } from "./restrictions-shell";
+import { ghStatusTable } from "./state";
 import { parsePr, repoOf } from "./sentries/gh";
 
 // Who a tool call reaches or acts on, for restrictions scoped to people: a Slack DM's other member, each email recipient, a
@@ -56,7 +57,7 @@ function bashPeople(command: string, cwd: string, dir: string): Person[] {
   for (const m of command.matchAll(/\bmallory\s+send\b[^;&|\n]*?--to[\s=]+(\S+)/g)) people.push(...malloryTo(m[1].split("/")[0]));
   const status = [...command.matchAll(/\bgh\s+pr\s+(?:review|merge|comment|close|edit|ready)\b([^;&|\n]*)/g), ...command.matchAll(/\bgh\s+api\b[^;&|\n]*?repos\/([\w.-]+\/[\w.-]+)\/pulls\/(\d+)/g)];
   if (!status.length) return people;
-  const prs = read("gh-status.json", dir) ?? {};
+  const prs = ghStatusTable.all();
   for (const m of status) {
     let key: string | null;
     if (m[2]) key = `${m[1].toLowerCase()}#${m[2]}`;

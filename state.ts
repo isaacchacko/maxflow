@@ -13,20 +13,30 @@ db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
 type Row = { id: string | number };
 
 const createList = (table: string) => db.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY, pos INTEGER NOT NULL, data TEXT NOT NULL)`);
+const createMap = (table: string) => db.exec(`CREATE TABLE ${table} (key TEXT PRIMARY KEY, data TEXT NOT NULL)`);
+function importMap(table: string, file: string) {
+  if (!existsSync(file)) return;
+  const insert = db.prepare(`INSERT INTO ${table} (key, data) VALUES (?, ?)`);
+  for (const [key, value] of Object.entries(JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>)) insert.run(key, JSON.stringify(value));
+}
 function importList(table: string, file: string) {
   if (!existsSync(file)) return;
   const insert = db.prepare(`INSERT INTO ${table} (id, pos, data) VALUES (?, ?, ?)`);
   (JSON.parse(readFileSync(file, "utf8")) as Row[]).forEach((row, pos) => insert.run(String(row.id), pos, JSON.stringify(row)));
 }
 
-// Run once each, in order, in one transaction with the version bump; user_version counts the ones done. Append only.
+// Run once each, in order, with the version bump; user_version counts the ones done. Append only. Every process that opens the
+// database runs them, so they run under the write lock, reading the version again once they hold it.
 const MIGRATIONS: (() => void)[] = [
   () => (createList("threads"), importList("threads", `${STATE_DIR}/threads.json`)),
   () => (createList("tasks"), importList("tasks", `${STATE_DIR}/tasks.json`)),
+  () => (createMap("gh_status"), importMap("gh_status", `${STATE_DIR}/gh-status.json`)),
 ];
 const version = () => (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-for (let v = version(); v < MIGRATIONS.length; v++)
-  db.transaction(() => (MIGRATIONS[v](), db.exec(`PRAGMA user_version = ${v + 1}`)))();
+if (version() < MIGRATIONS.length)
+  db.transaction(() => {
+    for (let v = version(); v < MIGRATIONS.length; v++) MIGRATIONS[v](), db.exec(`PRAGMA user_version = ${v + 1}`);
+  }).immediate();
 
 // A list of rows kept in order, the shape the server holds in memory. write() takes the whole list and stores only the rows
 // that changed, moved or went, in one transaction.
@@ -59,3 +69,47 @@ function listTable<T extends Row>(table: string) {
 
 export const threadsTable = listTable<Row & { messages: unknown[] }>("threads");
 export const tasksTable = listTable<Row>("tasks");
+
+// Values by key, the shape a sentry keeps as a JSON object. write() takes the whole record and stores only the keys that
+// changed or went. fresh() rereads only when another process has committed since the last read.
+function mapTable<V>(table: string) {
+  const select = db.prepare(`SELECT key, data FROM ${table}`);
+  const one = db.prepare(`SELECT data FROM ${table} WHERE key = ?`);
+  const upsert = db.prepare(`INSERT INTO ${table} (key, data) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET data = excluded.data`);
+  const remove = db.prepare(`DELETE FROM ${table} WHERE key = ?`);
+  const dataVersion = db.prepare("PRAGMA data_version");
+  // What the table holds for each key; filled by the first read, which a write does first if nothing has read yet.
+  const stored = new Map<string, string>();
+  let loaded = false, seen = -1, cached: Record<string, V> = {};
+  const all = (): Record<string, V> => {
+    const rows = select.all() as { key: string; data: string }[];
+    (loaded = true), stored.clear();
+    for (const r of rows) stored.set(r.key, r.data);
+    return Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.data)]));
+  };
+  return {
+    all,
+    get(key: string): V | undefined {
+      const row = one.get(key) as { data: string } | null;
+      return row ? JSON.parse(row.data) : undefined;
+    },
+    fresh(): Record<string, V> {
+      const v = (dataVersion.get() as { data_version: number }).data_version;
+      if (v !== seen) (cached = all()), (seen = v);
+      return cached;
+    },
+    write: db.transaction((record: Record<string, V>) => {
+      if (!loaded) all();
+      // data_version moves only for other connections' commits, so this process's own write would go unseen by fresh().
+      seen = -1;
+      for (const [key, value] of Object.entries(record)) {
+        const data = JSON.stringify(value);
+        if (stored.get(key) !== data) upsert.run(key, data), stored.set(key, data);
+      }
+      for (const key of stored.keys()) if (!(key in record)) remove.run(key), stored.delete(key);
+    }),
+  };
+}
+
+// The gh sentry's last whole fetch of each PR, by owner/repo#n.
+export const ghStatusTable = mapTable<{ at: number; pr: any }>("gh_status");

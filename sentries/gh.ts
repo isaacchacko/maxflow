@@ -4,6 +4,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base, STATE_DIR, TMUX_SOCKET } from "../instance";
+import { ghStatusTable } from "../state";
 import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("gh");
@@ -11,7 +12,6 @@ if (import.meta.main) takeOver("gh");
 const WATCH_FILE = join(STATE_DIR, "gh-watch.json");
 const STATE_FILE = join(STATE_DIR, "gh-state.json");
 // The last poll of each PR, whole, so `maxflow gh status` can answer without asking GitHub.
-const STATUS_FILE = join(STATE_DIR, "gh-status.json");
 // This sentry's graph edges, one per tied session, labeled by its PRs.
 const EDGES_FILE = join(STATE_DIR, "gh-edges.json");
 // The PRs sentry:review lists, with the sessions on each; watched here like explicit watches.
@@ -222,8 +222,8 @@ export async function markRead(id: string) {
   if ((await p.exited) !== 0) console.error(`${new Date().toLocaleTimeString()}  👀 on ${id} failed: ${(await new Response(p.stderr).text()).trim().slice(0, 300)}`);
 }
 
-// The last whole fetch of each PR, kept across restarts in the status file.
-const cache = new Map<string, { at: number; pr: Pr }>(Object.entries(readJson<Record<string, { at: number; pr: Pr }>>(STATUS_FILE, {})));
+// The last whole fetch of each PR, kept across restarts in the gh_status table.
+const cache = new Map<string, { at: number; pr: Pr }>(Object.entries(ghStatusTable.all()));
 
 const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", headers: caller, body: JSON.stringify(body) });
 
@@ -290,11 +290,11 @@ async function tick(me: string, state: Record<string, PrState>) {
   for (const [key, sessions] of listeners) for (const s of sessions) (onPrs.get(s) ?? onPrs.set(s, []).get(s)!).push(key);
   const label = (prs: string[]) => prs.map((k) => `#${k.split("#")[1]}`);
   writeFileSync(EDGES_FILE, JSON.stringify([...onPrs].map(([session, prs]) => ({ session, prs, label: prs.length > 2 ? `${label(prs).slice(0, 2).join(" ")} +${prs.length - 2}` : label(prs).join(" ") }))));
-  writeFileSync(STATUS_FILE, JSON.stringify(Object.fromEntries([...prs].map(([key, pr]) => [key, { at: cache.get(key)?.at ?? Date.now(), pr }]))));
+  ghStatusTable.write(Object.fromEntries([...prs].map(([key, pr]) => [key, { at: cache.get(key)?.at ?? Date.now(), pr }])));
   return prs.size;
 }
 
-export const readStatus = () => readJson<Record<string, { at: number; pr: Pr }>>(STATUS_FILE, {});
+export const readStatus = () => ghStatusTable.all() as Record<string, { at: number; pr: Pr }>;
 
 // What an agent would otherwise run gh pr view / gh pr checks for, as plain text.
 export function render(key: string, pr: Pr, at: number) {

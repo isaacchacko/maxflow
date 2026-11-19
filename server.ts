@@ -5,7 +5,7 @@ import { backgroundShells } from "./background";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
 import { slackAvatar, slackNames } from "./slack-meta";
 import { stats } from "./stats";
-import { tasksTable, threadsTable } from "./state";
+import { ghStatusTable, tasksTable, threadsTable } from "./state";
 import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
@@ -1355,7 +1355,7 @@ function untilShell(s: Session, body: { desc?: string; cmd?: string; cwd?: strin
 // The open PRs gh sentry ties each session to, from its edges and its last poll.
 type GhComment = { id: string; author: { login: string } | null };
 type GhPr = { state: string; title: string; comments: { nodes: GhComment[] }; reviewThreads: { nodes: { isResolved: boolean; comments: { nodes: GhComment[] } }[] } };
-const ghStatus = sentryFile<Record<string, { pr: GhPr }>>(`${STATE_DIR}/gh-status.json`, {});
+const ghStatus = () => ghStatusTable.fresh() as Record<string, { pr: GhPr }>;
 // The state of each PR a task links, { url: OPEN | MERGED | CLOSED }, which the assistant sentry's feed looks up on GitHub.
 const taskPrs = sentryFile<Record<string, string>>(`${STATE_DIR}/task-prs.json`, {});
 // How far a task's PRs got, counting only those whose state is known.

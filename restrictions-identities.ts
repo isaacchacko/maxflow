@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { STATE_DIR } from "./instance";
 import { samePerson, type Person, type Restriction } from "./restrictions";
+import { ghStatusTable } from "./state";
 
 // The people his restrictions can name, one per human: each Slack user the slack sentry has heard from, joined to their GitHub
 // login when the two are clearly the same person, or when he linked them by hand. A login joins a Slack user automatically
@@ -26,7 +27,7 @@ function seen(dir: string) {
   for (const { msgs } of Object.values(store)) for (const m of msgs) if (!m.bot && /^[UW]/.test(m.uid)) slack.set(m.uid, m.who);
   const github = new Map<string, string>();
   type Login = { login: string } | null | undefined;
-  const gh = read<Record<string, { pr?: { author?: Login; reviews?: { nodes: { author: Login }[] }; comments?: { nodes: { author: Login }[] } } }>>(join(dir, "gh-status.json"), {});
+  const gh = ghStatusTable.all() as Record<string, { pr?: { author?: Login; reviews?: { nodes: { author: Login }[] }; comments?: { nodes: { author: Login }[] } } }>;
   for (const { pr } of Object.values(gh))
     for (const a of [pr?.author, ...(pr?.reviews?.nodes ?? []).map((n) => n.author), ...(pr?.comments?.nodes ?? []).map((n) => n.author)])
       if (a?.login && !a.login.endsWith("[bot]")) github.set(a.login.toLowerCase(), a.login);

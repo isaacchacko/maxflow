@@ -12,12 +12,12 @@ import { dirname, join } from "node:path";
 import { repoOf } from "./gh";
 import { BASE, STATE_DIR } from "../instance";
 import { enqueue, flush, config, type Note } from "./approval-notify";
+import { ghStatusTable } from "../state";
 import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("approval");
 
 const STATE_FILE = join(STATE_DIR, "approval-state.json");
-const STATUS_FILE = join(STATE_DIR, "gh-status.json");
 const QUEUE_FILE = join(STATE_DIR, "review-queue.json");
 const OUT_DIR = join(STATE_DIR, "approval");
 const LOG_FILE = join(STATE_DIR, "approval-log.md");
@@ -61,7 +61,7 @@ const me = run(["gh", "api", "user", "--jq", ".login"]);
 // The user's PRs waiting on an approval: open, review required, CI not failing, not a draft per the review queue.
 function waiting() {
   const drafts = new Set(readJson<{ pr: string; stage: string }[]>(QUEUE_FILE, []).filter((q) => q.stage === "draft").map((q) => q.pr));
-  const status = readJson<Record<string, { pr: any }>>(STATUS_FILE, {});
+  const status = ghStatusTable.all();
   return Object.entries(status).flatMap(([key, { pr }]) => {
     const ci = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state;
     if (pr.author?.login !== me || pr.state !== "OPEN" || pr.reviewDecision !== "REVIEW_REQUIRED" || ci === "FAILURE" || ci === "ERROR" || drafts.has(key)) return [];
@@ -280,7 +280,7 @@ function tick() {
     state.heads[key] = { sha: pr.headRefOid, url: pr.url, title: pr.title, author: pr.author?.login ?? "?", status: "queued", started: Date.now() };
   }
   const queued = Object.entries(state.heads).filter(([k, h]) => h.status === "queued" && !active.has(k)).sort(([, a], [, b]) => a.started! - b.started!);
-  const status = readJson<Record<string, { pr: any }>>(STATUS_FILE, {});
+  const status = ghStatusTable.all();
   for (const [key, h] of queued) {
     if (active.size >= MAX_REVIEWS) break;
     active.add(key);
