@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { type Session, isSentry, sessions } from "./sessions";
 import { VERIFIED } from "./intro";
-import { funnel } from "./lifecycle";
 import { squash, unforge } from "./threads";
 
 // What Isaac himself typed into the funnel: its transcript's prompts, minus every part the server stamped as from a session.
