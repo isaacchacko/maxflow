@@ -234,9 +234,14 @@ function loadInbox(id: string, option: string | undefined): Pick<Session, "inbox
     const { inbox, sending } = JSON.parse(readFileSync(`${INBOXES}/${id}.json`, "utf8")) as { inbox: string[]; sending?: { count: number; at: number } };
     return { inbox, sending: sending && { ...sending, text: inbox.slice(0, sending.count).join("\n") } };
   } catch {}
-  // Kept by a server from before the file: the last value tmux took.
+  // Kept by a server from before the file: the last value tmux took. Read once: the file takes over and the option goes, since no
+  // file also means an inbox emptied, and an option left behind was delivered again on every restart (1eb5a8f4's four reports at 03:11Z).
+  if (!option) return { inbox: [] };
+  tmux("set-option", "-u", "-t", tmuxName(id), "@mf-inbox");
   try {
-    return { inbox: JSON.parse(option ?? "") || [] };
+    const inbox = JSON.parse(option) || [];
+    if (inbox.length) writeFileSync(`${INBOXES}/${id}.json`, JSON.stringify({ inbox }));
+    return { inbox };
   } catch {
     return { inbox: [] };
   }
