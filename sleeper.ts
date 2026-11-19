@@ -1,27 +1,58 @@
-// What an archived agent's pane runs while its claude is stopped: its last screen, then a prompt. What the user types there
-// wakes the agent and reaches its claude as if typed into it.
-import { createInterface } from "node:readline";
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import { createInterface } from "node:readline";
 
-const [screen, base, id] = process.argv.slice(2);
-if (existsSync(screen)) process.stdout.write(readFileSync(screen)), rmSync(screen);
-process.stdout.write("\x1b[2m[maxflow] asleep: claude is stopped to free memory. Type to wake it.\x1b[0m\n");
+const DIM = "\u{1B}[2m";
+const RED = "\u{1B}[31m";
+const RESET = "\u{1B}[0m";
+const PASTE_SETTLE_MS = 50;
+const WAKE_TIMEOUT_MS = 30_000;
+
+const [lastScreenFile = "", base = "", id = ""] = process.argv.slice(2);
+
+function showLastScreen() {
+  if (!existsSync(lastScreenFile)) return;
+  process.stdout.write(readFileSync(lastScreenFile));
+  rmSync(lastScreenFile);
+}
+
+showLastScreen();
+process.stdout.write(`${DIM}[maxflow] asleep: claude is stopped to free memory. Type to wake it.${RESET}\n`);
 
 const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "❯ " });
 rl.prompt();
-// A paste arrives as several lines at once; they go as one message.
-let lines: string[] = [];
-let timer: Timer | undefined;
-rl.on("line", (line) => {
-  lines.push(line);
-  clearTimeout(timer);
-  timer = setTimeout(send, 50);
-});
-async function send() {
-  const text = lines.join("\n").trim();
-  lines = [];
-  if (!text) return rl.prompt();
-  const res = await fetch(`${base}/api/sessions/${id}/wake`, { method: "POST", body: JSON.stringify({ text }) }).catch(() => null);
-  process.stdout.write(res?.ok ? "\x1b[2mwaking…\x1b[0m\n" : `\x1b[31mcouldn't wake it (${res ? await res.text() : "server unreachable"}); try again\x1b[0m\n`);
-  if (!res?.ok) rl.prompt();
+
+const pasteInProgress: { lines: string[]; timer: Timer | undefined } = { lines: [], timer: undefined };
+
+async function postWake(text: string) {
+  try {
+    return await fetch(`${base}/api/sessions/${id}/wake`, { method: "POST", body: JSON.stringify({ text }), signal: AbortSignal.timeout(WAKE_TIMEOUT_MS) });
+  } catch {
+    return null;
+  }
 }
+
+const failureReason = async (res: Response | null) => (res ? res.text() : "server unreachable");
+
+async function sendPasteAsOneMessage() {
+  const text = pasteInProgress.lines.join("\n").trim();
+  pasteInProgress.lines = [];
+  if (!text) {
+    rl.prompt();
+    return;
+  }
+  const res = await postWake(text);
+  if (res?.ok === true) {
+    process.stdout.write(`${DIM}waking…${RESET}\n`);
+    return;
+  }
+  process.stdout.write(`${RED}couldn't wake it (${await failureReason(res)}); try again${RESET}\n`);
+  rl.prompt();
+}
+
+rl.on("line", (line) => {
+  pasteInProgress.lines.push(line);
+  clearTimeout(pasteInProgress.timer);
+  pasteInProgress.timer = setTimeout(() => {
+    void sendPasteAsOneMessage();
+  }, PASTE_SETTLE_MS);
+});
