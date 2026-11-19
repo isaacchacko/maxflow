@@ -1,82 +1,123 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { STATE_DIR } from "./instance";
 import { resolve, type Person, type Restriction } from "./restrictions";
+import { isRecord, stringOr } from "./shared/guards";
+import { readStateJson, writeStateJson } from "./state";
 
-// Enforcing restrictions on a tool call an agent is about to make (hooks/restrictions.ts asks here). deny stops it; ask stops it
-// too, opens an ask to Isaac in a thread of its own naming the exact call, and keeps it pending; his yes there grants a one-time
-// pass for that session and call, so the agent's retry goes through. Each pending ask lives in restrictions-pending.json.
 type Pending = { id: string; session: string; key: string; call: string; restriction: string; label: string; thread: string; at: number; granted?: number; used?: number; refused?: number };
-const PENDING = join(STATE_DIR, "restrictions-pending.json");
+const PENDING_FILE = "restrictions-pending.json";
 const PASS_MS = 24 * 3_600_000;
-const pending: Pending[] = existsSync(PENDING) ? JSON.parse(readFileSync(PENDING, "utf8")) : [];
-const savePending = () => writeFileSync(PENDING, JSON.stringify(pending.filter((p) => Date.now() - p.at < 7 * 24 * 3_600_000)));
+const KEEP_PENDING_MS = 7 * 24 * 3_600_000;
+
+const isPending = (value: unknown): value is Pending =>
+  isRecord(value) && typeof value["session"] === "string" && typeof value["key"] === "string" && typeof value["thread"] === "string" && typeof value["at"] === "number";
+const isPendingList = (value: unknown): value is Pending[] => Array.isArray(value) && value.every((p) => isPending(p));
+
+const pending: Pending[] = readStateJson(PENDING_FILE, isPendingList) ?? [];
+const savePending = () => {
+  writeStateJson(
+    PENDING_FILE,
+    pending.filter((p) => Date.now() - p.at < KEEP_PENDING_MS),
+  );
+};
 
 export type Call = { session: string; tool: string; input?: Record<string, unknown>; cwd?: string; objective?: string; people?: Person[] };
 export type Verdict = { decision: "allow" | "deny"; reason?: string };
-type Deps = {
-  restrictions: () => Restriction[];
-  // Opens a new thread from the session, flagged as waiting on him; returns its id.
-  ask: (session: string, text: string) => string | null;
-  // Logs a line on the agent's activity; tell also types it into the agent's prompt.
-  log: (session: string, target: string, text: string, tell?: boolean) => void;
-  cli: string;
-};
+type OpenThreadWaitingOnHim = (session: string, text: string) => string | null;
+type LogOnTheAgentsActivity = (session: string, target: string, text: string, shouldAlsoTypeIntoItsPrompt?: boolean) => void;
+type Deps = { restrictions: () => Restriction[]; ask: OpenThreadWaitingOnHim; log: LogOnTheAgentsActivity; cli: string };
 
-// The call as he reads it, and as a retry is recognized: a Bash command is its command, anything else its tool and input.
-const callOf = (c: Call) => (c.tool === "Bash" ? String(c.input?.command ?? "") : `${c.tool} ${JSON.stringify(c.input ?? {})}`);
-const whoOf = (p: Person) => [p.name, p.email, p.github && `@${p.github}`, !p.name && p.slack].filter(Boolean).join(" ") || "someone";
+type Held = { c: Call; d: Deps; r: Restriction; person: Person | undefined; call: string; key: string; to: string };
+
+const isSet = (value: string | undefined): value is string => value !== undefined && value !== "";
+const isStamped = (at: number | undefined): at is number => at !== undefined && at !== 0;
+
+const callAsHeReadsIt = (c: Call) => (c.tool === "Bash" ? stringOr(c.input?.["command"]) : `${c.tool} ${JSON.stringify(c.input ?? {})}`);
+
+function whoOf(p: Person) {
+  const github = isSet(p.github) ? `@${p.github}` : undefined;
+  const slack = isSet(p.name) ? undefined : p.slack;
+  const words = [p.name, p.email, github, slack].filter((word) => isSet(word));
+  return words.length > 0 ? words.join(" ") : "someone";
+}
+
 const shown = (call: string) => (call.length > 600 ? `${call.slice(0, 600)}…` : call);
+const allowed: Verdict = { decision: "allow" };
 
-export function enforce(c: Call, d: Deps): Verdict {
-  const { mode, restriction: r, person } = resolve(d.restrictions(), c);
-  const to = person ? ` to ${whoOf(person)}` : "";
-  if (mode === "allow" || !r) return { decision: "allow" };
-  const call = callOf(c);
-  const key = `${c.tool}\n${call}`;
-  if (mode === "deny") {
-    d.log(c.session, `restriction: ${r.label}`, `Blocked ${c.tool}${to}: restriction "${r.label}" (${r.id}) is set to block.\n\`\`\`\n${shown(call)}\n\`\`\``);
-    return { decision: "deny", reason: `Blocked by yarn restriction "${r.label}" (${r.id}), which Isaac set to block${r.note ? `: ${r.note.replace(/\.$/, "")}` : ""}. Don't retry it or work around it with another tool; if the task needs it, ask him with \`${d.cli} ask\`.` };
-  }
-  const mine = pending.filter((p) => p.session === c.session && p.key === key);
-  const pass = mine.find((p) => p.granted && !p.used && Date.now() - p.granted < PASS_MS);
-  if (pass) {
-    pass.used = Date.now();
-    savePending();
-    d.log(c.session, `restriction: ${r.label}`, `Ran ${c.tool} on Isaac's one-time approval in ${pass.thread} (restriction "${r.label}").`);
-    return { decision: "allow" };
-  }
-  const open = mine.find((p) => !p.granted && !p.refused);
-  const refused = mine.findLast((p) => p.refused && Date.now() - p.refused < PASS_MS);
-  if (refused && !open)
-    return { decision: "deny", reason: `Isaac said no to this call in thread ${refused.thread} (restriction "${r.label}"). Don't run it or work around it; if something changed, ask him again there with \`${d.cli} ask --re ${refused.thread} '<why>'\`.` };
-  if (open)
-    return { decision: "deny", reason: `Still waiting on Isaac: restriction "${r.label}" needs his approval, already asked in thread ${open.thread}. Run \`${d.cli} wait thread:${open.thread}\` and end your turn; on his yes, retry exactly this call.` };
-  const thread = d.ask(c.session, `May I run this${to ? `, which reaches ${whoOf(person!)}` : ""}? It falls under the restriction "${r.label}", set to ask you first.\n\n\`\`\`\n${shown(call)}\n\`\`\`\n\nReply yes to let it run once, or no.`);
-  if (!thread) return { decision: "allow" };
+function block({ c, d, r, call, to }: Held): Verdict {
+  d.log(c.session, `restriction: ${r.label}`, `Blocked ${c.tool}${to}: restriction "${r.label}" (${r.id}) is set to block.\n\`\`\`\n${shown(call)}\n\`\`\``);
+  const note = isSet(r.note) ? `: ${r.note.replace(/\.$/, "")}` : "";
+  return {
+    decision: "deny",
+    reason: `Blocked by yarn restriction "${r.label}" (${r.id}), which Isaac set to block${note}. Don't retry it or work around it with another tool; if the task needs it, ask him with \`${d.cli} ask\`.`,
+  };
+}
+
+function useOneTimePass({ c, d, r }: Held, pass: Pending): Verdict {
+  pending[pending.indexOf(pass)] = { ...pass, used: Date.now() };
+  savePending();
+  d.log(c.session, `restriction: ${r.label}`, `Ran ${c.tool} on Isaac's one-time approval in ${pass.thread} (restriction "${r.label}").`);
+  return allowed;
+}
+
+function askHim(h: Held): Verdict {
+  const { c, d, r, person, call, key, to } = h;
+  const reaches = person ? `, which reaches ${whoOf(person)}` : "";
+  const thread = d.ask(c.session, `May I run this${reaches}? It falls under the restriction "${r.label}", set to ask you first.\n\n\`\`\`\n${shown(call)}\n\`\`\`\n\nReply yes to let it run once, or no.`);
+  if (thread === null || thread === "") return allowed;
   pending.push({ id: crypto.randomUUID().slice(0, 8), session: c.session, key, call, restriction: r.id, label: r.label, thread, at: Date.now() });
   savePending();
   d.log(c.session, `restriction: ${r.label}`, `Held ${c.tool}${to} for Isaac's approval in ${thread} (restriction "${r.label}" is set to ask).\n\`\`\`\n${shown(call)}\n\`\`\``);
-  return { decision: "deny", reason: `Held by yarn restriction "${r.label}" (${r.id}): Isaac wants to approve this first. yarn asked him in thread ${thread}, naming this exact call. Don't retry it or work around it. Run \`${d.cli} wait thread:${thread}\` and end your turn (do other work first if any doesn't hang on it); when he says yes you get a one-time pass and the same call goes through.` };
+  return {
+    decision: "deny",
+    reason: `Held by yarn restriction "${r.label}" (${r.id}): Isaac wants to approve this first. yarn asked him in thread ${thread}, naming this exact call. Don't retry it or work around it. Run \`${d.cli} wait thread:${thread}\` and end your turn (do other work first if any doesn't hang on it); when he says yes you get a one-time pass and the same call goes through.`,
+  };
+}
+
+const isUnusedPass = (p: Pending) => isStamped(p.granted) && !isStamped(p.used) && Date.now() - p.granted < PASS_MS;
+const isOpen = (p: Pending) => !isStamped(p.granted) && !isStamped(p.refused);
+const isRecentlyRefused = (p: Pending) => isStamped(p.refused) && Date.now() - p.refused < PASS_MS;
+
+function passOrAsk(h: Held): Verdict {
+  const { c, d, r, key } = h;
+  const mine = pending.filter((p) => p.session === c.session && p.key === key);
+  const pass = mine.find((p) => isUnusedPass(p));
+  if (pass) return useOneTimePass(h, pass);
+  const open = mine.find((p) => isOpen(p));
+  if (open)
+    return { decision: "deny", reason: `Still waiting on Isaac: restriction "${r.label}" needs his approval, already asked in thread ${open.thread}. Run \`${d.cli} wait thread:${open.thread}\` and end your turn; on his yes, retry exactly this call.` };
+  const refused = mine.findLast((p) => isRecentlyRefused(p));
+  if (refused)
+    return { decision: "deny", reason: `Isaac said no to this call in thread ${refused.thread} (restriction "${r.label}"). Don't run it or work around it; if something changed, ask him again there with \`${d.cli} ask --re ${refused.thread} '<why>'\`.` };
+  return askHim(h);
+}
+
+export function enforce(c: Call, d: Deps): Verdict {
+  const { mode, restriction: r, person } = resolve(d.restrictions(), c);
+  if (mode === "allow" || !r) return allowed;
+  const call = callAsHeReadsIt(c);
+  const held: Held = { c, d, r, person, call, key: `${c.tool}\n${call}`, to: person ? ` to ${whoOf(person)}` : "" };
+  return mode === "deny" ? block(held) : passOrAsk(held);
 }
 
 const YES = /^\s*(y|yes|yep|yeah|yup|ok|okay|sure|approved?|allow(ed)?|go( ahead)?|do it|ship it|lgtm|fine|granted)\b/i;
 const NO = /^\s*(n|no|nope|don'?t|deny|denied|block|stop|cancel|never)\b/i;
 
-// His reply in a thread an ask opened: yes grants the pass and no refuses it, and the agent is told either way. Anything else
-// leaves it pending; his words still reach the agent as any reply does.
+function answerIn(text: string) {
+  if (YES.test(text)) return "yes";
+  return NO.test(text) ? "no" : undefined;
+}
+
 export function onReply(thread: string, text: string, d: Deps) {
-  const p = pending.findLast((x) => x.thread === thread && !x.granted && !x.refused);
+  const p = pending.findLast((x) => x.thread === thread && isOpen(x));
   if (!p) return;
-  const verdict = YES.test(text) ? "yes" : NO.test(text) ? "no" : null;
-  if (!verdict) return;
-  if (verdict === "yes") p.granted = Date.now();
+  const answer = answerIn(text);
+  if (answer === undefined) return;
+  if (answer === "yes") p.granted = Date.now();
   else p.refused = Date.now();
   savePending();
   d.log(
     p.session,
     `restriction: ${p.label}`,
-    verdict === "yes"
+    answer === "yes"
       ? `[maxflow] Isaac approved the call held by restriction "${p.label}" in ${thread}. You have a one-time pass: retry exactly the same call now and it goes through, once.\n\`\`\`\n${shown(p.call)}\n\`\`\``
       : `[maxflow] Isaac said no to the call held by restriction "${p.label}" in ${thread}. Don't run it or work around it.`,
     true,
