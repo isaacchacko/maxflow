@@ -1,4 +1,4 @@
-import { CircleCheckBig, MessagesSquare, ShieldCheck, X, type LucideIcon } from "lucide-react";
+import { CircleCheckBig, FileText, MessagesSquare, ShieldCheck, X, type LucideIcon } from "lucide-react";
 import { AgentFace, type Expression } from "@/components/AgentFace";
 import { Dots } from "@/components/Working";
 import type { Thread } from "@/mock";
@@ -210,6 +210,7 @@ export function Sidebar({ view }: { view: string }) {
         <div className="flex flex-col gap-0.5">
           <Entry view="todo" label="Todo" icon={CircleCheckBig} count={needsYou} warn active={view === "todo"} open={isOpen} />
           <Entry view="inbox" label="Threads" icon={MessagesSquare} count={unread} active={view === "inbox"} open={isOpen} />
+          <Entry view="docs" label="Docs" icon={FileText} count={0} active={view === "docs"} open={isOpen} />
           <Entry view="restrictions" label="Restrictions" icon={ShieldCheck} count={0} active={view === "restrictions"} open={isOpen} />
         </div>
         {pins.length > 0 && (

@@ -1,10 +1,10 @@
-export type Ref = { kind: "agent" | "router" | "task" | "objective" | "thread" | "msg"; id: string };
+export type Ref = { kind: "agent" | "router" | "task" | "objective" | "thread" | "msg" | "doc"; id: string };
 type Part = { text: string } | { ref: Ref } | { url: string; label: string } | { image: string };
 
-const REF_KINDS = new Set<string>(["agent", "router", "task", "objective", "thread", "msg"]);
+const REF_KINDS = new Set<string>(["agent", "router", "task", "objective", "thread", "msg", "doc"]);
 export const isRefKind = (kind: string | undefined): kind is Ref["kind"] => kind !== undefined && REF_KINDS.has(kind);
 
-const TOKEN = /\[\[(agent|router|task|objective|thread|msg):([^\]]+)\]\]|!\[[^\]]*\]\(\S*\/uploads\/([\w.-]+)\)|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
+const TOKEN = /\[\[(agent|router|task|objective|thread|msg|doc):([^\]]+)\]\]|!\[[^\]]*\]\(\S*\/uploads\/([\w.-]+)\)|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
 
 function partOf(m: RegExpExecArray): Part {
   const [, kind, id = "", upload, label = "", url = ""] = m;
@@ -42,6 +42,6 @@ const UPLOADED_IMAGE = /!\[[^\]]*\]\(\S*\/uploads\/([\w.-]+)\)/g;
 
 export const uploadsIn = (text: string) => Array.from(showUploads(text).matchAll(UPLOADED_IMAGE), m => `/api/uploads/${m[1]}`);
 
-const CHIP_TOKEN = /\[\[(agent|router|task|objective|thread|msg):([^\]]+)\]\]/g;
+const CHIP_TOKEN = /\[\[(agent|router|task|objective|thread|msg|doc):([^\]]+)\]\]/g;
 
 export const asLinks = (text: string) => text.replaceAll(CHIP_TOKEN, (_, kind: string, id: string) => `[ref](ref:${kind}/${encodeURIComponent(id)})`);

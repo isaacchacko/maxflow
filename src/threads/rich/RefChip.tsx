@@ -1,4 +1,4 @@
-import { MessageSquareQuote, MessagesSquare, Network, Radar, Waypoints } from "lucide-react";
+import { FileText, MessageSquareQuote, MessagesSquare, Network, Radar, Waypoints } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor, type Agent } from "@/mock";
 import { agentStore, objectiveStore, sentryStore, taskStore, threadStore } from "@/store";
@@ -49,6 +49,11 @@ function ObjectiveChip({ r, look }: KindProps) {
 function ThreadChip({ r, look }: KindProps) {
   const t = threadStore.use().find(x => x.id === r.id);
   return <EntityChip r={r} look={look} href={`#thread/${r.id}`} isFound={t !== undefined} icon={<MessagesSquare className="size-3 text-link" />} label={t?.title ?? r.id} />;
+}
+
+function DocChip({ r, look }: KindProps) {
+  const name = r.id.replace(/\.md$/, "").split("/").at(-1) ?? r.id;
+  return <EntityChip r={r} look={look} href={`#docs/${encodeURI(r.id)}`} isFound icon={<FileText className="size-3 text-link" />} label={name} />;
 }
 
 function senderName(from: string, agents: Agent[], sentries: { id: string; name?: string | undefined }[]) {
@@ -109,6 +114,9 @@ export function RefChip({ r, still, wide, row }: { r: Ref; still?: boolean; wide
     }
     case "thread": {
       return <ThreadChip r={r} look={look} />;
+    }
+    case "doc": {
+      return <DocChip r={r} look={look} />;
     }
     case "agent":
     case "router": {

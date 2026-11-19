@@ -33,6 +33,14 @@ export function useNow(msUntilNextTick: (now: number) => number) {
   return now;
 }
 
+export function useInterval(callback: () => unknown, ms: number) {
+  const latest = useLatest(callback);
+  useEffect(() => {
+    const timer = setInterval(() => latest.current(), ms);
+    return () => clearInterval(timer);
+  }, [ms, latest]);
+}
+
 export function useSettled<T>(value: T, ms: number) {
   const [settled, setSettled] = useState(value);
   useEffect(() => {

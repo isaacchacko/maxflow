@@ -6,7 +6,7 @@ import { GitHubChip, LinearChip, PrChip, SlackChip, SlackUser, Upload } from "./
 import { isRefKind, type Ref } from "./parse";
 import { RefChip } from "./RefChip";
 
-const REF_LINK = /^ref:(agent|router|task|objective|thread|msg)\/(.+)$/;
+const REF_LINK = /^ref:(agent|router|task|objective|thread|msg|doc)\/(.+)$/;
 const APP_LINK = /^(?:https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?\/?)?#(agent|task|objective|thread)\/([^/?#]+)$/;
 const PR_LINK = /^pr:([\w.-]+\/[\w.-]+)\/(\d+)$/;
 const GITHUB_PR = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/i;

@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { boardVerbs, objectiveVerbs } from "./cli-board";
+import { docVerbs } from "./cli-docs";
 import { eventVerbs, sessionVerbs } from "./cli-sessions";
 import { base, type Verb } from "./cli-shared";
 import { threadVerbs } from "./cli-threads";
@@ -45,6 +46,7 @@ const usage = `usage:
   maxflow thread merge <thread id> <into thread id>   fold a duplicate into another thread: messages, routers, ask and waits move, the duplicate leaves the inbox
   maxflow thread move <thread id> <objective id>   re-home a thread and its subthreads onto that objective and its routers
   maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
+  maxflow docs ls | read <path> | write <path> [text...] | mv <path> <to> | rm <path>   Isaac's docs vault (markdown, git-committed per write; stdin when no text)
   maxflow deploy                             ship origin's feat/v2 to the live yarn: refuses a dirty live checkout or a commit whose CI check isn't green,
                                              fast-forwards, restarts, checks every session and sentry came back,
                                              and restarts the sentries whose code changed;
@@ -69,7 +71,7 @@ const shipVerbs: Verb[] = [
   { matches: (verb) => verb === "install", run: install },
 ];
 
-const VERBS: Verb[] = [...waitVerbs, ...sessionVerbs, ...boardVerbs, ...eventVerbs, ...watchVerbs, ...objectiveVerbs, ...threadVerbs, ...shipVerbs];
+const VERBS: Verb[] = [...waitVerbs, ...sessionVerbs, ...boardVerbs, ...eventVerbs, ...watchVerbs, ...objectiveVerbs, ...threadVerbs, ...docVerbs, ...shipVerbs];
 
 const [verb, ...rest] = process.argv.slice(2);
 const chosen = VERBS.find((v) => v.matches(verb, rest));

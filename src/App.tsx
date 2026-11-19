@@ -21,11 +21,13 @@ import { RoutingView } from "@/views/RoutingView";
 import { SentriesView } from "@/views/SentriesView";
 import { RestrictionsView } from "@/views/RestrictionsView";
 import { TodoView } from "@/views/TodoView";
+import { DocsView } from "@/views/DocsView";
 import { StatsView } from "@/views/StatsView";
 
 export const views = [
   { id: "todo", label: "Todo" },
   { id: "inbox", label: "Threads" },
+  { id: "docs", label: "Docs" },
   { id: "events", label: "Events" },
   { id: "objectives", label: "Objectives" },
   { id: "agents", label: "Agents" },
@@ -49,8 +51,13 @@ function lastView(): ViewId {
   }
 }
 
+function hashParts() {
+  const [first = "", ...rest] = location.hash.slice(1).split("/");
+  return [first, decodeURI(rest.join("/"))] as const;
+}
+
 function routeFromHash(): Route {
-  const [first, id] = location.hash.slice(1).split("/", 2);
+  const [first, id] = hashParts();
   if (hasText(id) && (first === "task" || first === "objective")) return { view: lastView(), detail: { kind: "page", ref: `${first}/${id}` as PageRef } };
   if (hasText(id) && (first === "agent" || first === "thread")) return { view: lastView(), detail: { kind: first, id } };
   const view = views.find(v => v.id === first)?.id ?? lastView();
@@ -105,6 +112,7 @@ function MainView({ route }: { route: Route }) {
   if (route.detail) return <DetailView detail={route.detail} back={route.view} />;
   if (route.view === "inbox") return <InboxView />;
   if (route.view === "todo") return <TodoView />;
+  if (route.view === "docs") return <DocsView path={route.sub} />;
   if (route.view === "restrictions") return <RestrictionsView />;
   if (route.view === "stats") return route.sub === undefined ? <StatsView /> : <StatsView tab={route.sub} />;
   if (route.view === "sentries") return <SentriesView />;
