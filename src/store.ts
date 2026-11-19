@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { NOW_AT, localAt, type Thread, sentries as seedSources, threads as seedThreads, agents as seedAgents, signals as seedSignals, tasks as seedTasks, objectives as seedObjectives, type Block, type Event, type Agent, type SentrySession, type Shell, type Signal, type Status } from "./mock";
+import { NOW_AT, localAt, type Thread, type Block, type Event, type Agent, type SentrySession, type Shell, type Signal, type Status } from "./mock";
+import { sentries as seedSources, threads as seedThreads, agents as seedAgents, signals as seedSignals, tasks as seedTasks, objectives as seedObjectives } from "./mock-seed";
 
 export function createStore<T>(initial: T) {
   let state = initial;
