@@ -300,3 +300,11 @@ export function watchedStateFile<T>(name: string, empty: T) {
     return value;
   };
 }
+
+export function writeStateText(name: string, text: string): string {
+  const file = stateFile(name);
+  const temporary = `${file}.${String(process.pid)}.tmp`;
+  writeFileSync(temporary, text);
+  renameSync(temporary, file);
+  return file;
+}
