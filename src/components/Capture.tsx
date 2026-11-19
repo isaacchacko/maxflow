@@ -7,8 +7,6 @@ import { captureRegion } from "./capture/draw";
 import { CommentPopover, PickOverlay, type Shot } from "./capture/parts";
 import { captureTarget, type Rect } from "./capture/region";
 
-type Picture = { png?: Blob | undefined; failure?: string | undefined };
-
 const isCaptureShortcut = (e: KeyboardEvent) => e.key.toLowerCase() === "s" && (e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey;
 
 const untilTheOverlayIsGone = async () =>
@@ -46,6 +44,7 @@ function useCaptureState() {
 }
 
 function useCapture() {
+  type Picture = { png?: Blob | undefined; failure?: string | undefined };
   const state = useCaptureState();
   const { mode, setMode, shot, setShot, comment, setError, setSendWhenReady, takingRef, reset } = state;
   const overlay = useRef<HTMLDivElement>(null);
