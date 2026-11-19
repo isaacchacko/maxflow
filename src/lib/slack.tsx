@@ -1,93 +1,112 @@
 import { createStore } from "@/store";
+import { isRecord } from "../../shared/guards";
 import { emojiOf, SHORTCODE } from "./emoji";
-import { cn } from "./utils";
+import { cn, hasText } from "./utils";
 
-/** Each Slack conversation's name by channel id ("#festo", "DM with Christoph Moser", "group DM with …"), from the server. */
 export const slackNameStore = createStore<Record<string, string>>({});
-let loadedAt = 0;
-export function loadSlackNames() {
-  if (Date.now() - loadedAt < 5 * 60_000) return;
-  loadedAt = Date.now();
-  fetch("/api/slack/names").then(r => (r.ok ? r.json() : {})).then(names => slackNameStore.set(names), () => {});
+const slackNamesLoad = { at: 0 };
+
+async function fetchSlackNames() {
+  try {
+    const r = await fetch("/api/slack/names");
+    const names: unknown = r.ok ? await r.json() : {};
+    if (isRecord(names)) slackNameStore.set(Object.fromEntries(Object.entries(names).filter((entry): entry is [string, string] => typeof entry[1] === "string")));
+  } catch {
+    // constraint: without the names a conversation still shows, as "DM" or "channel"
+  }
 }
 
-/** A Slack permalink's conversation and whether it points into a thread. */
+export function loadSlackNames() {
+  if (Date.now() - slackNamesLoad.at < 5 * 60_000) return;
+  slackNamesLoad.at = Date.now();
+  void fetchSlackNames();
+}
+
 export function slackLink(href: string) {
-  const m = href.match(/^https:\/\/[\w-]+\.slack\.com\/archives\/(\w+)(?:\/p(\d+))?(?:\?(.*))?$/);
-  if (!m) return null;
-  return { channel: m[1]!, thread: /(^|&)thread_ts=/.test(m[3] ?? "") };
+  const m = /^https:\/\/[\w-]+\.slack\.com\/archives\/(\w+)(?:\/p(\d+))?(?:\?(.*))?$/.exec(href);
+  const channel = m?.[1];
+  if (channel === undefined) return null;
+  return { channel, thread: /(^|&)thread_ts=/.test(m?.[3] ?? "") };
 }
 export function slackLabel(channel: string, names: Record<string, string>) {
   return names[channel] ?? (channel.startsWith("D") ? "DM" : "channel");
 }
 
-// The shortcodes people actually use, as the character Slack shows; any other stays as typed.
-const decode = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-const escapeLabel = (s: string) => s.replace(/[[\]]/g, "\\$&");
+const decode = (s: string) => s.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+const escapeLabel = (s: string) => s.replaceAll(/[[\]]/g, String.raw`\$&`);
+const firstText = (...texts: (string | undefined)[]) => texts.find(hasText);
+const isCodeSpan = (i: number) => i % 2 === 1;
 
-/**
- * Slack's mrkdwn as the markdown the rest of the app draws: mentions and channels become chips (slackuser:/slackchan: links),
- * <url|label> a link, *bold* / _italic_ / ~strike~ their markdown, :shortcodes: their emoji. Code, inline or fenced, is kept as
- * written; a fence Slack ran onto one line gets lines of its own.
- */
+function fencedBlock(part: string) {
+  return `\n\`\`\`\n${decode(part.slice(3, -3).replaceAll(/^\n|\n$/g, ""))}\n\`\`\`\n`;
+}
+
+function mrkdwnOutsideCode(part: string) {
+  return slackTokens(part)
+    .replaceAll(/(^|[\s(>])\*([^*\n]+?)\*(?=$|[\s).,!?:;])/gm, "$1**$2**")
+    .replaceAll(/(^|[\s(>])_([^_\n]+?)_(?=$|[\s).,!?:;])/gm, "$1*$2*")
+    .replaceAll(/(^|[\s(>])~([^~\n]+?)~(?=$|[\s).,!?:;])/gm, "$1~~$2~~")
+    .replaceAll(SHORTCODE, (all, code: string, tone?: string) => emojiOf(code.toLowerCase(), hasText(tone) ? Number(tone) : undefined) ?? all)
+    .replaceAll("&lt;", "\\<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+}
+
 export function mrkdwn(text: string) {
-  return boxesAsCode(text)
+  return boxDrawnTablesAsCode(text)
     .split(/(```[\s\S]*?```|`[^`\n]+`)/g)
     .map((part, i) => {
-      if (i % 2) return part.startsWith("```") ? `\n\`\`\`\n${decode(part.slice(3, -3).replace(/^\n|\n$/g, ""))}\n\`\`\`\n` : decode(part);
-      return slackTokens(part)
-        .replace(/(^|[\s(>])\*([^*\n]+?)\*(?=$|[\s).,!?:;])/gm, "$1**$2**")
-        .replace(/(^|[\s(>])_([^_\n]+?)_(?=$|[\s).,!?:;])/gm, "$1*$2*")
-        .replace(/(^|[\s(>])~([^~\n]+?)~(?=$|[\s).,!?:;])/gm, "$1~~$2~~")
-        .replace(SHORTCODE, (all, code: string, tone?: string) => emojiOf(code.toLowerCase(), tone ? Number(tone) : undefined) ?? all)
-        .replace(/&lt;/g, "\\<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+      if (!isCodeSpan(i)) return mrkdwnOutsideCode(part);
+      return part.startsWith("```") ? fencedBlock(part) : decode(part);
     })
     .join("");
 }
 
-// Slack's <@user|name>, <#channel|name>, <!here>, <!subteam^…> and <url|label> as markdown chips and links. A mention with no name
-// carries only the id, which the chip looks up.
 const slackTokens = (text: string) =>
   text
-    .replace(/<@([UW]\w+)(?:\|([^>]*))?>/g, (_, id, name) => `[@${escapeLabel(name || id)}](slackuser:${id})`)
-    .replace(/<#(C\w+)(?:\|([^>]*))?>/g, (_, id, name) => `[#${escapeLabel(name || "channel")}](slackchan:${id}${name ? `/${encodeURIComponent(name)}` : ""})`)
-    .replace(/<!(here|channel|everyone)(?:\|[^>]*)?>/g, "@$1")
-    .replace(/<!subteam\^\w+(?:\|([^>]*))?>/g, (_, name) => name || "@group")
-    .replace(/<((?:https?|mailto):[^|>]+)\|([^>]+)>/g, (_, url, label) => `[${escapeLabel(decode(label))}](${url})`)
-    .replace(/<((?:https?|mailto):[^>]+)>/g, "$1");
+    .replaceAll(/<@([UW]\w+)(?:\|([^>]*))?>/g, (_, id: string, name?: string) => `[@${escapeLabel(firstText(name) ?? id)}](slackuser:${id})`)
+    .replaceAll(/<#(C\w+)(?:\|([^>]*))?>/g, (_, id: string, name?: string) => `[#${escapeLabel(firstText(name) ?? "channel")}](slackchan:${id}${hasText(name) ? `/${encodeURIComponent(name)}` : ""})`)
+    .replaceAll(/<!(here|channel|everyone)(?:\|[^>]*)?>/g, "@$1")
+    .replaceAll(/<!subteam\^\w+(?:\|([^>]*))?>/g, (_, name?: string) => firstText(name) ?? "@group")
+    .replaceAll(/<((?:https?|mailto):[^|>]+)\|([^>]+)>/g, (_, url: string, label: string) => `[${escapeLabel(decode(label))}](${url})`)
+    .replaceAll(/<((?:https?|mailto):[^>]+)>/g, "$1");
 
-/** Slack's mentions, channels and links where they turn up outside a Slack message (pasted or quoted into his own), code left alone. */
-export const slackSyntax = (text: string) => (text.includes("<") ? text.split(/(```[\s\S]*?```|`[^`\n]+`)/g).map((part, i) => (i % 2 ? part : slackTokens(part))).join("") : text);
+export const slackSyntax = (text: string) => (text.includes("<") ? text.split(/(```[\s\S]*?```|`[^`\n]+`)/g).map((part, i) => (isCodeSpan(i) ? part : slackTokens(part))).join("") : text);
 
-/** The same as plain text, for a preview or a search: @name, #channel, a link's label. */
 export const slackPlain = (text: string, names: Record<string, string> = slackNameStore.get()) =>
   text
-    .replace(/<@([UW]\w+)(?:\|([^>]*))?>/g, (_, id, name) => `@${name || names[id] || id}`)
-    .replace(/<#(C\w+)(?:\|([^>]*))?>/g, (_, id, name) => name ? `#${name}` : (names[id] ?? "#channel"))
-    .replace(/<!(here|channel|everyone)(?:\|[^>]*)?>/g, "@$1")
-    .replace(/<!subteam\^\w+(?:\|([^>]*))?>/g, (_, name) => name || "@group")
-    .replace(/<((?:https?|mailto):[^|>]+)\|([^>]+)>/g, (_, _url, label) => decode(label))
-    .replace(/<((?:https?|mailto):[^>]+)>/g, "$1");
+    .replaceAll(/<@([UW]\w+)(?:\|([^>]*))?>/g, (_, id: string, name?: string) => `@${firstText(name, names[id]) ?? id}`)
+    .replaceAll(/<#(C\w+)(?:\|([^>]*))?>/g, (_, id: string, name?: string) => (hasText(name) ? `#${name}` : (names[id] ?? "#channel")))
+    .replaceAll(/<!(here|channel|everyone)(?:\|[^>]*)?>/g, "@$1")
+    .replaceAll(/<!subteam\^\w+(?:\|([^>]*))?>/g, (_, name?: string) => firstText(name) ?? "@group")
+    .replaceAll(/<((?:https?|mailto):[^|>]+)\|([^>]+)>/g, (_, _url: string, label: string) => decode(label))
+    .replaceAll(/<((?:https?|mailto):[^>]+)>/g, "$1");
 
-// A table drawn with box characters (┌─┬─┐ │ ├─┼─┤) only lines up in a fixed-width font, and wrapped it is a wall of rules: its lines
-// become a code block, which keeps them whole and scrolls sideways.
-const BOX = /[\u2500-\u257F]/;
-function boxesAsCode(text: string) {
-  if (!BOX.test(text)) return text;
-  let fenced = false;
+const BOX_DRAWING = /[\u{2500}-\u{257F}]/u;
+function boxDrawnTablesAsCode(text: string) {
+  if (!BOX_DRAWING.test(text)) return text;
+  let isFenced = false;
   const out: string[] = [];
   let run: string[] = [];
-  const flush = () => (run.length && out.push("```", ...run, "```"), (run = []));
+  const flush = () => {
+    if (run.length > 0) out.push("```", ...run, "```");
+    run = [];
+  };
   for (const line of text.split("\n")) {
-    if (line.trimStart().startsWith("```")) (fenced = !fenced), flush(), out.push(line);
-    else if (!fenced && BOX.test(line)) run.push(line);
-    else flush(), out.push(line);
+    if (line.trimStart().startsWith("```")) {
+      isFenced = !isFenced;
+      flush();
+      out.push(line);
+    } else if (!isFenced && BOX_DRAWING.test(line)) run.push(line);
+    else {
+      flush();
+      out.push(line);
+    }
   }
   flush();
   return out.join("\n");
 }
 
-/** Slack's mark, in its four colours. */
 export function SlackGlyph({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" aria-label="Slack" className={cn("size-3", className)}>
@@ -99,7 +118,6 @@ export function SlackGlyph({ className }: { className?: string }) {
   );
 }
 
-/** GitHub's mark, in the text colour. */
 export function GitHubGlyph({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" aria-label="GitHub" className={cn("size-3", className)}>
