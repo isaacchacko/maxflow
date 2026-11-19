@@ -170,3 +170,4 @@ export async function deliver(s: Session) {
   await Bun.sleep(150 + Math.min(1500, text.length / 5));
   await pressEnter(tmuxName(s.id));
 }
+

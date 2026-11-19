@@ -269,3 +269,4 @@ export async function inputBox(s: Session) {
   const text = lines.slice(i, end < 0 ? undefined : end).map(plain).join("\n").replace(/^❯/, "").trim();
   return { text, empty: first.startsWith("\x1b[2m") || text === "" };
 }
+

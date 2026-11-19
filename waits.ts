@@ -140,3 +140,4 @@ export function declareWait(s: Session, kind: string, ref: string, desc?: string
   if (kind !== "done" && s.claude?.state !== "working") setArchived(s, true);
   return null;
 }
+

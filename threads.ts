@@ -199,3 +199,4 @@ export const headline = (text: string) => {
   const words = squash(text.replace(/\[image: [^\]]*\]/g, "")) || "(image)";
   return words.length > 80 ? `${words.slice(0, 79)}…` : words;
 };
+

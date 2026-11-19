@@ -95,3 +95,4 @@ export function relayRefusal(t: Thread, from: Session, text: string): string | u
     ? `This hands ${t.id} to ${otherRouter.id}, and maxflow shows hand-offs in the thread itself; ${otherRouter.id} answers him. Post what you found or did, without the hand-off, or nothing.`
     : undefined;
 }
+
