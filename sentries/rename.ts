@@ -1,12 +1,11 @@
 #!/usr/bin/env bun
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { BASE as base, STATE_DIR } from "../instance";
+import { BASE as base } from "../instance";
+import { readStateJson, stateDirectory, writeStateJson } from "../state";
 import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("rename");
 
-const STATE_FILE = join(STATE_DIR, "rename-state.json");
+const STATE_FILE = "rename-state.json";
 const INTERVAL_MS = Number(process.env["RENAME_INTERVAL"] ?? 20_000);
 const FIRST_CHARS = Number(process.env["RENAME_FIRST_CHARS"] ?? 400);
 const EVERY_CHARS = Number(process.env["RENAME_EVERY_CHARS"] ?? 4000);
@@ -32,8 +31,7 @@ function isSessionList(value: unknown): value is Session[] {
 }
 
 function readMarks() {
-  const parsed: unknown = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {};
-  return new Map(Object.entries(isMarks(parsed) ? parsed : {}));
+  return new Map(Object.entries(readStateJson(STATE_FILE, isMarks) ?? {}));
 }
 
 const marks = readMarks();
@@ -55,7 +53,7 @@ async function title(s: Session, lines: string[]) {
   const input = `Command: ${s.cmd.join(" ")}\nFolder: ${s.cwd}\nCurrent title: ${s.name}\n\nScreen:\n${screen}`;
   const proc = Bun.spawn(
     ["claude", "-p", "--model", MODEL, "--no-session-persistence", "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--system-prompt", SYSTEM],
-    { cwd: STATE_DIR, stdin: new Blob([input]), stdout: "pipe", stderr: "pipe" },
+    { cwd: stateDirectory("."), stdin: new Blob([input]), stdout: "pipe", stderr: "pipe" },
   );
   const out = (await new Response(proc.stdout).text()).trim();
   if ((await proc.exited) !== 0) throw new Error(`claude exited ${String(proc.exitCode)}: ${(await new Response(proc.stderr).text()).slice(0, 200)}`);
@@ -100,7 +98,7 @@ async function tick() {
     marks.set(s.id, mark);
     marks.set(s.id, await retitle(s, mark));
   }
-  writeFileSync(STATE_FILE, JSON.stringify(Object.fromEntries(marks)));
+  writeStateJson(STATE_FILE, Object.fromEntries(marks));
 }
 
 console.log(`rename sentry: first title after ${FIRST_CHARS} new chars, then every ${EVERY_CHARS}, via ${MODEL}`);
