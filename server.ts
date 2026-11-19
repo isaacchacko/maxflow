@@ -4,30 +4,30 @@ import { inboxesTable, slackMessagesTable, writeStateJson } from "./state";
 import { publish } from "./bus";
 import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR } from "./instance";
 import app from "./src/index.html";
-import { TMUX, flushOptions, paste, pressEnter, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
-import { type ClaudeState, type Role, type Session, type Wait, type WsData, isAgent, isSentry, sessions } from "./sessions";
+import { TMUX, flushOptions, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
+import { type Role, type Session, type Wait, type WsData, isAgent, isSentry, sessions } from "./sessions";
 import type { Feed, FeedPost, Message, Thread } from "./model";
 import { live, objectives, saveThreads, tasks, threads, threadsDirty, writeThreads } from "./stores";
-import { DEFAULT_AFTER_H, DEFAULT_AFTER_MS, VERIFIED, intro } from "./intro";
-import { SessionCap, attachViewer, createSession, derive, dispatch, endWait, funnel, live_thread, push, routersOf, screen, setArchived, setClaudeState, setWait, settleTasks, stopAgent, waitsOn, wake } from "./lifecycle";
-import { checkShells, declareWait, untilShell } from "./waits";
-import { ISAAC_IN_THREAD, ancestors, answered, headline, mentionsIn, message, pathTitle, pauseTimers, postIn, resurface, schedulePause, squash, tellMembers, unforge, unpause } from "./threads";
+import { DEFAULT_AFTER_H, DEFAULT_AFTER_MS } from "./intro";
+import { SessionCap, attachViewer, createSession, derive, dispatch, funnel, live_thread, push, routersOf, setClaudeState, setWait, settleTasks, stopAgent, wake } from "./lifecycle";
+import { checkShells } from "./waits";
+import { ISAAC_IN_THREAD, ancestors, answered, headline, mentionsIn, message, pathTitle, pauseTimers, postIn, resurface, schedulePause, tellMembers, unforge, unpause } from "./threads";
 import { DRAFTS, deliver } from "./delivery";
-import { RESYNC_MS, claudeStateChanged, resync } from "./turns";
+import { RESYNC_MS, resync } from "./turns";
 import { docsRoute } from "./docs-api";
 import { sizingRoute } from "./sizing";
 import { SENTRY_USES, built, describe, freshWorld, judged, openWorld, prStates, worldClients } from "./world";
-import { EXTERNAL_SEEN, ROUTER_BRIEF, acceptTrust, externalSeen, externalSignal, feedPosts, feedToFunnel, known, requested, reroute, sizeFirst, slackChannels, startRouter } from "./routing";
+import { EXTERNAL_SEEN, ROUTER_BRIEF, acceptTrust, externalSeen, externalSignal, feedPosts, feedToFunnel, known, reroute, sizeFirst, slackChannels, startRouter } from "./routing";
 import { handOff, mergeThread, newObjective, subthread, titleOf } from "./objectives";
 import { recordUserComment, seedUserComments } from "./events";
 import { restrictionsRoute } from "./routes-restrictions";
 import { statsTodosRoute } from "./routes-stats";
 import { tasksLinksRoute } from "./routes-tasks";
-import { touchFrom } from "./sentry-files";
 import { SENTRIES } from "./sentry-commands";
 import { BARE_AGENT_SENTRIES, FED_AGENT_SENTRIES } from "./sentry-names";
 import { miscRoute } from "./routes-misc";
 import { objectivesRoute } from "./routes-objectives";
+import { sessionRoute } from "./routes-session";
 
 const HOST = "127.0.0.1";
 function loadInbox(id: string): Pick<Session, "inbox" | "sending"> {
@@ -110,13 +110,6 @@ setInterval(() => {
 }, 15_000);
 const UPLOADS = `${STATE_DIR}/uploads`;
 for (const s of sessions.values()) if (existsSync(`${DRAFTS}/${s.id}.txt`)) s.savedDraft = readFileSync(`${DRAFTS}/${s.id}.txt`, "utf8");
-
-function setTranscript(s: Session, path: string) {
-  if (!path.endsWith(".jsonl") || path === s.transcript) return;
-  s.transcript = path;
-  s.links = undefined;
-  setOption(s.id, "@mf-transcript", path);
-}
 // Whether each PR shown in the graph is open, closed, merged or missing; one GraphQL request per repo, off the event loop.
 const PR_URL_RE = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)$/;
 async function refreshPrStates() {
@@ -141,31 +134,6 @@ async function refreshPrStates() {
   }
 }
 setInterval(() => refreshPrStates().catch(() => {}), 30_000);
-// What Isaac himself typed into the funnel: its transcript's prompts, minus every part the server stamped as from a session.
-function isaacPrompts(funnel: Session) {
-  let raw = "";
-  try { raw = readFileSync(funnel.transcript ?? "", "utf8").slice(-4_000_000); } catch { return []; }
-  return raw.split("\n").flatMap((line) => {
-    try {
-      const e = JSON.parse(line);
-      if (e.type !== "user" || e.isMeta) return [];
-      const c = e.message?.content;
-      const text = typeof c === "string" ? c : Array.isArray(c) ? c.filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n") : "";
-      return text.split(/\n(?=\[maxflow)/).filter((p) => p.trim() && !p.startsWith("[maxflow") && !p.startsWith("<")).map(squash);
-    } catch { return []; }
-  }).slice(-30);
-}
-// Text one session types into another carries its true sender; a funnel relay of Isaac's own words carries the verified stamp.
-// request: the words Isaac typed into the funnel that the relay starts with.
-function stamp(req: Request, text: string, isaac?: boolean): { text: string; request?: string } | { error: string } {
-  const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-  if (!isaac) return { text: from ? `[maxflow · from "${from.name}" (${from.id})] ${unforge(text)}` : unforge(text) };
-  if (!from || from.name !== "sentry:funnel" || !isSentry(from)) return { error: "only the funnel sentry relays Isaac's requests" };
-  const said = squash(text);
-  const request = isaacPrompts(from).findLast((p) => p && said.startsWith(p));
-  if (!request) return { error: "the message doesn't start with a request Isaac typed into the funnel, verbatim; relay it without --isaac, saying who it came from" };
-  return { text: `${VERIFIED}\n${unforge(text)}`, request };
-}
 setTimeout(() => {
   const since = Date.now() - 86_400_000;
   try {
@@ -656,131 +624,8 @@ Bun.serve<WsData>({
       introduce(a, b, why), introduce(b, a, why);
       return Response.json([describe(a), describe(b)]);
     }
-
-    const act = path.match(/^\/api\/sessions\/([\w-]+)\/(input|screen|wait|notify|state|intro|await|wake|peer)$/);
-    if (act) {
-      const s = sessions.get(act[1]);
-      if (!s) return new Response("no such session", { status: 404 });
-      if (act[2] === "intro" && req.method === "GET") return new Response(intro(s, SENTRY_USES));
-      const t = tmuxName(s.id);
-      const touch = (kind: "read" | "write", held = false) => touchFrom(req, s, kind, held);
-      if (act[2] === "input" && req.method === "POST") {
-        const body = (await req.json().catch(() => ({}))) as { text?: string; keys?: string[]; enter?: boolean; isaac?: boolean };
-        if (s.exitCode !== null) return new Response("session ended", { status: 409 });
-        // A shell gets its text as is; an agent is told who typed it.
-        const typed: ReturnType<typeof stamp> | { text?: string; request?: undefined } = body.text && isAgent(s) ? stamp(req, body.text, body.isaac) : { text: body.text };
-        if ("error" in typed) return new Response(typed.error, { status: 409 });
-        if (typed.request) requested(s, typed.request);
-        // A session or sentry sending an agent text to submit goes through its inbox like notify: typed only at an idle prompt, and
-        // delivered only once claude has it as a prompt. Typed from a plain shell, or left unsubmitted, it goes straight in.
-        const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-        const queued = !!typed.text && isAgent(s) && !!body.enter && (!!from || !!body.isaac);
-        if (typed.text && isAgent(s)) dispatch({ from, source: body.isaac ? "isaac" : undefined, to: [s], text: body.text!, ...(queued ? { deliver: typed.text } : { typed: true }) });
-        touch("write");
-        if (typed.text && !queued) await paste(t, typed.text);
-        if (body.keys?.length) await tmuxAsync("send-keys", "-t", t, ...body.keys);
-        // A TUI like claude reads text + Enter in one burst as a paste, so the submit goes separately.
-        if (body.enter && !queued) await Bun.sleep(body.text ? 150 : 0), await pressEnter(t);
-        return Response.json(describe(s));
-      }
-      // Typed by the user into an asleep agent's pane: his own words, delivered once its claude is back.
-      if (act[2] === "wake" && req.method === "POST") {
-        const body = (await req.json().catch(() => ({}))) as { text?: string };
-        if (!body.text?.trim()) return new Response("text required", { status: 400 });
-        if (s.exitCode !== null) return new Response("session ended", { status: 409 });
-        dispatch({ source: "isaac", to: [s], text: body.text.trim() });
-        return Response.json(describe(s));
-      }
-      // An agent's native SendMessage, reported by its PreToolUse hook: logged like any message. Awake, the native send goes
-      // through; asleep, it has no claude to land in, so it is queued here instead, which wakes it.
-      if (act[2] === "peer" && req.method === "POST") {
-        const body = (await req.json().catch(() => ({}))) as { text?: string };
-        const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-        if (!body.text?.trim() || !from) return new Response("text and a calling session required", { status: 400 });
-        const asleep = !!(s.archived || s.asleep) && s.exitCode === null;
-        const stamped = stamp(req, body.text.trim());
-        dispatch({ from, to: [s], text: body.text.trim(), deliver: "error" in stamped ? body.text.trim() : stamped.text, typed: !asleep });
-        if (waitsOn(s, from.id)) endWait(s);
-        touch("write");
-        return Response.json({ queued: asleep });
-      }
-      if (act[2] === "notify" && req.method === "POST") {
-        const body = (await req.json().catch(() => ({}))) as { text?: string; isaac?: boolean };
-        if (!body.text?.trim()) return new Response("text required", { status: 400 });
-        const stamped = stamp(req, body.text.trim(), body.isaac);
-        if ("error" in stamped) return new Response(stamped.error, { status: 409 });
-        if (stamped.request) requested(s, stamped.request);
-        const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-        dispatch({ from, source: body.isaac ? "isaac" : undefined, to: [s], text: body.text.trim(), deliver: stamped.text });
-        // The awaited agent's message ends the wait on it.
-        if (waitsOn(s, req.headers.get("x-maxflow-from"))) endWait(s);
-        touch("write");
-        return Response.json(describe(s), { status: 202 });
-      }
-      if (act[2] === "state" && req.method === "POST") {
-        const { state, transcript } = (await req.json().catch(() => ({}))) as { state?: string; transcript?: string };
-        if (!["working", "waiting", "idle", "gone"].includes(state ?? "")) return new Response("state must be working, waiting, idle or gone", { status: 400 });
-        if (transcript) setTranscript(s, transcript);
-        claudeStateChanged(s, state as ClaudeState | "gone");
-        return Response.json(describe(s));
-      }
-      if (act[2] === "await" && req.method === "POST") {
-        const body = (await req.json().catch(() => ({}))) as { kind?: string; ref?: string } & Parameters<typeof untilShell>[1];
-        // until starts (or finds) the shell first, and waits on it by its id.
-        const shell = body.kind === "until" && !body.ref ? untilShell(s, body) : undefined;
-        if (typeof shell === "string") return new Response(shell, { status: 409 });
-        const err = declareWait(s, body.kind ?? "", shell?.id ?? body.ref?.trim() ?? "", body.desc?.trim());
-        return err ? new Response(err, { status: 409 }) : Response.json(describe(s));
-      }
-      if (act[2] === "screen" && req.method === "GET") return touch("read"), Response.json({ ...describe(s), screen: screen(s, Number(url.searchParams.get("history") ?? 0)) });
-      if (act[2] === "wait" && req.method === "GET") {
-        const idle = Number(url.searchParams.get("idle") ?? 1500);
-        const timeout = Number(url.searchParams.get("timeout") ?? 120_000);
-        const match = url.searchParams.get("match");
-        const re = match ? new RegExp(match, "m") : null;
-        const start = Date.now();
-        touch("read", true);
-        for (;;) {
-          const text = screen(s, 0);
-          const reason = s.exitCode !== null ? "exited" : re ? (re.test(text) ? "match" : null) : Date.now() - Math.max(s.lastOutputAt, start) >= idle ? "idle" : null;
-          if (reason || Date.now() - start >= timeout) return touch("read"), Response.json({ ...describe(s), reason: reason ?? "timeout", screen: text });
-          await Bun.sleep(200);
-        }
-      }
-      return new Response("method not allowed", { status: 405 });
-    }
-
-    const one = path.match(/^\/api\/sessions\/([\w-]+)$/);
-    if (one) {
-      const s = sessions.get(one[1]);
-      if (!s) return new Response("no such session", { status: 404 });
-      if (req.method === "DELETE") {
-        publish(`session/${s.id}/killed`, { session: s.id, name: s.name });
-        sessions.delete(s.id);
-        inboxesTable.delete(s.id);
-        tmux("kill-session", "-t", tmuxName(s.id));
-        s.proc.kill();
-        for (const ws of s.clients) ws.close();
-        return new Response(null, { status: 204 });
-      }
-      if (req.method === "PATCH") {
-        const body = (await req.json().catch(() => ({}))) as { name?: string; archived?: boolean };
-        // Archiving is the user's, from the browser; an agent that finishes runs `wait done` and stays awake.
-        if (body.archived === true && !req.headers.get("user-agent")?.includes("Mozilla"))
-          return new Response(`agents don't archive themselves: run \`${CLI} wait done\` (or wait <kind>:<ref>) and end your turn`, { status: 403 });
-        if (typeof body.archived === "boolean") {
-          setArchived(s, body.archived);
-          // Unarchived by hand, a sleeping agent is awake until its next turn ends; only the awaited event ends its wait.
-          if (!body.archived) wake(s);
-        }
-        if (body.name?.trim()) {
-          touchFrom(req, s, "write");
-          s.name = body.name.trim().slice(0, 80);
-          setOption(s.id, "@mf", JSON.stringify({ name: s.name, cmd: s.cmd, cwd: s.cwd, chatId: s.chatId, createdAt: s.createdAt }));
-        }
-      }
-      return Response.json(describe(s));
-    }
+    const sessionRouteAnswer = await sessionRoute(req, url, path);
+    if (sessionRouteAnswer) return sessionRouteAnswer;
 
     // The built-in mock, or real work kept out of the public repo, for showing the UI without a fleet.
     if (path === "/mock.local.json") {
