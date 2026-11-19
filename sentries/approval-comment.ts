@@ -1,10 +1,9 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "../shared/guards";
-import { STATE_DIR } from "../instance";
+import { hasState, listState, readStateJson, stateDirectory } from "../state";
 
-export const COMMENT_SWITCH = join(STATE_DIR, "approval-comment");
-const OUT_DIR = join(STATE_DIR, "approval");
+export const isCommentingOn = () => hasState("approval-comment");
+const OUT_NAME = "approval";
 const MODEL = "claude-sonnet-5-5";
 const WRITE_TIMEOUT_MS = 5 * 60_000;
 
@@ -40,20 +39,12 @@ type ReviewedHead = Reviewed & { reviews: NonNullable<Reviewed["reviews"]> };
 
 const isReviewedHead = (h: unknown): h is ReviewedHead => isRecord(h) && h["status"] === "done" && Array.isArray(h["reviews"]) && h["reviews"].length > 0;
 
-function readHead(path: string): unknown {
-  try {
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
 export function history(key: string): ReviewedHead[] {
-  const dir = join(OUT_DIR, key.replaceAll(/[/#]/g, "_"));
-  const files = existsSync(dir) ? readdirSync(dir) : [];
-  return files
+  const dir = join(OUT_NAME, key.replaceAll(/[/#]/g, "_"));
+  return listState(dir)
+    .map(({ name }) => name)
     .filter((f) => f.endsWith(".json"))
-    .map((f) => readHead(join(dir, f)))
+    .map((f) => readStateJson(join(dir, f)))
     .filter(isReviewedHead)
     .toSorted((a, b) => (a.finished ?? 0) - (b.finished ?? 0));
 }
@@ -97,9 +88,10 @@ export async function compose(key: string, title: string): Promise<string | null
   const heads = history(key);
   const last = heads.at(-1);
   if (last === undefined) return null;
-  const env = { ...process.env, GH_CONFIG_DIR: join(OUT_DIR, "no-gh"), GH_TOKEN: "", GITHUB_TOKEN: "", MAXFLOW_SESSION: "" };
+  const outDir = stateDirectory(OUT_NAME);
+  const env = { ...process.env, GH_CONFIG_DIR: join(outDir, "no-gh"), GH_TOKEN: "", GITHUB_TOKEN: "", MAXFLOW_SESSION: "" };
   const proc = Bun.spawn(["claude", "-p", facts(title, last, heads.slice(0, -1)), "--model", MODEL, "--output-format", "json", "--system-prompt", BRIEF,
-    "--tools", ""], { cwd: OUT_DIR, env, stdout: "pipe", stderr: "pipe" });
+    "--tools", ""], { cwd: outDir, env, stdout: "pipe", stderr: "pipe" });
   const timer = setTimeout(() => proc.kill(), WRITE_TIMEOUT_MS);
   const out = await new Response(proc.stdout).text();
   clearTimeout(timer);

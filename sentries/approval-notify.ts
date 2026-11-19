@@ -1,14 +1,12 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { STATE_DIR } from "../instance";
 import { isRecord } from "../shared/guards";
-import { appendStateText, readStateJson, removeState, writeStateJson } from "../state";
+import { appendStateText, didClaimState, hasState, listState, readStateJson, removeState, stateDirectory, writeStateJson } from "../state";
 
 const STATE_FILE = "approval-notified.json";
 const BOARD_FILE = "review-board.json";
 const HELD = "Held: tier 3, waiting on Isaac";
 const CLAIMS_NAME = "approval-claims";
-const CLAIMS = join(STATE_DIR, CLAIMS_NAME);
 const MAX_BACKOFF_MS = 30 * 60_000;
 const BACKOFF_MS = [60_000, 5 * 60_000, 15 * 60_000, MAX_BACKOFF_MS];
 const SEND_TIMEOUT_MS = 30_000;
@@ -39,25 +37,20 @@ const note = (line: string) => {
   appendStateText("approval-notify.log", `${new Date().toISOString()}  ${line}\n`);
 };
 const claimName = (n: Note) => tag(n).replaceAll(/[^\w@.-]/g, "_");
-const claimFile = (n: Note) => join(CLAIMS, claimName(n));
+const claimFile = (n: Note) => join(CLAIMS_NAME, claimName(n));
 
 function isClaimWon(n: Note) {
-  mkdirSync(CLAIMS, { recursive: true });
-  try {
-    closeSync(openSync(claimFile(n), "wx"));
-    return true;
-  } catch {
-    return false;
-  }
+  stateDirectory(CLAIMS_NAME);
+  return didClaimState(claimFile(n));
 }
 
-const sentLastHour = () => (existsSync(CLAIMS) ? readdirSync(CLAIMS).filter((f) => Date.now() - statSync(join(CLAIMS, f)).mtimeMs < HOUR_MS).length : 0);
+const sentLastHour = () => listState(CLAIMS_NAME).filter(({ modifiedAt }) => Date.now() - modifiedAt < HOUR_MS).length;
 const wasSent = (n: Note) => sent.sent[tag(n)] !== undefined;
 
 export const config = () => readJson("approval-notify.json", {}, isConfig);
 
 export function enqueue(n: Note) {
-  if (wasSent(n) || existsSync(claimFile(n)) || sent.queue.some((q) => tag(q) === tag(n))) return;
+  if (wasSent(n) || hasState(claimFile(n)) || sent.queue.some((q) => tag(q) === tag(n))) return;
   sent.queue = [...sent.queue.filter((q) => q.pr !== n.pr), n];
   save();
 }
@@ -123,7 +116,7 @@ function logUnsent() {
 }
 
 function backOff(n: Note, detail: string) {
-  removeState(join(CLAIMS_NAME, claimName(n)));
+  removeState(claimFile(n));
   sent.retryAt = Date.now() + (BACKOFF_MS[Math.min(sent.failures, BACKOFF_MS.length - 1)] ?? MAX_BACKOFF_MS);
   sent.failures += 1;
   note(`failed ${tag(n)}: ${detail}; retrying after ${new Date(sent.retryAt).toISOString()}`);

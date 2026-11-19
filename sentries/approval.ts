@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ciStateOf, fetchSessions, readStatus, repoOf, run, type Pr } from "../gh";
-import { BASE, STATE_DIR } from "../instance";
+import { BASE } from "../instance";
 import { isRecord } from "../shared/guards";
-import { appendStateText, readStateJson, writeStateJson } from "../state";
-import { compose, COMMENT_SWITCH, post, type Posted } from "./approval-comment";
+import { appendStateText, hasState, readStateJson, stateDirectory, writeStateJson } from "../state";
+import { compose, isCommentingOn, post, type Posted } from "./approval-comment";
 import { config, enqueue, flush, type Note } from "./approval-notify";
 import { runReview, type Lens, type LensReview, type Reviewing } from "./approval-review";
 import { changesOf, isFastLane, isReviewableCode, signalsOf, tierOf, type FastLane, type Scored, type Signals } from "./approval-score";
@@ -16,9 +16,9 @@ if (import.meta.main) takeOver("approval");
 
 const STATE_FILE = "approval-state.json";
 const OUT_NAME = "approval";
-const OUT_DIR = join(STATE_DIR, OUT_NAME);
+const OUT_DIR = stateDirectory(OUT_NAME);
 const SCRATCH_DIR = join(tmpdir(), "maxflow-approval");
-const WRITE_SWITCH = join(STATE_DIR, "approval-write");
+const WRITE_SWITCH = "approval-write";
 const TICK_MS = Number(process.env["APPROVAL_TICK_MS"] ?? 2 * 60_000);
 const MAX_REVIEWS = 2;
 const DRAFT_RECHECK_MS = 30 * 60_000;
@@ -154,7 +154,7 @@ function logEntry(key: string, h: Head) {
 
 function record(key: string, h: Head) {
   const prDir = key.replaceAll(/[/#]/g, "_");
-  mkdirSync(join(OUT_DIR, prDir), { recursive: true });
+  stateDirectory(join(OUT_NAME, prDir));
   writeStateJson(join(OUT_NAME, prDir, `${h.sha}.json`), h);
   appendStateText("approval-log.md", logEntry(key, h));
 }
@@ -232,8 +232,7 @@ async function reviewHead(key: string, h: Head, { dir, pr, body, clone, ref }: C
   save();
   const reviews: LensReview[] = [];
   Object.assign(h, { reviews });
-  const ghlessDir = join(OUT_DIR, "no-gh");
-  mkdirSync(ghlessDir, { recursive: true });
+  const ghlessDir = stateDirectory(join(OUT_NAME, "no-gh"));
   await reviewInTurn({ dir, pr, body, key, head: h, scored, ghlessDir }, lenses, reviews);
 }
 
@@ -268,7 +267,7 @@ function commentOutcome(posted: Posted | null, body: string | null) {
 }
 
 async function comment(key: string, h: Head) {
-  if (state.comments[key]?.sha === h.sha || commenting.has(key) || !existsSync(COMMENT_SWITCH)) return;
+  if (state.comments[key]?.sha === h.sha || commenting.has(key) || !isCommentingOn()) return;
   commenting.add(key);
   try {
     const body = await compose(key, h.title);
@@ -326,7 +325,7 @@ function actOnReviewed(live: Map<string, string>) {
     if (isPassed(h)) {
       enqueue(note(key, h));
       void comment(key, h);
-    } else if (h.handed === undefined && existsSync(WRITE_SWITCH)) {
+    } else if (h.handed === undefined && hasState(WRITE_SWITCH)) {
       void handBackAndSave(key, h);
     }
   }
@@ -341,8 +340,7 @@ function tick() {
   void flush((n) => live.get(n.pr) === n.sha);
 }
 
-mkdirSync(OUT_DIR, { recursive: true });
-const mode = existsSync(WRITE_SWITCH) ? "handing findings to the PRs' agents" : `shadow mode (touch ${WRITE_SWITCH} to act)`;
+const mode = hasState(WRITE_SWITCH) ? "handing findings to the PRs' agents" : `shadow mode (touch ${join(dirname(OUT_DIR), WRITE_SWITCH)} to act)`;
 log(`approval sentry up as ${me || "?"}; ${mode}; notifier ${(config().url ?? "") === "" ? "shadow (no url)" : "sending"}`);
 tick();
 setInterval(tick, TICK_MS);
