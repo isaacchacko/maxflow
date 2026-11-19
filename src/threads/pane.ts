@@ -1,49 +1,65 @@
+import { isRecord } from "../../shared/guards";
+import { hasText } from "@/lib/utils";
 import { createStore } from "@/store";
 import { focusRegion } from "./region";
 
-// Slack's side pane: one thread open beside the page, shift-clicked from anywhere. It belongs to the page it was opened on: going
-// back to that page (Esc, ←, Back, h) opens it again, as Forward does, and closing it there forgets it. Its width is kept too.
-
 const WIDTH = "yarn-pane-width";
 const BY_PAGE = "yarn-pane-by-page";
+const DEFAULT_WIDTH = 480;
 export const paneStore = createStore<string | undefined>(undefined);
 
-const byPage: Record<string, string> = (() => {
+function readPanesByPage() {
   try {
-    return JSON.parse(sessionStorage.getItem(BY_PAGE) ?? "{}");
+    const parsed: unknown = JSON.parse(sessionStorage.getItem(BY_PAGE) ?? "{}");
+    const entries = isRecord(parsed) ? Object.entries(parsed) : [];
+    return new Map(entries.filter((entry): entry is [string, string] => typeof entry[1] === "string"));
   } catch {
-    return {};
+    return new Map<string, string>();
   }
-})();
-const page = () => location.hash.slice(1) || "inbox";
-function remember(id: string | undefined) {
-  if (id) byPage[page()] = id;
-  else delete byPage[page()];
-  try {
-    sessionStorage.setItem(BY_PAGE, JSON.stringify(byPage));
-  } catch {}
 }
 
-// Opening puts him in it, so Esc closes it at once; closing puts him back on the page.
-function show(id: string | undefined) {
-  if (id !== paneStore.get()) focusRegion(id ? "pane" : "main");
+const paneOpenOnPage = readPanesByPage();
+const page = () => location.hash.slice(1) || "inbox";
+
+function remember(id: string | undefined) {
+  if (hasText(id)) paneOpenOnPage.set(page(), id);
+  else paneOpenOnPage.delete(page());
+  try {
+    sessionStorage.setItem(BY_PAGE, JSON.stringify(Object.fromEntries(paneOpenOnPage)));
+  } catch {
+    // constraint: sessionStorage throws in a private window or on a full quota; the pane is still remembered in memory
+  }
+}
+
+function showAndFocus(id: string | undefined) {
+  if (id !== paneStore.get()) focusRegion(hasText(id) ? "pane" : "main");
   paneStore.set(id);
 }
-export const openPane = (threadId: string) => (remember(threadId), show(threadId));
-export const closePane = () => (remember(undefined), show(undefined));
-/** The page changed: its own pane, if it had one open, or none. */
-export const restorePane = () => show(byPage[page()]);
+
+export const openPane = (threadId: string) => {
+  remember(threadId);
+  showAndFocus(threadId);
+};
+export const closePane = () => {
+  remember(undefined);
+  showAndFocus(undefined);
+};
+export const restorePane = () => showAndFocus(paneOpenOnPage.get(page()));
 restorePane();
 
 export function paneWidth() {
   try {
-    return Number(localStorage.getItem(WIDTH)) || 480;
+    const stored = Number(localStorage.getItem(WIDTH));
+    return stored === 0 || Number.isNaN(stored) ? DEFAULT_WIDTH : stored;
   } catch {
-    return 480;
+    return DEFAULT_WIDTH;
   }
 }
+
 export function savePaneWidth(w: number) {
   try {
     localStorage.setItem(WIDTH, String(Math.round(w)));
-  } catch {}
+  } catch {
+    // constraint: localStorage throws in a private window or on a full quota; the width then lasts only this page load
+  }
 }
