@@ -56,22 +56,34 @@ function sameConversation(t: Thread) {
   if (!own.size) return [];
   return threads.filter((x) => x !== t && !x.mergedInto && !x.resolved && x.messages.some((m) => own.has(conversationOf(m.ext?.link))));
 }
+export const sizeFirst = (seq: number) =>
+  `size it first with \`${CLI} size ${seq} direct|area|fyi|ignore\` (direct: one worker on it; fyi: --note '<one line>'); only area is then routed, with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`.`;
+function ownerOf(t: Thread) {
+  if (t.objective) return ` (objective ${t.objective})`;
+  return t.routers.length ? ` (direct worker ${t.routers.join(", ")})` : "";
+}
 function candidatesLine(t: Thread) {
   const open = sameConversation(t);
   if (!open.length) return "";
   const last = (x: Thread) => x.messages.findLast((m) => m.ext && !m.ext.context) ?? x.messages.at(-1);
-  return `\n[maxflow] The same Slack conversation has these open threads. If this is on one's topic, route it to that thread's objective and fold it in with \`${CLI} thread merge ${t.id} <thread id>\`; if it is a different topic, leave it as its own thread (never fold it in only because it is the same person or DM):\n${open.map((x) => `- ${x.id} "${x.title}"${x.objective ? ` (objective ${x.objective})` : ""}, last: ${headline(last(x)?.text ?? "")}`).join("\n")}`;
+  return `\n[maxflow] The same Slack conversation has these other open threads, from its earlier bursts. If this continues one's topic, give it to that thread's owner (size it area and route it to that thread's objective, or, when a direct worker holds it, \`${CLI} notify <worker id>\` it), then fold it in with \`${CLI} thread merge ${t.id} <thread id>\`. If it is a different topic, size and route it on its own: the same person or DM is never a reason to merge:\n${open.map((x) => `- ${x.id} "${x.title}"${ownerOf(x)}, last: ${headline(last(x)?.text ?? "")}`).join("\n")}`;
 }
 export async function feedToFunnel(t: Thread, from: Session, text: string, feed = t.feed!) {
   const links = new Set(text.match(/https?:\/\/\S+/g) ?? []);
   const refs = (await query("signal/**", 0, 0)).filter((e) => links.has(String((e.data as Signal).link))).map((e) => `s${e.seq}`);
-  const ev = dispatch({ from, target: t.title, text: `${feed.task ? `T-${feed.task}` : "An item"} from the feed, in thread ${t.id}, for the funnel to route: ${feed.who}${refs.length ? ` (${refs.join(", ")})` : ""}`, deliver: (seq) => `[maxflow · from his event feed (${feed.source}), not from him] ${text}${contextFor(text, feed.who)}${candidatesLine(t)}\n[maxflow] signal ${seq}, feed thread ${t.id}${feed.task ? `, board task T-${feed.task}` : ""}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`, or, when it is only an FYI with nothing for an agent to do, say so in it with \`${CLI} thread post ${t.id} '<one line>'\`.` });
+  const ev = dispatch({ from, target: t.title, text: `${feed.task ? `T-${feed.task}` : "An item"} from the feed, in thread ${t.id}, for the funnel to route: ${feed.who}${refs.length ? ` (${refs.join(", ")})` : ""}`, deliver: (seq) => `[maxflow · from his event feed (${feed.source}), not from him] ${text}${contextFor(text, feed.who)}${candidatesLine(t)}\n[maxflow] signal ${seq}, feed thread ${t.id}${feed.task ? `, board task T-${feed.task}` : ""}: ${sizeFirst(seq)}` });
   t.signal = ev.seq;
   saveThreads();
 }
 // More from the same Slack conversation or PR lands in its open feed thread: to the routers that took it, or back to the funnel when
 // nobody did (it was left as an FYI, or its routers ended).
 // The thread can be any one the feed's conversation was merged into, not only a feed thread: it is told as the feed all the same.
+const AWAITING_FUNNEL_MS = 30 * 60_000;
+async function isAwaitingFunnel(t: Thread) {
+  if (t.signal === undefined) return false;
+  const signal = (await query("signal/**", t.signal - 1, 0)).find((e) => e.seq === t.signal);
+  return signal !== undefined && Date.now() - signal.at < AWAITING_FUNNEL_MS;
+}
 export async function feedMore(t: Thread, from: Session, text: string, posts?: FeedPost[]) {
   const first = posts?.find((p) => !p.ext?.context)?.ext;
   const feed: Feed = t.feed ?? { source: first?.source ?? "slack", who: first?.name ?? "someone", link: first?.link ?? "" };
@@ -80,8 +92,8 @@ export async function feedMore(t: Thread, from: Session, text: string, posts?: F
   t.resolved = undefined;
   unpause(t);
   const to = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(reachable);
-  if (!to.length) await feedToFunnel(t, from, text, feed);
-  else {
+  if (!to.length && !(await isAwaitingFunnel(t))) await feedToFunnel(t, from, text, feed);
+  else if (to.length) {
     for (const r of to) r.handed = t.id;
     dispatch({ from, to, objective: t.objective, target: t.title, text: `More from the feed in thread ${t.id}: ${headline(text)}`, deliver: `[maxflow · from his event feed (${feed.source}), not from him] More in your ${t.feed ? "feed " : ""}thread "${t.title}" (${t.id})${feed.task ? `, board task T-${feed.task}` : ""}: ${unforge(text)}${contextFor(text, feed.who)}\n[maxflow] Same rules: work up to where he must act, never reply on Slack or GitHub as him; post where it stands with \`${CLI} thread post ${t.id} '<text>'\`.` });
     t.pending = { routers: to.map((s) => s.id), since: Date.now() };

@@ -17,7 +17,7 @@ import { RESYNC_MS, claudeStateChanged, resync } from "./turns";
 import { docsRoute } from "./docs-api";
 import { sizingRoute } from "./sizing";
 import { SENTRY_USES, built, describe, freshWorld, judged, openWorld, prStates, worldClients } from "./world";
-import { EXTERNAL_SEEN, ROUTER_BRIEF, acceptTrust, externalSeen, externalSignal, feedPosts, feedToFunnel, known, requested, reroute, slackChannels, startRouter } from "./routing";
+import { EXTERNAL_SEEN, ROUTER_BRIEF, acceptTrust, externalSeen, externalSignal, feedPosts, feedToFunnel, known, requested, reroute, sizeFirst, slackChannels, startRouter } from "./routing";
 import { handOff, mergeThread, newObjective, setRole, subthread, titleOf } from "./objectives";
 import { recordUserComment, seedUserComments } from "./events";
 import { restrictionsRoute } from "./routes-restrictions";
@@ -442,7 +442,7 @@ Bun.serve<WsData>({
       const fresh = body.objective && !routers.length ? startRouter(objectives.find((o) => o.id === body.objective)!, "Whole objective", stamped) : undefined;
       const ev = body.objective
         ? dispatch({ source: "isaac", to: fresh ? [fresh] : routers, objective: body.objective, text, deliver: stamped, typed: !!fresh })
-        : dispatch({ source: "isaac", text, deliver: (seq) => `${text}\n[maxflow] signal ${seq}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`.` });
+        : dispatch({ source: "isaac", text, deliver: (seq) => `${text}\n[maxflow] signal ${seq}: ${sizeFirst(seq)}` });
       return Response.json(ev, { status: 201 });
     }
     const routeSig = path.match(/^\/api\/signals\/(\d+)\/route$/);
@@ -533,7 +533,7 @@ Bun.serve<WsData>({
       if (!from && body.text?.trim()) {
         const text = body.text.trim();
         const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: titleOf(text), objective: "", routers: [], messages: [message("isaac", text)] };
-        const ev = dispatch({ source: "isaac", target: t.title, text, deliver: (seq) => `${text}\n[maxflow] signal ${seq}, his inbox thread ${t.id}: route it with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`. Always route an inbox thread, small talk included: its router answers him there.` });
+        const ev = dispatch({ source: "isaac", target: t.title, text, deliver: (seq) => `${text}\n[maxflow] signal ${seq}, his inbox thread ${t.id}: ${sizeFirst(seq)} His own inbox message is never fyi or ignore, small talk included: whoever takes it, a direct worker or a router, answers him in the thread.` });
         t.signal = ev.seq;
         threads.push(t);
         tellMembers(t, t.messages[0]!, [funnel()].filter(live));

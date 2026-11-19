@@ -37,6 +37,7 @@ export type State = {
   batch: Routed[];
   batchAt: number;
   feedThreads: Record<string, string>;
+  dmBursts: Record<string, { start: number; last: number }>;
   convo: Record<string, Said[]>;
   ctxSent: Record<string, number>;
   prsAt: number;
@@ -57,6 +58,7 @@ export const state: State = {
   batch: [],
   batchAt: 0,
   feedThreads: {},
+  dmBursts: {},
   convo: {},
   ctxSent: {},
   prsAt: 0,

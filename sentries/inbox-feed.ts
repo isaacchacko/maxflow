@@ -62,9 +62,20 @@ function inboxPosts(first: Routed, items: Routed[], before: Said[]) {
 }
 
 const PR_LINK = /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/gi;
-const DAY_FORMAT = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" });
-const dmDayKey = (i: Routed) => (/^[DG]\w+$/.test(i.key) ? [`${i.key}@${DAY_FORMAT.format(i.at ?? Date.now())}`] : []);
-const feedKeysOf = (i: Routed) => [i.key, ...dmDayKey(i), ...i.text.matchAll(PR_LINK).map((m) => `${m[1] ?? ""}#${m[2] ?? ""}`.toLowerCase())];
+const BURST_GAP_MS = Number(process.env["INBOX_BURST_GAP_MS"] ?? 15 * 60_000);
+
+function burstStartOf(key: string, at: number) {
+  const burst = state.dmBursts[key];
+  if (burst && at >= burst.start && at - burst.last <= BURST_GAP_MS) {
+    burst.last = Math.max(burst.last, at);
+    return burst.start;
+  }
+  state.dmBursts[key] = { start: at, last: at };
+  return at;
+}
+
+const dmBurstKey = (i: Routed) => (/^[DG]\w+$/.test(i.key) ? [`${i.key}@${String(burstStartOf(i.key, i.at ?? Date.now()))}`] : []);
+const feedKeysOf = (i: Routed) => [i.key, ...dmBurstKey(i), ...i.text.matchAll(PR_LINK).map((m) => `${m[1] ?? ""}#${m[2] ?? ""}`.toLowerCase())];
 const isSingleTopicKey = (key: string) => !/^[CDG]\w+$/.test(key);
 
 function liveThread(threads: FeedThread[], id: string | undefined): FeedThread | undefined {
