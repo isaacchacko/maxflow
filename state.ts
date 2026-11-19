@@ -214,7 +214,7 @@ export const deployLock = {
   },
 };
 
-export const stateExists = (name: string) => existsSync(stateFile(name));
+export const hasState = (name: string) => existsSync(stateFile(name));
 
 export function listState(directory: string): { name: string; modifiedAt: number }[] {
   const path = stateFile(directory);
@@ -222,7 +222,7 @@ export function listState(directory: string): { name: string; modifiedAt: number
   return readdirSync(path).map((name) => ({ name, modifiedAt: statSync(join(path, name)).mtimeMs }));
 }
 
-export function claimState(name: string): boolean {
+export function didClaimState(name: string): boolean {
   try {
     closeSync(openSync(stateFile(name), "wx"));
     return true;
