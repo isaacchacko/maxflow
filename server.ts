@@ -23,6 +23,7 @@ import { ISAAC_IN_THREAD, ancestors, answered, ask, enforcing, headline, mention
 import { DRAFTS, deliver } from "./delivery";
 import { RESYNC_MS, claudeStateChanged, resync } from "./turns";
 import { docsRoute } from "./docs-api";
+import { sizingRoute } from "./sizing";
 import { ARCHIVED_LINKS, SENTRY_USES, archivedLinks, built, describe, freshWorld, judged, openWorld, prStates, worldClients } from "./world";
 import { EXTERNAL_SEEN, ROUTER_BRIEF, acceptTrust, externalSeen, externalSignal, feedMore, feedPosts, feedToFunnel, known, requested, reroute, slackChannels, startRouter } from "./routing";
 import { handOff, mergeThread, newObjective, pointsAtItself, relayRefusal, setRole, subthread, titleOf } from "./objectives";
@@ -72,7 +73,7 @@ adoptSessions();
 
 // Sentries are ordinary sessions, started once and kept by tmux across server restarts.
 const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  ["gh", "slack", "rename", ...(LIVE ? ["health"] : []), "graph", "ram", "inbox", "approval", "docs", "jev"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
+  ["gh", "slack", "rename", ...(LIVE ? ["health"] : []), "graph", "ram", "inbox", "approval", "docs"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
 );
 // The review sentry is a claude agent; its feed runs beside it, logging out of the way of its screen.
 const reviewSource = (f: string) => new URL(`./sentries/${f}`, import.meta.url).pathname;
@@ -476,6 +477,8 @@ Bun.serve<WsData>({
     if (path === "/api/instance") return Response.json({ instance: INSTANCE || "live", port: PORT, pid: process.pid });
     const docs = await docsRoute(req, url);
     if (docs) return docs;
+    const sized = await sizingRoute(req, url);
+    if (sized) return sized;
     if (path === "/api/sessions" && req.method === "GET") return Response.json([...sessions.values()].map((s) => describe(s)));
     if (path === "/api/sessions" && req.method === "POST") {
       const body = (await req.json().catch(() => ({}))) as { name?: string; cmd?: string[] | string; cwd?: string; role?: "router" | "worker"; parent?: string; objective?: string; scope?: string };

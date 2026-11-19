@@ -11,9 +11,7 @@ import { VERIFIED } from "./intro";
 import { createSession, dispatch, editTask, enqueue, newestTaskOf, reachable, routersOf, screen } from "./lifecycle";
 import { headline, mentionsIn, message, unforge, unpause } from "./threads";
 
-// A signal routed after the fact, by the funnel naming its objective; the log keeps both. An objective with no router yet
-// gets one, started with the signal as its first prompt.
-export async function reroute(seq: number, o: Objective) {
+export async function handoff(seq: number) {
   const e = (await query("signal/**", seq - 1, 0)).find((x) => x.seq === seq);
   if (!e) return null;
   const sig = e.data as Signal;
@@ -25,6 +23,14 @@ export async function reroute(seq: number, o: Objective) {
     (feed ? `\n[maxflow] maxflow took this up by itself, from what reached him (${feed.link}). Do the work up to the point where he must act: look it up, fix it, open the PR, and draft any reply for him. Never reply on Slack or GitHub as him and never write to prod; his go-ahead comes in the thread. Post what you started and where it stands in thread ${thread!.id}, which shows in his inbox flagged as from the feed (when \`thread read\` shows it was merged into another thread, that one already tells him: post only what is new, and nothing at all when there is nothing to do)${feed.task ? `; board task T-${feed.task} is yours` : ""}. If he says stop there, stop.${contextFor(said, feed.who)}` : "") +
     (thread ? `\n[maxflow] He wrote this in his inbox as thread "${thread.title}" (${thread.id}), which is yours now. Answer him there with \`${CLI} thread post ${thread.id} '<text>'\`.` : "") +
     mentionsIn(said);
+  return { seq, sig, text, thread, feed };
+}
+// A signal routed after the fact, by the funnel naming its objective; the log keeps both. An objective with no router yet
+// gets one, started with the signal as its first prompt.
+export async function reroute(seq: number, o: Objective) {
+  const h = await handoff(seq);
+  if (!h) return null;
+  const { sig, text, thread, feed } = h;
   const to = routersOf(o.id);
   if (to.length) for (const s of to) enqueue(s, text);
   else to.push(startRouter(o, "Whole objective", text));

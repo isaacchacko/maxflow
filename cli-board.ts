@@ -144,10 +144,25 @@ export const boardVerbs: Verb[] = [
   { matches: (verb, args) => verb === "task" && hasArg(args, 0), run: editTask },
 ];
 
+async function sizeSignal(args: string[]) {
+  const body = { size: argAt(args, 1), cwd: flag(args, "--cwd"), name: flag(args, "--name"), note: flag(args, "--note"), about: flag(args, "--about") };
+  const r = replyOf(await post(`/api/signals/${argAt(args, 0)}/size`, body));
+  const made = isBlank(str(r, "session")) ? "" : `, worker ${str(r, "session")}`;
+  console.log(`signal ${argAt(args, 0)} sized ${str(r, "size")}${made}${isBlank(str(r, "noted")) ? "" : `, noted in ${str(r, "noted")}`}`);
+}
+
+async function promote(args: string[]) {
+  if (isBlank(mySession())) fail("promote works only inside a maxflow agent");
+  const r = replyOf(await post("/api/promote", { title: positional(args, []).join(" ") }));
+  console.log(`you are now the router of objective ${str(r, "objective")}. Read your brief, ${str(r, "brief")}, before you go on.`);
+}
+
 export const objectiveVerbs: Verb[] = [
   { matches: (verb) => verb === "objectives", run: listObjectives },
   { matches: (verb, args) => verb === "objective" && args[0] === "new" && hasArg(args, 1), run: newObjective },
   { matches: (verb, args) => verb === "objective" && args[0] === "merge" && hasArg(args, 2), run: mergeObjective },
   { matches: (verb, args) => verb === "route" && hasArg(args, 1), run: routeSignal },
+  { matches: (verb, args) => verb === "size" && hasArg(args, 1), run: sizeSignal },
+  { matches: (verb, args) => verb === "promote" && hasArg(args, 0), run: promote },
   { matches: (verb, args) => verb === "page" && (args[0] === "put" || args[0] === "rm") && hasArg(args, 2), run: editPage },
 ];

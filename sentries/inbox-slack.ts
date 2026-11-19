@@ -6,6 +6,7 @@ import { splitTarget } from "../slack-read";
 import { isRecord } from "../shared/guards";
 import { closeTask, getTasks, isOpen, log, onBoard, post, run, shortened, stringField, type Task } from "./inbox-board";
 import { feed, remember } from "./inbox-feed";
+import { isBareAck, noteFyi } from "./inbox-fyi";
 import { slackNamesById, state } from "./inbox-state";
 import { fetchSessions, isSession } from "./slack-sessions";
 
@@ -156,6 +157,12 @@ async function putReplyOnBoard(event: SlackEvent, incoming: Incoming, where: str
   return onBoard(key, link, note, { title: `Reply to ${who} in ${where}: "${shortened(text, 50)}"`, status: "you" });
 }
 
+async function boardUnlessAck(event: SlackEvent, incoming: Incoming, where: string, owner: string | null) {
+  if (owner !== null || !isBareAck(event.text)) return putReplyOnBoard(event, incoming, where, owner);
+  await noteFyi(`${event.from ?? "?"} in ${where}: "${incoming.text}"`, event.link);
+  return null;
+}
+
 async function onPersonMessage(event: SlackEvent, incoming: Incoming) {
   const { key, kind, text, me } = incoming;
   const who = event.from ?? "?";
@@ -165,7 +172,7 @@ async function onPersonMessage(event: SlackEvent, incoming: Incoming) {
     log(`skipped ${event.link}: the user already reacted`);
     return;
   }
-  const task = await putReplyOnBoard(event, incoming, where, owner);
+  const task = await boardUnlessAck(event, incoming, where, owner);
   if (task !== null) state.open[event.ts] = key;
   if (text.includes("?")) state.questions[event.ts] = { key, at: Date.now(), who, text, link: event.link };
   if (owner !== null || task === null || kind === "reply") return;

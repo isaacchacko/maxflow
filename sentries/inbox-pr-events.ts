@@ -1,6 +1,7 @@
 import { isRecord } from "../shared/guards";
 import { closeTask, dig, log, onBoard, repoAndNumber, run, shortened, stringField } from "./inbox-board";
 import { feed, remember } from "./inbox-feed";
+import { isBareAck, noteFyi } from "./inbox-fyi";
 import { GITHUB_BOT_LOGIN } from "./inbox-github";
 import { state } from "./inbox-state";
 
@@ -80,12 +81,19 @@ function rememberComment(key: string, event: PrEvent, who: string) {
   remember(key, { at: Date.now(), who: isHis ? "Isaac" : who, text: shortened(event.body ?? "", 600), mine: isHis, user: event.author, raw: event.body, link: event.url });
 }
 
+const isAckOnly = (kind: string, reviewState: string, body: string) => (body.trim() === "" ? kind === "review" && reviewState !== "changes requested" : isBareAck(body));
+const noteAck = async (key: string, what: string, body: string, link: string) => noteFyi(`${what}${body.trim() === "" ? "" : `: "${body.trim()}"`} on ${repoAndNumber(key)}`, link);
+
 async function notePersonEvent(key: string, person: PersonEvent) {
   const { kind, event, who, url, isMine } = person;
   const reviewState = String(event.state).toLowerCase().replace("_", " ");
   const path = event.path ?? "";
   const body = event.body ?? "";
   const what = kind === "review" ? `${who} reviewed (${reviewState})` : `${who} commented${path === "" ? "" : ` on ${path}`}`;
+  if (isAckOnly(kind, reviewState, body)) {
+    await noteAck(key, what, body, event.url ?? url);
+    return;
+  }
   const task = await onBoard(key, url, `${what}: "${shortened(body, 120)}"`, { title: `${what} on ${repoAndNumber(key)}`, ...(!isMine && { status: "you" }) });
   if (task === null) return;
   const verdict = kind === "review" ? `**${reviewState}**${body === "" ? "" : "\n\n"}` : "";

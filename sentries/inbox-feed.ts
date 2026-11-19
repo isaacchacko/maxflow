@@ -62,7 +62,9 @@ function inboxPosts(first: Routed, items: Routed[], before: Said[]) {
 }
 
 const PR_LINK = /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/gi;
-const feedKeysOf = (i: Routed) => [i.key, ...i.text.matchAll(PR_LINK).map((m) => `${m[1] ?? ""}#${m[2] ?? ""}`.toLowerCase())];
+const DAY_FORMAT = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" });
+const dmDayKey = (i: Routed) => (/^[DG]\w+$/.test(i.key) ? [`${i.key}@${DAY_FORMAT.format(i.at ?? Date.now())}`] : []);
+const feedKeysOf = (i: Routed) => [i.key, ...dmDayKey(i), ...i.text.matchAll(PR_LINK).map((m) => `${m[1] ?? ""}#${m[2] ?? ""}`.toLowerCase())];
 const isSingleTopicKey = (key: string) => !/^[CDG]\w+$/.test(key);
 
 function liveThread(threads: FeedThread[], id: string | undefined): FeedThread | undefined {
