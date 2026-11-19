@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // constraint: happy-dom registered for the whole run would replace fetch and friends for the other test files
-beforeAll(() => GlobalRegistrator.register({ url: "http://localhost:4949/" }));
+beforeAll(() => GlobalRegistrator.register({ url: "http://localhost:4949/", settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true } }));
 afterAll(async () => {
   await GlobalRegistrator.unregister();
 });
@@ -23,19 +23,19 @@ const DEPLOYING = {
   log: "",
 };
 const server = { isBack: false };
-const json = (body: unknown, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json", ...headers } });
+const urlOf = (input: string | URL | Request) => (input instanceof Request ? input.url : String(input));
 
-function fakeFetch(input: string | URL | Request): Promise<Response> {
-  const path = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, "http://localhost:4949/").pathname;
-  if (!server.isBack) return Promise.resolve(path === "/__panic/state" ? json(DEPLOYING, { "x-yarn-panic": "1" }) : new Response("maxflow is down", { status: 503, headers: { "x-yarn-panic": "1" } }));
-  if (path === "/api/instance") return Promise.resolve(json({ instance: "live", port: 4949, pid: 1 }));
-  if (path === "/__panic/state") return Promise.resolve(new Response("not found", { status: 404 }));
-  return Promise.resolve(new Response("<html></html>", { headers: { "content-type": "text/html" } }));
+function answer(path: string): Response {
+  if (!server.isBack) return path === "/__panic/state" ? Response.json(DEPLOYING, { headers: { "x-yarn-panic": "1" } }) : new Response("maxflow is down", { status: 503, headers: { "x-yarn-panic": "1" } });
+  if (path === "/api/instance") return Response.json({ instance: "live", port: 4949, pid: 1 });
+  if (path === "/__panic/state") return new Response("not found", { status: 404 });
+  return new Response("<html></html>", { headers: { "content-type": "text/html" } });
 }
+const fakeFetch = async (input: string | URL | Request) => answer(new URL(urlOf(input), "http://localhost:4949/").pathname);
 
-const text = (id: string) => document.getElementById(id)?.textContent ?? "";
+const text = (id: string) => document.querySelector(`#${id}`)?.textContent ?? "";
 
-async function until(isDone: () => boolean, ms: number) {
+async function hasHappened(isDone: () => boolean, ms: number) {
   for (const end = Date.now() + ms; Date.now() < end; ) {
     if (isDone()) return true;
     await Bun.sleep(100);
@@ -44,19 +44,25 @@ async function until(isDone: () => boolean, ms: number) {
 }
 
 test("the panic page keeps rendering through a deploy and comes back once the server answers", async () => {
+  const page = document.defaultView;
   Reflect.set(globalThis, "fetch", fakeFetch);
+  if (page !== null) Reflect.set(page, "fetch", fakeFetch);
   const errors: unknown[] = [];
-  window.addEventListener("error", (event) => errors.push(event.error));
+  globalThis.addEventListener("error", (event) => {
+    errors.push(event.error);
+  });
   document.body.innerHTML = BODY;
-  new Function(SCRIPT)();
+  const script = document.createElement("script");
+  script.textContent = SCRIPT;
+  document.body.append(script);
 
-  expect(await until(() => text("line").startsWith("Deploying f549995"), 3000)).toBe(true);
+  expect(await hasHappened(() => text("line").startsWith("Deploying f549995"), 3000)).toBe(true);
   const firstLine = text("line");
-  expect(await until(() => text("line") !== firstLine, 3000)).toBe(true);
-  expect(document.getElementById("runs")).not.toBeNull();
+  expect(await hasHappened(() => text("line") !== firstLine, 3000)).toBe(true);
+  expect(document.querySelector("#runs")).not.toBeNull();
   expect(text("runs")).toContain("1 restart");
 
   server.isBack = true;
-  expect(await until(() => text("line") === "Back! Reloading…", 4000)).toBe(true);
+  expect(await hasHappened(() => text("line") === "Back! Reloading…", 4000)).toBe(true);
   expect(errors).toEqual([]);
 }, 15_000);
