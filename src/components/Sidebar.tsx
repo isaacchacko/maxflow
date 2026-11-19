@@ -5,6 +5,7 @@ import type { Thread } from "@/mock";
 import { useRef, useState, type MouseEvent } from "react";
 import { useEventListener } from "@/lib/effects";
 import { Mark } from "@/components/Mark";
+import { CursorToggle } from "@/cursors/CursorToggle";
 import { cn, hasText } from "@/lib/utils";
 import { agentStore, setPinned, setPinOrder, taskStore, threadStore } from "@/store";
 import { closePane, openPane } from "@/threads/pane";
@@ -224,6 +225,7 @@ export function Sidebar({ view }: { view: string }) {
             ))}
           </div>
         )}
+        <CursorToggle open={isOpen} />
         {isOpen && <div onPointerDown={e => dragToResize(e, saved.width, setSaved)} title={saved.pinned ? "Drag to resize · ⌘\\ to unpin" : "Drag to resize · ⌘\\ to pin open"} className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize" />}
       </nav>
     </div>

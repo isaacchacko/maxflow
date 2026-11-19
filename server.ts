@@ -1,3 +1,4 @@
+import type { Server } from "bun";
 import { existsSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { inboxesTable, slackMessagesTable, writeStateJson } from "./state";
 import { publish } from "./bus";
@@ -15,6 +16,7 @@ import { DRAFTS, deliver } from "./delivery";
 import { RESYNC_MS, resync } from "./turns";
 import { docsRoute } from "./docs-api";
 import { sizingRoute } from "./sizing";
+import { cursorsAfter } from "./cursors";
 import { built, judged, openWorld, prStates, worldClients } from "./world";
 import { EXTERNAL_SEEN, externalSeen, externalSignal, known } from "./routing";
 import { recordUserComment, seedUserComments } from "./events";
@@ -328,6 +330,55 @@ for (let i = 0; i < 20; i++) {
   await Bun.sleep(250);
 }
 
+async function answer(req: Request, server: Server<WsData>): Promise<Response | undefined> {
+  if (!sameOrigin(req)) return new Response("forbidden", { status: 403 });
+  const url = new URL(req.url);
+  const path = url.pathname;
+
+  const castMatch = /^\/ws\/browser\/([\w-]+)$/.exec(path);
+  if (castMatch) return server.upgrade(req, { data: { id: castMatch[1] ?? "", browser: true } }) ? undefined : new Response("upgrade failed", { status: 400 });
+  const wsMatch = path.match(/^\/ws\/([\w-]+)$/);
+  if (wsMatch) {
+    if (!sessions.has(wsMatch[1])) return new Response("no such session", { status: 404 });
+    return server.upgrade(req, { data: { id: wsMatch[1] } }) ? undefined : new Response("upgrade failed", { status: 400 });
+  }
+
+  if (path === "/api/instance") return Response.json({ instance: INSTANCE || "live", port: PORT, pid: process.pid });
+  const docs = await docsRoute(req, url);
+  if (docs) return docs;
+  const sized = await sizingRoute(req, url);
+  if (sized) return sized;
+  const sessionsWorldRouteAnswer = await sessionsWorldRoute(req, url, path, server);
+  if (sessionsWorldRouteAnswer) return sessionsWorldRouteAnswer;
+  const signalsRouteAnswer = await signalsRoute(req, url, path);
+  if (signalsRouteAnswer) return signalsRouteAnswer;
+  const objectivesRouteAnswer = await objectivesRoute(req, url, path);
+  if (objectivesRouteAnswer) return objectivesRouteAnswer;
+  const threadsRouteAnswer = await threadsRoute(req, url, path);
+  if (threadsRouteAnswer) return threadsRouteAnswer;
+  const browserAnswer = await browserRoute(req, path);
+  if (browserAnswer) return browserAnswer;
+  const miscRouteAnswer = await miscRoute(req, url, path);
+  if (miscRouteAnswer) return miscRouteAnswer;
+  const statsTodosRouteAnswer = await statsTodosRoute(req, url, path);
+  if (statsTodosRouteAnswer) return statsTodosRouteAnswer;
+  const restrictionsRouteAnswer = await restrictionsRoute(req, url, path);
+  if (restrictionsRouteAnswer) return restrictionsRouteAnswer;
+  const tasksLinksRouteAnswer = await tasksLinksRoute(req, url, path);
+  if (tasksLinksRouteAnswer) return tasksLinksRouteAnswer;
+  const filesRouteAnswer = await filesRoute(req, url, path);
+  if (filesRouteAnswer) return filesRouteAnswer;
+  const sessionRouteAnswer = await sessionRoute(req, url, path);
+  if (sessionRouteAnswer) return sessionRouteAnswer;
+
+  // The built-in mock, or real work kept out of the public repo, for showing the UI without a fleet.
+  if (path === "/mock.local.json") {
+    const file = Bun.file(`${DIR}/mock.local.json`);
+    return (await file.exists()) ? new Response(file) : new Response(null, { status: 404 });
+  }
+  return new Response("not found", { status: 404 });
+}
+
 Bun.serve<WsData>({
   hostname: HOST,
   port: PORT,
@@ -336,52 +387,10 @@ Bun.serve<WsData>({
   routes: { "/": app },
   error: (err) => (err instanceof SessionCap ? new Response(err.message, { status: 429 }) : undefined),
   async fetch(req, server) {
-    if (!sameOrigin(req)) return new Response("forbidden", { status: 403 });
-    const url = new URL(req.url);
-    const path = url.pathname;
-
-    const castMatch = /^\/ws\/browser\/([\w-]+)$/.exec(path);
-    if (castMatch) return server.upgrade(req, { data: { id: castMatch[1] ?? "", browser: true } }) ? undefined : new Response("upgrade failed", { status: 400 });
-    const wsMatch = path.match(/^\/ws\/([\w-]+)$/);
-    if (wsMatch) {
-      if (!sessions.has(wsMatch[1])) return new Response("no such session", { status: 404 });
-      return server.upgrade(req, { data: { id: wsMatch[1] } }) ? undefined : new Response("upgrade failed", { status: 400 });
-    }
-
-    if (path === "/api/instance") return Response.json({ instance: INSTANCE || "live", port: PORT, pid: process.pid });
-    const docs = await docsRoute(req, url);
-    if (docs) return docs;
-    const sized = await sizingRoute(req, url);
-    if (sized) return sized;
-    const sessionsWorldRouteAnswer = await sessionsWorldRoute(req, url, path, server);
-    if (sessionsWorldRouteAnswer) return sessionsWorldRouteAnswer;
-    const signalsRouteAnswer = await signalsRoute(req, url, path);
-    if (signalsRouteAnswer) return signalsRouteAnswer;
-    const objectivesRouteAnswer = await objectivesRoute(req, url, path);
-    if (objectivesRouteAnswer) return objectivesRouteAnswer;
-    const threadsRouteAnswer = await threadsRoute(req, url, path);
-    if (threadsRouteAnswer) return threadsRouteAnswer;
-    const browserAnswer = await browserRoute(req, path);
-    if (browserAnswer) return browserAnswer;
-    const miscRouteAnswer = await miscRoute(req, url, path);
-    if (miscRouteAnswer) return miscRouteAnswer;
-    const statsTodosRouteAnswer = await statsTodosRoute(req, url, path);
-    if (statsTodosRouteAnswer) return statsTodosRouteAnswer;
-    const restrictionsRouteAnswer = await restrictionsRoute(req, url, path);
-    if (restrictionsRouteAnswer) return restrictionsRouteAnswer;
-    const tasksLinksRouteAnswer = await tasksLinksRoute(req, url, path);
-    if (tasksLinksRouteAnswer) return tasksLinksRouteAnswer;
-    const filesRouteAnswer = await filesRoute(req, url, path);
-    if (filesRouteAnswer) return filesRouteAnswer;
-    const sessionRouteAnswer = await sessionRoute(req, url, path);
-    if (sessionRouteAnswer) return sessionRouteAnswer;
-
-    // The built-in mock, or real work kept out of the public repo, for showing the UI without a fleet.
-    if (path === "/mock.local.json") {
-      const file = Bun.file(`${DIR}/mock.local.json`);
-      return (await file.exists()) ? new Response(file) : new Response(null, { status: 404 });
-    }
-    return new Response("not found", { status: 404 });
+    const cursor = cursorsAfter(req);
+    const res = await answer(req, server);
+    void cursor?.(res);
+    return res;
   },
   websocket: {
     open(ws) {

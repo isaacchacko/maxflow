@@ -24,6 +24,8 @@ import { TodoView } from "@/views/TodoView";
 import { DocsView } from "@/views/DocsView";
 import { BrowsersView } from "@/views/BrowsersView";
 import { StatsView } from "@/views/StatsView";
+import { Cursors } from "@/cursors/Cursors";
+import { CursorPlayground } from "@/cursors/Playground";
 
 export const views = [
   { id: "todo", label: "Todo" },
@@ -42,7 +44,7 @@ const ROUTING_CANVAS_IN_SNAP_ORDER: readonly string[] = ["events", "objectives",
 
 type ViewId = (typeof views)[number]["id"];
 type Detail = { kind: "page"; ref: PageRef } | { kind: "agent" | "thread"; id: string };
-type Route = { view: ViewId; detail?: Detail; sub?: string };
+type Route = { view: ViewId; detail?: Detail; sub?: string; dev?: string };
 
 function lastView(): ViewId {
   try {
@@ -62,6 +64,7 @@ function routeFromHash(): Route {
   const [first, id] = hashParts();
   if (hasText(id) && (first === "task" || first === "objective")) return { view: lastView(), detail: { kind: "page", ref: `${first}/${id}` as PageRef } };
   if (hasText(id) && (first === "agent" || first === "thread")) return { view: lastView(), detail: { kind: first, id } };
+  if (first === "dev") return { view: lastView(), dev: id };
   const view = views.find(v => v.id === first)?.id ?? lastView();
   try {
     sessionStorage.setItem("view", view);
@@ -111,6 +114,7 @@ function DetailView({ detail, back }: { detail: Detail; back: ViewId }) {
 }
 
 function MainView({ route }: { route: Route }) {
+  if (route.dev === "cursors") return <CursorPlayground />;
   if (route.detail) return <DetailView detail={route.detail} back={route.view} />;
   if (route.view === "inbox") return <InboxView />;
   if (route.view === "todo") return <TodoView />;
@@ -161,6 +165,7 @@ export function App() {
       <Viewer />
       <PauseDialog />
       <RaiseDialog />
+      <Cursors />
       <div className="flex h-dvh bg-window [app-region:drag]">
         <Sidebar view={route.view} />
         <main style={{ marginTop: "max(0.5rem, env(titlebar-area-height, 0px))" }} className="mr-2 mb-2 flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-card [app-region:no-drag]">
