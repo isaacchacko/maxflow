@@ -1,22 +1,19 @@
 #!/usr/bin/env bun
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
-  ciStateOf, fetchHeads, fetchPrs, fetchSessions, isFailed, isFinished, isOwnComment, isRecord, prNumber, rateLimit, readStatus, repoOfKey, rollupOf, run,
-  sessionLinks, short, watchLinks, type Head, type Link, type PolledPr, type Pr, type Session, type Watch,
+  ciStateOf, fetchHeads, fetchPrs, fetchSessions, INBOX_WATCH, isFailed, isFinished, isOwnComment, links, prNumber, rateLimit, readStatus, readWatches, repoOfKey,
+  REVIEW_WATCH, rollupOf, run, short, watchLinks, writeWatches, type Head, type Link, type PolledPr, type Pr, type Session,
 } from "../gh";
 import { BASE as base, STATE_DIR } from "../instance";
-import { ghStatusTable } from "../state";
+import { isRecord } from "../shared/guards";
+import { ghStatusTable, readStateJson, writeStateJson } from "../state";
 import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("gh");
 
-const WATCH_FILE = join(STATE_DIR, "gh-watch.json");
-const STATE_FILE = join(STATE_DIR, "gh-state.json");
-const EDGES_FILE = join(STATE_DIR, "gh-edges.json");
-export const REVIEW_WATCH_FILE = join(STATE_DIR, "review-watch.json");
-export const INBOX_WATCH_FILE = join(STATE_DIR, "inbox-watch.json");
+export const INBOX_WATCH_FILE = join(STATE_DIR, INBOX_WATCH);
 const PROJECTS = join(homedir(), ".claude", "projects");
 const INTERVAL_MS = Number(process.env["GH_SENTRY_INTERVAL"] ?? 30_000);
 const RATE_LIMITED_WAIT_MS = 5 * 60_000;
@@ -36,25 +33,7 @@ type Poster = { me: string; isByAgent: (body: string) => boolean };
 type Wanted = { numbers: Set<number>; branches: Set<string> };
 type Polled = { prs: Map<string, Pr>; listeners: Map<string, Set<string>> };
 
-const isWatchList = (value: unknown): value is Watch[] =>
-  Array.isArray(value) && value.every((w) => isRecord(w) && typeof w["pr"] === "string" && Array.isArray(w["sessions"]));
 const isPrStates = (value: unknown): value is Record<string, PrState> => isRecord(value);
-
-function readJson<T>(path: string, fallback: T, isWanted: (value: unknown) => value is T): T {
-  if (!existsSync(path)) return fallback;
-  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-  return isWanted(parsed) ? parsed : fallback;
-}
-
-export const readWatches = () => readJson<Watch[]>(WATCH_FILE, [], isWatchList);
-export const writeWatches = (w: Watch[]) => {
-  writeFileSync(WATCH_FILE, JSON.stringify(w, null, 2));
-};
-
-export async function links(): Promise<Link[]> {
-  const fromSessions = await sessionLinks();
-  return [...watchLinks(readWatches()), ...fromSessions];
-}
 
 function setOf<V>(map: Map<string, Set<V>>, key: string) {
   const found = map.get(key) ?? new Set<V>();
@@ -273,17 +252,17 @@ const edgeLabel = (keys: string[]) => (keys.length > 2 ? `${prLabels(keys).slice
 function writeEdges(listeners: Map<string, Set<string>>) {
   const onPrs = new Map<string, string[]>();
   for (const [key, sessions] of listeners) for (const s of sessions) listOf(onPrs, s).push(key);
-  writeFileSync(EDGES_FILE, JSON.stringify([...onPrs].map(([session, keys]) => ({ session, prs: keys, label: edgeLabel(keys) }))));
+  writeStateJson("gh-edges.json", [...onPrs].map(([session, keys]) => ({ session, prs: keys, label: edgeLabel(keys) })));
 }
 
 async function tick(me: string, state: Map<string, PrState>) {
   const fromSessions = await links();
-  const all = [...fromSessions, ...watchLinks(readJson(REVIEW_WATCH_FILE, [], isWatchList)), ...watchLinks(readJson(INBOX_WATCH_FILE, [], isWatchList))];
+  const all = [...fromSessions, ...watchLinks(readWatches(REVIEW_WATCH)), ...watchLinks(readWatches(INBOX_WATCH))];
   const polled: Polled = { prs: new Map(), listeners: new Map() };
   for (const [repo, wanted] of groupByRepo(all)) pollRepo(repo, wanted, all.filter((l) => l.repo === repo), polled);
   await reportChanges(me, state, polled);
   endFinishedWatches(polled.prs);
-  writeFileSync(STATE_FILE, JSON.stringify(Object.fromEntries(state)));
+  writeStateJson("gh-state.json", Object.fromEntries(state));
   writeEdges(polled.listeners);
   ghStatusTable.write(Object.fromEntries([...polled.prs].map(([key, pr]) => [key, { at: cache.get(key)?.at ?? Date.now(), pr }])));
   return polled.prs.size;
@@ -304,7 +283,8 @@ async function pollForever(me: string, state: Map<string, PrState>) {
 
 if (import.meta.main) {
   const me = run(["gh", "api", "user", "-q", ".login"]);
-  const state = new Map(Object.entries(readJson<Record<string, PrState>>(STATE_FILE, {}, isPrStates)));
+  const saved = readStateJson("gh-state.json");
+  const state = new Map(Object.entries(isPrStates(saved) ? saved : {}));
   console.log(`gh sentry as ${me || "?"}, every ${INTERVAL_MS / 1000}s`);
   await pollForever(me, state);
 }

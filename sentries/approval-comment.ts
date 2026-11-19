@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { isRecord } from "../gh";
+import { isRecord } from "../shared/guards";
 import { STATE_DIR } from "../instance";
 
 export const COMMENT_SWITCH = join(STATE_DIR, "approval-comment");

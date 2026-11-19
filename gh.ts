@@ -1,5 +1,6 @@
 import { BASE, TMUX_SOCKET } from "./instance";
-import { ghStatusTable } from "./state";
+import { isRecord } from "./shared/guards";
+import { ghStatusTable, readStateJson, writeStateJson } from "./state";
 
 export type Watch = { pr: string; sessions: string[] };
 export type Link = { pr?: string; repo: string; branch?: string; session: string };
@@ -48,10 +49,24 @@ const HEAD = `number updatedAt state mergeable reviewDecision headRefOid commits
 
 export const rateLimit = { wasHit: false };
 
-export const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+const GH_WATCH = "gh-watch.json";
+export const REVIEW_WATCH = "review-watch.json";
+export const INBOX_WATCH = "inbox-watch.json";
+
 const isPr = (value: unknown): value is Pr => isRecord(value) && typeof value["number"] === "number";
 const isHead = (value: unknown): value is Head => isRecord(value) && typeof value["number"] === "number";
 const isSession = (value: unknown): value is Session => isRecord(value) && typeof value["id"] === "string";
+const isWatchList = (value: unknown): value is Watch[] =>
+  Array.isArray(value) && value.every((w) => isRecord(w) && typeof w["pr"] === "string" && Array.isArray(w["sessions"]));
+
+export function readWatches(name = GH_WATCH): Watch[] {
+  const watches = readStateJson(name);
+  return isWatchList(watches) ? watches : [];
+}
+
+export function writeWatches(watches: Watch[], name = GH_WATCH) {
+  writeStateJson(name, watches);
+}
 
 export const isFailed = (state: string) => FAILED.has(state);
 export const isFinished = (state: string) => state === "SUCCESS" || isFailed(state);
@@ -61,8 +76,8 @@ export const repoOfKey = (key: string) => key.split("#", 1)[0] ?? "";
 export const rollupOf = (pr: Pr) => pr.commits.nodes[0]?.commit.statusCheckRollup;
 export const ciStateOf = (pr: Head | Pr) => pr.commits.nodes[0]?.commit.statusCheckRollup?.state;
 
-export function run(cmd: string[]) {
-  const r = Bun.spawnSync(cmd, { stderr: "pipe" });
+export function run(cmd: string[], cwd?: string) {
+  const r = Bun.spawnSync(cmd, cwd === undefined ? { stderr: "pipe" } : { cwd, stderr: "pipe" });
   return r.exitCode === 0 ? r.stdout.toString().trim() : "";
 }
 
@@ -156,9 +171,14 @@ export function watchLinks(watches: Watch[]): Link[] {
   return watches.flatMap((w) => (w.sessions.length > 0 ? w.sessions : [""]).map((session) => ({ pr: w.pr, repo: repoOfKey(w.pr), session })));
 }
 
-export async function sessionLinks(): Promise<Link[]> {
+async function sessionLinks(): Promise<Link[]> {
   const live = (await fetchSessions()).filter((s) => s.running && !s.sentry);
   return live.flatMap((s) => sessionBranchLink(s) ?? []);
+}
+
+export async function links(): Promise<Link[]> {
+  const fromSessions = await sessionLinks();
+  return [...watchLinks(readWatches()), ...fromSessions];
 }
 
 export const isOwnComment = (who: string | null | undefined) => who?.startsWith("the user") ?? false;

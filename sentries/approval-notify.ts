@@ -1,14 +1,14 @@
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { isRecord } from "../gh";
 import { STATE_DIR } from "../instance";
+import { isRecord } from "../shared/guards";
+import { appendStateText, readStateJson, removeState, writeStateJson } from "../state";
 
-const CONFIG_FILE = join(STATE_DIR, "approval-notify.json");
-const STATE_FILE = join(STATE_DIR, "approval-notified.json");
-const BOARD_FILE = join(STATE_DIR, "review-board.json");
+const STATE_FILE = "approval-notified.json";
+const BOARD_FILE = "review-board.json";
 const HELD = "Held: tier 3, waiting on Isaac";
-const LOG_FILE = join(STATE_DIR, "approval-notify.log");
-const CLAIMS = join(STATE_DIR, "approval-claims");
+const CLAIMS_NAME = "approval-claims";
+const CLAIMS = join(STATE_DIR, CLAIMS_NAME);
 const MAX_BACKOFF_MS = 30 * 60_000;
 const BACKOFF_MS = [60_000, 5 * 60_000, 15 * 60_000, MAX_BACKOFF_MS];
 const SEND_TIMEOUT_MS = 30_000;
@@ -25,24 +25,21 @@ type Sent = { queue: Note[]; sent: Record<string, number>; logged: string[]; fai
 const isPartialSent = (value: unknown): value is Partial<Sent> => isRecord(value);
 const isConfig = (value: unknown): value is Config => isRecord(value);
 
-function readJson<T>(path: string, fallback: T, isWanted: (value: unknown) => value is T): T {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-    return isWanted(parsed) ? parsed : fallback;
-  } catch {
-    return fallback;
-  }
+function readJson<T>(name: string, fallback: T, isWanted: (value: unknown) => value is T): T {
+  const parsed = readStateJson(name);
+  return isWanted(parsed) ? parsed : fallback;
 }
 
 const sent: Sent = { queue: [], sent: {}, logged: [], failures: 0, retryAt: 0, ...readJson(STATE_FILE, {}, isPartialSent) };
 const save = () => {
-  writeFileSync(STATE_FILE, JSON.stringify(sent, null, 1));
+  writeStateJson(STATE_FILE, sent);
 };
 const tag = (n: Note) => `${n.pr}@${n.sha}`;
 const note = (line: string) => {
-  appendFileSync(LOG_FILE, `${new Date().toISOString()}  ${line}\n`);
+  appendStateText("approval-notify.log", `${new Date().toISOString()}  ${line}\n`);
 };
-const claimFile = (n: Note) => join(CLAIMS, tag(n).replaceAll(/[^\w@.-]/g, "_"));
+const claimName = (n: Note) => tag(n).replaceAll(/[^\w@.-]/g, "_");
+const claimFile = (n: Note) => join(CLAIMS, claimName(n));
 
 function isClaimWon(n: Note) {
   mkdirSync(CLAIMS, { recursive: true });
@@ -57,7 +54,7 @@ function isClaimWon(n: Note) {
 const sentLastHour = () => (existsSync(CLAIMS) ? readdirSync(CLAIMS).filter((f) => Date.now() - statSync(join(CLAIMS, f)).mtimeMs < HOUR_MS).length : 0);
 const wasSent = (n: Note) => sent.sent[tag(n)] !== undefined;
 
-export const config = () => readJson(CONFIG_FILE, {}, isConfig);
+export const config = () => readJson("approval-notify.json", {}, isConfig);
 
 export function enqueue(n: Note) {
   if (wasSent(n) || existsSync(claimFile(n)) || sent.queue.some((q) => tag(q) === tag(n))) return;
@@ -103,13 +100,12 @@ function heldSection(held: Note[]) {
 }
 
 function showHeld(held: Note[]) {
-  const parsed: unknown = existsSync(BOARD_FILE) ? JSON.parse(readFileSync(BOARD_FILE, "utf8")) : { sections: [] };
+  const parsed = readStateJson(BOARD_FILE);
   const board = isRecord(parsed) ? parsed : {};
   const sections: unknown = board["sections"];
   const list: unknown[] = Array.isArray(sections) ? sections : [];
   const rest = list.filter((section) => !(isRecord(section) && section["title"] === HELD));
-  writeFileSync(`${BOARD_FILE}.tmp`, JSON.stringify({ ...board, sections: [...rest, ...heldSection(held)] }, null, 2));
-  renameSync(`${BOARD_FILE}.tmp`, BOARD_FILE);
+  writeStateJson(BOARD_FILE, { ...board, sections: [...rest, ...heldSection(held)] });
 }
 
 const hasEndpoint = (cfg: Config): cfg is Endpoint => (cfg.url ?? "") !== "" && (cfg.tokenFile ?? "") !== "";
@@ -127,7 +123,7 @@ function logUnsent() {
 }
 
 function backOff(n: Note, detail: string) {
-  unlinkSync(claimFile(n));
+  removeState(join(CLAIMS_NAME, claimName(n)));
   sent.retryAt = Date.now() + (BACKOFF_MS[Math.min(sent.failures, BACKOFF_MS.length - 1)] ?? MAX_BACKOFF_MS);
   sent.failures += 1;
   note(`failed ${tag(n)}: ${detail}; retrying after ${new Date(sent.retryAt).toISOString()}`);

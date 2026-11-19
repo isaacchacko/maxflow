@@ -1,16 +1,14 @@
 #!/usr/bin/env bun
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { fetchSessions, isOwnComment, isRecord, prNumber, repoOfKey, type Link, type Session, type Watch } from "../gh";
-import { BASE as base, STATE_DIR } from "../instance";
-import { links, REVIEW_WATCH_FILE } from "./gh";
+import { fetchSessions, isOwnComment, links, prNumber, repoOfKey, REVIEW_WATCH, writeWatches, type Link, type Session, type Watch } from "../gh";
+import { BASE as base } from "../instance";
+import { isRecord } from "../shared/guards";
+import { readStateJson, writeStateJson } from "../state";
 import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("review");
 
-const EDGES_FILE = join(STATE_DIR, "review-edges.json");
-const QUEUE_FILE = join(STATE_DIR, "review-queue.json");
-const BOARD_FILE = join(STATE_DIR, "review-board.json");
+const QUEUE_FILE = "review-queue.json";
+const BOARD_FILE = "review-board.json";
 const INTERVAL_MS = Number(process.env["REVIEW_SENTRY_INTERVAL"] ?? 120_000);
 const caller = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
 const agent = process.env["MAXFLOW_SESSION"] ?? "";
@@ -74,9 +72,7 @@ const isCiFailing = (ci: string) => ci === "FAILURE" || ci === "ERROR";
 const isMergeable = (pr: Pr) => pr.reviewDecision === "APPROVED" && !pr.isDraft && !NEVER_MERGE.test(pr.title) && !NEVER_MERGE.test(pr.body);
 
 function polledApprovedKeys(): string[] {
-  const ghState = join(STATE_DIR, "gh-state.json");
-  if (!existsSync(ghState)) return [];
-  const polled: unknown = JSON.parse(readFileSync(ghState, "utf8"));
+  const polled = readStateJson("gh-state.json");
   return isPolledStates(polled) ? Object.entries(polled).filter(([, p]) => p.state === "OPEN" && p.decision === "APPROVED").map(([key]) => key) : [];
 }
 
@@ -281,13 +277,12 @@ async function landOne(pr: Pr, ties: Link[], live: Set<string>): Promise<Landing
 function writeLandingBoard(items: LandingItem[]) {
   const sorted = items.toSorted((a, b) => Number(b.why !== "") - Number(a.why !== ""));
   const landing = sorted.length === 0 ? [] : [{ title: LANDING, items: sorted.map(({ why, ...item }) => item) }];
-  const parsed: unknown = existsSync(BOARD_FILE) ? JSON.parse(readFileSync(BOARD_FILE, "utf8")) : { sections: [] };
+  const parsed = readStateJson(BOARD_FILE);
   const board = isRecord(parsed) ? parsed : {};
   const sections: unknown = board["sections"];
   const list: unknown[] = Array.isArray(sections) ? sections : [];
   const rest = list.filter((section) => !(isRecord(section) && section["title"] === LANDING));
-  writeFileSync(`${BOARD_FILE}.tmp`, JSON.stringify({ ...board, sections: [...landing, ...rest] }, null, 2));
-  renameSync(`${BOARD_FILE}.tmp`, BOARD_FILE);
+  writeStateJson(BOARD_FILE, { ...board, sections: [...landing, ...rest] });
 }
 
 async function landAll(prs: Pr[], ties: Link[], sessions: Session[]) {
@@ -338,16 +333,16 @@ async function tick() {
   const ties = await links();
   const { names, on, owners } = sessionsOnPrs(prs, ties, sessions);
   const queue = prs.map((pr) => queueEntry(pr, on, names));
-  writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
-  writeFileSync(REVIEW_WATCH_FILE, JSON.stringify(queue.map((q): Watch => ({ pr: q.pr, sessions: owners.get(q.pr) ?? [] }))));
-  writeFileSync(EDGES_FILE, JSON.stringify(queue.flatMap((q) => q.sessions.map((s) => ({ session: s.id, label: label(q.pr) })))));
+  writeStateJson(QUEUE_FILE, queue);
+  writeWatches(queue.map((q): Watch => ({ pr: q.pr, sessions: owners.get(q.pr) ?? [] })), REVIEW_WATCH);
+  writeStateJson("review-edges.json", queue.flatMap((q) => q.sessions.map((s) => ({ session: s.id, label: label(q.pr) }))));
   await landAll(prs, ties, sessions);
 
   const isFirst = stages.size === 0;
   const moved = stageMoves(queue);
   refill(stages, queue.map((q): [string, string] => [q.pr, q.stage]));
   refill(titles, queue.map((q): [string, string] => [q.pr, q.title]));
-  if (isFirst) await notify(`Feed up: ${queue.length} open PRs staged in ${QUEUE_FILE}. Build the queue.`);
+  if (isFirst) await notify(`Feed up: ${queue.length} open PRs staged in $MAXFLOW_STATE/${QUEUE_FILE}. Build the queue.`);
   else if (moved.length > 0) await notify(`Stage changes: ${moved.join("; ")}.`);
   process.title = `review feed (${queue.length} PRs)`;
 }
