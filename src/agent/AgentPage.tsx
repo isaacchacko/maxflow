@@ -1,6 +1,7 @@
-import { Archive, ArrowLeft, Bot, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Hash, Link2, Network, Pause, Play, Plus, Radar, User, Waypoints } from "lucide-react";
+import { Archive, ArrowLeft, Bot, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Hash, Link2, Network, Pause, Play, Plus, Radar, SquareTerminal, User, Waypoints } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AgentFace, expressionOf } from "@/components/AgentFace";
+import { Waiting } from "@/components/Waiting";
 import { Dots } from "@/components/Working";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { cn } from "@/lib/utils";
 import { NOW_AT, agentStateColor, statusColor, type Agent, type AgentState } from "@/mock";
-import { addSignal, agentStore, api, liveStore, objectiveStore, pathOf, sentryStore, setArchived, signalStore, spawnWorker, taskStore } from "@/store";
+import { addSignal, agentStore, api, liveStore, objectiveStore, pathOf, sentryStore, setArchived, shellStore, signalStore, spawnWorker, taskStore } from "@/store";
 import { Rich } from "@/threads/Rich";
 import { Terminal } from "./Terminal";
 import { closing, transcriptFor, typedStore, type Line } from "./transcript";
@@ -177,7 +178,7 @@ function RouterSidebar({ router }: { router: Agent }) {
                 return (
                   <a key={a.id} href={`#agent/${a.id}`} className="flex flex-col px-1 py-1 hover:bg-muted">
                     <span className="font-mono text-xs">{a.name ?? a.id}</span>
-                    <span className="truncate text-xs text-muted-foreground">{task ? task.title : a.doing}</span>
+                    {a.wait && a.wait.kind !== "done" ? <Waiting wait={a.wait} className="truncate text-xs text-muted-foreground" /> : <span className="truncate text-xs text-muted-foreground">{task ? task.title : a.doing}</span>}
                   </a>
                 );
               })}
@@ -243,6 +244,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
   const agents = agentStore.use();
   const live = liveStore.use();
   const sentry = sentryStore.use().find(s => s.id === id);
+  const shells = shellStore.use();
   const tasks = taskStore.use();
   const objectives = objectiveStore.use();
   const signals = signalStore.use();
@@ -250,6 +252,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
 
   const agent = agents.find(a => a.id === id);
   if (!agent && sentry) return <SentryPage id={id} back={back} />;
+  if (!agent && shells.some(x => x.id === id)) return <ShellPage id={id} back={back} />;
   if (!agent) return <p className="p-6 text-muted-foreground">No agent {id}.</p>;
 
   const parent = agents.find(a => a.id === agent.parent);
@@ -280,6 +283,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
         <h1 className={cn("text-lg", !agent.name && "font-mono")}>{agent.name ?? agent.id}</h1>
         <Badge variant="outline">{agent.role}</Badge>
         {agent.role === "router" && <span className="truncate text-sm text-muted-foreground">{agent.scope}</span>}
+        <Waiting wait={agent.wait} className="truncate text-sm text-muted-foreground" />
         {agent.role === "router" && (
           <span className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
             {stateOrder.map(state => {
@@ -405,7 +409,7 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
               <a key={a.id} href={`#agent/${a.id}`} className="flex items-center gap-2 px-1 py-1 text-sm hover:bg-muted">
                 <span className={cn("size-2 shrink-0 rounded-full", agentStateColor[a.state])} />
                 <span className="shrink-0 font-mono text-xs">{a.name ?? a.id}</span>
-                <Rich still text={a.doing} className="truncate text-xs text-muted-foreground" />
+                {a.wait && a.wait.kind !== "done" ? <Waiting wait={a.wait} className="truncate text-xs text-muted-foreground" /> : <Rich still text={a.doing} className="truncate text-xs text-muted-foreground" />}
               </a>
             ))}
           </Section>
@@ -456,6 +460,66 @@ function SentryPage({ id, back }: { id: string; back: string }) {
               </a>
             ))}
           </Section>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+/** A shell an agent waits on: its live output, what the agent said it waits for, and how it ended. */
+function ShellPage({ id, back }: { id: string; back: string }) {
+  const shell = shellStore.use().find(x => x.id === id)!;
+  const owner = agentStore.use().find(a => a.id === shell.owner);
+  const state = !shell.end ? "running" : shell.end.code === null ? "ended" : `exited ${shell.end.code}`;
+  const tone = !shell.end ? "bg-agent" : shell.end.code === 0 ? "bg-ok" : shell.end.code === null ? "bg-muted-foreground" : "bg-destructive";
+  const at = (ms: number) => new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
+  return (
+    <div className="flex h-full flex-col gap-3 overflow-hidden pb-3">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
+        <Button variant="ghost" size="icon" asChild>
+          <a href={`#${back}`}>
+            <ArrowLeft />
+          </a>
+        </Button>
+        <SquareTerminal className="size-4 text-command" />
+        <h1 className="truncate text-lg">{shell.desc}</h1>
+        <Badge variant="outline">shell</Badge>
+      </header>
+      <div className="flex min-h-0 flex-1 gap-4 pl-3">
+        <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-background p-2">
+          {shell.kind === "pid" ? <p className="p-4 font-mono text-sm text-muted-foreground">process {shell.pid}: its output isn't maxflow's to show</p> : <Terminal key={shell.id} id={shell.id} />}
+        </section>
+        <aside className="-my-3 flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto border-l px-4 py-4">
+          <Section title="Properties">
+            <Row label="State">
+              <span className={cn("size-2 rounded-full", tone, !shell.end && "animate-pulse")} />
+              {state}
+            </Row>
+            <Row label="Waited on by">
+              <a href={`#agent/${shell.owner}`} className="truncate hover:underline">{owner?.name ?? shell.owner}</a>
+            </Row>
+            {shell.cmd && (
+              <Row label="Command">
+                <code className="font-mono text-xs break-all">{shell.cmd}</code>
+              </Row>
+            )}
+            {shell.pid && <Row label="Process">{shell.pid}</Row>}
+            {shell.cwd && (
+              <Row label="Folder">
+                <span className="truncate font-mono text-xs">{shell.cwd}</span>
+              </Row>
+            )}
+            <Row label="Started">{at(shell.at)}</Row>
+            {shell.end && <Row label="Ended">{at(shell.end.at)}</Row>}
+          </Section>
+          {shell.end?.tail && (
+            <>
+              <Separator />
+              <Section title="Last lines">
+                <pre className="overflow-x-auto rounded-md bg-muted p-2 font-mono text-[11px] leading-snug whitespace-pre-wrap">{shell.end.tail}</pre>
+              </Section>
+            </>
+          )}
         </aside>
       </div>
     </div>

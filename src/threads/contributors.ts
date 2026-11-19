@@ -48,7 +48,7 @@ export function stateOf(c: Contributor, t: Thread): { expression: Expression; wo
   const a = c.agent;
   if (!a) return { expression: "done", word: "done", at: c.last };
   if (t.asks?.sessionId === a.id) return { expression: "waiting", word: "waiting on you", at: t.asks.since };
-  if (a.wait && a.wait.kind !== "done") return { expression: "asleep", word: a.wait.kind === "thread" && a.wait.ref === t.id ? "asleep on this thread" : `asleep on ${a.wait.kind}:${a.wait.ref}`, at: a.since };
+  if (a.wait && a.wait.kind !== "done") return { expression: "asleep", word: a.wait.kind === "thread" && a.wait.ref === t.id ? "asleep on this thread" : a.wait.kind === "until" ? `asleep until ${a.wait.desc}` : `asleep on ${a.wait.kind}:${a.wait.ref}`, at: a.since };
   if (a.state === "working") return { expression: "working", word: "working", at: a.since };
   if (a.state === "waiting") return { expression: "waiting", word: "waiting", at: a.since };
   if (a.state === "asleep") return { expression: "asleep", word: "asleep", at: a.since };

@@ -2,6 +2,7 @@ import { Check, ChevronDown, Circle, ExternalLink, Pause, Waypoints } from "luci
 import { useState } from "react";
 import { AgentFace } from "@/components/AgentFace";
 import { AgentLink } from "@/components/AgentLink";
+import { Waiting } from "@/components/Waiting";
 import { GitHubGlyph, SlackGlyph } from "@/lib/slack";
 import { cn } from "@/lib/utils";
 import { statusColor, type Thread } from "@/mock";
@@ -79,12 +80,14 @@ function AgentRow({ c, t }: { c: Contributor; t: Thread }) {
   const s = stateOf(c, t);
   const time = span(s.at);
   const word = c.agent ? `${s.word}${time ? ` ${time}` : ""}` : `done${time ? ` ${time} ago` : ""}`;
+  // Asleep on something other than this thread: the sentence, its condition a chip that opens it.
+  const sleepsOn = s.expression === "asleep" && !!c.agent?.wait && c.agent.wait.kind !== "done" && !(c.agent.wait.kind === "thread" && c.agent.wait.ref === t.id);
   const face = <AgentFace id={c.id} expression={s.expression} small still={!c.agent} className="size-5" />;
   const body = (
     <>
       {face}
       <span className={cn("min-w-0 flex-1 truncate", !c.agent && "text-muted-foreground")}>{c.name}</span>
-      <span className="max-w-[55%] shrink-0 truncate text-xs text-muted-foreground">{word}</span>
+      {sleepsOn ? <Waiting wait={c.agent!.wait} lead="Asleep" className="max-w-[60%] shrink-0 truncate text-xs text-muted-foreground" /> : <span className="max-w-[55%] shrink-0 truncate text-xs text-muted-foreground">{word}</span>}
     </>
   );
   const title = [c.name, c.agent?.doing, `${c.why}${c.agent?.role === "router" ? " · router" : ""}`].filter(Boolean).join("\n");

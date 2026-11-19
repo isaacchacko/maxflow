@@ -9,6 +9,7 @@ const usage = `usage:
   maxflow screen <id> [--history N]          print the screen as plain text
   maxflow wait <id> [--idle MS] [--match RE] [--timeout MS]   block until quiet / RE on screen / exit, print screen
   maxflow wait thread:<id> | approval:<pr> | ci:<pr> | agent:<id> [agent:<id>…] | slack:<permalink | channel | #channel | query> | done   declare what you wait on; you sleep from your turn's end until a message wakes you
+  maxflow wait until '<what you wait for, in words>' -- <command...> | --pane <session> | --pid <pid>   sleep until a shell concludes: the server runs the command in its own pane (or watches the session or process), and you wake with its exit code and last lines
   maxflow rename <id> <name...> | maxflow kill <id>
   maxflow notify <id> <text...> [--isaac]    deliver text once the session is idle at an empty claude prompt; --isaac as for send
   maxflow who router|parent|workers|objective   the agents around you, as mf-<id> names for SendMessage
@@ -104,6 +105,20 @@ if (verb === "ls") {
   await call(`/api/sessions/${rest[0]}/input`, { method: "POST", body: JSON.stringify({ keys: rest.slice(1) }) });
 } else if (verb === "screen" && rest[0]) {
   console.log((await call(`/api/sessions/${rest[0]}/screen?history=${flag(rest, "--history") ?? 0}`)).screen);
+} else if (verb === "wait" && rest[0] === "until") {
+  const me = process.env.MAXFLOW_SESSION;
+  if (!me) console.error("wait works only inside a maxflow session"), process.exit(1);
+  const dash = rest.indexOf("--");
+  const head = dash === -1 ? rest.slice(1) : rest.slice(1, dash);
+  const cmd = dash === -1 ? undefined : rest.slice(dash + 1).join(" ");
+  const pid = flag(head, "--pid"), pane = flag(head, "--pane");
+  const desc = positional(head, ["--pid", "--pane"]).join(" ");
+  if (!desc || (!cmd && !pid && !pane)) console.error("usage: maxflow wait until '<what you wait for>' -- <command...> | --pane <session> | --pid <pid>"), process.exit(1);
+  const { wait } = await call(`/api/sessions/${me}/await`, { method: "POST", body: JSON.stringify({ kind: "until", desc, cmd, cwd: process.cwd(), path: process.env.PATH, pane, pid: pid ? Number(pid) : undefined }) });
+  console.log(
+    !wait ? `"${desc}" had already ended; its exit code and last lines are on their way to your prompt.`
+    : `waiting until ${desc} (shell ${wait.ref}, ${base}/#agent/${wait.ref}). End your turn now; you sleep until it concludes or a message wakes you.`,
+  );
 } else if (verb === "wait" && /^(thread|q|approval|ci|agent|slack):.|^done$/.test(rest[0] ?? "")) {
   const me = process.env.MAXFLOW_SESSION;
   if (!me) console.error("wait works only inside a maxflow session"), process.exit(1);

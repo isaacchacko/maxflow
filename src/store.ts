@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { NOW_AT, localAt, type Thread, sentries as seedSources, threads as seedThreads, agents as seedAgents, signals as seedSignals, tasks as seedTasks, objectives as seedObjectives, type Block, type Event, type Agent, type SentrySession, type Signal, type Status } from "./mock";
+import { NOW_AT, localAt, type Thread, sentries as seedSources, threads as seedThreads, agents as seedAgents, signals as seedSignals, tasks as seedTasks, objectives as seedObjectives, type Block, type Event, type Agent, type SentrySession, type Shell, type Signal, type Status } from "./mock";
 
 export function createStore<T>(initial: T) {
   let state = initial;
@@ -26,6 +26,7 @@ export const threadStore = createStore(seedThreads);
 export const editedStore = createStore<Record<string, number>>({});
 export const sourceStore = createStore(seedSources);
 export const sentryStore = createStore<SentrySession[]>([]);
+export const shellStore = createStore<Shell[]>([]);
 /** Sessions that have ended, by the name they last went by. */
 export const nameStore = createStore<Record<string, string>>({});
 export type Pr = { title: string; state: "open" | "merged" | "closed" };

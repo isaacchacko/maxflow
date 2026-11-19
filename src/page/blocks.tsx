@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Waiting } from "@/components/Waiting";
 import { cn } from "@/lib/utils";
 import { agentStateColor, statusColor, type Block, type Event, type Status } from "@/mock";
 import { addEvent, agentStore, putBlock, taskStore, objectiveStore, type PageRef } from "@/store";
@@ -255,7 +256,7 @@ export function AgentRow({ id, indent }: { id: string; indent?: boolean }) {
     <a href={`#agent/${id}`} data-agent={`agent:${id}`} className={cn("flex items-center gap-2 py-1 text-sm hover:bg-muted", indent && "ml-3 border-l pl-4")}>
       {agent.role === "router" ? <Network className="size-3.5 shrink-0 text-router" /> : <span className={cn("ml-1 size-2 shrink-0 rounded-full", agentStateColor[agent.state])} />}
       <span className="shrink-0 truncate text-xs">{agent.name ?? agent.id}</span>
-      <Rich still text={agent.doing} className="truncate text-muted-foreground" />
+      {agent.wait && agent.wait.kind !== "done" ? <Waiting wait={agent.wait} className="truncate text-muted-foreground" /> : <Rich still text={agent.doing} className="truncate text-muted-foreground" />}
     </a>
   );
 }

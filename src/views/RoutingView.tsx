@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { AgentFace, expressionOf } from "@/components/AgentFace";
+import { Waiting, waitWords } from "@/components/Waiting";
 import { cn } from "@/lib/utils";
 import { ChipView, SearchPalette, hits, isActive, type Filter, type NodeMeta } from "@/views/SearchPalette";
 import { NOW_AT, agentStateColor, objectiveStatus, statusColor, type Agent, type Signal, type Source, type Thread } from "@/mock";
@@ -223,7 +224,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
         kind: a.role === "router" ? ("router" as const) : ("agent" as const),
         label: a.name ?? a.id,
         detail: a.role === "router" ? `${a.scope} · ${a.doing}` : `${a.doing}${task ? ` · ${task.title}` : ""}`,
-        text: `${a.id} ${a.name ?? ""} ${a.scope ?? ""} ${a.doing} ${task?.title ?? ""} ${task?.pr ?? ""}`,
+        text: `${a.id} ${a.name ?? ""} ${a.scope ?? ""} ${a.doing} ${a.wait ? waitWords(a.wait, agents) : ""} ${task?.title ?? ""} ${task?.pr ?? ""}`,
         state: a.state,
         status: task?.status,
         objectives: [objectiveOfAgent.get(a.id)!],
@@ -477,6 +478,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
           <span className="ml-auto text-xs text-muted-foreground">{crew} {crew === 1 ? "agent" : "agents"}</span>
         </div>
         <p className="text-sm">{r.scope}</p>
+        <Waiting wait={r.wait} className="text-xs text-muted-foreground" />
       </Card>
     );
   };
@@ -491,6 +493,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
           <span className={cn("truncate text-xs", !w.name && "font-mono")}>{w.name ?? w.id}</span>
           <span className="ml-auto text-xs text-muted-foreground">{w.state}</span>
         </div>
+        <Waiting wait={w.wait} className="text-xs text-muted-foreground" />
         {task && (
           <a href={`#task/${task.id}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 truncate text-xs hover:underline">
             <span className={cn("size-1.5 shrink-0 rounded-full", statusColor[task.status])} />

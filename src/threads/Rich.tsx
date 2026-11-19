@@ -49,7 +49,7 @@ export function urlsIn(text: string) {
  * list it sits in, `wide`), with the full label in its tooltip; its icon never shrinks. The label carries the baseline, so its text
  * sits on the line's with the words around it; the icon is centred beside it.
  */
-const pill = (wide?: boolean) => cn("inline-flex items-baseline gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline whitespace-nowrap hover:border-ring [&>:first-child]:shrink-0 [&>:first-child]:self-center", wide ? "max-w-full" : "max-w-[min(100%,28ch)]");
+export const pill = (wide?: boolean) => cn("inline-flex items-baseline gap-1 rounded-full border border-transparent bg-muted px-1.5 align-baseline whitespace-nowrap hover:border-ring [&>:first-child]:shrink-0 [&>:first-child]:self-center", wide ? "max-w-full" : "max-w-[min(100%,28ch)]");
 
 // `row` draws it as a line in a list (the thread panel's Related), Linear-style: icon and title, no pill.
 const ROW = "flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-[13px] whitespace-nowrap hover:bg-black/[0.04] [&>:first-child]:shrink-0 [&>svg:first-child]:size-4";

@@ -91,8 +91,14 @@ export type Agent = {
   name?: string;
   cwd?: string;
   links?: string[];
-  wait?: { kind: string; ref: string; at: number } | null;
+  wait?: Wait | null;
 };
+
+/** What an agent sleeps on (`maxflow wait`): until's ref is a Shell's id and desc the agent's words for it. */
+export type Wait = { kind: string; ref: string; at: number; desc?: string };
+
+/** A shell an agent waits on with `wait until`: a command the server runs in a session of its own, another session, or a process. */
+export type Shell = { id: string; desc: string; owner: string; kind: "cmd" | "pane" | "pid"; cmd?: string; cwd?: string; pid?: number; at: number; end?: { at: number; code: number | null; tail: string } };
 
 /** Where a signal came from: Isaac, a GitHub or Slack sentry, another agent, another sentry, or maxflow itself. */
 export type Source = "isaac" | "gh" | "slack" | "agent" | "sentry" | "maxflow";

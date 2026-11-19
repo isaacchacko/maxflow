@@ -1,7 +1,7 @@
-import type { Agent, Objective, Sentry, SentrySession, Signal, Task, Thread } from "./mock";
-import { agentStore, changes, liveStore, objectiveStore, nameStore, prStore, type Pr, refreshed, sentryStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
+import type { Agent, Objective, Sentry, SentrySession, Shell, Signal, Task, Thread } from "./mock";
+import { agentStore, changes, liveStore, objectiveStore, nameStore, prStore, type Pr, refreshed, sentryStore, shellStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
 
-type World = { objectives: Objective[]; agents: Agent[]; tasks: Task[]; threads: Thread[]; signals: Signal[]; sentries: SentrySession[]; names?: Record<string, string>; prs: Record<string, Pr> };
+type World = { objectives: Objective[]; agents: Agent[]; tasks: Task[]; threads: Thread[]; signals: Signal[]; sentries: SentrySession[]; shells?: Shell[]; names?: Record<string, string>; prs: Record<string, Pr> };
 
 const SOURCE_SENTRY: Partial<Record<Sentry["id"], string>> = { gh: "gh", slack: "slack" };
 const LABEL: Record<Sentry["id"], string> = { isaac: "You", gh: "GitHub", slack: "Slack", agent: "Agents", sentry: "Sentries", maxflow: "yarn" };
@@ -26,6 +26,7 @@ function apply(w: World) {
   threadStore.set(w.threads);
   signalStore.set(w.signals);
   sentryStore.set(w.sentries);
+  shellStore.set(w.shells ?? []);
   sourceStore.set(sourcesOf(w.sentries));
   prStore.set(w.prs ?? {});
   nameStore.set(w.names ?? {});
