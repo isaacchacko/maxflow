@@ -68,7 +68,7 @@ export function StatsView({ tab: wanted }: { tab?: string }) {
 
   return (
     <div className="viz flex h-full flex-col">
-      <FitRow className="h-12 shrink-0 items-center gap-3 border-b px-5">
+      <FitRow className="h-12 shrink-0 items-center gap-3 border-b px-5 data-[fit=glyph]:gap-2 data-[fit=glyph]:px-3">
         <h1 className="shrink-0 text-sm font-medium group-data-[fit=glyph]/fit:hidden">Stats</h1>
         <nav className="flex shrink-0 rounded-lg bg-[var(--viz-track)] p-0.5 text-xs">
           {TABS.map(t => (
