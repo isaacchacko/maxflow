@@ -10,13 +10,15 @@ export const SENTRIES: Record<string, string[]> = Object.fromEntries(
   PLAIN_SENTRIES.filter((n) => LIVE || !LIVE_ONLY_SENTRIES.has(n)).map((n) => [`sentry:${n}`, [process.execPath, new URL(`sentries/${n}.ts`, import.meta.url).pathname]]),
 );
 
+const isTextPart = (part: unknown): part is { type: "text"; text: string } => isRecord(part) && part["type"] === "text" && typeof part["text"] === "string";
+
 function assistantTextsOf(line: string): string[] {
   try {
     const entry: unknown = JSON.parse(line);
     if (!isRecord(entry) || entry["type"] !== "assistant") return [];
     const content = isRecord(entry["message"]) ? entry["message"]["content"] : undefined;
     if (!Array.isArray(content)) return [];
-    return content.flatMap((part) => (isRecord(part) && part["type"] === "text" && typeof part["text"] === "string" ? [part["text"].trim().slice(0, 300)] : []));
+    return content.filter(isTextPart).map((part) => part.text.trim().slice(0, 300));
   } catch {
     return [];
   }
@@ -42,6 +44,6 @@ export function restartSentry(s: Session, hasBriefChanged: boolean) {
   const chat = isFilled(s.transcript) && existsSync(s.transcript) ? chatOf(s) : undefined;
   const isClaude = command[0] === "sh" && (command[2] ?? "").includes("exec claude ");
   const isResuming = isClaude && isFilled(chat) && !hasBriefChanged;
-  const ok = respawn(s.id, "-c", DIR, ...paneEnv(s.id), "--", ...restartCommand(s, command, chat, hasBriefChanged));
-  return { ok, resumed: isResuming ? chat : undefined, fresh: isClaude && (hasBriefChanged || !isFilled(chat)) };
+  const isRespawned = respawn(s.id, "-c", DIR, ...paneEnv(s.id), "--", ...restartCommand(s, command, chat, hasBriefChanged));
+  return { ok: isRespawned, resumed: isResuming ? chat : undefined, fresh: isClaude && (hasBriefChanged || !isFilled(chat)) };
 }
