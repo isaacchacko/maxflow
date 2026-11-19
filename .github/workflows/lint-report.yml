@@ -22,4 +22,5 @@ jobs:
           echo "::group::type errors"
           bun node_modules/.bin/tsc -p . --pretty false | grep -F -f <(echo "$FILES") || true
           echo "::endgroup::"
-          bun --bun node_modules/.bin/eslint --suppressions-location /tmp/no-suppressions.json $FILES || true
+          bun --bun node_modules/.bin/eslint --suppressions-location /tmp/no-suppressions.json -o /tmp/report.txt $FILES || true
+          cat /tmp/report.txt

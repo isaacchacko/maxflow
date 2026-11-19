@@ -112,6 +112,7 @@ export default defineConfig(
       "unicorn/no-array-reduce": "off",
       "unicorn/no-array-callback-reference": "off",
       "unicorn/no-await-expression-member": "off",
+      "unicorn/numeric-separators-style": ["error", { onlyIfContainsSeparator: true }],
       "unicorn/filename-case": ["error", { cases: { kebabCase: true, pascalCase: true, camelCase: true } }],
     },
   },
