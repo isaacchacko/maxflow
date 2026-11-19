@@ -1,5 +1,5 @@
 import { ArrowLeft, Ellipsis, Maximize2, MessageSquareReply, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { threadStore } from "@/store";
 import { closePane, openPane, paneStore, paneWidth, savePaneWidth } from "./pane";
@@ -9,7 +9,6 @@ import { DropMenu, RowMenu, threadItems, type MenuItem } from "./RowMenu";
 import { resolveOrReopen, ThreadNavContext, ThreadPage, type ThreadNav } from "./ThreadPage";
 import { AgentStack } from "./ThreadPanel";
 import { PinToggle } from "./PinToggle";
-import { focusRegion } from "./region";
 
 /**
  * Slack's side pane: the thread he shift-clicked, beside the page, with everything a thread page does. Subthreads open inside it,
@@ -34,8 +33,6 @@ export function ThreadPane() {
     }),
     [],
   );
-  // Opening puts him in it, so Esc closes it at once.
-  useEffect(() => focusRegion(id ? "pane" : "main"), [id]);
   if (!id) return null;
   const thread = all.find(t => t.id === id);
   const parent = thread?.parentId;

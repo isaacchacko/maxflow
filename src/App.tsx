@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useEventListener } from "@/lib/effects";
 import { AgentPage } from "@/agent/AgentPage";
 import { Capture } from "@/components/Capture";
 import { QuickSwitcher } from "@/components/QuickSwitcher";
 import { Viewer } from "@/threads/Viewer";
-import { PauseDialog, useResurfacing } from "@/threads/Pause";
+import { PauseDialog } from "@/threads/Pause";
 import { RaiseDialog } from "@/threads/Raise";
 import { Sidebar } from "@/components/Sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -90,38 +91,27 @@ const onShiftDown = (e: MouseEvent) => e.shiftKey && e.button === 0 && threadAt(
 export function App() {
   const [route, setRoute] = useState(routeFromHash);
   const current = useRef(route);
-  useResurfacing();
 
-  useEffect(() => {
-    // Each route change tells the pages how he got there: up out of a thread, by Back/Forward, or fresh.
-    const onHash = () => {
-      const prev = current.current;
-      const next = (current.current = routeFromHash());
-      arrive(prev.detail?.kind === "thread" ? prev.detail.id : undefined, { thread: next.detail?.kind === "thread" ? next.detail.id : undefined, view: !next.detail });
-      // Each page brings back its own side pane: opening a thread in full leaves this page's pane behind (the pane's own thread
-      // included, as ↗ does), and coming back here opens it again.
-      restorePane();
-      setRoute(next);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      // In the side pane, Escape closes it and the page underneath stays as it was.
-      if (e.key === "Escape" && paneStore.get() && activeRegion() === "pane") return closePane();
-      const { detail } = routeFromHash();
-      if (e.key === "Escape" && detail?.kind === "thread") threadUp(detail.id, route.view);
-      else if (e.key === "Escape" && detail) location.hash = route.view;
-    };
-    addEventListener("hashchange", onHash);
-    addEventListener("keydown", onKey);
-    addEventListener("click", onThreadClick, true);
-    addEventListener("mousedown", onShiftDown, true);
-    return () => {
-      removeEventListener("hashchange", onHash);
-      removeEventListener("keydown", onKey);
-      removeEventListener("click", onThreadClick, true);
-      removeEventListener("mousedown", onShiftDown, true);
-    };
-  }, [route.view]);
+  // Each route change tells the pages how he got there: up out of a thread, by Back/Forward, or fresh.
+  useEventListener("hashchange", () => {
+    const prev = current.current;
+    const next = (current.current = routeFromHash());
+    arrive(prev.detail?.kind === "thread" ? prev.detail.id : undefined, { thread: next.detail?.kind === "thread" ? next.detail.id : undefined, view: !next.detail });
+    // Each page brings back its own side pane: opening a thread in full leaves this page's pane behind (the pane's own thread
+    // included, as ↗ does), and coming back here opens it again.
+    restorePane();
+    setRoute(next);
+  });
+  useEventListener("keydown", e => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    // In the side pane, Escape closes it and the page underneath stays as it was.
+    if (e.key === "Escape" && paneStore.get() && activeRegion() === "pane") return closePane();
+    const { detail } = routeFromHash();
+    if (e.key === "Escape" && detail?.kind === "thread") threadUp(detail.id, route.view);
+    else if (e.key === "Escape" && detail) location.hash = route.view;
+  });
+  useEventListener("click", onThreadClick, { capture: true });
+  useEventListener("mousedown", onShiftDown, { capture: true });
 
   const snap = ROUTING.indexOf(route.view);
   const { detail } = route;

@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from "react";
+import { useSyncExternalStore } from "react";
 import type { Thread } from "@/mock";
 
 // How many messages of each thread Isaac has had on screen, kept in this browser, so the inbox can count what's new.
@@ -25,8 +25,10 @@ export function setSeen(id: string, count: number) {
   try {
     localStorage.setItem(key(id), String(count));
   } catch {}
+  changes++;
   dispatchEvent(new Event("seen-change"));
 }
+let changes = 0;
 
 /** Marked read: every message in the thread and the subthreads under it. */
 export function markRead(t: Thread, all: Thread[]) {
@@ -39,12 +41,9 @@ export const markUnread = (t: Thread) => setSeen(t.id, t.messages.length - 1);
 
 /** Draws again when a thread is marked read or unread, since what he has seen lives outside the stores. */
 export function useSeen() {
-  const [, bump] = useReducer((n: number) => n + 1, 0);
-  useEffect(() => {
-    addEventListener("seen-change", bump);
-    return () => removeEventListener("seen-change", bump);
-  }, []);
+  useSyncExternalStore(onSeenChange, () => changes);
 }
+const onSeenChange = (draw: () => void) => (addEventListener("seen-change", draw), () => removeEventListener("seen-change", draw));
 
 /** What he hasn't seen in a thread and every subthread under it, so a reply deep down shows on the inbox row. */
 export function unseenDeep(t: Thread, all: Thread[]): number {
@@ -62,4 +61,21 @@ const shownOf = (t: Thread) => Math.max(seenCount(t.id) ?? t.messages.findLastIn
 export function firstUnseen(t: Thread) {
   const shown = shownOf(t);
   return shown < t.messages.length ? shown : undefined;
+}
+
+// Which resurfacing this browser has already marked unread, so a reload doesn't mark it again after he read it.
+const handled = (id: string) => `resurfaced:${id}`;
+
+/** A thread back from its pause is unread from where he paused it (its last message at least), so it sorts up with the red line. */
+export function markResurfaced(threads: Thread[]) {
+  for (const t of threads) {
+    if (!t.resurfaced) continue;
+    try {
+      if (localStorage.getItem(handled(t.id)) === t.resurfaced.at) continue;
+      localStorage.setItem(handled(t.id), t.resurfaced.at);
+    } catch {
+      continue;
+    }
+    setSeen(t.id, Math.max(t.parentId ? 0 : 1, Math.min(t.resurfaced.from, t.messages.length - 1)));
+  }
 }
