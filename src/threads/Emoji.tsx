@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useResource } from "@/lib/effects";
+import { useKeyedState } from "@/lib/useKeyedState";
 import { emojiReady, emojiTable, loadEmoji, recentEmoji, searchEmoji, usedEmoji, type Emoji } from "@/lib/emoji";
 import { cn } from "@/lib/utils";
 import { caretAt } from "./Mention";
@@ -12,7 +14,7 @@ const MARKS = ["😀", "👋", "🐈", "🍎", "✈️", "⚽", "💡", "❤️"
  */
 export function EmojiPanel({ onPick }: { onPick: (emoji: string) => void }) {
   const ready = emojiReady.use();
-  useEffect(() => void loadEmoji(), []);
+  useResource("emoji", loadEmoji);
   const [query, setQuery] = useState("");
   const [hover, setHover] = useState<Emoji>();
   const grid = useRef<HTMLDivElement>(null);
@@ -75,16 +77,14 @@ const COLON = /(?:^|\s):([a-z0-9_+'-]{2,40})$/i;
 export function useEmojiComplete(input: React.RefObject<HTMLTextAreaElement | null>, draft: string, setDraft: (text: string) => void) {
   const ready = emojiReady.use();
   const [caret, setCaret] = useState(0);
-  const [active, setActive] = useState(0);
-  const [dismissed, setDismissed] = useState(-1);
   const typed = draft.slice(0, caret).match(COLON);
   const query = typed?.[1] ?? "";
   const start = typed ? caret - query.length - 1 : -1;
-  useEffect(() => void (start >= 0 && loadEmoji()), [start >= 0]);
+  useResource(start >= 0 ? "emoji" : undefined, loadEmoji);
+  const [active, setActive] = useKeyedState(`${start}:${query}`, 0);
+  const [dismissed, setDismissed] = useKeyedState(start >= 0, -1);
   const shown = useMemo(() => (start >= 0 ? searchEmoji(query, 8) : []), [query, start, ready]);
   const open = start >= 0 && start !== dismissed && shown.length > 0;
-  useEffect(() => setActive(0), [query, start]);
-  useEffect(() => void (start < 0 && setDismissed(-1)), [start]);
 
   function pick(e: Emoji | undefined) {
     const el = input.current;

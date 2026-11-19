@@ -1,5 +1,6 @@
 import { ArrowUpToLine, AtSign, Bold, Code, Ellipsis, Italic, Link2, List, ListOrdered, Plus, SendHorizontal, Smile, SquareCode, Strikethrough, Type, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { useEventListener } from "@/lib/effects";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { cn } from "@/lib/utils";
 import { EmojiPanel, useEmojiComplete } from "./Emoji";
@@ -102,7 +103,7 @@ export function Composer({ onSend, onRaise, className, autoFocus, agent, draftKe
   const [quote, setQuote] = usePersistentDraft(`${draftKey}:quote`);
   // With a quote in the box, he can send it to the top of Threads as a new thread instead of replying here (`onRaise`).
   const [raising, setRaising] = useState(false);
-  useEffect(() => void (quote || setRaising(false)), [quote]);
+  if (raising && !quote) setRaising(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [emoji, setEmoji] = useState(false);
@@ -113,37 +114,33 @@ export function Composer({ onSend, onRaise, className, autoFocus, agent, draftKe
       try { localStorage.setItem(FORMAT_KEY, on ? "0" : "1"); } catch {}
       return !on;
     });
-  // It grows with what he types, up to 40% of the window, then scrolls.
-  useLayoutEffect(() => {
-    const el = input.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, innerHeight * 0.4)}px`;
-  }, [draft]);
-  useEffect(() => {
-    // Quoted, he types next: the box takes focus with the caret after his text, and takes it again a frame later in case the
-    // click that quoted (a menu closing, a selection clearing) hands focus back to where it came from.
-    const take = (markdown: string) => {
-      setQuote(prev => [prev, markdown].filter(Boolean).join("\n\n"));
-      const focusEnd = () => {
-        const el = input.current;
-        el?.focus();
-        el?.setSelectionRange(el.value.length, el.value.length);
-      };
-      focusEnd();
-      requestAnimationFrame(focusEnd);
+  // Quoted, he types next: the box takes focus with the caret after his text, and takes it again a frame later in case the
+  // click that quoted (a menu closing, a selection clearing) hands focus back to where it came from.
+  const take = (markdown: string) => {
+    setQuote(prev => [prev, markdown].filter(Boolean).join("\n\n"));
+    const focusEnd = () => {
+      const el = input.current;
+      el?.focus();
+      el?.setSelectionRange(el.value.length, el.value.length);
     };
-    const onQuote = (e: Event) => {
-      const { detail } = e as CustomEvent<{ draftKey: string; markdown: string }>;
-      if (detail.draftKey !== draftKey) return;
-      e.preventDefault();
-      take(detail.markdown);
-    };
-    const pending = waiting.get(draftKey);
-    if (pending) waiting.delete(draftKey), take(pending);
-    addEventListener("composer-quote", onQuote);
-    return () => removeEventListener("composer-quote", onQuote);
-  }, [draftKey]);
+    focusEnd();
+    requestAnimationFrame(focusEnd);
+  };
+  useEventListener("composer-quote", e => {
+    const { detail } = e as CustomEvent<{ draftKey: string; markdown: string }>;
+    if (detail.draftKey !== draftKey) return;
+    e.preventDefault();
+    take(detail.markdown);
+  });
+  // A quote sent here before this box was on screen waits for it.
+  const attachInput = useCallback(
+    (el: HTMLTextAreaElement | null) => {
+      input.current = el;
+      const pending = el && waiting.get(draftKey);
+      if (pending) waiting.delete(draftKey), take(pending);
+    },
+    [draftKey],
+  );
   const mention = useMentionPicker(input, draft, setDraft, draftKey.match(/^thread:([\w-]+)$/)?.[1]);
   const emojiComplete = useEmojiComplete(input, draft, setDraft);
   const [uploading, setUploading] = useState(0);
@@ -252,7 +249,7 @@ export function Composer({ onSend, onRaise, className, autoFocus, agent, draftKe
         {/* The @ picker places itself by the caret, measured from the text's own top. */}
         <div className="relative">
         <textarea
-          ref={input}
+          ref={attachInput}
           rows={1}
           autoFocus={autoFocus}
           data-agent={agent}
@@ -273,7 +270,8 @@ export function Composer({ onSend, onRaise, className, autoFocus, agent, draftKe
             if (files.length) e.preventDefault(), void attach(files);
           }}
           placeholder={placeholder}
-          className="block w-full resize-none overflow-y-auto bg-transparent px-3 pt-2.5 pb-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60"
+          // It grows with what he types, up to 40% of the window, then scrolls.
+          className="block max-h-[40vh] w-full resize-none overflow-y-auto bg-transparent px-3 pt-2.5 pb-1 [field-sizing:content] text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60"
         />
         {mention.panel}
         {emojiComplete.panel}
@@ -320,13 +318,8 @@ export function Composer({ onSend, onRaise, className, autoFocus, agent, draftKe
 /** A small panel above a bottom-row button, closed by a click elsewhere or Esc. */
 function Popover({ onClose, className, children, agent }: { onClose: () => void; className?: string; children: React.ReactNode; agent?: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const away = (e: MouseEvent) => ref.current && !ref.current.parentElement?.contains(e.target as Node) && onClose();
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    addEventListener("mousedown", away);
-    addEventListener("keydown", esc);
-    return () => (removeEventListener("mousedown", away), removeEventListener("keydown", esc));
-  }, [onClose]);
+  useEventListener("mousedown", e => ref.current && !ref.current.parentElement?.contains(e.target as Node) && onClose());
+  useEventListener("keydown", e => e.key === "Escape" && onClose());
   return (
     <div ref={ref} data-agent={agent} className={cn("absolute bottom-9 left-0 z-20 rounded-xl border bg-card shadow-card", className)}>
       {children}

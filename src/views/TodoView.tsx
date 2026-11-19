@@ -1,5 +1,7 @@
 import { ArrowRight, Check, ChevronLeft, ChevronRight, Link2, MessageSquarePlus, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useEventListener, useResource } from "@/lib/effects";
+import { useKeyedState } from "@/lib/useKeyedState";
 import type { Thread } from "@/mock";
 import { plain, score, useThreadItems } from "@/components/QuickSwitcher";
 import { cn } from "@/lib/utils";
@@ -37,7 +39,7 @@ export function TodoView() {
   const asks = threads.filter(t => t.asks && !t.resolved && !t.paused).sort((a, b) => a.asks!.since.localeCompare(b.asks!.since));
   const scrollRef = useRef<HTMLDivElement>(null);
   useLayerScroll("todo", scrollRef);
-  useEffect(() => void loadTodos(), [live]);
+  useResource(live ? "todos" : undefined, loadTodos);
 
   // In the order they were added, whatever their state, so a click on a box never moves its row.
   const onDay = todos.filter(t => t.day === day).sort((a, b) => a.at.localeCompare(b.at));
@@ -216,7 +218,7 @@ function TaggedThread({ thread, onUntag }: { thread: Thread; onUntag: () => void
 function ThreadPicker({ todo, onClose }: { todo: Todo; onClose: () => void }) {
   const items = useThreadItems().filter(i => !todo.threadIds.includes(i.href.slice("#thread/".length)));
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useKeyedState(query, 0);
   const box = useRef<HTMLDivElement>(null);
   const shown = useMemo(() => {
     const q = query.trim();
@@ -229,12 +231,7 @@ function ThreadPicker({ todo, onClose }: { todo: Todo; onClose: () => void }) {
       .sort((a, b) => b.s - a.s || b.rank - a.rank)
       .slice(0, 8);
   }, [items, query]);
-  useEffect(() => setActive(0), [query]);
-  useEffect(() => {
-    const away = (e: PointerEvent) => box.current?.contains(e.target as Node) || onClose();
-    window.addEventListener("pointerdown", away);
-    return () => window.removeEventListener("pointerdown", away);
-  }, [onClose]);
+  useEventListener("pointerdown", e => box.current?.contains(e.target as Node) || onClose());
   // The new-thread row sits after the matches, at index shown.length.
   const pick = (i: number) => {
     onClose();
@@ -302,9 +299,8 @@ function StateBox({ state, onClick }: { state: TodoState; onClick: () => void })
 }
 
 function Calendar({ day, today, todos, onPick }: { day: string; today: string; todos: Todo[]; onPick: (day: string) => void }) {
-  const [month, setMonth] = useState(() => dateOf(day.slice(0, 8) + "01"));
   // Picking a day in another month (Back to today) turns the calendar to it.
-  useEffect(() => setMonth(m => (dayOf(m).slice(0, 7) === day.slice(0, 7) ? m : dateOf(day.slice(0, 8) + "01"))), [day]);
+  const [month, setMonth] = useKeyedState(day, dateOf(day.slice(0, 8) + "01"));
   const open = new Set(todos.filter(isOpen).map(t => t.day));
   const first = month.getDay();
   const days = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();

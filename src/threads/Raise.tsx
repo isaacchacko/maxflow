@@ -1,6 +1,6 @@
 import { ArrowUpToLine } from "lucide-react";
 import { Dialog } from "radix-ui";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { Thread } from "@/mock";
 import { createStore, startThread } from "@/store";
 import { quoted } from "./Composer";
@@ -34,7 +34,9 @@ export function RaiseDialog() {
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => (setComment(""), setSending(false)), [r]);
+  // Each quote raised starts with an empty box.
+  const [boxFor, setBoxFor] = useState(r);
+  if (boxFor !== r) setBoxFor(r), setComment(""), setSending(false);
   const close = () => raising.set(undefined);
   const quote = r ? quoted(r.text, r.thread, r.message) : "";
   const send = async () => {

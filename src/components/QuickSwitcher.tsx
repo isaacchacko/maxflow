@@ -1,9 +1,11 @@
 import { LayoutGrid, Waypoints } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
+import { useEventListener } from "@/lib/effects";
+import { useKeyedState } from "@/lib/useKeyedState";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
 import { slackPlain } from "@/lib/slack";
-import { cn } from "@/lib/utils";
+import { cn, scrollIntoReach } from "@/lib/utils";
 import { statusColor } from "@/mock";
 import { agentStore, objectiveStore, sentryStore, taskStore, threadStore } from "@/store";
 import { Avatar, Rich } from "@/threads/Rich";
@@ -109,27 +111,20 @@ function useItems(views: readonly { id: string; label: string }[]) {
 export function QuickSwitcher({ views }: { views: readonly { id: string; label: string }[] }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useKeyedState(`${open}:${query}`, 0);
   const items = useItems(views);
-  const listRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+  useEventListener(
+    "keydown",
+    e => {
       if (e.key.toLowerCase() !== "k" || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
       e.preventDefault();
       setOpen(o => !o);
-    };
-    const onHash = () => visited(location.hash);
-    const onOpen = () => setOpen(true);
-    addEventListener("keydown", onKey, true);
-    addEventListener("hashchange", onHash);
-    addEventListener("quick-switcher-open", onOpen);
-    return () => {
-      removeEventListener("keydown", onKey, true);
-      removeEventListener("hashchange", onHash);
-      removeEventListener("quick-switcher-open", onOpen);
-    };
-  }, []);
+    },
+    { capture: true },
+  );
+  useEventListener("hashchange", () => visited(location.hash));
+  useEventListener("quick-switcher-open", () => setOpen(true));
 
   const shown = useMemo(() => {
     const q = query.trim();
@@ -155,12 +150,6 @@ export function QuickSwitcher({ views }: { views: readonly { id: string; label: 
     return groups.sort((a, b) => b[0]!.s - a[0]!.s).flat();
   }, [items, query, open]);
 
-  useEffect(() => {
-    setActive(0);
-  }, [query, open]);
-  useEffect(() => {
-    listRef.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [active]);
 
   function go(i: Item | undefined) {
     if (!i) return;
@@ -189,13 +178,14 @@ export function QuickSwitcher({ views }: { views: readonly { id: string; label: 
           placeholder="Jump to a thread, agent, objective, task or view…"
           className="border-b bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground/60"
         />
-        <div ref={listRef} className="max-h-[60vh] overflow-y-auto py-1">
+        <div className="max-h-[60vh] overflow-y-auto py-1">
           {shown.length === 0 && <p className="px-4 py-6 text-center text-sm text-muted-foreground">Nothing matches “{query}”</p>}
           {shown.map((item, n) => (
             <div key={`${item.kind}:${item.href}`}>
               {item.kind !== shown[n - 1]?.kind && <p className="px-4 pt-2 pb-1 text-[11px] font-medium text-muted-foreground">{item.kind}</p>}
               <button
                 data-index={n}
+                ref={n === active ? scrollIntoReach : undefined}
                 onMouseMove={() => setActive(n)}
                 onClick={() => go(item)}
                 className={cn("flex w-full items-center gap-2.5 px-4 py-1.5 text-left text-sm", n === active && "bg-muted")}

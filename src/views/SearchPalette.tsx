@@ -1,8 +1,8 @@
 import { Bot, GitPullRequest, Hash, MessagesSquare, Network, Radar, Search, User, Waypoints, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useKeyedState } from "@/lib/useKeyedState";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+import { cn, scrollIntoReach } from "@/lib/utils";
 
 export type Kind = "event" | "objective" | "router" | "agent" | "thread";
 export type ChipKey = "is" | "from" | "state" | "status" | "in";
@@ -110,9 +110,8 @@ export function SearchPalette({
   onFilter: (f: Filter) => void;
   onPick: (node: NodeMeta) => void;
 }) {
-  const [active, setActive] = useState(0);
-  const listRef = useRef<HTMLDivElement>(null);
   const { chips, text } = filter;
+  const [active, setActive] = useKeyedState(`${chips.length}:${text}`, 0);
 
   const results = isActive(filter) ? hits(nodes, filter).slice(0, 50) : [];
   const token = text.split(" ").at(-1) ?? "";
@@ -129,11 +128,6 @@ export function SearchPalette({
         ? []
         : chipKeys.map(k => `${k}:`);
 
-  useEffect(() => setActive(0), [text, chips.length]);
-
-  useEffect(() => {
-    listRef.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [active]);
 
   const setText = (next: string) => {
     const parts = next.split(" ");
@@ -217,7 +211,7 @@ export function SearchPalette({
           </div>
         )}
 
-        <div ref={listRef} className="max-h-96 overflow-y-auto py-1">
+        <div className="max-h-96 overflow-y-auto py-1">
           {isActive(filter) && results.length === 0 && <p className="px-3 py-6 text-center text-sm text-muted-foreground">No results</p>}
           {results.map((n, i) => {
             const Icon = (n.source && sourceIcon[n.source]) || kindIcon[n.kind];
@@ -225,6 +219,7 @@ export function SearchPalette({
               <button
                 key={n.id}
                 data-index={i}
+                ref={i === active ? scrollIntoReach : undefined}
                 onMouseMove={() => setActive(i)}
                 onClick={() => onPick(n)}
                 className={cn("flex w-full items-center gap-3 px-3 py-1.5 text-left text-sm", i === active && "bg-muted")}
