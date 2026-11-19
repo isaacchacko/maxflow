@@ -3,11 +3,21 @@ import { App } from "./App";
 import { startLive } from "./live";
 import { loadLocalMock } from "./store";
 
-// yarn installs as an app (src/pwa): the manifest is linked here because Bun's HTML bundler would try to bundle it from index.html,
-// and the worker caches nothing. Before the awaits below, so the app is installable even while the live data loads.
+// constraint: Bun's HTML bundler would bundle a manifest linked from index.html, so it is linked here, before the awaits
 document.head.append(Object.assign(document.createElement("link"), { rel: "manifest", href: "/manifest.webmanifest" }));
-navigator.serviceWorker?.register("/sw.js").catch(() => {});
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    await navigator.serviceWorker.register("/sw.js");
+  } catch {
+    // constraint: registering fails outside a secure context; the app runs without being installable
+  }
+}
+void registerServiceWorker();
 
 await startLive();
 await loadLocalMock();
-createRoot(document.getElementById("root")!).render(<App />);
+const root = document.querySelector("#root");
+if (!root) throw new Error("index.html has no #root");
+createRoot(root).render(<App />);
