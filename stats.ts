@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { DIR, STATE_DIR } from "./instance";
 import { ACTIVE_GAP_MS, cost, loadUsage, type Tokens } from "./usage";
-import { threadsTable } from "./state";
+import { namesTable, threadsTable } from "./state";
 
 // The Stats page's numbers, one week at a time (Monday to Sunday in his time zone).
 // GitHub: one repo at a time (Dryft-AI/app unless he picks another), one GraphQL call per repo and week (a 502 is tried twice more), cached in
@@ -408,13 +408,7 @@ function freshenUsage(at: number) {
 }
 
 let usageMemo: { at: number; value: ReturnType<typeof loadUsage> } | undefined;
-const names = () => {
-  try {
-    return JSON.parse(readFileSync(`${STATE_DIR}/names.json`, "utf8")) as Record<string, string>;
-  } catch {
-    return {} as Record<string, string>;
-  }
-};
+const names = () => namesTable.all();
 
 type Group = {
   id: string;

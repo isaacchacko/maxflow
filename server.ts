@@ -5,7 +5,7 @@ import { backgroundShells } from "./background";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
 import { slackAvatar, slackNames } from "./slack-meta";
 import { agents, calendar, health, stats } from "./stats";
-import { ghStatusTable, slackMessagesTable, tasksTable, threadsTable } from "./state";
+import { ghStatusTable, namesTable, objectivesTable, slackMessagesTable, tasksTable, threadsTable, todosTable } from "./state";
 import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
@@ -750,9 +750,8 @@ setTimeout(() => {
 type Block = { id: string; kind: string; w: number; h: number; [k: string]: unknown };
 // mergedInto: closed by merging it into another objective, which now owns its agents, threads, tasks and signals.
 type Objective = { id: string; title: string; cwd: string; at: number; page: Block[]; closed?: boolean; mergedInto?: string };
-const OBJECTIVES = `${STATE_DIR}/objectives.json`;
-const objectives: Objective[] = (() => { try { return JSON.parse(readFileSync(OBJECTIVES, "utf8")); } catch { return []; } })();
-const saveObjectives = () => writeFileSync(OBJECTIVES, JSON.stringify(objectives, null, 2));
+const objectives = objectivesTable.read() as Objective[];
+const saveObjectives = () => objectivesTable.write(objectives);
 const slug = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "objective";
 
 function setRole(s: Session, role: Role) {
@@ -943,15 +942,11 @@ function mergeThread(from: Thread, into: Thread) {
   for (const t of [from, into]) publish(`thread/${t.id}`, { thread: t.id, ...(t === from && { mergedInto: into.id }) });
 }
 // The last name each session went by, so a message from one that has ended reads as it rather than as a bare id.
-const NAMES = `${STATE_DIR}/names.json`;
-// Seeded on first run from the askers of the old question queue, some of which have ended.
-const names: Record<string, string> = (() => { try { return JSON.parse(readFileSync(NAMES, "utf8")); } catch {} try {
-  return Object.fromEntries((JSON.parse(readFileSync(`${STATE_DIR}/questions.json`, "utf8")) as { session: string; name: string }[]).map((q) => [q.session, q.name]));
-} catch { return {}; } })();
+const names = namesTable.all();
 function rememberNames() {
   let changed = false;
   for (const s of sessions.values()) if (names[s.id] !== s.name) (names[s.id] = s.name), (changed = true);
-  if (changed) writeFileSync(NAMES, JSON.stringify(names));
+  if (changed) namesTable.write(names);
 }
 const pathTitle = (t: Thread) => [...ancestors(t), t].map((x) => x.title).join(" › ");
 // A thread he @-mentions ([[thread:<id>]]) reaches the router as a line of context: where it sits, who owns it, how it last stood,
@@ -1542,12 +1537,11 @@ const saveTasks = () => tasksTable.write(tasks);
 const TODO_STATES = ["todo", "doing", "done", "cancelled"] as const;
 // threadIds: the threads tagged on it, by him from the page or by agents with `maxflow todo tag`, in the order they were tagged.
 type Todo = { id: string; text: string; day: string; state: (typeof TODO_STATES)[number]; at: string; threadIds: string[] };
-const TODOS = `${STATE_DIR}/todos.json`;
 // Todos saved before states were a done flag, or before a todo held several threads.
-const todos: Todo[] = (() => { try { return JSON.parse(readFileSync(TODOS, "utf8")); } catch { return []; } })().map(
+const todos: Todo[] = (todosTable.read() as (Todo & { done?: boolean; threadId?: string })[]).map(
   ({ done, threadId, ...t }: Todo & { done?: boolean; threadId?: string }) => ({ ...t, state: t.state ?? (done ? "done" : "todo"), threadIds: t.threadIds ?? (threadId ? [threadId] : []) }),
 );
-const saveTodos = () => writeFileSync(TODOS, JSON.stringify(todos));
+const saveTodos = () => todosTable.write(todos);
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 // His autonomy restrictions (restrictions.ts): the Restrictions page edits them, the enforcement hook reads them.

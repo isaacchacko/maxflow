@@ -32,6 +32,9 @@ const MIGRATIONS: (() => void)[] = [
   () => (createList("tasks"), importList("tasks", `${STATE_DIR}/tasks.json`)),
   () => (createMap("gh_status"), importMap("gh_status", `${STATE_DIR}/gh-status.json`)),
   () => (createMap("slack_messages"), importMap("slack_messages", `${STATE_DIR}/slack-messages.json`)),
+  () => (createList("objectives"), importList("objectives", `${STATE_DIR}/objectives.json`)),
+  () => (createMap("names"), importMap("names", `${STATE_DIR}/names.json`)),
+  () => (createList("todos"), importList("todos", `${STATE_DIR}/todos.json`)),
 ];
 const version = () => (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
 if (version() < MIGRATIONS.length)
@@ -70,6 +73,8 @@ function listTable<T extends Row>(table: string) {
 
 export const threadsTable = listTable<Row & { messages: unknown[] }>("threads");
 export const tasksTable = listTable<Row>("tasks");
+export const objectivesTable = listTable<Row>("objectives");
+export const todosTable = listTable<Row>("todos");
 
 // Values by key, the shape a sentry keeps as a JSON object. write() takes the whole record and stores only the keys that
 // changed or went. fresh() rereads only when another process has committed since the last read.
@@ -118,3 +123,6 @@ export const ghStatusTable = mapTable<{ at: number; pr: any }>("gh_status");
 // What the slack sentry read from each thread, channel or search it watches, by target ("C…/ts", "C…", "search:…").
 export type SlackKept = { at?: number; title: string; msgs: { ts: string; uid: string; who: string; text: string; link?: string; channel?: string; bot?: boolean }[] };
 export const slackMessagesTable = mapTable<SlackKept>("slack_messages");
+
+// The last name each session went by, by session id.
+export const namesTable = mapTable<string>("names");
