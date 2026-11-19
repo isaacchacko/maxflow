@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { BASE as base, STATE_DIR } from "../instance";
 import { mcp } from "../mcp";
 import { slackMessagesTable } from "../state";
-import { watchNotices, type Notice } from "./slack-notify";
+import { didStartWatchingNotices, type Notice } from "./slack-notify";
 import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("slack");
@@ -408,7 +408,7 @@ async function placeOf(subtitle: string, state: State): Promise<string | null> {
 
 // A notification is published as it is, then its conversation is read now so the whole message lands through the usual path.
 async function onNotice(n: Notice, me: string, state: State) {
-  await post("/api/events", { topic: "slack/notify", data: { title: n.title, subtitle: n.subtitle, body: n.body, ts: n.ts, at: n.at } });
+  await post("/api/events", { topic: "slack/notify", data: { title: n.workspace, subtitle: n.subtitle, body: n.body, ts: n.ts, at: n.at } });
   const place = await placeOf(n.subtitle, state).catch((e) => (console.error(`notice "${n.subtitle}": ${e}`), null));
   console.log(`${new Date().toLocaleTimeString()}  notice from ${n.subtitle} (${place ?? "unknown"}), ${((Date.now() - n.at) / 1000).toFixed(1)}s after delivery`);
   // A conversation the sentry can't name yet (a group DM it hasn't seen, a channel search can't find) is looked for at once
@@ -446,7 +446,7 @@ if (import.meta.main) {
   const state = { latest: {}, seen: {}, titles: {}, own: {}, readAt: {}, bots: [], dms: {}, groups: {}, places: {}, direct: [], ...readJson<Partial<State>>(STATE_FILE, {}) } as State;
   // A notification is handled at once, beside a tick that may be running; `exclusive` keeps them off the same conversation.
   // SLACK_NOTICES_SINCE=<record id> replays the notifications after it, for a test.
-  const notices = watchNotices((n) => void onNotice(n, me, state).catch((e) => console.error(`${new Date().toLocaleTimeString()}  notice failed:`, e)), Number(process.env.SLACK_NOTICES_SINCE) || undefined);
+  const notices = didStartWatchingNotices((n) => void onNotice(n, me, state).catch((e) => console.error(`${new Date().toLocaleTimeString()}  notice failed:`, e)), Number(process.env.SLACK_NOTICES_SINCE) || undefined);
   console.log(`slack sentry as ${me || "?"}, every ${INTERVAL_MS / 1000}s; notifications ${notices ? "watched" : "unreadable, polling only"}`);
   void (async () => {
     for (;;) {

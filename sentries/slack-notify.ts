@@ -1,82 +1,118 @@
-// The Slack notifications macOS shows on this Mac, read from its notification store as they land: a DM or mention reaches the
-// slack sentry in about a second, where Slack's search index takes minutes. Slack shows none while its window is focused, under
-// Do Not Disturb or for a muted conversation, and cuts long bodies short, so the sentry's own polling stays the backstop.
 import { Database } from "bun:sqlite";
 import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-const DIR = join(process.env.HOME!, "Library/Group Containers/group.com.apple.usernoted/db2");
+const NOTIFICATION_STORE_DIR = join(homedir(), "Library/Group Containers/group.com.apple.usernoted/db2");
 const SLACK = "com.tinyspeck.slackmacgap";
-// The store's dates count from 2001, the Mac epoch.
-const MAC_EPOCH = 978_307_200;
-// fs.watch hears nothing of usernoted's writes here, so the store's files are stat'ed this often instead.
+const MAC_EPOCH_UNIX_SECONDS = 978_307_200;
+// constraint: fs.watch hears nothing of usernoted's writes to its store, so the files are stat'ed this often instead.
 const STAT_MS = 500;
+const STORE_FILES = ["db", "db-wal", "db-shm"];
+const NEW_ROWS = "select rec_id, data, delivered_date from record where app_id = ? and rec_id > ? order by rec_id";
 
-// title: the workspace; subtitle: `#channel`, a private channel's bare name, or the person for a DM; ts: the message's Slack ts.
-export type Notice = { id: number; title: string; subtitle: string; body: string; ts?: string; at: number };
+export type Notice = { id: number; workspace: string; subtitle: string; body: string; ts: string | undefined; at: number };
 type Row = { rec_id: number; data: Uint8Array; delivered_date: number };
 
-const XML: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
-// A record's data is a binary plist; plutil turns it into XML, whose `req` dict holds titl, subt, body and iden (`<team>_<ts>`).
-function parse(row: Row): Notice {
+const XML_ENTITIES = new Map([
+  ["amp", "&"],
+  ["lt", "<"],
+  ["gt", ">"],
+  ["quot", '"'],
+  ["apos", "'"],
+]);
+const decodeXmlEntities = (text: string) => text.replaceAll(/&(\w+);/g, (entity, name: string) => XML_ENTITIES.get(name) ?? entity);
+
+function plistStringField(xml: string, key: string) {
+  const match = new RegExp(String.raw`<key>${key}</key>\s*<string>([\s\S]*?)</string>`).exec(xml);
+  return decodeXmlEntities(match?.[1] ?? "");
+}
+
+function binaryPlistToXml(data: Uint8Array) {
   const dir = mkdtempSync(join(tmpdir(), "slack-notice-"));
   try {
-    writeFileSync(join(dir, "n.plist"), row.data);
-    const xml = Bun.spawnSync(["plutil", "-convert", "xml1", "-o", "-", join(dir, "n.plist")]).stdout.toString();
-    const field = (key: string) => (xml.match(new RegExp(`<key>${key}</key>\\s*<string>([\\s\\S]*?)</string>`))?.[1] ?? "").replace(/&(\w+);/g, (m, e) => XML[e] ?? m);
-    return { id: row.rec_id, title: field("titl"), subtitle: field("subt"), body: field("body"), ts: field("iden").match(/_(\d+\.\d+)$/)?.[1], at: (row.delivered_date + MAC_EPOCH) * 1000 };
+    writeFileSync(join(dir, "n.plist"), data);
+    return Bun.spawnSync(["plutil", "-convert", "xml1", "-o", "-", join(dir, "n.plist")]).stdout.toString();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-/** Calls `onNotice` for each Slack notification delivered from now on (or after record `since`); false when the store can't be read (no access, or not macOS). */
-export function watchNotices(onNotice: (n: Notice) => void, since?: number) {
-  if (!existsSync(join(DIR, "db"))) return false;
-  let db: Database, app: number, after: number;
-  try {
-    db = new Database(join(DIR, "db"), { readonly: true });
-    app = (db.query("select app_id from app where identifier = ?").get(SLACK) as { app_id: number } | null)?.app_id ?? -1;
-    after = since ?? (db.query("select max(rec_id) as id from record").get() as { id: number | null }).id ?? 0;
-  } catch (e) {
-    console.error(`notification store unreadable, polling only: ${e}`);
-    return false;
+function parseNotice(row: Row): Notice {
+  const xml = binaryPlistToXml(row.data);
+  const slackTs = /_(\d+\.\d+)$/.exec(plistStringField(xml, "iden"))?.[1];
+  return {
+    id: row.rec_id,
+    workspace: plistStringField(xml, "titl"),
+    subtitle: plistStringField(xml, "subt"),
+    body: plistStringField(xml, "body"),
+    ts: slackTs,
+    at: (row.delivered_date + MAC_EPOCH_UNIX_SECONDS) * 1000,
+  };
+}
+
+function copyStoreTo(dir: string) {
+  for (const file of STORE_FILES) {
+    if (existsSync(join(NOTIFICATION_STORE_DIR, file))) copyFileSync(join(NOTIFICATION_STORE_DIR, file), join(dir, file));
   }
-  const NEW = "select rec_id, data, delivered_date from record where app_id = ? and rec_id > ? order by rec_id";
-  // A read never writes; while usernoted holds a lock, a copy of the store and its log is read instead.
-  const rows = (): Row[] => {
+}
+
+function rowsFromCopyOfStore(app: number, after: number) {
+  const dir = mkdtempSync(join(tmpdir(), "slack-notices-"));
+  try {
+    copyStoreTo(dir);
+    const copy = new Database(join(dir, "db"), { readonly: true });
+    const rows = copy.query<Row, [number, number]>(NEW_ROWS).all(app, after);
+    copy.close();
+    return rows;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function openStore(since?: number) {
+  try {
+    const db = new Database(join(NOTIFICATION_STORE_DIR, "db"), { readonly: true });
+    const app = db.query<{ app_id: number }, [string]>("select app_id from app where identifier = ?").get(SLACK)?.app_id ?? -1;
+    const after = since ?? db.query<{ id: number | null }, []>("select max(rec_id) as id from record").get()?.id ?? 0;
+    return { db, app, after };
+  } catch (error) {
+    console.error(`notification store unreadable, polling only: ${String(error)}`);
+    return null;
+  }
+}
+
+const storeStamp = () => ["db-wal", "db"].map((file) => statSync(join(NOTIFICATION_STORE_DIR, file), { throwIfNoEntry: false })?.mtimeMs ?? 0).join(",");
+
+export function didStartWatchingNotices(onNotice: (notice: Notice) => void, since?: number) {
+  if (!existsSync(join(NOTIFICATION_STORE_DIR, "db"))) return false;
+  const store = openStore(since);
+  if (!store) return false;
+  const { db, app } = store;
+  let { after } = store;
+  const newRows = (): Row[] => {
     try {
-      return db.query(NEW).all(app, after) as Row[];
+      return db.query<Row, [number, number]>(NEW_ROWS).all(app, after);
     } catch {
-      const dir = mkdtempSync(join(tmpdir(), "slack-notices-"));
-      try {
-        for (const f of ["db", "db-wal", "db-shm"]) if (existsSync(join(DIR, f))) copyFileSync(join(DIR, f), join(dir, f));
-        const copy = new Database(join(dir, "db"), { readonly: true });
-        const got = copy.query(NEW).all(app, after) as Row[];
-        copy.close();
-        return got;
-      } finally {
-        rmSync(dir, { recursive: true, force: true });
-      }
+      return rowsFromCopyOfStore(app, after);
     }
   };
   const check = () => {
     try {
-      for (const row of rows()) {
+      for (const row of newRows()) {
         after = Math.max(after, row.rec_id);
-        onNotice(parse(row));
+        onNotice(parseNotice(row));
       }
-    } catch (e) {
-      console.error(`notification check failed: ${e}`);
+    } catch (error) {
+      console.error(`notification check failed: ${String(error)}`);
     }
   };
-  // The store's write-ahead log (or, after a checkpoint, the store) changes the moment a notification lands.
-  const stamp = () => ["db-wal", "db"].map((f) => statSync(join(DIR, f), { throwIfNoEntry: false })?.mtimeMs ?? 0).join();
-  let seen = stamp();
+  let seen = storeStamp();
   setInterval(() => {
-    const now = stamp();
-    if (now !== seen) (seen = now), check();
+    const stamp = storeStamp();
+    if (stamp === seen) return;
+    seen = stamp;
+    check();
   }, STAT_MS);
   check();
   return true;
