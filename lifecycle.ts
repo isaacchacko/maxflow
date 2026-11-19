@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { inboxesTable, watchedStateFile, writeStateText } from "./state";
 import { publish } from "./bus";
-import { BASE, DIR, INERT_AGENTS, INERT_CWD, INSTANCE, MAX_SESSIONS } from "./instance";
+import { BASE, DIR, ARE_AGENTS_INERT, INERT_CWD, INSTANCE, MAX_SESSIONS } from "./instance";
 import { TMUX, launchable, named, paneEnv, respawn, scoped, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
 import { type ClaudeState, type Role, type Session, type Wait, chatOf, isAgent, isSentry, sessions } from "./sessions";
 import { type Signal, type Source, TASK_STATUSES, type Task, type TaskEdit, type Thread } from "./model";
@@ -49,7 +49,7 @@ export function attachViewer(session: Session, cols = 120, rows = 34) {
 }
 
 export class SessionCap extends Error {}
-const isNewInertClaude = (cmd: string[]) => INERT_AGENTS && cmd[0] === "claude" && !cmd.includes("--resume");
+const isNewInertClaude = (cmd: string[]) => ARE_AGENTS_INERT && cmd[0] === "claude" && !cmd.includes("--resume");
 export function createSession(name: string, cmd: string[], cwd: string, chatId?: string, role?: Role, cols = 120, rows = 34): Session {
   const running = sessions.values().filter((s) => s.exitCode === null && s.sentry !== true).toArray().length;
   if (running >= MAX_SESSIONS && !name.startsWith("sentry:"))

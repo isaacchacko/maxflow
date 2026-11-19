@@ -14,7 +14,7 @@ export const TMUX_SOCKET = LIVE ? "maxflow-v2" : `maxflow-v2-${INSTANCE}`;
 export const STATE_DIR = join(homedir(), LIVE ? ".maxflow-v2" : `.maxflow-v2-${INSTANCE}`);
 const DEV_INSTANCE_SESSION_CAP = 10;
 export const MAX_SESSIONS = LIVE ? Infinity : Number(nonEmptyEnv("MAXFLOW_MAX_SESSIONS") ?? DEV_INSTANCE_SESSION_CAP);
-export const INERT_AGENTS = !LIVE && process.env["MAXFLOW_REAL_AGENTS"] !== "1";
+export const ARE_AGENTS_INERT = !LIVE && process.env["MAXFLOW_REAL_AGENTS"] !== "1";
 export const INERT_CWD = join(STATE_DIR, "agent-cwd");
 export const DIR = import.meta.dir;
 export const CLI = join(DIR, "cli.ts");

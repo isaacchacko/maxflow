@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { CLI, DIR, INERT_AGENTS, INSTANCE, PORT, TMUX_SCOPE, TMUX_SOCKET } from "./instance";
+import { CLI, DIR, ARE_AGENTS_INERT, INSTANCE, PORT, TMUX_SCOPE, TMUX_SOCKET } from "./instance";
 import { stateDisplayPath } from "./state";
 
 const TMUX_SYNC_TIMEOUT_MS = 5000;
@@ -78,7 +78,7 @@ export async function paste(target: string, text: string) {
   await tmuxAsync("paste-buffer", "-p", "-d", "-b", target, "-t", target);
 }
 
-const withInertModel = (cmd: string[]) => (INERT_AGENTS && !cmd.includes("--model") ? ["claude", "--model", "haiku", ...cmd.slice(1)] : cmd);
+const withInertModel = (cmd: string[]) => (ARE_AGENTS_INERT && !cmd.includes("--model") ? ["claude", "--model", "haiku", ...cmd.slice(1)] : cmd);
 export const named = (id: string, cmd: string[]) => {
   if (cmd[0] !== "claude") return cmd;
   const claude = withInertModel(cmd);
