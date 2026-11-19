@@ -11,7 +11,7 @@ export function repoPath(context: Readonly<TSESLint.RuleContext<string, readonly
 }
 
 export function areaOf(path: string): Area {
-  const top = path.split("/")[0] ?? "";
+  const top = path.split("/", 1)[0] ?? "";
   return path.includes("/") && AREAS.has(top) ? (top as Area) : "root";
 }
 
