@@ -18,6 +18,7 @@ import app from "./src/index.html";
 import { TMUX, flushOptions, launchable, named, paneEnv, paste, pressEnter, respawn, scoped, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
 import { type ClaudeState, type Role, type Session, type Wait, type WsData, chatOf, isAgent, isSentry, sessions } from "./sessions";
 import { candidates } from "./mentions";
+import { type Block, type Feed, type FeedPost, type GhPr, type Message, type Objective, type Pending, type Shell, type Signal, type Source, TASK_STATUSES, TODO_STATES, type Task, type TaskEdit, type Thread, type Todo, type UserComment } from "./model";
 
 const HOST = "127.0.0.1";
 const SCROLLBACK_BYTES = 2 * 1024 * 1024;
@@ -390,14 +391,6 @@ function enqueue(s: Session, text: string) {
   saveInbox(s);
   wake(s);
 }
-
-// One chokepoint for every message: Isaac's chats, GitHub and Slack notices, the server's own, and one agent writing another
-// all become a signal on the bus, then go to the sessions named, else to the routers of the objective, else to the funnel.
-type Source = "isaac" | "gh" | "slack" | "agent" | "sentry" | "maxflow";
-// An external message (see externalSignal) also carries who wrote it, where, a link to it, its thread or PR's link (on, which its board
-// task links), the bus event it came on and when that was.
-// own: his own post (on Slack, or on GitHub as himself or through an agent).
-type Signal = { source: Source; from?: string; target: string; text: string; routedTo: string[]; objective?: string; who?: string; where?: string; link?: string; on?: string; event?: number; at?: number; own?: boolean };
 const sourceOf = (from?: Session): Source =>
   !from ? "maxflow" : isSentry(from) ? (from.name === "sentry:gh" ? "gh" : from.name === "sentry:slack" ? "slack" : "sentry") : "agent";
 // What a signal is about, for the event log: a PR, a Slack channel, or who sent it.
@@ -566,11 +559,6 @@ setTimeout(() => {
     writeFileSync(EXTERNAL_SEEN, JSON.stringify([...externalSeen].slice(-5000)));
   } catch (err) { console.error(`external backfill failed: ${err}`); }
 }, 3_000);
-
-// Objectives own the work: each has one or more routers, each router a scope of it and its workers. Isaac sees them as rows.
-type Block = { id: string; kind: string; w: number; h: number; [k: string]: unknown };
-// mergedInto: closed by merging it into another objective, which now owns its agents, threads, tasks and signals.
-type Objective = { id: string; title: string; cwd: string; at: number; page: Block[]; closed?: boolean; mergedInto?: string };
 const objectives = objectivesTable.read() as Objective[];
 const saveObjectives = () => objectivesTable.write(objectives);
 const slug = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "objective";
@@ -608,35 +596,6 @@ async function acceptTrust(s: Session) {
     if (/esc to interrupt|bypass permissions on/i.test(text)) return;
   }
 }
-
-// Threads are the routers' running notes to Isaac on an objective; his reply in one goes to its routers like any message.
-// signal: an inbox thread Isaac started, waiting on the funnel to route that signal to an objective.
-// resolved: Isaac marked it done, from the browser only; his next message in it reopens it.
-// paused: he put it away until a time (until), from the browser only, saying when in his words (said); count is how many messages
-// it had then, posts how many agents added since, which leave it paused. At until it comes back as resurfaced, unread from count.
-// His own message in it unpauses it at once. wake: what he wrote to be sent when it comes back, posted then as his message, so its
-// routers take it up as if he had typed it; unpaused early (by hand, or by his own post) it isn't sent. An open ask in a paused (or
-// resolved) thread is kept but not drawn as needing him, and its default waits; it is his again when the thread comes back. Only a
-// new ask brings a paused thread back.
-type Paused = { until: number; at: number; said: string; count: number; posts?: number; wake?: string };
-// pending: his last message was handed to these routers, and none has answered yet; status is the line a router set on it.
-type Pending = { routers: string[]; since: number; status?: string };
-// asks: an agent asked him here and waits on his reply (see ask); default: its recommendation, taken after DEFAULT_AFTER_MS.
-// shown: when his inbox first drew it flagged; the default's clock runs from then, never from before he could see it.
-type Ask = { session: string; since: number; default?: string; shown?: number };
-// feed: started by maxflow itself from his event feed (a Slack DM or mention, a PR comment, a CI failure nobody owned), not by him;
-// source is the sentry's kind of item, task the board task it is on, which goes to the agent the funnel routes it to.
-type Feed = { source: string; who: string; link: string; task?: number };
-// task: the board task a feed thread is on.
-// parent: a subthread hangs off a message in another thread, which is its root; its messages are that message's replies, and
-// any of them can have a subthread of its own. A top thread's root is its first message, so replying to that posts in it.
-// nudge: he asked for the answer to this message in a subthread of its own. wake: his message the end of a pause sent, as he wrote it then.
-// A message someone wrote on Slack or GitHub, posted by the feed as that person: user is a Slack user id or a GitHub login; context marks
-// one from before the new ones in its conversation, shown muted; own marks his own post there.
-type External = { source: "slack" | "github"; name: string; user?: string; link: string; where?: string; context?: true; own?: true };
-type Message = { id: string; from: string; at: number; text: string; nudge?: "subthread"; wake?: true; ext?: External };
-// members: agents he @-mentioned in it, who hear his later replies there as its routers do.
-type Thread = { id: string; title: string; objective: string; routers: string[]; members?: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; task?: number; resolved?: { at: number }; paused?: Paused; pinned?: { at: number; order: number }; resurfaced?: { at: number; from: number }; asks?: Ask; q?: number; mergedInto?: string; moved?: { at: number }; feed?: Feed; feedSaid?: string[] };
 const threads = threadsTable.read() as Thread[];
 const STUBS_SINCE_HIS_MIDNIGHT = Date.parse("2026-11-18T08:00:00Z");
 for (const t of threads) {
@@ -735,9 +694,6 @@ function unpause(t: Thread) {
   schedulePause(t);
 }
 const message = (from: string, text: string): Message => ({ id: `m-${crypto.randomUUID().slice(0, 6)}`, from, at: Date.now(), text });
-// What the feed stores for one hand-off: a message per Slack or GitHub message, as its author, or the hand-off's text when it sent none.
-// Agents are handed that text either way (thread.feedSaid).
-type FeedPost = { text: string; at?: number; ext: External };
 const feedPosts = (text: string, posts?: FeedPost[]): Message[] =>
   posts?.length ? posts.filter((p) => p.text && p.ext?.name && p.ext.link).map((p) => ({ ...message("feed", p.text), ...(p.at && { at: p.at }), ext: p.ext })) : [message("feed", text)];
 // Messages from before subthreads get their ids once.
@@ -1068,9 +1024,6 @@ function onEvent(topic: string, data: any, from?: Session) {
       if (why) endWait(s, why);
     }
 }
-// The user's own PR comments, which the board shows until they're resolved. The gh sentry's `who` tells his comments from the ones
-// agents post as him; the bus keeps only its last few thousand events, so the comments are kept here, seeded from it on boot.
-type UserComment = { id: string; pr: string; kind: "comment" | "thread"; url: string; body: string; path?: string; at: number };
 const USER_COMMENTS = `${STATE_DIR}/user-comments.json`;
 const userComments: UserComment[] = (() => { try { return JSON.parse(readFileSync(USER_COMMENTS, "utf8")); } catch { return []; } })();
 const seedUserComments = !userComments.length;
@@ -1137,11 +1090,6 @@ function alreadyDone(w: Session) {
 }
 const waitsOn = (w: Session, id?: string | null) => w.wait?.kind === "agent" && !!id && w.wait.ref.split(",").includes(id);
 const waitLabel = (w: Wait) => (w.kind === "done" ? "done" : w.kind === "until" ? `until "${w.desc}"` : `${w.kind}:${w.ref}`);
-
-// A wait until a shell concludes: a command the server runs in a tmux session of its own (so it outlives the agent's turn), another
-// maxflow session (--pane), or any process (--pid). The agent names it in words, the UI draws that as the condition, and its end
-// wakes the agent with the exit code and the output's last lines. A command's pane stays up an hour after it exits, to be read.
-type Shell = { id: string; desc: string; owner: string; kind: "cmd" | "pane" | "pid"; cmd?: string; cwd?: string; pid?: number; file?: string; at: number; end?: { at: number; code: number | null; tail: string } };
 const SHELLS = `${STATE_DIR}/shells.json`;
 const SHELL_DIR = `${STATE_DIR}/shells`;
 const SHELL_KEEP_MS = 7 * 86_400_000;
@@ -1218,10 +1166,6 @@ function untilShell(s: Session, body: { desc?: string; cmd?: string; cwd?: strin
   }
   return "until needs a command (after --), --pane <session> or --pid <pid>";
 }
-
-// The open PRs gh sentry ties each session to, from its edges and its last poll.
-type GhComment = { id: string; author: { login: string } | null };
-type GhPr = { state: string; title: string; comments: { nodes: GhComment[] }; reviewThreads: { nodes: { isResolved: boolean; comments: { nodes: GhComment[] } }[] } };
 const ghStatus = () => ghStatusTable.fresh() as Record<string, { pr: GhPr }>;
 // The state of each PR a task links, { url: OPEN | MERGED | CLOSED }, which the assistant sentry's feed looks up on GitHub.
 const taskPrs = sentryFile<Record<string, string>>(`${STATE_DIR}/task-prs.json`, {});
@@ -1377,36 +1321,8 @@ function migrateQuestions() {
   }
 }
 setTimeout(migrateQuestions, 5_000);
-
-// The user's task board: the server opens a task for each request the funnel routes, and sentry:assistant keeps the rest; he never writes to it himself.
-const TASK_STATUSES = ["todo", "doing", "you", "waiting", "blocked", "done", "dropped"] as const;
-type Task = {
-  id: number;
-  title: string;
-  kind: "task" | "question";
-  status: (typeof TASK_STATUSES)[number];
-  answer?: string;
-  sessions: string[];
-  links: string[];
-  at: number;
-  updated: number;
-  timeline: { at: number; text: string; session?: string }[];
-  // The title is still Isaac's words cut short, waiting for the funnel to name the root.
-  drafted?: boolean;
-  // The status its agents' waits last settled; a hand move sticks until they settle a different one.
-  derived?: (typeof TASK_STATUSES)[number];
-  objective?: string;
-  page?: Block[];
-};
-type TaskEdit = Partial<Pick<Task, "title" | "kind" | "status" | "answer" | "objective">> & { session?: string; link?: string; event?: string; at?: number };
 const tasks = tasksTable.read() as Task[];
 const saveTasks = () => tasksTable.write(tasks);
-
-// His own todo list, each todo on a day (YYYY-MM-DD, his local day as the browser sends it); nothing else reads or writes it.
-// state: clicking a todo's box steps it todo → doing → done → cancelled → todo.
-const TODO_STATES = ["todo", "doing", "done", "cancelled"] as const;
-// threadIds: the threads tagged on it, by him from the page or by agents with `maxflow todo tag`, in the order they were tagged.
-type Todo = { id: string; text: string; day: string; state: (typeof TODO_STATES)[number]; at: string; threadIds: string[] };
 // Todos saved before states were a done flag, or before a todo held several threads.
 const todos: Todo[] = (todosTable.read() as (Todo & { done?: boolean; threadId?: string })[]).map(
   ({ done, threadId, ...t }: Todo & { done?: boolean; threadId?: string }) => ({ ...t, state: t.state ?? (done ? "done" : "todo"), threadIds: t.threadIds ?? (threadId ? [threadId] : []) }),
