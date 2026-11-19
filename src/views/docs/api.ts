@@ -2,7 +2,7 @@ import { isRecord } from "../../../shared/guards";
 
 export type DocSummary = { path: string; owner?: string; open: number };
 export type Vault = { dir: string; docs: DocSummary[]; folders: string[]; files: string[] };
-export type Doc = { path: string; text: string; version: string; owner?: string; obsidian: string };
+export type Doc = { path: string; text: string; version: string; owner?: string };
 export type Saved = { kind: "saved"; version: string } | { kind: "conflict"; text: string; version: string };
 
 const docUrl = (path: string) => `/api/docs/${encodeURIComponent(path)}`;
