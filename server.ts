@@ -25,6 +25,7 @@ import { statsTodosRoute } from "./routes-stats";
 import { tasksLinksRoute } from "./routes-tasks";
 import { touchFrom } from "./sentry-files";
 import { SENTRIES } from "./sentry-commands";
+import { BARE_AGENT_SENTRIES, FED_AGENT_SENTRIES } from "./sentry-names";
 import { miscRoute } from "./routes-misc";
 
 const HOST = "127.0.0.1";
@@ -68,24 +69,13 @@ function adoptSessions() {
 if (LIVE && (await fetch(`${BASE}/api/sessions`).then((r) => r.ok, () => false)))
   console.error(`the live maxflow is already running on ${BASE}; run ./dev.sh for a dev instance`), process.exit(1);
 adoptSessions();
-// The review sentry is a claude agent; its feed runs beside it, logging out of the way of its screen.
+// The agent sentries are claude agents; a fed one runs its feed beside it, logging out of the way of its screen.
 const reviewSource = (f: string) => new URL(`./sentries/${f}`, import.meta.url).pathname;
-SENTRIES["sentry:review"] = ["sh", "-c",
-  `"${process.execPath}" "${reviewSource("review.ts")}" >"${STATE_DIR}/review-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("review.md")}")"`];
-// The meta sentry is a claude agent that watches the other agents; its feed times their transcripts beside it.
-SENTRIES["sentry:meta"] = ["sh", "-c",
-  `"${process.execPath}" "${reviewSource("meta.ts")}" >"${STATE_DIR}/meta-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("meta.md")}")"`];
-// The assistant sentry is a claude agent that keeps the user's task board; its feed brings it his prompts and the fleet's events.
-SENTRIES["sentry:assistant"] = ["sh", "-c",
-  `"${process.execPath}" "${reviewSource("assistant.ts")}" >"${STATE_DIR}/assistant-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("assistant.md")}")"`];
-// The context sentry is a claude agent that keeps notes on his Slack (people, asks, artifacts, topics); its feed brings it each message.
-SENTRIES["sentry:context"] = ["sh", "-c",
-  `"${process.execPath}" "${reviewSource("context.ts")}" >"${STATE_DIR}/context-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("context.md")}")"`];
-// The todo sentry is a claude agent that tags threads onto his todos; its feed brings it the threads that changed, in batches.
-SENTRIES["sentry:todo"] = ["sh", "-c",
-  `"${process.execPath}" "${reviewSource("todo.ts")}" >"${STATE_DIR}/todo-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("todo.md")}")"`];
-// The funnel sentry is a claude agent that takes the user's requests and routes each to an agent.
-SENTRIES["sentry:funnel"] = ["sh", "-c", `exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource("funnel.md")}")"`];
+for (const n of FED_AGENT_SENTRIES)
+  SENTRIES[`sentry:${n}`] = ["sh", "-c",
+    `"${process.execPath}" "${reviewSource(`${n}.ts`)}" >"${STATE_DIR}/${n}-feed.log" 2>&1 & exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource(`${n}.md`)}")"`];
+for (const n of BARE_AGENT_SENTRIES)
+  SENTRIES[`sentry:${n}`] = ["sh", "-c", `exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${reviewSource(`${n}.md`)}")"`];
 // A session is a sentry because the server started it as one, never because of its name.
 function markSentry(s: Session) {
   s.sentry = true;

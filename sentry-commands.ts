@@ -3,10 +3,11 @@ import { DIR, LIVE } from "./instance";
 import { paneEnv, respawn } from "./tmux";
 import { type Session, chatOf } from "./sessions";
 import { writeStateText } from "./state";
+import { LIVE_ONLY_SENTRIES, PLAIN_SENTRIES } from "./sentry-names";
 
 // Sentries are ordinary sessions, started once and kept by tmux across server restarts.
 export const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  ["gh", "slack", "rename", ...(LIVE ? ["health"] : []), "graph", "ram", "inbox", "approval", "docs", "jev"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
+  PLAIN_SENTRIES.filter((n) => LIVE || !LIVE_ONLY_SENTRIES.has(n)).map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
 );
 // A deploy restarts a sentry whose code changed in its own pane, so it keeps its session. A claude sentry resumes its chat, unless
 // its brief changed: then it starts a fresh chat, handed the last things its old one said.
