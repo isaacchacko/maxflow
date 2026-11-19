@@ -17,7 +17,6 @@ export type Session = {
   inbox: string[];
   claude?: { state: ClaudeState; at: number };
   transcript?: string;
-  links?: { found: Candidate[]; offset: number; at: number; repo?: string };
   archived?: boolean;
   asleep?: string;
   claudeUp?: boolean;

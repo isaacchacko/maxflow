@@ -1,88 +1,184 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { repoOf } from "./gh";
-import { tmux, tmuxName } from "./tmux";
+import { patch } from "./patch";
+import { isRecord, stringOr } from "./shared/guards";
 import { type Candidate, type Session, isSentry } from "./sessions";
+import { tmux, tmuxName } from "./tmux";
 
-const PROJECTS = `${process.env.HOME}/.claude/projects`;
+const PROJECTS = `${homedir()}/.claude/projects`;
 const URL_RE = /https?:\/\/[^\s<>"'`()[\]{}|\\^]+/g;
-const MAX_CANDIDATES = 40, SHELL_LINKS_MS = 5000, CONTEXT_CHARS = 200;
-// A PR named without its URL: owner/repo#n, PR n, PR #n, or a bare #n of 3+ digits, which resolves against the session's repo.
-const PR_REF_RE = /\b([\w.-]+\/[\w.-]+)#(\d+)\b|\bPR\s*#?(\d{2,})\b|(?<![\w/&#])#(\d{3,})\b/gi;
+const MAX_CANDIDATES = 40;
+const SHELL_LINKS_MS = 5000;
+const CONTEXT_CHARS = 200;
+const NEWLINE = 10;
+const PR_NAMED_WITHOUT_URL_RE = /\b([\w.-]+\/[\w.-]+)#(\d+)\b|\bPR\s*#?(\d{2,})\b|(?<![\w/&#])#(\d{3,})\b/gi;
+const GITHUB_PR_URL_RE = /^(https:\/\/github\.com\/)([\w.-]+\/[\w.-]+)(\/pull\/)/i;
+const REPO_IN_COMMAND_RE = /(?:--repo[ =]|-R )([\w.-]+\/[\w.-]+)|(?:\bcd |git -C )(~?\/[\w./-]+)/g;
+
+type Mention = { at: number; url: string; len: number };
+
 const repos = new Map<string, string>();
-const repoFor = (cwd: string) => repos.get(cwd) ?? repos.set(cwd, repoOf(cwd)).get(cwd)!;
-// GitHub's owner and repo are case-insensitive; one spelling keeps a PR to one node.
-const canonical = (url: string) => url.replace(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\//i, (m, r) => m.replace(r, r.toLowerCase()));
-function candidatesIn(text: string, role: string, repo: string): Candidate[] {
-  const around = (at: number, len: number) => text.slice(Math.max(0, at - CONTEXT_CHARS), at + len + CONTEXT_CHARS).replace(/\s+/g, " ").trim();
-  const urls = [...text.matchAll(URL_RE)]
-    .map((m) => ({ at: m.index, url: canonical(m[0].replace(/[.,;:!?*_~]+$/, "").replace(/\/$/, "")), len: m[0].length }))
-    .filter((c) => URL.canParse(c.url) && /^[\w.-]*\w(:\d+)?$/.test(new URL(c.url).host));
-  const prs = [...text.replace(URL_RE, (u) => " ".repeat(u.length)).matchAll(PR_REF_RE)].flatMap((m) => {
-    const r = m[1]?.toLowerCase() ?? repo;
-    return r ? [{ at: m.index, url: `https://github.com/${r}/pull/${m[2] ?? m[3] ?? m[4]}`, len: m[0].length }] : [];
-  });
-  return [...urls, ...prs].sort((a, b) => a.at - b.at).map((c) => ({ url: c.url, role, context: around(c.at, c.len) }));
+function repoFor(cwd: string) {
+  const known = repos.get(cwd);
+  if (known !== undefined) return known;
+  const repo = repoOf(cwd);
+  repos.set(cwd, repo);
+  return repo;
 }
-// A URL mentioned again moves to the end with its newest context, so the cap drops the stalest ones.
-const addCandidates = (list: Candidate[], found: Candidate[]) => {
+
+const withCaseInsensitiveOwnerAndRepoLowercased = (url: string) =>
+  url.replace(GITHUB_PR_URL_RE, (_match, head: string, ownerAndRepo: string, pull: string) => `${head}${ownerAndRepo.toLowerCase()}${pull}`);
+
+const isPlainHost = (url: string) => URL.canParse(url) && /^[\w.-]*\w(:\d+)?$/.test(new URL(url).host);
+
+const urlMentions = (text: string): Mention[] =>
+  text
+    .matchAll(URL_RE)
+    .map((m) => ({ at: m.index, url: withCaseInsensitiveOwnerAndRepoLowercased(m[0].replace(/[.,;:!?*_~]+$/, "").replace(/\/$/, "")), len: m[0].length }))
+    .filter((c) => isPlainHost(c.url))
+    .toArray();
+
+function prMention(m: RegExpExecArray, sessionRepo: string): Mention | undefined {
+  const repo = m[1]?.toLowerCase() ?? sessionRepo;
+  if (repo === "") return;
+  return { at: m.index, url: `https://github.com/${repo}/pull/${m[2] ?? m[3] ?? m[4] ?? ""}`, len: m[0].length };
+}
+
+const prMentions = (text: string, sessionRepo: string): Mention[] =>
+  text
+    .replaceAll(URL_RE, (u) => " ".repeat(u.length))
+    .matchAll(PR_NAMED_WITHOUT_URL_RE)
+    .map((m) => prMention(m, sessionRepo))
+    .filter((c) => c !== undefined)
+    .toArray();
+
+function candidatesIn(text: string, role: string, repo: string): Candidate[] {
+  const around = (at: number, len: number) =>
+    text
+      .slice(Math.max(0, at - CONTEXT_CHARS), at + len + CONTEXT_CHARS)
+      .replaceAll(/\s+/g, " ")
+      .trim();
+  return [...urlMentions(text), ...prMentions(text, repo)].toSorted((a, b) => a.at - b.at).map((c) => ({ url: c.url, role, context: around(c.at, c.len) }));
+}
+
+function addCandidatesNewestLast(list: Candidate[], found: Candidate[]) {
   for (const c of found) {
     const i = list.findIndex((o) => o.url === c.url);
-    if (i >= 0) list.splice(i, 1);
+    if (i !== -1) list.splice(i, 1);
     list.push(c);
   }
   list.splice(0, Math.max(0, list.length - MAX_CANDIDATES));
-};
-// The repo a session's latest command worked in (gh -R/--repo, cd, git -C), for resolving bare PR numbers when its folder is no checkout.
-const REPO_HINT_RE = /(?:--repo[ =]|-R )([\w.-]+\/[\w.-]+)|(?:\bcd |git -C )(~?\/[\w./-]+)/g;
-function repoHint(rec: any) {
-  const calls = rec.type === "assistant" && Array.isArray(rec.message?.content) ? rec.message.content.filter((b: any) => b?.type === "tool_use") : [];
-  const hints = calls.flatMap((b: any) => [...JSON.stringify(b.input ?? {}).matchAll(REPO_HINT_RE)]);
-  const m = hints.at(-1);
-  return m ? (m[1]?.toLowerCase() ?? repoFor(m[2].replace(/^~/, process.env.HOME!))) : "";
 }
-function textOf(rec: any) {
-  if (rec.isMeta || rec.isSidechain || (rec.type !== "user" && rec.type !== "assistant")) return "";
-  const c = rec.message?.content;
-  return typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("\n") : "";
+
+const contentOf = (rec: Record<string, unknown>) => (isRecord(rec["message"]) ? rec["message"]["content"] : undefined);
+const ofBlockType = (type: string) => (block: unknown): block is Record<string, unknown> => isRecord(block) && block["type"] === type;
+const expandHome = (path: string) => (path.startsWith("~") ? `${homedir()}${path.slice(1)}` : path);
+
+function repoOfLatestCommand(rec: Record<string, unknown>) {
+  const content = contentOf(rec);
+  if (rec["type"] !== "assistant" || !Array.isArray(content)) return "";
+  const hint = content
+    .filter(ofBlockType("tool_use"))
+    .flatMap((block) => JSON.stringify(block["input"] ?? {}).matchAll(REPO_IN_COMMAND_RE).toArray())
+    .at(-1);
+  if (hint === undefined) return "";
+  const [, repo, dir = ""] = hint;
+  return repo === undefined ? repoFor(expandHome(dir)) : repo.toLowerCase();
 }
+
+function textOf(rec: Record<string, unknown>) {
+  if (Boolean(rec["isMeta"]) || Boolean(rec["isSidechain"]) || (rec["type"] !== "user" && rec["type"] !== "assistant")) return "";
+  const content = contentOf(rec);
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter(ofBlockType("text"))
+    .map((block) => block["text"])
+    .join("\n");
+}
+
+const hasPossibleMention = (line: string) => line.includes("http") || line.includes("#") || /\bPR\b/i.test(line) || line.includes("tool_use");
+
+function parseRecord(line: string): unknown {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+}
+
+function readFrom(path: string, offset: number) {
+  try {
+    const size = statSync(path).size;
+    const start = size < offset ? 0 : offset;
+    const buf = Buffer.alloc(size - start);
+    const fd = openSync(path, "r");
+    try {
+      readSync(fd, buf, 0, buf.length, start);
+    } finally {
+      closeSync(fd);
+    }
+    return { buf, start };
+  } catch {
+    return null;
+  }
+}
+
+class SessionMentions {
+  private offset = 0;
+  private repo = "";
+  found: Candidate[] = [];
+  checkedAt = 0;
+
+  private addFromRecord(rec: unknown, cwd: string) {
+    if (!isRecord(rec)) return;
+    this.repo = repoOfLatestCommand(rec) || this.repo;
+    addCandidatesNewestLast(this.found, candidatesIn(textOf(rec), stringOr(rec["type"]), repoFor(cwd) || this.repo));
+  }
+  readAppendedTranscript(path: string, cwd: string) {
+    const read = readFrom(path, this.offset);
+    if (read === null) return;
+    this.offset = read.start;
+    const endOfLastFullLine = read.buf.lastIndexOf(NEWLINE) + 1;
+    if (endOfLastFullLine === 0) return;
+    this.offset += endOfLastFullLine;
+    const lines = read.buf.subarray(0, endOfLastFullLine).toString("utf8").split("\n").filter(hasPossibleMention);
+    for (const line of lines) this.addFromRecord(parseRecord(line), cwd);
+  }
+
+
+  rereadScreen(s: Session) {
+    this.checkedAt = Date.now();
+    this.found = [];
+    const lines = tmux("capture-pane", "-p", "-J", "-t", tmuxName(s.id), "-S", "-2000").out.split("\n");
+    for (const line of lines) addCandidatesNewestLast(this.found, candidatesIn(line, "screen", repoFor(s.cwd)));
+  }
+
+}
+
+const mentionsBySession = new WeakMap<Session, SessionMentions>();
+function mentionsOf(s: Session) {
+  const known = mentionsBySession.get(s);
+  if (known) return known;
+  const mentions = new SessionMentions();
+  mentionsBySession.set(s, mentions);
+  return mentions;
+}
+
+const isFilled = (text: string | undefined): text is string => text !== undefined && text !== "";
+
+const resumedChatTranscript = (chatId: string) => Array.from(new Bun.Glob(`*/${chatId}.jsonl`).scanSync(PROJECTS), (f) => `${PROJECTS}/${f}`)[0];
+
 export function candidates(s: Session): Candidate[] {
   if (isSentry(s)) return [];
-  const l = (s.links ??= { found: [], offset: 0, at: 0 });
-  // A resumed chat's transcript is known from its id before any hook reports it.
-  if (!s.transcript && s.chatId && !l.at) (l.at = Date.now()), (s.transcript = [...new Bun.Glob(`*/${s.chatId}.jsonl`).scanSync(PROJECTS)].map((f) => `${PROJECTS}/${f}`)[0]);
-  if (s.transcript) {
-    // Only what was appended since the last read: the whole transcript (often tens of MB) was read on every world before.
-    let buf: Buffer;
-    try {
-      const size = statSync(s.transcript).size;
-      if (size < l.offset) l.offset = 0;
-      buf = Buffer.alloc(size - l.offset);
-      const fd = openSync(s.transcript, "r");
-      try {
-        readSync(fd, buf, 0, buf.length, l.offset);
-      } finally {
-        closeSync(fd);
-      }
-    } catch {
-      return l.found;
-    }
-    // Stop at the last full line; a half-written record is read next time.
-    const end = buf.lastIndexOf(10) + 1;
-    if (end > 0) {
-      l.offset += end;
-      for (const line of buf.subarray(0, end).toString("utf8").split("\n")) {
-        if (!line.includes("http") && !line.includes("#") && !/\bPR\b/i.test(line) && !line.includes("tool_use")) continue;
-        try {
-          const rec = JSON.parse(line);
-          l.repo = repoHint(rec) || l.repo;
-          addCandidates(l.found, candidatesIn(textOf(rec), rec.type, repoFor(s.cwd) || l.repo || ""));
-        } catch {}
-      }
-    }
-  } else if (s.exitCode === null && s.lastOutputAt > l.at && Date.now() - l.at > SHELL_LINKS_MS) {
-    l.at = Date.now();
-    l.found = [];
-    for (const line of tmux("capture-pane", "-p", "-J", "-t", tmuxName(s.id), "-S", "-2000").out.split("\n")) addCandidates(l.found, candidatesIn(line, "screen", repoFor(s.cwd)));
+  const mentions = mentionsOf(s);
+  if (!isFilled(s.transcript) && isFilled(s.chatId) && mentions.checkedAt === 0) {
+    mentions.checkedAt = Date.now();
+    const transcript = resumedChatTranscript(s.chatId);
+    if (transcript !== undefined) patch(s, { transcript });
   }
-  return l.found;
+  if (isFilled(s.transcript)) mentions.readAppendedTranscript(s.transcript, s.cwd);
+  else if (s.exitCode === null && s.lastOutputAt > mentions.checkedAt && Date.now() - mentions.checkedAt > SHELL_LINKS_MS) mentions.rereadScreen(s);
+  return mentions.found;
 }
