@@ -1,4 +1,5 @@
 import { Archive, ArrowLeft, Bot, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Hash, Link2, Network, Pause, Play, Plus, Radar, SquareTerminal, User, Waypoints } from "lucide-react";
+import { FitLabel, FitRow } from "@/components/Fit";
 import { AgentFace, expressionOf } from "@/components/AgentFace";
 import { Waiting } from "@/components/Waiting";
 import { Dots } from "@/components/Working";
@@ -272,15 +273,15 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-hidden pb-3">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
+      <FitRow className="h-12 shrink-0 items-center gap-3 border-b px-3 data-[fit=glyph]:gap-1.5">
         <Button variant="ghost" size="icon" asChild data-agent="back" className="shrink-0">
           <a href={`#${back}`}>
             <ArrowLeft />
           </a>
         </Button>
         <AgentFace id={agent.id} expression={expressionOf(agent.state)} className="size-9 shrink-0" />
-        {/* One line whatever the width: the title gives way first, cut short with its whole text on hover, and the chips and buttons keep their size. */}
-        <h1 title={agent.name ?? agent.id} className={cn("min-w-0 truncate text-lg", !agent.name && "font-mono")}>
+        {/* One line whatever the width: the title gives way first, cut short with its whole text on hover, then the buttons keep only their icons. */}
+        <h1 title={agent.name ?? agent.id} className={cn("min-w-24 truncate group-data-[fit=glyph]/fit:min-w-12 text-lg", !agent.name && "font-mono")}>
           {agent.name ?? agent.id}
         </h1>
         <Badge variant="outline" className="shrink-0">
@@ -305,22 +306,21 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
             })}
           </span>
         )}
-        {/* On a phone the buttons keep only their icons. */}
         <div className="ml-auto flex shrink-0 gap-1.5">
           {agent.state === "asleep" ? (
             <Button variant="outline" size="sm" title="Resume" onClick={() => setArchived(agent.id, false)}>
-              <Play /> <span className="hidden sm:inline">Resume</span>
+              <Play /> <FitLabel full="Resume" glyph={false} />
             </Button>
           ) : (
             <Button variant="outline" size="sm" title="Pause" onClick={pause} disabled={agent.state !== "working"}>
-              <Pause /> <span className="hidden sm:inline">Pause</span>
+              <Pause /> <FitLabel full="Pause" glyph={false} />
             </Button>
           )}
           <Button variant="outline" size="sm" title="Archive" onClick={() => setArchived(agent.id, true)} disabled={agent.state === "asleep"}>
-            <Archive /> <span className="hidden sm:inline">Archive</span>
+            <Archive /> <FitLabel full="Archive" glyph={false} />
           </Button>
         </div>
-      </header>
+      </FitRow>
 
       <div className="flex min-h-0 flex-1 gap-4 pl-3">
         {live ? (

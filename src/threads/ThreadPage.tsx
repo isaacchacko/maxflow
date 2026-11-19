@@ -1,4 +1,5 @@
 import { AlarmClock, ArrowLeft, ArrowUpToLine, Check, ChevronRight, GitBranch, MessageSquareReply, MessagesSquare, PanelRight, Quote, RotateCcw } from "lucide-react";
+import { FitLabel, FitRow } from "@/components/Fit";
 import { createContext, Fragment, useCallback, useContext, useRef, useState } from "react";
 import { useEventListener } from "@/lib/effects";
 import { Button } from "@/components/ui/button";
@@ -209,7 +210,8 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
     <div className="flex h-full flex-col overflow-hidden">
       {!embedded && (
       <RowMenu agent="thread-header" items={threadItems(thread, all, { resolve: () => resolveOrReopen(thread, climb), pause: () => openPause(thread.id, climb) })}>
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
+      <div className="shrink-0">
+      <FitRow className="h-12 items-center gap-3 border-b px-3 data-[fit=glyph]:gap-1.5">
         <Button variant="ghost" size="icon" asChild data-agent="back" className="shrink-0">
           <a href={thread.parentId ? `#thread/${thread.parentId}` : `#${back}`}>
             <ArrowLeft />
@@ -224,8 +226,8 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
             <ChevronRight className="hidden size-3.5 shrink-0 text-muted-foreground md:block" />
           </Fragment>
         ))}
-        {/* One line whatever the width: the title gives way first, cut short with its whole text on hover, and the buttons keep their size. */}
-        <h1 title={thread.title} className={cn("min-w-0 truncate text-xl font-semibold tracking-tight", thread.resolved && "text-muted-foreground")}>
+        {/* One line whatever the width: the title gives way first, cut short with its whole text on hover, then the buttons keep only their icons. */}
+        <h1 title={thread.title} className={cn("min-w-24 truncate group-data-[fit=glyph]/fit:min-w-12 text-xl font-semibold tracking-tight", thread.resolved && "text-muted-foreground")}>
           {thread.title}
         </h1>
         {thread.resolved && <span className="hidden shrink-0 text-xs whitespace-nowrap text-muted-foreground md:inline">resolved {when(thread.resolved.at)}</span>}
@@ -241,14 +243,15 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
         {!thread.parentId && (
           <Button variant="outline" size="sm" data-agent="thread-pause" title="Pause until a time" onClick={() => openPause(thread.id, climb)} className="shrink-0">
             <AlarmClock />
-            <span className="hidden sm:inline">{thread.paused ? "Paused" : "Pause"}</span>
+            <FitLabel full={thread.paused ? "Paused" : "Pause"} glyph={false} />
           </Button>
         )}
         <Button variant="outline" size="sm" data-agent="thread-resolve" title={thread.resolved ? "Reopen" : "Resolve"} onClick={() => resolveOrReopen(thread, climb)} className="shrink-0">
           {thread.resolved ? <RotateCcw /> : <Check />}
-          <span className="hidden sm:inline">{thread.resolved ? "Reopen" : "Resolve"}</span>
+          <FitLabel full={thread.resolved ? "Reopen" : "Resolve"} glyph={false} />
         </Button>
-      </header>
+      </FitRow>
+      </div>
       </RowMenu>
       )}
 

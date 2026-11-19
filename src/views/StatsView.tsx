@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useRef, useState } from "react";
+import { FitLabel, FitRow } from "@/components/Fit";
 import { liveStore } from "@/store";
 import { cn } from "@/lib/utils";
 import { Agents } from "./stats/Agents";
@@ -14,7 +15,7 @@ import { Performance } from "./stats/Performance";
 
 const TABS = [
   { id: "overview", label: "Overview" },
-  { id: "performance", label: "Performance" },
+  { id: "performance", label: "Performance", short: "Perf" },
   { id: "agents", label: "Agents" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
@@ -32,6 +33,15 @@ const save = (key: string, value: string) => {
     localStorage.setItem(key, value);
   } catch {}
 };
+
+function WeekRange({ from }: { from: string }) {
+  const range = `${short(from)} – ${short(addDays(from, 6))}`;
+  return (
+    <span title={range}>
+      <FitLabel full={range} glyph={short(from)} />
+    </span>
+  );
+}
 
 export function StatsView({ tab: wanted }: { tab?: string }) {
   const tab: Tab = TABS.find(t => t.id === wanted)?.id ?? "overview";
@@ -58,32 +68,32 @@ export function StatsView({ tab: wanted }: { tab?: string }) {
 
   return (
     <div className="viz flex h-full flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-5">
-        <h1 className="text-sm font-medium">Stats</h1>
-        <nav className="flex rounded-lg bg-[var(--viz-track)] p-0.5 text-xs">
+      <FitRow className="h-12 shrink-0 items-center gap-3 border-b px-5">
+        <h1 className="shrink-0 text-sm font-medium group-data-[fit=glyph]/fit:hidden">Stats</h1>
+        <nav className="flex shrink-0 rounded-lg bg-[var(--viz-track)] p-0.5 text-xs">
           {TABS.map(t => (
-            <a key={t.id} href={`#stats/${t.id}`} className={cn("rounded-md px-2.5 py-0.5", tab === t.id ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-              {t.label}
+            <a key={t.id} href={`#stats/${t.id}`} title={t.label} className={cn("rounded-md px-2.5 py-0.5", tab === t.id ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+              <FitLabel full={t.label} short={"short" in t ? t.short : undefined} />
             </a>
           ))}
         </nav>
         {tab !== "agents" && (
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex shrink-0 items-center gap-1">
             {!thisWeek && (
-              <button onClick={() => setWeekKey(undefined)} className="mr-1 text-xs text-muted-foreground hover:text-foreground">
-                This week
+              <button onClick={() => setWeekKey(undefined)} title="Back to this week" className="mr-1 text-xs text-muted-foreground hover:text-foreground">
+                <FitLabel full="This week" short="Now" />
               </button>
             )}
             <button onClick={() => step(-1)} disabled={!key} title="Week before" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
               <ChevronLeft className="size-4" />
             </button>
-            <span className="min-w-36 text-center text-sm tabular-nums">{key ? `${short(key)} – ${short(addDays(key, 6))}` : "This week"}</span>
+            <span className="text-center text-sm whitespace-nowrap tabular-nums group-data-[fit=full]/fit:min-w-36 group-data-[fit=short]/fit:min-w-36">{key ? <WeekRange from={key} /> : "This week"}</span>
             <button onClick={() => step(1)} disabled={!key || thisWeek} title="Week after" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
               <ChevronRight className="size-4" />
             </button>
           </div>
         )}
-      </header>
+      </FitRow>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className={cn("mx-auto flex max-w-6xl flex-col gap-8 px-5 py-5", stale && "opacity-60 transition-opacity")}>
           {tab === "agents" ? (

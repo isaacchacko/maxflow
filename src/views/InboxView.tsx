@@ -1,6 +1,7 @@
 import { AlarmClock, ArrowUpToLine, Check, ChevronDown, MessageSquareReply, Pin, Quote, RotateCcw } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { Fragment, useCallback, useRef, useState } from "react";
+import { FitLabel, FitRow } from "@/components/Fit";
 import { cn } from "@/lib/utils";
 import { localAt, type Thread } from "@/mock";
 import { markAskShown, movedStore, objectiveStore, setResolved, startThread, threadStore } from "@/store";
@@ -122,6 +123,7 @@ export function InboxView() {
     .sort((a, b) => a.first.at.localeCompare(b.first.at));
   const asks = rows.filter(r => r.t.asks);
   const replied = rows.filter(r => unseenDeep(r.t, threads) > 0);
+  const newReplies = replied.length === 1 ? "1 thread with new replies" : `${replied.length} threads with new replies`;
   const firstNew = rows.findIndex(r => r.first.from !== "isaac" && r.first.at > seenAt);
   const toggle = (t: Thread) => (setKept(k => new Set(k).add(t.id)), setResolved(t.id, !t.resolved));
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -288,28 +290,28 @@ export function InboxView() {
 
   return (
     <div ref={openInbox} className="flex h-full flex-col">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-5">
-            <h1 className="text-sm font-medium">Threads</h1>
+        <FitRow className="h-12 shrink-0 items-center gap-2 border-b px-5">
+            <h1 className="shrink-0 text-sm font-medium">Threads</h1>
             {replied.length > 0 && (
-              <button data-agent="inbox-new-replies" onClick={nextReplied} className="flex items-center gap-1.5 rounded-full bg-new-soft px-2.5 py-0.5 text-xs font-medium text-new hover:brightness-95">
+              <button data-agent="inbox-new-replies" onClick={nextReplied} title={newReplies} aria-label={newReplies} className="flex shrink-0 items-center gap-1.5 rounded-full bg-new-soft px-2.5 py-0.5 text-xs font-medium text-new hover:brightness-95">
                 <ChevronDown className="size-3" />
-                {replied.length === 1 ? "1 thread with new replies" : `${replied.length} threads with new replies`}
+                <FitLabel full={newReplies} short={`${replied.length} new`} glyph={replied.length} />
               </button>
             )}
             <span className="ml-auto" />
             {resolved > 0 && (
-              <button data-agent="inbox-resolved" onClick={() => setShowResolved(v => !v)} className={cn("flex w-fit items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring", showResolved && "border-ring text-foreground")}>
+              <button data-agent="inbox-resolved" onClick={() => setShowResolved(v => !v)} title={`Resolved (${resolved})`} aria-label={`Resolved (${resolved})`} className={cn("flex shrink-0 items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring", showResolved && "border-ring text-foreground")}>
                 <Check className="size-3" />
-                Resolved ({resolved})
+                <FitLabel full={`Resolved (${resolved})`} glyph={resolved} />
               </button>
             )}
             {paused > 0 && (
-              <button data-agent="inbox-paused" onClick={() => setShowPaused(v => !v)} className={cn("flex w-fit items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring", showPaused && "border-ring text-foreground")}>
+              <button data-agent="inbox-paused" onClick={() => setShowPaused(v => !v)} title={`Paused (${paused})`} aria-label={`Paused (${paused})`} className={cn("flex shrink-0 items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring", showPaused && "border-ring text-foreground")}>
                 <AlarmClock className="size-3" />
-                Paused ({paused})
+                <FitLabel full={`Paused (${paused})`} glyph={paused} />
               </button>
             )}
-        </header>
+        </FitRow>
         {/* Agents waiting on him, pinned above the channel one line each; a click scrolls to the thread where it sits. */}
         {asks.length > 0 && (
           <ol data-agent="inbox-asks" className="flex shrink-0 flex-col border-b bg-warn-soft/40 px-3 py-1">
