@@ -117,7 +117,7 @@ export function Columns({ values, labels, ticks: tickLabels, strong, onPeek, onP
   labels: string[];
   ticks?: string[];
   strong: (i: number) => boolean;
-  onPeek(p: Peek): void;
+  onPeek?: (p: Peek) => void;
   onPick?(i: number): void;
   height?: string;
   format?(v: number): string;
@@ -128,14 +128,14 @@ export function Columns({ values, labels, ticks: tickLabels, strong, onPeek, onP
   const ticks = labels.length > 7 ? [0, labels.length - 1] : labels.map((_, i) => i);
   return (
     <div className="mt-4">
-      <div className={cn("flex items-end justify-between gap-[3px]", height)} onMouseLeave={() => (setHover(undefined), onPeek(undefined))}>
+      <div className={cn("flex items-end justify-between gap-[3px]", height)} onMouseLeave={() => (setHover(undefined), onPeek?.(undefined))}>
         {values.map((v, i) => {
           const lit = hover === undefined ? strong(i) : hover === i;
           return (
             <button
               key={i}
               type="button"
-              onMouseEnter={() => (setHover(i), onPeek({ value: v === undefined ? "–" : format(v), label: labels[i]! }))}
+              onMouseEnter={() => (setHover(i), onPeek?.({ value: v === undefined ? "–" : format(v), label: labels[i]! }))}
               onClick={() => onPick?.(i)}
               className={cn("relative h-full max-w-9 flex-1 overflow-hidden rounded-[6px] bg-[var(--viz-track)]", !onPick && "cursor-default")}
             >

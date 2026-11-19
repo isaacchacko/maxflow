@@ -1,10 +1,7 @@
 import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn, hasText } from "@/lib/utils";
 import { useJson } from "./load";
 import { Columns, Distributions, LatencyTiles, SectionHead, Tile, YarnNote, duration, short, sum, weekday, type Peek, type Stats } from "./parts";
-
-// How fast yarn moves and how well it holds up: the picked week's timings, then the server, its deploys and its sentries over
-// the last two weeks.
 
 type Health = {
   days: string[];
@@ -20,13 +17,12 @@ type Health = {
 const since = (at: number) => duration(Date.now() - at);
 const when = (at: number) => new Date(at).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
 
-/** One whole split into its parts as a thin segmented bar; the legend under it carries each part's count. */
 function Segments({ parts }: { parts: { label: string; value: number; color: string }[] }) {
   const total = Math.max(1, sum(parts.map(p => p.value)));
   return (
     <div className="mt-4">
       <div className="flex h-3 gap-[2px] overflow-hidden rounded-full">
-        {parts.filter(p => p.value).map(p => (
+        {parts.filter(p => p.value > 0).map(p => (
           <div key={p.label} style={{ width: `${(p.value / total) * 100}%`, background: p.color }} title={`${p.label}: ${p.value}`} />
         ))}
       </div>
@@ -72,7 +68,7 @@ function HealthSection({ h }: { h: Health }) {
           <Tile label="Server up for" value={since(h.server.upSince)} delta={<span className="text-xs text-muted-foreground">{h.server.rssMb} MB</span>}>
             <div className="mt-2 text-xs text-muted-foreground">
               since {when(h.server.upSince)}
-              {h.server.logSince ? ` · ${h.server.starts.length} restarts logged` : " · restarts are logged from this deploy on"}
+              {h.server.logSince === undefined ? " · restarts are logged from this deploy on" : ` · ${h.server.starts.length} restarts logged`}
             </div>
           </Tile>
           <Tile label="Sentries running" value={`${up} of ${h.sentries.length}`} delta={up < h.sentries.length ? <span className="rounded-md bg-rose-500/15 px-1.5 py-px text-xs font-medium text-rose-700 dark:text-rose-300">down: {h.sentries.filter(s => !s.running).map(s => s.name.slice(7)).join(", ")}</span> : <span className="rounded-md bg-emerald-500/15 px-1.5 py-px text-xs font-medium text-emerald-700 dark:text-emerald-300">all up</span>}>
@@ -91,7 +87,7 @@ function HealthSection({ h }: { h: Health }) {
         </div>
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
           <Tile label="Deploys" value={h.deploys.length.toLocaleString()} delta={<span className="text-xs text-muted-foreground">in 14 days</span>} className="lg:col-span-3">
-            <Columns values={deploysPerDay} labels={h.days.map(d => `Deploys · ${weekday(d, "short")} ${short(d)}`)} ticks={h.days.map(d => short(d))} strong={i => i === h.days.length - 1} height="h-12" onPeek={() => {}} />
+            <Columns values={deploysPerDay} labels={h.days.map(d => `Deploys · ${weekday(d, "short")} ${short(d)}`)} ticks={h.days.map(d => short(d))} strong={i => i === h.days.length - 1} height="h-12" />
             <ol className="mt-4 flex max-h-56 flex-col gap-1.5 overflow-y-auto pr-1">
               {h.deploys.slice(0, 30).map(d => (
                 <li key={`${d.at}${d.sha}`} className="grid grid-cols-[6.5rem_3.5rem_minmax(0,1fr)] items-baseline gap-2 text-xs">
@@ -116,7 +112,7 @@ function HealthSection({ h }: { h: Health }) {
                   <span className="text-right text-muted-foreground tabular-nums" title={`up since ${when(s.upSince)}`}>
                     {s.running ? `up ${since(s.upSince)}` : "–"}
                   </span>
-                  <span className={cn("text-right tabular-nums", s.respawns ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground")}>{s.respawns ? `${s.respawns} restart${s.respawns > 1 ? "s" : ""}` : "steady"}</span>
+                  <span className={cn("text-right tabular-nums", s.respawns > 0 ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground")}>{s.respawns > 0 ? `${s.respawns} restart${s.respawns > 1 ? "s" : ""}` : "steady"}</span>
                 </li>
               ))}
             </ul>
@@ -152,7 +148,7 @@ export function Performance({ stats, live }: { stats: Stats; live: boolean }) {
       {health.value ? (
         <HealthSection h={health.value} />
       ) : (
-        <p className={cn("text-sm", health.error ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>{health.error ?? "Checking the server…"}</p>
+        <p className={cn("text-sm", hasText(health.error) ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>{health.error ?? "Checking the server…"}</p>
       )}
     </>
   );
