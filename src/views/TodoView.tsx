@@ -38,7 +38,7 @@ export function TodoView() {
   const [day, setDay] = useState(today);
   const asks = threads.filter(t => t.asks && !t.resolved && !t.paused).sort((a, b) => a.asks!.since.localeCompare(b.asks!.since));
   const scrollRef = useRef<HTMLDivElement>(null);
-  useLayerScroll("todo", scrollRef);
+  const attachScroll = useLayerScroll("todo", scrollRef);
   useResource(live ? "todos" : undefined, loadTodos);
 
   // In the order they were added, whatever their state, so a click on a box never moves its row.
@@ -51,7 +51,7 @@ export function TodoView() {
       <header className="flex h-12 shrink-0 items-center border-b px-5">
         <h1 className="text-sm font-medium">Todo</h1>
       </header>
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={attachScroll} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-5xl flex-col-reverse gap-6 px-5 py-4 md:flex-row md:items-start">
           <div className="min-w-0 flex-1">
             {asks.length > 0 && (

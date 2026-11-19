@@ -47,7 +47,7 @@ export function RestrictionsView() {
   const setTab = (t: "actions" | "people") => (setTabState(t), history.replaceState(history.state, "", t === "people" ? "#restrictions/people" : "#restrictions"));
   useEventListener("hashchange", () => location.hash.startsWith("#restrictions") && setTabState(location.hash === "#restrictions/people" ? "people" : "actions"));
   const scrollRef = useRef<HTMLDivElement>(null);
-  useLayerScroll("restrictions", scrollRef);
+  const attachScroll = useLayerScroll("restrictions", scrollRef);
   const loaded = useResource(live ? "restrictions" : undefined, () => send("/api/restrictions", "GET") as Promise<Restriction[]>);
   const list = loaded.value ?? [];
   const setList = (change: (all: Restriction[]) => Restriction[]) => loaded.set(all => change(all ?? []));
@@ -89,7 +89,7 @@ export function RestrictionsView() {
           ))}
         </div>
       </header>
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={attachScroll} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-5 py-4">
           <p className="mb-3 px-2.5 text-sm text-muted-foreground">What your agents may do without asking you.</p>
           <ul className="mb-6 grid grid-cols-3 divide-x rounded-xl border">

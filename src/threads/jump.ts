@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 import { threadStore } from "@/store";
 
 // Landing on a message: scrolled to and flashed once, whether by climbing out of its subthread or clicking a quote's link to it.
@@ -41,17 +41,18 @@ export function arrivedFrom() {
 }
 
 /**
- * Keeps `layer`'s scroll as he scrolls it, and on arrival back puts it there before the first paint, so nothing jumps.
- * Returns whether it did, so the page skips its own opening scroll.
+ * The ref for `layer`'s scroller, which it also puts in `ref`: it keeps the scroll as he scrolls, and on arrival back puts it
+ * there before the first paint, so nothing jumps. Then `arrived` gets whether it did, for the page's own opening scroll.
  */
-export function useLayerScroll(layer: string, ref: React.RefObject<HTMLElement | null>) {
-  const restored = useRef(false);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
+export function useLayerScroll<E extends HTMLElement>(layer: string, ref: React.RefObject<E | null>, arrived?: (el: E, restored: boolean) => void) {
+  const latest = useRef(arrived);
+  latest.current = arrived;
+  return useCallback((el: E) => {
     const key = layer;
-    restored.current = arrival.restore && scrolls[key] !== undefined;
-    if (restored.current) el.scrollTop = scrolls[key]!;
+    ref.current = el;
+    const restored = arrival.restore && scrolls[key] !== undefined;
+    if (restored) el.scrollTop = scrolls[key]!;
+    latest.current?.(el, restored);
     let frame = 0;
     const onScroll = () =>
       (frame ||= requestAnimationFrame(() => {
@@ -62,9 +63,12 @@ export function useLayerScroll(layer: string, ref: React.RefObject<HTMLElement |
         } catch {}
       }));
     el.addEventListener("scroll", onScroll, { passive: true });
-    return () => (el.removeEventListener("scroll", onScroll), cancelAnimationFrame(frame));
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(frame);
+      ref.current = null;
+    };
   }, [layer]);
-  return restored;
 }
 
 /** Brings an element into view and flashes it: centered on a fresh arrival, only as far as needed where his scroll was put back. */
