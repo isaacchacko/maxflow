@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { type Person, type Restriction, loadRestrictions, matches, resolve } from "../restrictions";
+import { type Person, type Restriction, doesMatch, loadRestrictions, resolve } from "../restrictions";
 
 type HookInput = { tool_name?: unknown; tool_input?: unknown; cwd?: unknown };
 type Verdict = { decision: string; reason?: string };
@@ -57,7 +57,7 @@ const call = {
 };
 
 const list = loadOrNone();
-const areOnlyAllowRestrictionsMatched = list.every((r) => r.mode === "allow" || !matches(r, call, list));
+const areOnlyAllowRestrictionsMatched = list.every((r) => r.mode === "allow" || !doesMatch(r, call, list));
 if (areOnlyAllowRestrictionsMatched) process.exit(0);
 const peopleOf = await loadPeopleOf();
 const peopleReached: Person[] = peopleOf ? peopleOf(call.tool, call.input, call.cwd) : [];

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { STATE_DIR } from "./instance";
-import { samePerson, type Person, type Restriction } from "./restrictions";
+import { isSamePerson, type Person, type Restriction } from "./restrictions";
 import { ghStatusTable, slackMessagesTable } from "./state";
 
 // The people his restrictions can name, one per human: each Slack user the slack sentry has heard from, joined to their GitHub
@@ -97,7 +97,7 @@ export function backfill(list: Restriction[], unlinked?: Pair, dir = STATE_DIR) 
         changed = true;
         continue;
       }
-      const m = everyone.find((o) => samePerson(o, p));
+      const m = everyone.find((o) => isSamePerson(o, p));
       if (m?.slack && !p.slack) (p.slack = m.slack), (changed = true);
       if (m?.github && !p.github) (p.github = m.github), (changed = true);
     }
