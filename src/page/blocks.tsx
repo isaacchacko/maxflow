@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Waiting } from "@/components/Waiting";
-import { cn } from "@/lib/utils";
+import { cn, hasText } from "@/lib/utils";
 import { agentStateColor, statusColor, type Block, type Event, type Status } from "@/mock";
 import { addEvent, agentStore, putBlock, taskStore, objectiveStore, type PageRef } from "@/store";
 import { Rich } from "@/threads/Rich";
@@ -75,7 +75,7 @@ function StatBlock({ block }: Props<"stat">) {
   return (
     <Shell title={block.label} className="flex flex-col justify-end">
       <div className="text-4xl font-semibold tracking-tight tabular-nums">{block.value}</div>
-      {block.delta && <div className={cn("mt-1 text-sm", tone[block.tone ?? "flat"])}>{block.delta}</div>}
+      {hasText(block.delta) && <div className={cn("mt-1 text-sm", tone[block.tone ?? "flat"])}>{block.delta}</div>}
     </Shell>
   );
 }
@@ -83,14 +83,16 @@ function StatBlock({ block }: Props<"stat">) {
 function ChartBlock({ block }: Props<"chart">) {
   const max = Math.max(...block.points);
   const min = block.style === "bar" ? 0 : Math.min(...block.points);
-  const y = (v: number) => 100 - ((v - min) / (max - min || 1)) * 90 - 5;
+  const range = max - min;
+  const scale = range === 0 || Number.isNaN(range) ? 1 : range;
+  const y = (v: number) => 100 - ((v - min) / scale) * 90 - 5;
   const step = 100 / (block.points.length - 1);
   const line = block.points.map((v, i) => `${i * step},${y(v)}`).join(" ");
-  const last = block.points.at(-1)!;
+  const last = block.points.at(-1);
   return (
     <Shell
       title={block.title}
-      action={<span className="text-sm tabular-nums">{last}{block.unit && ` ${block.unit}`}</span>}
+      action={<span className="text-sm tabular-nums">{last}{hasText(block.unit) && ` ${block.unit}`}</span>}
       className="pb-1"
     >
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="size-full">
@@ -230,18 +232,18 @@ function VisionBlock({ block }: Props<"vision">) {
 function TasksBlock({ subject }: Props<"tasks">) {
   const objective = objectiveStore.use().find(t => t.id === subject.objectiveId);
   const all = taskStore.use();
-  const items = (objective?.taskIds ?? []).map(id => all.find(t => t.id === id)!).filter(Boolean);
+  const items = (objective?.taskIds ?? []).map(id => all.find(t => t.id === id)).filter(t => t !== undefined);
   const done = items.filter(t => t.status === "done").length;
   return (
     <Shell title="Tasks" action={<span className="text-xs text-muted-foreground">{done}/{items.length} done</span>} className="flex flex-col">
-      <Progress value={(done / (items.length || 1)) * 100} className="mb-3 h-1" />
+      <Progress value={(done / Math.max(items.length, 1)) * 100} className="mb-3 h-1" />
       <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
         {items.map(t => (
           <li key={t.id}>
             <a href={`#task/${t.id}`} data-agent={`row:${t.id}`} className="-mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted">
               <span className={cn("size-2 shrink-0 rounded-full", statusColor[t.status])} />
               <span className={cn("flex-1 truncate", t.status === "done" && "text-muted-foreground")}>{t.title}</span>
-              {t.agent && <Badge variant="secondary">{t.agent}</Badge>}
+              {hasText(t.agent) && <Badge variant="secondary">{t.agent}</Badge>}
             </a>
           </li>
         ))}
@@ -251,9 +253,10 @@ function TasksBlock({ subject }: Props<"tasks">) {
 }
 
 export function AgentRow({ id, indent }: { id: string; indent?: boolean }) {
-  const agent = agentStore.use().find(a => a.id === id)!;
+  const agent = agentStore.use().find(a => a.id === id);
+  if (!agent) return null;
   return (
-    <a href={`#agent/${id}`} data-agent={`agent:${id}`} className={cn("flex items-center gap-2 py-1 text-sm hover:bg-muted", indent && "ml-3 border-l pl-4")}>
+    <a href={`#agent/${id}`} data-agent={`agent:${id}`} className={cn("flex items-center gap-2 py-1 text-sm hover:bg-muted", indent === true && "ml-3 border-l pl-4")}>
       {agent.role === "router" ? <Network className="size-3.5 shrink-0 text-router" /> : <span className={cn("ml-1 size-2 shrink-0 rounded-full", agentStateColor[agent.state])} />}
       <span className="shrink-0 truncate text-xs">{agent.name ?? agent.id}</span>
       {agent.wait && agent.wait.kind !== "done" ? <Waiting wait={agent.wait} className="truncate text-muted-foreground" /> : <Rich still text={agent.doing} className="truncate text-muted-foreground" />}
