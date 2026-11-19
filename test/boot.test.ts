@@ -57,8 +57,9 @@ test("it starts a session in tmux and lists it", async () => {
   expect(Bun.spawnSync(["tmux", "-L", socket, "has-session", "-t", `mf-${id}`]).exitCode).toBe(0);
 }, 30_000);
 
+const signal = () => AbortSignal.timeout(10_000);
+
 test("a session made or renamed just before a restart comes back with its name", async () => {
-  const signal = () => AbortSignal.timeout(10_000);
   const make = async (name: string) =>
     (await (await fetch(`${base}/api/sessions`, { method: "POST", body: JSON.stringify({ name, cmd: ["sh", "-c", "sleep 60"], cwd: home }), signal: signal() })).json()) as { id: string };
   const made = await make("made-before-restart");
