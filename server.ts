@@ -5,6 +5,7 @@ import { backgroundShells } from "./background";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
 import { slackAvatar, slackNames } from "./slack-meta";
 import { stats } from "./stats";
+import { threadsTable } from "./state";
 import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
@@ -813,8 +814,7 @@ type External = { source: "slack" | "github"; name: string; user?: string; link:
 type Message = { id: string; from: string; at: number; text: string; nudge?: "subthread"; wake?: true; ext?: External };
 // members: agents he @-mentioned in it, who hear his later replies there as its routers do.
 type Thread = { id: string; title: string; objective: string; routers: string[]; members?: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; task?: number; resolved?: { at: number }; paused?: Paused; pinned?: { at: number; order: number }; resurfaced?: { at: number; from: number }; asks?: Ask; q?: number; mergedInto?: string; feed?: Feed; feedSaid?: string[] };
-const THREADS = `${STATE_DIR}/threads.json`;
-const threads: Thread[] = (() => { try { return JSON.parse(readFileSync(THREADS, "utf8")); } catch { return []; } })();
+const threads = threadsTable.read() as Thread[];
 // Commands are retired: every thread is a plain thread, and a router's result on his message is an ordinary reply.
 for (const t of threads as (Thread & { kind?: string; kindBy?: string; done?: number })[]) {
   delete t.kind, delete t.kindBy, delete t.done;
@@ -871,9 +871,9 @@ for (const t of threads as (Thread & { kind?: string; kindBy?: string; done?: nu
     }
 }
 // Written a moment after the last change, not inside each request: a burst of changes writes once, and the request that made one
-// doesn't wait on serializing every thread (over half a megabyte). Flushed on the way out, so a restart loses nothing.
+// doesn't wait on serializing every thread. Flushed on the way out, so a restart loses nothing.
 let threadsDirty: ReturnType<typeof setTimeout> | undefined;
-const writeThreads = () => (clearTimeout(threadsDirty), (threadsDirty = undefined), writeFileSync(THREADS, JSON.stringify(threads)));
+const writeThreads = () => (clearTimeout(threadsDirty), (threadsDirty = undefined), threadsTable.write(threads));
 const saveThreads = () => void (threadsDirty ??= setTimeout(writeThreads, 200));
 process.on("exit", () => threadsDirty && writeThreads());
 for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => process.exit(0));

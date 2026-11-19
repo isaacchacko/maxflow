@@ -1,12 +1,13 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { DIR, STATE_DIR } from "./instance";
+import { threadsTable } from "./state";
 
 // The Stats page's numbers, one week at a time (Monday to Sunday in his time zone).
 // GitHub: one repo at a time (Dryft-AI/app unless he picks another), one GraphQL call per repo and week (a 502 is tried twice more), cached in
 // stats-github.json; a finished week is never fetched again and the current one at most every 15 minutes, since the token is shared with
 // the sentries. Commits in a repo cloned here are counted from the clone, which costs no API call and sees every branch (maxflow's work
 // lives on feat/v2, which GitHub's own count leaves out); elsewhere from the default branch's history.
-// yarn: read from events.jsonl and threads.json, which only go back to when v2 started.
+// yarn: read from events.jsonl and the threads table, which only go back to when v2 started.
 
 const TZ = "America/Los_Angeles";
 const DAY = 86_400_000;
@@ -209,7 +210,7 @@ export function yarn(w: Week): YarnWeek {
   const hit = yarnCache.get(w.key);
   if (hit && (hit.at > w.to || Date.now() - hit.at < 60_000)) return hit.value;
   const { events: evs, since } = events();
-  const threads: Thread[] = existsSync(`${STATE_DIR}/threads.json`) ? JSON.parse(readFileSync(`${STATE_DIR}/threads.json`, "utf8")) : [];
+  const threads = threadsTable.read() as Thread[];
   const inWeek = (at: number) => at >= w.from && at < w.to;
   const lat = (id: string): Latency => ({ id, samples: [] });
   const route = lat("route"), reply = lat("reply"), slack = lat("slack"), ask = lat("ask");

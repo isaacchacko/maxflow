@@ -3,12 +3,14 @@
 // task in every column, and today's todos. Times are relative to now so nothing reads as weeks old.
 // The agents it names are made up and never run: their ids only give the messages an author with a name.
 //   bun fixtures/seed.ts <state dir>
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: bun fixtures/seed.ts <state dir>");
 mkdirSync(dir, { recursive: true });
+// Stores already moved into yarn.db import their JSON only into a new database, so seeding starts it over.
+for (const f of ["yarn.db", "yarn.db-wal", "yarn.db-shm"]) rmSync(join(dir, f), { force: true });
 const now = Date.now();
 const ago = (min: number) => now - min * 60_000;
 const day = new Date(now - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
