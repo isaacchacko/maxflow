@@ -1,4 +1,5 @@
 import { useCallback, useContext, useRef, useState } from "react";
+import { useLatest } from "@/lib/effects";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { hasText } from "@/lib/utils";
 import type { Thread } from "@/mock";
@@ -12,7 +13,8 @@ import { raise } from "./Raise";
 import { markSeen, setSeen, firstUnseen } from "./seen";
 import { ShotScope, shotsOf } from "./Viewer";
 import { ThreadPanel } from "./ThreadPanel";
-import { messageActions, messageMenuFor, rootOf, type Message, type MessageActions } from "./page/actions";
+import { keyOf, messageActions, messageMenuFor, rootOf, type Message, type MessageActions } from "./page/actions";
+import { JumpToNew } from "./page/JumpToNew";
 import { EarlierInTheConversationLine, NudgeToggle } from "./page/marks";
 import { ReplyRow, RootMessage } from "./page/messages";
 import { resolveOrReopen, ThreadNavContext, type ThreadNav } from "./page/nav";
@@ -48,17 +50,46 @@ function landOnArrival(el: HTMLElement, isRestored: boolean, newLine: HTMLElemen
   if (takeCompose() === true) focusComposer();
 }
 
-function useFollowArrivals(thread: Thread, scrollRef: React.RefObject<HTMLDivElement | null>) {
+const NEAR_BOTTOM_PX = 80;
+
+function useBottomWatch(thread: Thread) {
+  const bottom = useRef({ id: thread.id, isAtBottom: true });
+  const latest = useLatest({ id: thread.id, count: thread.messages.length });
+  const watch = useCallback(
+    (el: HTMLElement) => {
+      const onScroll = () => {
+        const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+        bottom.current = { id: latest.current.id, isAtBottom };
+        if (isAtBottom) markSeen(latest.current.id, latest.current.count);
+      };
+      onScroll();
+      el.addEventListener("scroll", onScroll, { passive: true });
+      return () => el.removeEventListener("scroll", onScroll);
+    },
+    [latest],
+  );
+  return { bottom, watch };
+}
+
+function useFollowArrivals(thread: Thread, scrollRef: React.RefObject<HTMLDivElement | null>, bottom: React.RefObject<{ id: string; isAtBottom: boolean }>, holdNewLine: (at: number | undefined) => void) {
   const threadId = thread.id;
   const count = thread.messages.length;
+  const isOwnLast = thread.messages.at(-1)?.from === "isaac";
+  const unseenFrom = firstUnseen(thread);
+  const latestHold = useLatest(holdNewLine);
   return useCallback(
     (end: HTMLElement | null) => {
       if (!end) return;
+      const isScrolledUp = bottom.current.id === threadId && !bottom.current.isAtBottom;
+      if (isScrolledUp && !isOwnLast) {
+        latestHold.current(unseenFrom);
+        return;
+      }
       markSeen(threadId, count);
       const scroller = scrollRef.current;
       if (scroller) scroller.scrollTop = scroller.scrollHeight;
     },
-    [threadId, count, scrollRef],
+    [threadId, count, isOwnLast, unseenFrom, scrollRef, bottom, latestHold],
   );
 }
 
@@ -136,7 +167,11 @@ function useThreadMessages(thread: Thread, all: Thread[], nav: ThreadNav, focusC
     setLine({ id: thread.id, at });
   });
   const firstNew = lineAt === undefined ? -1 : replies.findIndex(m => thread.messages.indexOf(m) >= lineAt);
-  return { root, replies, actions, messageMenu, firstNew, clearNewLine: () => setLine({ id: thread.id }) };
+  const newKeys = firstNew < 0 ? [] : replies.slice(firstNew).map((m, i) => keyOf(m, firstNew + i));
+  const holdNewLine = (at: number | undefined) => {
+    if (lineAt === undefined) setLine({ id: thread.id, at });
+  };
+  return { root, replies, actions, messageMenu, firstNew, newKeys, holdNewLine, clearNewLine: () => setLine({ id: thread.id }) };
 }
 
 type BodyProps = { thread: Thread; all: Thread[]; back: string; isEmbedded: boolean };
@@ -153,18 +188,33 @@ function ThreadBody({ thread, all, back, isEmbedded }: BodyProps) {
   const lineRef = useRef<HTMLDivElement>(null);
   const focusComposer = () => (scrollRef.current?.closest("[data-region]") ?? document).querySelector<HTMLElement>('[data-agent="thread-input"]')?.focus();
   const attachScroll = useLayerScroll(`${isEmbedded ? "pane:" : ""}thread:${thread.id}`, scrollRef, (el, isRestored) => landOnArrival(el, isRestored, lineRef.current, focusComposer));
-  const followArrivals = useFollowArrivals(thread, scrollRef);
+  const { bottom, watch: watchBottom } = useBottomWatch(thread);
+  const attachScroller = useCallback(
+    (el: HTMLDivElement) => {
+      const detach = attachScroll(el);
+      const unwatch = watchBottom(el);
+      return () => {
+        detach();
+        unwatch();
+      };
+    },
+    [attachScroll, watchBottom],
+  );
+  const { root, replies, actions, messageMenu, firstNew, newKeys, holdNewLine, clearNewLine } = useThreadMessages(thread, all, nav, focusComposer);
+  const followArrivals = useFollowArrivals(thread, scrollRef, bottom, holdNewLine);
   const selected = useQuotableSelection(scrollRef);
-  const { root, replies, actions, messageMenu, firstNew, clearNewLine } = useThreadMessages(thread, all, nav, focusComposer);
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {!isEmbedded && <ThreadHeader thread={thread} all={all} back={back} isPaneOpen={isPaneOpen} isDetailShown={isDetailShown} onDetailShown={setDetailWithPane} onResolve={onResolve} onPause={onPause} />}
       <div className="flex min-h-0 flex-1">
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <ShotScope.Provider value={shotsOf([...(root ? [root] : []), ...replies])}>
-            <div ref={attachScroll} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-              <ThreadMessages thread={thread} all={all} root={root} replies={replies} firstNew={firstNew} lineRef={lineRef} actions={actions} messageMenu={messageMenu} nav={nav} selected={selected} onResolve={onResolve} onPause={onPause} />
-              <div key={`${thread.messages.length}:${thread.pending !== undefined}`} ref={followArrivals} />
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              <div ref={attachScroller} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                <ThreadMessages thread={thread} all={all} root={root} replies={replies} firstNew={firstNew} lineRef={lineRef} actions={actions} messageMenu={messageMenu} nav={nav} selected={selected} onResolve={onResolve} onPause={onPause} />
+                <div key={`${thread.messages.length}:${thread.pending !== undefined}`} ref={followArrivals} />
+              </div>
+              <JumpToNew threadId={thread.id} newKeys={newKeys} scrollRef={scrollRef} />
             </div>
           </ShotScope.Provider>
           <ThreadComposer thread={thread} isEmbedded={isEmbedded} onSent={clearNewLine} />

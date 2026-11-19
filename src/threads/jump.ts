@@ -88,6 +88,10 @@ export function useLayerScroll<E extends HTMLElement>(layer: string, ref: React.
 
 export function flash(el: Element) {
   el.scrollIntoView({ block: arrival.restore ? "nearest" : "center" });
+  highlight(el);
+}
+
+export function highlight(el: Element) {
   el.animate([{ backgroundColor: "color-mix(in oklch, var(--color-link) 25%, transparent)" }, { backgroundColor: "transparent" }], { duration: 1600, easing: "ease-out" });
 }
 
