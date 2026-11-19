@@ -15,9 +15,9 @@ export type NodeMeta = {
   label: string;
   detail: string;
   text: string;
-  source?: string;
-  state?: string;
-  status?: string;
+  source?: string | undefined;
+  state?: string | undefined;
+  status?: string | undefined;
   objectives: string[];
 };
 
