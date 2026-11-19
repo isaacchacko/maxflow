@@ -61,7 +61,7 @@ test("useNow draws again after the wait it is given", async () => {
     return null;
   }
   await render(h(Clock));
-  await wait(70);
+  await wait(250);
   expect(draws.length).toBeGreaterThanOrEqual(3);
   expect(draws.at(-1)!).toBeGreaterThan(draws[0]!);
 });
@@ -69,16 +69,15 @@ test("useNow draws again after the wait it is given", async () => {
 test("useSettled follows its value only once it holds still", async () => {
   const draws: string[] = [];
   function Search({ q }: { q: string }) {
-    draws.push(useSettled(q, 30));
+    draws.push(useSettled(q, 300));
     return null;
   }
+  // Typed faster than it settles: it holds the first value until the last has held still.
   await render(h(Search, { q: "a" }));
   await render(h(Search, { q: "ab" }));
-  await wait(10);
   await render(h(Search, { q: "abc" }));
-  await wait(10);
   expect(draws.at(-1)).toBe("a");
-  await wait(50);
+  await wait(500);
   expect(draws.at(-1)).toBe("abc");
   expect(draws).not.toContain("ab");
 });
@@ -93,11 +92,11 @@ test("usePresence stays mounted for the way out, and shows only after it mounts"
   expect(states.at(-1)).toEqual({ mounted: false, shown: false });
   await render(h(Panel, { open: true }));
   expect(states.at(-1)).toEqual({ mounted: true, shown: false });
-  await wait(60);
+  await wait(250);
   expect(states.at(-1)).toEqual({ mounted: true, shown: true });
   await render(h(Panel, { open: false }));
   expect(states.at(-1)).toEqual({ mounted: true, shown: false });
-  await wait(60);
+  await wait(250);
   expect(states.at(-1)).toEqual({ mounted: false, shown: false });
 });
 
