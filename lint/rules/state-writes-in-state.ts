@@ -11,25 +11,32 @@ function isWrite(callee: TSESTree.Expression) {
   return callee.type === AST_NODE_TYPES.MemberExpression && callee.object.type === AST_NODE_TYPES.Identifier && callee.object.name === "Bun";
 }
 
-function reachesStateDir(node: TSESTree.Node, scope: TSESLint.Scope.Scope, depth: number): boolean {
-  if (depth > MAX_TRACE) return false;
-  switch (node.type) {
-    case AST_NODE_TYPES.Identifier: {
-      if (node.name === "STATE_DIR") return true;
-      const def = ASTUtils.findVariable(scope, node)?.defs[0];
-      if (def?.type === DefinitionType.Variable && def.node.init) return reachesStateDir(def.node.init, scope, depth + 1);
-      if (def?.type === DefinitionType.Parameter && def.name.parent.type === AST_NODE_TYPES.AssignmentPattern) return reachesStateDir(def.name.parent.right, scope, depth + 1);
-      return false;
-    }
-    case AST_NODE_TYPES.TemplateLiteral:
-      return node.expressions.some((e) => reachesStateDir(e, scope, depth));
-    case AST_NODE_TYPES.CallExpression:
-      return node.arguments.some((a) => reachesStateDir(a, scope, depth));
-    case AST_NODE_TYPES.BinaryExpression:
-      return reachesStateDir(node.left, scope, depth) || reachesStateDir(node.right, scope, depth);
-    default:
-      return false;
+function initialValueOf(identifier: TSESTree.Identifier, scope: TSESLint.Scope.Scope): TSESTree.Node | null | undefined {
+  const def = ASTUtils.findVariable(scope, identifier)?.defs[0];
+  if (def?.type === DefinitionType.Variable) return def.node.init;
+  if (def?.type === DefinitionType.Parameter && def.name.parent.type === AST_NODE_TYPES.AssignmentPattern) return def.name.parent.right;
+  return undefined;
+}
+
+function partsOf(node: TSESTree.Node): readonly TSESTree.Node[] {
+  if (node.type === AST_NODE_TYPES.TemplateLiteral) return node.expressions;
+  if (node.type === AST_NODE_TYPES.CallExpression) return node.arguments;
+  if (node.type === AST_NODE_TYPES.BinaryExpression) return [node.left, node.right];
+  return [];
+}
+
+function doesAnyPartReachStateDir(node: TSESTree.Node, scope: TSESLint.Scope.Scope, depth: number) {
+  return partsOf(node).some((part) => doesReachStateDir(part, scope, depth));
+}
+
+function doesReachStateDir(start: TSESTree.Node, scope: TSESLint.Scope.Scope, startDepth: number): boolean {
+  let node: TSESTree.Node | null | undefined = start;
+  for (let depth = startDepth; node && depth <= MAX_TRACE; depth += 1) {
+    if (node.type !== AST_NODE_TYPES.Identifier) return doesAnyPartReachStateDir(node, scope, depth);
+    if (node.name === "STATE_DIR") return true;
+    node = initialValueOf(node, scope);
   }
+  return false;
 }
 
 export default createRule({
@@ -50,7 +57,7 @@ export default createRule({
       CallExpression(node) {
         const path = node.arguments[0];
         if (!path || !isWrite(node.callee)) return;
-        if (reachesStateDir(path, context.sourceCode.getScope(node), 0)) context.report({ node, messageId: "write", data: { call: calleeName(node.callee) } });
+        if (doesReachStateDir(path, context.sourceCode.getScope(node), 0)) context.report({ node, messageId: "write", data: { call: calleeName(node.callee) } });
       },
     };
   },
