@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { asOf, candidatesAt, funnelPick, JevCallError, NEW_OBJECTIVE, routeObjective, type ObjectiveRow } from "../jev";
+import { asOf, candidatesAt, funnelPick, JevCallError, NEW_OBJECTIVE, routeObjective, sizeRequest, type ObjectiveRow } from "../jev";
 
 const objectives = new Map<string, ObjectiveRow>(
   [
@@ -44,9 +44,27 @@ test("routeObjective asks one choice over the candidates plus new and reads Jev'
 
 test("a refused call carries its status and never the key", async () => {
   using server = Bun.serve({ port: 0, fetch: (req) => new Response(`rate limited for ${req.headers.get("authorization") ?? ""}`, { status: 429 }) });
-  const refused = routeObjective({ url: server.url.origin, key: "sk-secret", model: "fake", sources: new Set(["isaac"]) }, "hello", []);
-  expect(refused).rejects.toBeInstanceOf(JevCallError);
-  const error = await refused.catch((caught: unknown) => caught);
-  expect(error).toMatchObject({ status: 429 });
-  expect(String(error)).not.toContain("sk-secret");
+  let refusal: unknown;
+  try {
+    await routeObjective({ url: server.url.origin, key: "sk-secret", model: "fake", sources: new Set(["isaac"]) }, "hello", []);
+  } catch (error) {
+    refusal = error;
+  }
+  expect(refusal).toBeInstanceOf(JevCallError);
+  expect(refusal).toMatchObject({ status: 429 });
+  expect(String(refusal)).not.toContain("sk-secret");
+});
+
+test("sizeRequest asks one choice over direct, area, fyi and ignore", async () => {
+  let asked: unknown;
+  using server = Bun.serve({
+    port: 0,
+    async fetch(req) {
+      asked = await req.json();
+      return Response.json({ model: "fake", answers: { pick: { type: "choice", choice: "fyi", probabilities: { fyi: 1 }, confidence: 1 } } });
+    },
+  });
+  const answer = await sizeRequest({ url: server.url.origin, key: "", model: "fake", sources: new Set(["isaac"]) }, "merged, thanks");
+  expect(answer).toMatchObject({ choice: "fyi", usage: { estimated: true } });
+  expect(Object.keys((asked as { questions: { pick: { criteria: object } } }).questions.pick.criteria)).toEqual(["direct", "area", "fyi", "ignore"]);
 });
