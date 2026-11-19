@@ -8,7 +8,7 @@ afterAll(() => GlobalRegistrator.unregister());
 
 const { act, createElement: h } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { useEventListener, useNow, usePresence, useResource } = await import("../src/lib/effects");
+const { useEventListener, useNow, usePresence, useResource, useSettled } = await import("../src/lib/effects");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root | undefined;
@@ -64,6 +64,23 @@ test("useNow draws again after the wait it is given", async () => {
   await wait(70);
   expect(draws.length).toBeGreaterThanOrEqual(3);
   expect(draws.at(-1)!).toBeGreaterThan(draws[0]!);
+});
+
+test("useSettled follows its value only once it holds still", async () => {
+  const draws: string[] = [];
+  function Search({ q }: { q: string }) {
+    draws.push(useSettled(q, 30));
+    return null;
+  }
+  await render(h(Search, { q: "a" }));
+  await render(h(Search, { q: "ab" }));
+  await wait(10);
+  await render(h(Search, { q: "abc" }));
+  await wait(10);
+  expect(draws.at(-1)).toBe("a");
+  await wait(50);
+  expect(draws.at(-1)).toBe("abc");
+  expect(draws).not.toContain("ab");
 });
 
 test("usePresence stays mounted for the way out, and shows only after it mounts", async () => {

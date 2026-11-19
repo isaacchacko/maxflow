@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, CornerDownRight, Globe, Link2, Pencil, Plus, RotateCcw, Trash2, Unlink, Users, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useEventListener, useResource, useSettled } from "@/lib/effects";
 import type { Call, Exception, Mode, Person, Reach, Restriction } from "../../restrictions";
 import { cn } from "@/lib/utils";
 import { liveStore, objectiveStore } from "@/store";
@@ -41,19 +42,16 @@ async function send(path: string, method: string, body?: unknown) {
 
 export function RestrictionsView() {
   const live = liveStore.use();
-  const [list, setList] = useState<Restriction[]>([]);
   // The tab is in the address (#restrictions/people), so it survives a reload and can be linked to.
   const [tab, setTabState] = useState<"actions" | "people">(location.hash === "#restrictions/people" ? "people" : "actions");
   const setTab = (t: "actions" | "people") => (setTabState(t), history.replaceState(history.state, "", t === "people" ? "#restrictions/people" : "#restrictions"));
-  useEffect(() => {
-    const follow = () => location.hash.startsWith("#restrictions") && setTabState(location.hash === "#restrictions/people" ? "people" : "actions");
-    window.addEventListener("hashchange", follow);
-    return () => window.removeEventListener("hashchange", follow);
-  }, []);
+  useEventListener("hashchange", () => location.hash.startsWith("#restrictions") && setTabState(location.hash === "#restrictions/people" ? "people" : "actions"));
   const scrollRef = useRef<HTMLDivElement>(null);
   useLayerScroll("restrictions", scrollRef);
-  const load = async () => liveStore.get() && setList(await send("/api/restrictions", "GET"));
-  useEffect(() => void load(), [live]);
+  const loaded = useResource(live ? "restrictions" : undefined, () => send("/api/restrictions", "GET") as Promise<Restriction[]>);
+  const list = loaded.value ?? [];
+  const setList = (change: (all: Restriction[]) => Restriction[]) => loaded.set(all => change(all ?? []));
+  const load = loaded.reload;
 
   // A change shows at once; one the server refuses is put back by fetching the list again, and the error is thrown to the editor.
   const edit = async (id: string, change: Partial<Restriction>) => {
@@ -280,10 +278,9 @@ function ExceptionForm({ r, kinds, onAdd, onCancel }: { r: Restriction; kinds: E
   const [people, setPeople] = useState<Person[]>([]);
   const [objective, setObjective] = useState("");
   const [repo, setRepo] = useState("");
-  const [repos, setRepos] = useState<{ path: string; name: string }[]>([]);
+  const repos = useResource("repos", knownRepos).value ?? [];
   const [mode, setMode] = useState<Mode>(r.mode === "allow" ? "ask" : "allow");
   const [error, setError] = useState<string>();
-  useEffect(() => void knownRepos().then(setRepos), []);
   const scope = kind === "people" ? people.length && { people } : kind === "objective" ? objective && { objective } : repo && { cwd: repo };
   const add = async () => {
     try {
@@ -400,14 +397,16 @@ function CustomEditor({ r, onSave, onCancel, onDelete }: { r?: Restriction; onSa
   const [mode, setMode] = useState<Mode>(r?.mode ?? "ask");
   const [tools, setTools] = useState((r?.match.tools ?? []).join("\n"));
   const [bash, setBash] = useState((r?.match.bash ?? []).join("\n"));
-  const [preview, setPreview] = useState<Preview | string>();
   const [error, setError] = useState<string>();
   const match = { tools: lines(tools), bash: lines(bash) };
-  useEffect(() => {
-    if (!match.tools.length && !match.bash.length) return setPreview(undefined);
-    const timer = setTimeout(() => void send("/api/restrictions/preview", "POST", { match }).then(setPreview, e => setPreview((e as Error).message)), 300);
-    return () => clearTimeout(timer);
-  }, [tools, bash]);
+  const empty = !match.tools.length && !match.bash.length;
+  const asked = useSettled(JSON.stringify(match), 300);
+  const previewed = useResource(empty ? undefined : `preview:${asked}`, () => send("/api/restrictions/preview", "POST", { match: JSON.parse(asked) }) as Promise<Preview>);
+  // The last answer stays up while he types the next.
+  const answer = previewed.error?.message ?? previewed.value;
+  const [kept, setKept] = useState<Preview | string>();
+  if (answer !== undefined && answer !== kept) setKept(answer);
+  const preview = empty ? undefined : kept;
   const save = async () => {
     try {
       setError(undefined);
@@ -491,15 +490,15 @@ const peopleOnly = (o: Restriction) => !!o.scope?.people?.length && !o.scope.obj
  * broader rule.
  */
 function PeopleList({ list, sections, onEdit, onDelete, onAdd, onLinked }: { list: Restriction[]; sections: string[]; onEdit: (id: string, c: Partial<Restriction>) => Promise<void>; onDelete: (id: string) => Promise<void>; onAdd: (r: Partial<Restriction>) => Promise<Restriction>; onLinked: () => Promise<unknown> }) {
-  const [known, setKnown] = useState<Person[]>([]);
+  const people = useResource("people", knownPeople);
+  const known = people.value ?? [];
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<string>();
-  useEffect(() => void knownPeople().then(setKnown), []);
   // Linking or unlinking answers with everyone again, and the server may have given restrictions the other account.
   const relink = async (pair: { slack: string; github: string }, linked: boolean) => {
     const everyone = (await send("/api/restrictions/people/link", linked ? "POST" : "DELETE", pair)) as Person[];
     knownCache = Promise.resolve(everyone);
-    setKnown(everyone);
+    people.set(() => everyone);
     await onLinked();
   };
   // People named in overrides but never seen on Slack or GitHub (a typed email) are listed too.
@@ -633,17 +632,11 @@ const knownPeople = () => (knownCache ??= send("/api/restrictions/people", "GET"
  * Enter or a click adds one. An address with an @ adds that email, and a bare word that GitHub login.
  */
 function PeoplePicker({ people, reach, onChange }: { people: Person[]; reach: Reach; onChange: (p: Person[]) => void }) {
-  const [all, setAll] = useState<Person[]>([]);
+  const all = useResource("people", knownPeople).value ?? [];
   const [query, setQuery] = useState("");
   const [listing, setListing] = useState(false);
   const box = useRef<HTMLDivElement>(null);
-  useEffect(() => void knownPeople().then(setAll), []);
-  useEffect(() => {
-    if (!listing) return;
-    const away = (e: PointerEvent) => box.current?.contains(e.target as Node) || setListing(false);
-    window.addEventListener("pointerdown", away);
-    return () => window.removeEventListener("pointerdown", away);
-  }, [listing]);
+  useEventListener("pointerdown", e => listing && !box.current?.contains(e.target as Node) && setListing(false));
   const q = query.trim().toLowerCase();
   const picked = (p: Person) => people.some(o => samePerson(o, p));
   const offers: Person[] = listing
@@ -703,17 +696,19 @@ function PeoplePicker({ people, reach, onChange }: { people: Person[]; reach: Re
 function Tester() {
   const [text, setText] = useState("");
   const [verdict, setVerdict] = useState<{ mode: Mode; restriction?: Restriction }>();
-  useEffect(() => {
-    const t = text.trim();
+  const timer = useRef(0);
+  const type = (next: string) => {
+    setText(next);
+    clearTimeout(timer.current);
+    const t = next.trim();
     if (!t || !liveStore.get()) return setVerdict(undefined);
     const call: Call = /^[\w-]+$/.test(t) && t !== t.toLowerCase() || t.startsWith("mcp__") ? { tool: t } : { tool: "Bash", input: { command: t } };
-    const timer = setTimeout(() => void send("/api/restrictions/check", "POST", call).then(setVerdict, () => setVerdict(undefined)), 150);
-    return () => clearTimeout(timer);
-  }, [text]);
+    timer.current = window.setTimeout(() => void send("/api/restrictions/check", "POST", call).then(setVerdict, () => setVerdict(undefined)), 150);
+  };
   const m = verdict && MODES.find(x => x.mode === verdict.mode)!;
   return (
     <div className="mb-5 flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 focus-within:bg-muted/60">
-      <input value={text} onChange={e => setText(e.target.value)} placeholder="Try a command or tool name: gh pr merge 12 --auto" className="min-w-0 flex-1 bg-transparent font-mono text-xs outline-none placeholder:font-sans placeholder:text-sm placeholder:text-muted-foreground" />
+      <input value={text} onChange={e => type(e.target.value)} placeholder="Try a command or tool name: gh pr merge 12 --auto" className="min-w-0 flex-1 bg-transparent font-mono text-xs outline-none placeholder:font-sans placeholder:text-sm placeholder:text-muted-foreground" />
       {m && (
         <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
           <span className={cn("rounded px-2 py-0.5 font-medium", m.on)}>{m.label}</span>
