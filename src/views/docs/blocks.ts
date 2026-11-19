@@ -1,5 +1,5 @@
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
-import { type EditorState, type Range, StateField } from "@codemirror/state";
+import { type EditorState, type Range, StateField, type Transaction } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 
 const PARSE_BUDGET_MS = 50;
@@ -73,9 +73,14 @@ function blockDecorations(state: EditorState): DecorationSet {
   return Decoration.set(out, true);
 }
 
+function isStale(tr: Transaction) {
+  if (tr.docChanged || tr.selection !== undefined) return true;
+  return syntaxTree(tr.state) !== syntaxTree(tr.startState);
+}
+
 // constraint: CodeMirror takes decorations that replace whole lines (a rendered table) only from a state field, never from a view plugin.
 export const renderedBlocks = StateField.define<DecorationSet>({
   create: blockDecorations,
-  update: (decorations, tr) => (tr.docChanged || tr.selection !== undefined || syntaxTree(tr.state) !== syntaxTree(tr.startState) ? blockDecorations(tr.state) : decorations),
+  update: (decorations, tr) => (isStale(tr) ? blockDecorations(tr.state) : decorations),
   provide: (field) => EditorView.decorations.from(field),
 });

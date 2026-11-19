@@ -19,8 +19,8 @@ function HeaderLink({ href, label }: { href: string; label: string }) {
   );
 }
 
-function DocEditor({ doc, summary, docPaths }: { doc: Doc; summary: DocSummary | undefined; docPaths: string[] }) {
-  const editor = useDocEditor(doc, docPaths);
+function DocEditor({ doc, summary }: { doc: Doc; summary: DocSummary | undefined }) {
+  const editor = useDocEditor(doc);
   const open = summary?.open ?? 0;
   return (
     <article className="flex min-w-0 flex-1 flex-col">
@@ -48,14 +48,20 @@ function DocEditor({ doc, summary, docPaths }: { doc: Doc; summary: DocSummary |
 function DocPane({ path, vault }: { path: string; vault: { docs: DocSummary[] } }) {
   const loaded = useResource(`doc:${path}`, async () => loadDoc(path));
   if (!loaded.value) return <p className="p-6 text-sm text-muted-foreground">{loaded.error?.message ?? "Loading…"}</p>;
-  return <DocEditor doc={loaded.value} summary={vault.docs.find((d) => d.path === path)} docPaths={vault.docs.map((d) => d.path)} />;
+  return <DocEditor doc={loaded.value} summary={vault.docs.find((d) => d.path === path)} />;
+}
+
+const firstToShow = (docs: DocSummary[]) => (docs.find((d) => d.open > 0) ?? docs[0])?.path;
+
+function emptyText(vault: { error?: Error; value?: unknown }) {
+  if (vault.error) return vault.error.message;
+  return vault.value === undefined ? "Loading…" : "No docs yet. Make one with the new-doc button.";
 }
 
 export function DocsView({ path }: { path: string | undefined }) {
   const vault = useResource("docs", loadVault);
   useInterval(vault.reload, VAULT_CHECK_MS);
-  const docs = vault.value?.docs ?? [];
-  const shown = hasText(path) ? withExtension(path) : (docs.find((d) => d.open > 0) ?? docs[0])?.path;
+  const shown = hasText(path) ? withExtension(path) : firstToShow(vault.value?.docs ?? []);
   return (
     <div className="flex h-full min-h-0">
       <aside className="flex w-64 shrink-0 flex-col border-r">
@@ -69,7 +75,7 @@ export function DocsView({ path }: { path: string | undefined }) {
       {hasText(shown) && vault.value ? (
         <DocPane key={shown} path={shown} vault={vault.value} />
       ) : (
-        <p className="p-6 text-sm text-muted-foreground">{vault.error?.message ?? (vault.value ? "No docs yet. Make one with the new-doc button." : "Loading…")}</p>
+        <p className="p-6 text-sm text-muted-foreground">{emptyText(vault)}</p>
       )}
     </div>
   );

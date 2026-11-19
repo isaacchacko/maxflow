@@ -24,7 +24,7 @@ function closeBlock(block: CalloutBlock) {
   return { ...block, isOpen: lastWho.toLowerCase() === ISAAC };
 }
 
-function startsComment(state: EditorState, line: CalloutLine) {
+function isCommentStart(state: EditorState, line: CalloutLine) {
   const text = state.doc.line(line.number).text.slice(line.markerLength);
   return line.depth === 1 && /^\[!comment\]/i.test(text);
 }
@@ -37,7 +37,7 @@ export function calloutBlocks(state: EditorState): CalloutBlock[] {
     const text = state.doc.line(n).text;
     if (FENCE.test(text)) isInCode = !isInCode;
     const line = isInCode ? undefined : calloutLine(n, text);
-    if (line && startsComment(state, line)) {
+    if (line && isCommentStart(state, line)) {
       if (current) blocks.push(closeBlock(current));
       current = { firstLine: n, lastLine: n, who: line.who ?? ISAAC, isOpen: true, lines: [line] };
     } else if (line && current) {
@@ -79,7 +79,7 @@ function endOfBlockAt(state: EditorState, pos: number) {
   return line.to;
 }
 
-export function commentOnSelection(view: EditorView) {
+export function didCommentOnSelection(view: EditorView) {
   const { state } = view;
   const range = state.selection.main;
   const quote = state.sliceDoc(range.from, range.to).replaceAll(/\s+/g, " ").trim().slice(0, 120);

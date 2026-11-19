@@ -6,13 +6,13 @@ import { searchKeymap } from "@codemirror/search";
 import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import { drawSelection, EditorView, keymap, placeholder } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import { uploadFile } from "./api";
+import { knownDocPaths, uploadFile } from "./api";
 import { renderedBlocks } from "./blocks";
 import { livePreview, openWikilinks } from "./livePreview";
 import type { DocSession } from "./session";
-import { commentOnSelection } from "./threads";
+import { didCommentOnSelection } from "./threads";
 
-function wrap(view: EditorView, mark: string) {
+function didWrap(view: EditorView, mark: string) {
   view.dispatch(
     view.state.changeByRange((range) => {
       const text = view.state.sliceDoc(range.from, range.to);
@@ -25,7 +25,7 @@ function wrap(view: EditorView, mark: string) {
   return true;
 }
 
-function link(view: EditorView) {
+function didLink(view: EditorView) {
   view.dispatch(
     view.state.changeByRange((range) => {
       const insert = `[${view.state.sliceDoc(range.from, range.to)}](url)`;
@@ -36,12 +36,12 @@ function link(view: EditorView) {
   return true;
 }
 
-function wikilinkCompletions(docs: () => string[]) {
+function wikilinkCompletions() {
   return (context: CompletionContext) => {
     const typed = context.matchBefore(/\[\[[^\]\n]*/);
     if (!typed) return null;
     const hasClose = context.state.sliceDoc(context.pos, context.pos + 2) === "]]";
-    const options = docs().map((path) => {
+    const options = knownDocPaths().map((path) => {
       const label = path.replace(/\.md$/, "");
       return { label, type: "text", apply: hasClose ? label : `${label}]]` };
     });
@@ -61,7 +61,7 @@ async function embedFiles(view: EditorView, files: File[]) {
   view.dispatch(view.state.replaceSelection(embeds.join("\n")));
 }
 
-function takeFiles(list: FileList | undefined | null, view: EditorView) {
+function didTakeFiles(list: FileList | undefined | null, view: EditorView) {
   const files = [...(list ?? [])];
   if (files.length === 0) return false;
   void embedFiles(view, files);
@@ -69,8 +69,8 @@ function takeFiles(list: FileList | undefined | null, view: EditorView) {
 }
 
 const attachments = EditorView.domEventHandlers({
-  paste: (e, view) => takeFiles(e.clipboardData?.files, view),
-  drop: (e, view) => takeFiles(e.dataTransfer?.files, view),
+  paste: (e, view) => didTakeFiles(e.clipboardData?.files, view),
+  drop: (e, view) => didTakeFiles(e.dataTransfer?.files, view),
 });
 
 const highlight = HighlightStyle.define([
@@ -116,8 +116,8 @@ const theme = EditorView.theme({
   ".cm-tooltip-autocomplete": { backgroundColor: "var(--popover)", color: "var(--popover-foreground)", border: "1px solid var(--border)", borderRadius: "8px" },
 });
 
-export function extensionsFor(session: DocSession, text: string, docs: () => string[]): Extension[] {
-  const save = () => {
+export function extensionsFor(session: DocSession, text: string): Extension[] {
+  const didSave = () => {
     void session.save();
     return true;
   };
@@ -127,13 +127,13 @@ export function extensionsFor(session: DocSession, text: string, docs: () => str
     EditorView.lineWrapping,
     markdown({ base: markdownLanguage }),
     syntaxHighlighting(highlight),
-    autocompletion({ override: [wikilinkCompletions(docs)] }),
+    autocompletion({ override: [wikilinkCompletions()] }),
     keymap.of([
-      { key: "Mod-b", run: (v) => wrap(v, "**") },
-      { key: "Mod-i", run: (v) => wrap(v, "*") },
-      { key: "Mod-k", run: link },
-      { key: "Mod-Shift-m", run: commentOnSelection },
-      { key: "Mod-s", run: save, preventDefault: true },
+      { key: "Mod-b", run: (v) => didWrap(v, "**") },
+      { key: "Mod-i", run: (v) => didWrap(v, "*") },
+      { key: "Mod-k", run: didLink },
+      { key: "Mod-Shift-m", run: didCommentOnSelection },
+      { key: "Mod-s", run: didSave, preventDefault: true },
       ...completionKeymap,
       ...searchKeymap,
       ...historyKeymap,

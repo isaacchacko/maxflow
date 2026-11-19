@@ -44,7 +44,7 @@ function NameInput({ editing, onDone }: { editing: Editing; onDone: (typed: stri
         onBlur={() => onDone(undefined)}
         onKeyDown={(e) => {
           if (e.key === "Escape") onDone(undefined);
-          if (e.key === "Enter") onDone(e.currentTarget.value.trim().replace(/^\/+|\/+$/g, ""));
+          else if (e.key === "Enter") onDone(e.currentTarget.value.trim().replaceAll(/^\/+|\/+$/g, ""));
         }}
       />
     </label>
@@ -125,9 +125,8 @@ function Row({ kind, path, depth, open = 0, isSelected = false, isCollapsed, onT
   );
 }
 
-type Level = { folder: string; depth: number };
-
 export function Tree({ vault, selected, onChanged }: Props) {
+  type Level = { folder: string; depth: number };
   const [editing, setEditing] = useState<Editing | undefined>();
   const [confirming, setConfirming] = useState<string | undefined>();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -143,16 +142,17 @@ export function Tree({ vault, selected, onChanged }: Props) {
       setError(error_ instanceof Error ? error_.message : String(error_));
     }
   };
-  const finishEditing = (e: Editing, typed: string | undefined) => {
+  const finishEditing = (typed: string | undefined) => {
     setEditing(undefined);
-    if (hasText(typed) && typed !== startingText(e).replace(/\/$/, "")) void run(async () => apply(e, typed));
+    if (editing && hasText(typed) && typed !== startingText(editing).replace(/\/$/, "")) void run(async () => apply(editing, typed));
   };
   const remove = (key: string, isSure: boolean) => {
     setConfirming(undefined);
     if (!isSure) return;
     const [kind, ...rest] = key.split(":");
     const path = rest.join(":");
-    void run(async () => (kind === "doc" ? removeDoc(path) : removeFolder(path)));
+    const removeIt = kind === "doc" ? removeDoc : removeFolder;
+    void run(async () => removeIt(path));
     if (selected === path || selected?.startsWith(`${path}/`) === true) location.hash = "docs";
   };
   const toggle = (folder: string) => setCollapsed((all) => (all.has(folder) ? new Set([...all].filter((f) => f !== folder)) : new Set([...all, folder])));
@@ -163,10 +163,10 @@ export function Tree({ vault, selected, onChanged }: Props) {
     return [
       ...folders.flatMap((f) => folderRows(f, depth)),
       ...docs.map((d: DocSummary) => (confirming === `doc:${d.path}` ? <ConfirmDelete key={d.path} path={d.path} onAnswer={(isSure) => remove(`doc:${d.path}`, isSure)} /> : editingRow(d.path) ?? <Row key={d.path} kind="doc" path={d.path} depth={depth} open={d.open} isSelected={d.path === selected} act={act} />)),
-      ...(editing?.mode === "new" && editing.path === folder ? [<NameInput key="new" editing={editing} onDone={(typed) => finishEditing(editing, typed)} />] : []),
+      ...(editing?.mode === "new" && editing.path === folder ? [<NameInput key="new" editing={editing} onDone={finishEditing} />] : []),
     ];
   };
-  const editingRow = (path: string) => (editing?.mode === "rename" && editing.path === path ? <NameInput key={path} editing={editing} onDone={(typed) => finishEditing(editing, typed)} /> : undefined);
+  const editingRow = (path: string) => (editing?.mode === "rename" && editing.path === path ? <NameInput key={path} editing={editing} onDone={finishEditing} /> : undefined);
   const folderRows = (f: string, depth: number): React.ReactNode[] => {
     if (confirming === `folder:${f}`) return [<ConfirmDelete key={f} path={f} onAnswer={(isSure) => remove(`folder:${f}`, isSure)} />];
     const row = editingRow(f) ?? <Row key={f} kind="folder" path={f} depth={depth} isCollapsed={collapsed.has(f)} onToggle={() => toggle(f)} act={act} />;

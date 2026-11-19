@@ -54,7 +54,10 @@ function written(path: string, text: string, from: Session | undefined, isExisti
 }
 
 async function put(req: Request, path: string, from: Session | undefined, isExisting: boolean) {
-  if (!isMarkdown(path)) return Response.json({ path: saveFile(path, new Uint8Array(await req.arrayBuffer())) }, { status: 201 });
+  if (!isMarkdown(path)) {
+    const bytes = new Uint8Array(await req.arrayBuffer());
+    return Response.json({ path: saveFile(path, bytes) }, { status: 201 });
+  }
   const change = await changeOf(req);
   if (typeof change.text !== "string") return new Response("PUT {text, base?}", { status: 400 });
   const isStale = isExisting && typeof change.base === "string" && versionOf(readDoc(path)) !== change.base;
@@ -74,12 +77,12 @@ async function docAction(req: Request, path: string, from: Session | undefined) 
 }
 
 async function folderAction(req: Request, path: string, from: Session | undefined) {
-  const who = from?.name ?? "isaac";
   if (req.method === "POST") {
     makeFolder(path);
     return Response.json({ path }, { status: 201 });
   }
   if (!existsSync(join(DOCS_DIR, path))) return notFound(path);
+  const who = from?.name ?? "isaac";
   const change = await changeOf(req);
   if (req.method === "PATCH" && typeof change.to === "string") return Response.json({ path: moveFolder(path, change.to, who) });
   if (req.method === "DELETE") return Response.json({ path: removeFolder(path, who) });
@@ -88,7 +91,7 @@ async function folderAction(req: Request, path: string, from: Session | undefine
 
 function routeOf(pathname: string) {
   const m = /^\/api\/docs(-folder)?\/(.+)$/.exec(pathname);
-  if (!m?.[2]) return;
+  if (m?.[2] === undefined) return;
   const path = decodeURIComponent(m[2]);
   return m[1] === undefined ? { act: docAction, path: docPath(path) } : { act: folderAction, path: vaultPath(path) };
 }

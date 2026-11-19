@@ -2,7 +2,7 @@ import { syntaxTree } from "@codemirror/language";
 import type { EditorState, Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
 import type { SyntaxNodeRef } from "@lezer/common";
-import { calloutBlocks, replyInto, resolveBlock, type CalloutBlock } from "./threads";
+import { calloutBlocks, replyInto, resolveBlock, type CalloutBlock, type CalloutLine } from "./threads";
 
 const hidden = Decoration.replace({});
 const lineClass = (cls: string) => Decoration.line({ class: cls });
@@ -141,18 +141,21 @@ const isActive = (scan: Scan, pos: number) => scan.active.has(scan.state.doc.lin
 function hideMark(scan: Scan, node: SyntaxNodeRef) {
   if (isActive(scan, node.from)) return;
   const after = scan.state.sliceDoc(node.to, node.to + 1);
-  scan.out.push(hidden.range(node.from, node.name === "HeaderMark" && after === " " ? node.to + 1 : node.to));
+  const isHeadingSpace = after === " " && node.name === "HeaderMark";
+  scan.out.push(hidden.range(node.from, isHeadingSpace ? node.to + 1 : node.to));
 }
 
 function markLines(scan: Scan, node: SyntaxNodeRef, cls: string) {
   const { doc } = scan.state;
-  for (let n = doc.lineAt(node.from).number; n <= doc.lineAt(node.to).number; n++) scan.out.push(lineClass(cls).range(doc.line(n).from));
+  const last = doc.lineAt(node.to).number;
+  for (let n = doc.lineAt(node.from).number; n <= last; n += 1) scan.out.push(lineClass(cls).range(doc.line(n).from));
 }
 
 function image(scan: Scan, node: SyntaxNodeRef) {
   const url = node.node.getChild("URL");
   if (!url || isActive(scan, node.from)) return;
-  scan.out.push(Decoration.replace({ widget: new ImageWidget(resolveFrom(scan.docPath, scan.state.sliceDoc(url.from, url.to))) }).range(node.from, node.to));
+  const src = resolveFrom(scan.docPath, scan.state.sliceDoc(url.from, url.to));
+  scan.out.push(Decoration.replace({ widget: new ImageWidget(src) }).range(node.from, node.to));
 }
 
 function listMark(scan: Scan, node: SyntaxNodeRef) {
@@ -168,14 +171,34 @@ function listMark(scan: Scan, node: SyntaxNodeRef) {
 const MARKS = new Set(["EmphasisMark", "StrikethroughMark", "LinkMark", "URL"]);
 const SPANS: Record<string, string> = { Emphasis: "cm-md-em", StrongEmphasis: "cm-md-strong", InlineCode: "cm-md-code", Strikethrough: "cm-md-strike", Link: "cm-md-link" };
 
+const isHiddenMark = (node: SyntaxNodeRef) => node.name === "HeaderMark" || MARKS.has(node.name) || (node.name === "CodeMark" && node.node.parent?.name === "InlineCode");
+
+function visitBlock(scan: Scan, node: SyntaxNodeRef) {
+  switch (node.name) {
+    case "FencedCode": {
+      markLines(scan, node, "cm-md-codeblock");
+      break;
+    }
+    case "Table": {
+      markLines(scan, node, "cm-md-table");
+      break;
+    }
+    case "Image": {
+      image(scan, node);
+      break;
+    }
+    case "ListMark": {
+      listMark(scan, node);
+      break;
+    }
+  }
+}
+
 function visit(scan: Scan, node: SyntaxNodeRef) {
   const heading = /^ATXHeading(\d)$/.exec(node.name)?.[1];
   if (heading !== undefined) scan.out.push(lineClass(`cm-md-h${heading}`).range(scan.state.doc.lineAt(node.from).from));
-  else if (node.name === "HeaderMark" || MARKS.has(node.name) || (node.name === "CodeMark" && node.node.parent?.name === "InlineCode")) hideMark(scan, node);
-  else if (node.name === "FencedCode") markLines(scan, node, "cm-md-codeblock");
-  else if (node.name === "Table") markLines(scan, node, "cm-md-table");
-  else if (node.name === "Image") image(scan, node);
-  else if (node.name === "ListMark") listMark(scan, node);
+  else if (isHiddenMark(node)) hideMark(scan, node);
+  else visitBlock(scan, node);
   const span = SPANS[node.name];
   if (span !== undefined && node.from < node.to) scan.out.push(Decoration.mark({ class: span }).range(node.from, node.to));
 }
@@ -186,18 +209,23 @@ function wikilinks(scan: Scan, from: number, to: number) {
     const [whole, bang, target = "", alias] = m;
     const start = from + m.index;
     const isEmbed = bang === "!";
-    if (isEmbed && IMAGE.test(target) && !isActive(scan, start)) scan.out.push(Decoration.replace({ widget: new ImageWidget(embedUrl(target)) }).range(start, start + whole.length));
-    else if (!isEmbed) linkDecorations(scan, start, whole.length, target, alias);
+    const end = start + whole.length;
+    if (!isEmbed) linkDecorations(scan, { start, end, target, alias });
+    else if (IMAGE.test(target) && !isActive(scan, start)) {
+      const widget = new ImageWidget(embedUrl(target));
+      scan.out.push(Decoration.replace({ widget }).range(start, end));
+    }
   }
 }
 
-function linkDecorations(scan: Scan, start: number, length: number, target: string, alias: string | undefined) {
-  const end = start + length;
+function linkDecorations(scan: Scan, { start, end, target, alias }: { start: number; end: number; target: string; alias: string | undefined }) {
   scan.out.push(Decoration.mark({ class: "cm-md-wikilink", attributes: { "data-doc": target.trim() } }).range(start, end));
   if (isActive(scan, start)) return;
   const shownFrom = alias === undefined ? start + 2 : end - 2 - alias.length;
   scan.out.push(hidden.range(start, shownFrom), hidden.range(end - 2, end));
 }
+
+const replyLabel = (line: CalloutLine) => (line.who === undefined ? undefined : new ReplyLabel(line.who));
 
 function callouts(scan: Scan) {
   for (const block of calloutBlocks(scan.state)) {
@@ -205,7 +233,7 @@ function callouts(scan: Scan) {
       const at = scan.state.doc.line(line.number);
       scan.out.push(lineClass(`cm-callout${block.isOpen ? " cm-callout-open" : ""}${line.depth > 1 ? " cm-callout-reply" : ""}`).range(at.from));
       if (scan.active.has(line.number)) continue;
-      const header = line.number === block.firstLine ? new CommentHeader(block) : line.who === undefined ? undefined : new ReplyLabel(line.who);
+      const header = line.number === block.firstLine ? new CommentHeader(block) : replyLabel(line);
       if (header) scan.out.push(Decoration.replace({ widget: header }).range(at.from, at.to));
       else if (line.markerLength > 0) scan.out.push(hidden.range(at.from, at.from + line.markerLength));
     }

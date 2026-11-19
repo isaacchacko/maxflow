@@ -53,7 +53,7 @@ test("folders, attachments and saves from yarn: saves wait for the sentry's comm
   docs.ensureVault();
   docs.saveFile("notes/weekly review.md", "# hi\n");
   docs.saveFile("attachments/shot.png", new Uint8Array([1, 2, 3]));
-  expect(docs.uncommitted().toSorted()).toEqual(["attachments/shot.png", "notes/weekly review.md"]);
+  expect(docs.uncommitted().toSorted((a, b) => a.localeCompare(b))).toEqual(["attachments/shot.png", "notes/weekly review.md"]);
   expect(docs.listVault()).toEqual({ docs: [{ path: "notes/weekly review.md", open: 0 }], folders: ["attachments", "notes"], files: ["attachments/shot.png"] });
   docs.didCommit(["."], "vault: sweep");
   docs.moveFolder("notes", "archive/notes", "docs agent");

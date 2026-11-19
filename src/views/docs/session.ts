@@ -11,19 +11,19 @@ const normalized = (text: string) => text.replaceAll("\r\n", "\n");
 
 export function diff(before: string, after: string) {
   let start = 0;
-  while (start < before.length && start < after.length && before[start] === after[start]) start++;
+  while (start < before.length && start < after.length && before[start] === after[start]) start += 1;
   let end = 0;
-  while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end++;
+  while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end += 1;
   return ChangeSet.of({ from: start, to: before.length - end, insert: after.slice(start, after.length - end) }, before.length);
 }
 
 // constraint: CodeMirror counts every line break as one character, so the base is kept with \n breaks to line up with its positions.
 export class DocSession {
-  view: EditorView | undefined;
   private base: { text: string; version: string };
   private pending: ChangeSet;
   private sentAfter: ChangeSet | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
+  view: EditorView | undefined;
 
   constructor(
     readonly path: string,
@@ -65,8 +65,15 @@ export class DocSession {
       return;
     }
     this.sentAfter = undefined;
-    if (this.pending.empty) return;
-    await this.save();
+    if (this.hasUnsaved()) await this.save();
+  }
+
+  private hasUnsaved() {
+    return !this.pending.empty;
+  }
+
+  private isSaving() {
+    return this.sentAfter !== undefined;
   }
 
   private acknowledge(sent: string, version: string) {
@@ -86,9 +93,9 @@ export class DocSession {
   }
 
   async refresh() {
-    if (this.sentAfter !== undefined || !this.pending.empty) return;
+    if (this.isSaving() || this.hasUnsaved()) return;
     const doc = await loadDoc(this.path);
-    if (doc.version === this.base.version || this.sentAfter !== undefined || !this.pending.empty) return;
+    if (doc.version === this.base.version || this.isSaving() || this.hasUnsaved()) return;
     this.merge(normalized(doc.text), doc.version, "updated");
   }
 

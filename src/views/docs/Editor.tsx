@@ -1,11 +1,11 @@
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { useCallback, useRef, useState } from "react";
-import { useInterval, useLatest } from "@/lib/effects";
+import { useCallback, useState } from "react";
+import { useInterval } from "@/lib/effects";
 import type { Doc } from "./api";
 import { extensionsFor } from "./extensions";
 import { DocSession, type SaveStatus } from "./session";
-import { commentOnSelection } from "./threads";
+import { didCommentOnSelection } from "./threads";
 
 const REMOTE_CHECK_MS = 3000;
 const STATUS_TEXT: Record<SaveStatus, string> = {
@@ -17,29 +17,28 @@ const STATUS_TEXT: Record<SaveStatus, string> = {
   offline: "Not saved: the server didn't answer",
 };
 
-export function useDocEditor(doc: Doc, docPaths: string[]) {
+export function useDocEditor(doc: Doc) {
   const [status, setStatus] = useState<SaveStatus>("saved");
-  const session = useRef<DocSession | undefined>(undefined);
-  const paths = useLatest(docPaths);
+  const [session, setSession] = useState<DocSession | undefined>();
   const mount = useCallback(
     (parent: HTMLDivElement | null) => {
       if (!parent) return;
       const s = new DocSession(doc.path, doc.text, doc.version, setStatus);
-      const view = new EditorView({ parent, state: EditorState.create({ doc: doc.text, extensions: extensionsFor(s, doc.text, () => paths.current) }) });
+      const view = new EditorView({ parent, state: EditorState.create({ doc: doc.text, extensions: extensionsFor(s, doc.text) }) });
       s.view = view;
-      session.current = s;
+      setSession(s);
       return () => {
         s.dispose();
         view.destroy();
         s.view = undefined;
+        setSession(undefined);
       };
     },
-    [doc, paths],
+    [doc],
   );
-  useInterval(async () => session.current?.refresh(), REMOTE_CHECK_MS);
+  useInterval(async () => session?.refresh(), REMOTE_CHECK_MS);
   const comment = () => {
-    const view = session.current?.view;
-    if (view) commentOnSelection(view);
+    if (session?.view) didCommentOnSelection(session.view);
   };
   return { mount, comment, status: STATUS_TEXT[status], isWarning: status === "offline" };
 }

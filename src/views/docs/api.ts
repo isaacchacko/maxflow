@@ -22,15 +22,20 @@ async function answer(url: string, init?: RequestInit): Promise<Record<string, u
   return body;
 }
 
+const known = { docPaths: [] as string[] };
+export const knownDocPaths = () => known.docPaths;
+
 export async function loadVault(): Promise<Vault> {
   const v = await answer("/api/docs");
-  if (!Array.isArray(v["docs"]) || !Array.isArray(v["folders"])) throw new Error("The server didn't answer with the docs vault");
-  return v as Vault;
+  if (!Array.isArray(v["docs"]) || !Array.isArray(v["folders"])) throw new TypeError("The server didn't answer with the docs vault");
+  const vault = v as Vault;
+  known.docPaths = vault.docs.map((d) => d.path);
+  return vault;
 }
 
 export async function loadDoc(path: string): Promise<Doc> {
   const d = await answer(docUrl(path));
-  if (typeof d["text"] !== "string" || typeof d["version"] !== "string") throw new Error(`The server didn't answer with ${path}`);
+  if (typeof d["text"] !== "string" || typeof d["version"] !== "string") throw new TypeError(`The server didn't answer with ${path}`);
   return d as Doc;
 }
 
