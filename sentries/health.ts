@@ -9,7 +9,7 @@ import type { ServerWebSocket, Subprocess } from "bun";
 import { join } from "node:path";
 import { BASE as base, CLI, LIVE, PORT, TMUX_SCOPE, TMUX_SOCKET } from "../instance";
 import { deployRestartUnderway } from "../deploy-restart";
-import { LABEL, LOG, loaded, restartCommand, status as serviceStatus } from "../service";
+import { LABEL, LOG, isLoaded, restartCommand, status as serviceStatus } from "../service";
 import { stateDirectory } from "../state";
 import { takeOver } from "./singleton";
 
@@ -305,7 +305,7 @@ for (;;) {
           if (started !== undefined) await acceptTrust(started.tmux);
         }
       }
-    } else if (!DEV && !loaded()) {
+    } else if (!DEV && !isLoaded()) {
       // Unloaded on purpose (launchctl bootout, systemctl disable), so it is meant to be down.
       downSince = null;
       closePage();
