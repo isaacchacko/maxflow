@@ -35,6 +35,30 @@ export class DocSession {
     this.pending = ChangeSet.empty(this.base.text.length);
   }
 
+  private hasUnsaved() {
+    return !this.pending.empty;
+  }
+
+  private isSaving() {
+    return this.sentAfter !== undefined;
+  }
+
+  private acknowledge(sent: string, version: string) {
+    this.base = { text: sent, version };
+    this.pending = this.sentAfter ?? ChangeSet.empty(sent.length);
+    this.report(this.pending.empty ? "saved" : "unsaved");
+  }
+
+  private merge(theirs: string, version: string, status: SaveStatus) {
+    const view = this.view;
+    if (!view) return;
+    const fromBase = diff(this.base.text, theirs);
+    view.dispatch({ changes: fromBase.map(this.pending), annotations: fromServer.of(true) });
+    this.pending = this.pending.map(fromBase, true);
+    this.base = { text: theirs, version };
+    this.report(status);
+  }
+
   onUpdate(u: ViewUpdate) {
     const local = u.transactions.filter((tr) => tr.docChanged && tr.annotation(fromServer) !== true);
     if (local.length === 0) return;
@@ -66,30 +90,6 @@ export class DocSession {
     }
     this.sentAfter = undefined;
     if (this.hasUnsaved()) await this.save();
-  }
-
-  private hasUnsaved() {
-    return !this.pending.empty;
-  }
-
-  private isSaving() {
-    return this.sentAfter !== undefined;
-  }
-
-  private acknowledge(sent: string, version: string) {
-    this.base = { text: sent, version };
-    this.pending = this.sentAfter ?? ChangeSet.empty(sent.length);
-    this.report(this.pending.empty ? "saved" : "unsaved");
-  }
-
-  private merge(theirs: string, version: string, status: SaveStatus) {
-    const view = this.view;
-    if (!view) return;
-    const fromBase = diff(this.base.text, theirs);
-    view.dispatch({ changes: fromBase.map(this.pending), annotations: fromServer.of(true) });
-    this.pending = this.pending.map(fromBase, true);
-    this.base = { text: theirs, version };
-    this.report(status);
   }
 
   async refresh() {

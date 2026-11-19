@@ -36,17 +36,15 @@ function didLink(view: EditorView) {
   return true;
 }
 
-function wikilinkCompletions() {
-  return (context: CompletionContext) => {
-    const typed = context.matchBefore(/\[\[[^\]\n]*/);
-    if (!typed) return null;
-    const hasClose = context.state.sliceDoc(context.pos, context.pos + 2) === "]]";
-    const options = knownDocPaths().map((path) => {
-      const label = path.replace(/\.md$/, "");
-      return { label, type: "text", apply: hasClose ? label : `${label}]]` };
-    });
-    return { from: typed.from + 2, options, validFor: /^[^\]\n]*$/ };
-  };
+function wikilinkCompletions(context: CompletionContext) {
+  const typed = context.matchBefore(/\[\[[^\]\n]*/);
+  if (!typed) return null;
+  const hasClose = context.state.sliceDoc(context.pos, context.pos + 2) === "]]";
+  const options = knownDocPaths().map((path) => {
+    const label = path.replace(/\.md$/, "");
+    return { label, type: "text", apply: hasClose ? label : `${label}]]` };
+  });
+  return { from: typed.from + 2, options, validFor: /^[^\]\n]*$/ };
 }
 
 const safeName = (name: string) => name.replaceAll(/[^\w.-]+/g, "-");
@@ -127,7 +125,7 @@ export function extensionsFor(session: DocSession, text: string): Extension[] {
     EditorView.lineWrapping,
     markdown({ base: markdownLanguage }),
     syntaxHighlighting(highlight),
-    autocompletion({ override: [wikilinkCompletions()] }),
+    autocompletion({ override: [wikilinkCompletions] }),
     keymap.of([
       { key: "Mod-b", run: (v) => didWrap(v, "**") },
       { key: "Mod-i", run: (v) => didWrap(v, "*") },

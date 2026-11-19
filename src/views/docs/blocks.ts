@@ -67,7 +67,8 @@ function blockDecorations(state: EditorState): DecorationSet {
   tree.iterate({
     enter: (node) => {
       if (node.name !== "Table" || isEditing(state, node.from, node.to)) return;
-      out.push(Decoration.replace({ widget: new TableWidget(state.sliceDoc(node.from, node.to), node.from), block: true }).range(node.from, node.to));
+      const widget = new TableWidget(state.sliceDoc(node.from, node.to), node.from);
+      out.push(Decoration.replace({ widget, block: true }).range(node.from, node.to));
     },
   });
   return Decoration.set(out, true);

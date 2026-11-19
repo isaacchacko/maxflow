@@ -191,6 +191,7 @@ function visitBlock(scan: Scan, node: SyntaxNodeRef) {
       listMark(scan, node);
       break;
     }
+    default:
   }
 }
 

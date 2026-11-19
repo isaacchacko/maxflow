@@ -20,7 +20,7 @@ function HeaderLink({ href, label }: { href: string; label: string }) {
 }
 
 function DocEditor({ doc, summary }: { doc: Doc; summary: DocSummary | undefined }) {
-  const editor = useDocEditor(doc);
+  const { mount, comment, status, isWarning } = useDocEditor(doc);
   const open = summary?.open ?? 0;
   return (
     <article className="flex min-w-0 flex-1 flex-col">
@@ -29,17 +29,17 @@ function DocEditor({ doc, summary }: { doc: Doc; summary: DocSummary | undefined
         {hasText(doc.owner) && <RefChip r={{ kind: "agent", id: doc.owner }} />}
         {open > 0 && <span className="text-xs text-warn">{open} open comment(s)</span>}
         <span className="flex-1" />
-        <span data-agent="docs:status" className={cn("text-xs", editor.isWarning ? "text-destructive" : "text-muted-foreground")}>
-          {editor.status}
+        <span data-agent="docs:status" className={cn("text-xs", isWarning ? "text-destructive" : "text-muted-foreground")}>
+          {status}
         </span>
-        <button type="button" data-agent="docs:comment" title="Comment on the selection (⌘⇧M)" onMouseDown={(e) => e.preventDefault()} onClick={editor.comment} className="flex shrink-0 items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted">
+        <button type="button" data-agent="docs:comment" title="Comment on the selection (⌘⇧M)" onMouseDown={(e) => e.preventDefault()} onClick={comment} className="flex shrink-0 items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted">
           <MessageSquarePlus className="size-3.5" />
           Comment
         </button>
         <HeaderLink href={doc.obsidian} label="Open in Obsidian" />
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div ref={editor.mount} data-agent="docs:editor" className="mx-auto max-w-3xl px-6" />
+        <div ref={mount} data-agent="docs:editor" className="mx-auto max-w-3xl px-6" />
       </div>
     </article>
   );

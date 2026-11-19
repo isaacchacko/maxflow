@@ -155,7 +155,7 @@ export function Tree({ vault, selected, onChanged }: Props) {
     void run(async () => removeIt(path));
     if (selected === path || selected?.startsWith(`${path}/`) === true) location.hash = "docs";
   };
-  const toggle = (folder: string) => setCollapsed((all) => (all.has(folder) ? new Set([...all].filter((f) => f !== folder)) : new Set([...all, folder])));
+  const toggle = (folder: string) => setCollapsed((all) => new Set(all.has(folder) ? [...all].filter((f) => f !== folder) : [...all, folder]));
 
   const rowsAt = ({ folder, depth }: Level): React.ReactNode[] => {
     const folders = vault.folders.filter((f) => parentOf(f) === folder);
