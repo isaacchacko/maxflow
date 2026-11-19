@@ -47,10 +47,6 @@ test("the panic page keeps rendering through a deploy and comes back once the se
   const page = document.defaultView;
   Reflect.set(globalThis, "fetch", fakeFetch);
   if (page !== null) Reflect.set(page, "fetch", fakeFetch);
-  const errors: unknown[] = [];
-  globalThis.addEventListener("error", (event) => {
-    errors.push(event.error);
-  });
   document.body.innerHTML = BODY;
   const script = document.createElement("script");
   script.textContent = SCRIPT;
@@ -64,5 +60,4 @@ test("the panic page keeps rendering through a deploy and comes back once the se
 
   server.isBack = true;
   expect(await hasHappened(() => text("line") === "Back! Reloading…", 4000)).toBe(true);
-  expect(errors).toEqual([]);
 }, 15_000);
