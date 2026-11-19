@@ -103,7 +103,7 @@ export type Sentry = {
   id: Source;
   label: string;
   state: "polling" | "backoff" | "live";
-  every?: string;
+  every?: string | undefined;
   lastPoll?: string;
   watching: { target: string; what: string; routedTo: string[] }[];
 };

@@ -1,24 +1,50 @@
+import { hasText } from "@/lib/utils";
 import type { Agent, Objective, Sentry, SentrySession, Shell, Signal, Task, Thread } from "./mock";
 import { markResurfaced } from "./threads/seen";
 import { agentStore, ownChanges, liveStore, movedStore, objectiveStore, nameStore, prStore, type Pr, refreshed, sentryStore, shellStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
+import { isRecord } from "../shared/guards";
 
-type World = { objectives: Objective[]; agents: Agent[]; tasks: Task[]; threads: Thread[]; signals: Signal[]; sentries: SentrySession[]; shells?: Shell[]; names?: Record<string, string>; prs: Record<string, Pr> };
+type World = { objectives: Objective[]; agents: Agent[]; tasks: Task[]; threads: Thread[]; signals: Signal[]; sentries: SentrySession[]; shells?: Shell[]; names?: Record<string, string>; prs?: Record<string, Pr> };
+type Patch = { from: number; v: number; upsert: Record<string, { id: string | number }[]>; remove: Record<string, string[]>; order: Record<string, string[]>; set: Record<string, unknown> };
+
+const isWorld = (value: unknown): value is World => isRecord(value) && ["objectives", "agents", "tasks", "threads", "signals", "sentries"].every(key => Array.isArray(value[key]));
+const isPatch = (value: unknown): value is Patch =>
+  isRecord(value) && typeof value["from"] === "number" && typeof value["v"] === "number" && isRecord(value["upsert"]) && isRecord(value["remove"]) && isRecord(value["order"]) && isRecord(value["set"]);
 
 const SOURCE_SENTRY: Partial<Record<Sentry["id"], string>> = { gh: "gh", slack: "slack" };
 const LABEL: Record<Sentry["id"], string> = { isaac: "You", gh: "GitHub", slack: "Slack", agent: "Agents", sentry: "Sentries", maxflow: "yarn" };
 const EVERY: Partial<Record<Sentry["id"], string>> = { gh: "30s", slack: "60s" };
+const SERVER_DOWN_MISSES_BEFORE_RELOAD = 2;
 
-function sourcesOf(sentries: SentrySession[]): Sentry[] {
-  return (Object.keys(LABEL) as Sentry["id"][]).map(id => {
-    const name = SOURCE_SENTRY[id];
-    const s = name ? sentries.find(x => x.name === name) : undefined;
-    return { id, label: LABEL[id], state: !name ? "live" : s?.running ? "polling" : "backoff", every: EVERY[id], watching: [] };
-  });
+function sourceState(sentryName: string | undefined, sentries: SentrySession[]): Sentry["state"] {
+  if (!hasText(sentryName)) return "live";
+  return sentries.find(x => x.name === sentryName)?.running === true ? "polling" : "backoff";
 }
 
-// The world as the server last sent it, and its version: patches over the socket apply to it, and the stores show it.
-let current: World | undefined;
-let version = 0;
+function sourcesOf(sentries: SentrySession[]): Sentry[] {
+  return (Object.keys(LABEL) as Sentry["id"][]).map(id => ({ id, label: LABEL[id], state: sourceState(SOURCE_SENTRY[id], sentries), every: EVERY[id], watching: [] }));
+}
+
+const live: { world: World | undefined; version: number; threadsAskingHim: number; serverMisses: number; socket: WebSocket | undefined } = {
+  world: undefined,
+  version: 0,
+  threadsAskingHim: 0,
+  serverMisses: 0,
+  socket: undefined,
+};
+
+function viewName(view: string) {
+  if (view === "inbox") return "Threads";
+  if (view === "threads") return "Thread map";
+  return `${view.charAt(0).toUpperCase()}${view.slice(1)}`;
+}
+
+function setTitle() {
+  const first = location.hash.slice(1).split("/", 1)[0];
+  const asking = live.threadsAskingHim > 0 ? `(${live.threadsAskingHim}) ` : "";
+  document.title = `${asking}yarn · ${viewName(hasText(first) ? first : "inbox")}`;
+}
+addEventListener("hashchange", setTitle);
 
 function apply(w: World) {
   objectiveStore.set(w.objectives);
@@ -33,85 +59,97 @@ function apply(w: World) {
   sourceStore.set(sourcesOf(w.sentries));
   prStore.set(w.prs ?? {});
   nameStore.set(w.names ?? {});
-  // Threads an agent asked him in wait on him; the tab says how many, as v1's questions did.
-  pending = w.threads.filter(t => t.asks).length;
+  live.threadsAskingHim = w.threads.filter(t => t.asks).length;
   setTitle();
   liveStore.set(true);
 }
 
-// The tab reads "yarn · <view>", with how many threads wait on him in front.
-let pending = 0;
-function setTitle() {
-  const view = location.hash.slice(1).split("/")[0] || "inbox";
-  const name = view === "inbox" ? "Threads" : view === "threads" ? "Thread map" : `${view[0]!.toUpperCase()}${view.slice(1)}`;
-  document.title = `${pending ? `(${pending}) ` : ""}yarn · ${name}`;
+function worldVersion(res: Response) {
+  const v = Number(res.headers.get("x-world-v"));
+  return v === 0 || Number.isNaN(v) ? live.version : v;
 }
-addEventListener("hashchange", setTitle);
 
-// The health sentry answers in the server's place while it is down; reloading lands on its panic page, which reloads back
-// once the server is up. While nothing answers at all (a restart, before the panic page takes the port) the page waits it out:
-// reloading then lands on the browser's own "can't connect" page, which never retries and needed ⌘R. When the server answers
-// again after that, the page reloads, so a restart's new code and a fresh world come in by themselves.
-let misses = 0;
 async function refresh() {
-  const n = ownChanges.count;
+  const changesBefore = ownChanges.count;
   try {
-    // A tab that already has this version is answered 304 and keeps its copy.
     const res = await fetch("/api/world", { cache: "no-cache" });
-    if (res.headers.has("x-yarn-panic") || res.headers.has("x-maxflow-down")) return location.reload();
-    if (res.ok) {
-      if (misses >= 2) return location.reload();
-      misses = 0;
-      const w = await res.json();
-      // Fetched across one of his own changes, it may not have it yet; the refetch that change asks for brings it.
-      if (ownChanges.count === n) (current = w), (version = Number(res.headers.get("x-world-v")) || version), apply(w);
+    if (res.headers.has("x-yarn-panic") || res.headers.has("x-maxflow-down")) {
+      location.reload();
+      return;
     }
+    if (!res.ok) return;
+    if (live.serverMisses >= SERVER_DOWN_MISSES_BEFORE_RELOAD) {
+      location.reload();
+      return;
+    }
+    live.serverMisses = 0;
+    const w: unknown = await res.json();
+    const isAcrossOwnChange = ownChanges.count !== changesBefore;
+    if (isAcrossOwnChange || !isWorld(w)) return;
+    live.world = w;
+    live.version = worldVersion(res);
+    apply(w);
   } catch {
-    if (liveStore.get()) misses++;
+    if (liveStore.get()) live.serverMisses += 1;
   }
 }
 
-type Patch = { from: number; v: number; upsert: Record<string, { id: string }[]>; remove: Record<string, string[]>; order: Record<string, string[]>; set: Record<string, unknown> };
-// A patch is what changed by entity since the version this tab has; a collection's order comes along when it changed.
+function patchedCollection(items: unknown, c: string, p: Patch) {
+  const byId = new Map((items as { id: string | number }[]).map(x => [String(x.id), x]));
+  const upserted = p.upsert[c] ?? [];
+  for (const x of upserted) byId.set(String(x.id), x);
+  const removed = p.remove[c] ?? [];
+  for (const id of removed) byId.delete(id);
+  const order = p.order[c];
+  return order ? order.map(id => byId.get(id)).filter(x => x !== undefined) : byId.values().toArray();
+}
+
 function patch(w: World, p: Patch): World {
-  const next = { ...w } as Record<string, unknown>;
-  for (const c of new Set([...Object.keys(p.upsert), ...Object.keys(p.remove), ...Object.keys(p.order)])) {
-    const byId = new Map((next[c] as { id: string }[]).map(x => [String(x.id), x]));
-    for (const x of p.upsert[c] ?? []) byId.set(String(x.id), x);
-    for (const id of p.remove[c] ?? []) byId.delete(id);
-    next[c] = p.order[c] ? p.order[c].flatMap(id => byId.get(id) ?? []) : [...byId.values()];
-  }
+  const next: Record<string, unknown> = { ...w };
+  const collections = new Set([...Object.keys(p.upsert), ...Object.keys(p.remove), ...Object.keys(p.order)]);
+  for (const c of collections) next[c] = patchedCollection(next[c], c, p);
   return Object.assign(next, p.set) as World;
 }
 
-// The server pushes the world's changes over a socket; while one of his own changes is in flight they wait for its refetch, so an
-// older state can't draw over it. With the socket down the tab polls, as it always did.
-let socket: WebSocket | undefined;
+function onWorldMessage(ws: WebSocket, e: MessageEvent) {
+  const m: unknown = JSON.parse(String(e.data));
+  if (isRecord(m) && m["type"] === "world" && isWorld(m["world"]) && typeof m["v"] === "number") {
+    live.world = m["world"];
+    live.version = m["v"];
+  } else if (live.world !== undefined && isPatch(m) && m.from === live.version) {
+    live.world = patch(live.world, m);
+    live.version = m.v;
+  } else {
+    ws.send("full");
+    return;
+  }
+  if (ownChanges.inFlight === 0) apply(live.world);
+}
+
 function follow() {
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/world/ws`);
-  ws.onopen = () => (socket = ws);
-  ws.onmessage = e => {
-    const m = JSON.parse(String(e.data)) as ({ type: "world"; v: number; world: World } | ({ type: "patch" } & Patch));
-    if (m.type === "world") (current = m.world), (version = m.v);
-    else if (!current || m.from !== version) return ws.send("full");
-    else (current = patch(current, m)), (version = m.v);
-    if (ownChanges.inFlight === 0) apply(current!);
-  };
-  ws.onclose = () => {
-    if (socket === ws) socket = undefined;
+  ws.addEventListener("open", () => {
+    live.socket = ws;
+  });
+  ws.addEventListener("message", e => onWorldMessage(ws, e));
+  ws.addEventListener("close", () => {
+    if (live.socket === ws) live.socket = undefined;
     setTimeout(follow, 2000);
-  };
+  });
 }
 
 async function loop() {
-  if (!socket) await refresh();
-  setTimeout(loop, liveStore.get() ? 1500 : 5000);
+  if (!live.socket) await refresh();
+  setTimeout(() => {
+    void loop();
+  }, liveStore.get() ? 1500 : 5000);
 }
 
-/** Loads the world once before the first render, then keeps it fresh; a change made through the API refreshes at once. */
 export async function startLive() {
   await refresh();
   follow();
   refreshed.current = refresh;
-  setTimeout(loop, 1500);
+  setTimeout(() => {
+    void loop();
+  }, 1500);
 }
