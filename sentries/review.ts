@@ -6,6 +6,9 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Link, links, ownComment, REVIEW_WATCH_FILE, type Watch } from "./gh";
 import { BASE as base, STATE_DIR } from "../instance";
+import { takeOver } from "./singleton";
+
+if (import.meta.main) takeOver("review");
 
 const EDGES_FILE = join(STATE_DIR, "review-edges.json");
 const QUEUE_FILE = join(STATE_DIR, "review-queue.json");

@@ -4,6 +4,9 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base, STATE_DIR } from "../instance";
+import { takeOver } from "./singleton";
+
+if (import.meta.main) takeOver("rename");
 
 const STATE_FILE = join(STATE_DIR, "rename-state.json");
 const INTERVAL_MS = Number(process.env.RENAME_INTERVAL ?? 20_000);

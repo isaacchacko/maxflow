@@ -4,6 +4,9 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base, STATE_DIR, TMUX_SOCKET } from "../instance";
+import { takeOver } from "./singleton";
+
+if (import.meta.main) takeOver("gh");
 
 const WATCH_FILE = join(STATE_DIR, "gh-watch.json");
 const STATE_FILE = join(STATE_DIR, "gh-state.json");

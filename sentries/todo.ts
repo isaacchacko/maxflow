@@ -6,6 +6,9 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base, STATE_DIR } from "../instance";
+import { takeOver } from "./singleton";
+
+if (import.meta.main) takeOver("todo");
 
 const STATE_FILE = join(STATE_DIR, "todo-state.json");
 // The tags the agent made itself, the only ones it may take off.

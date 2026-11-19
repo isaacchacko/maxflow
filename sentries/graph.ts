@@ -6,6 +6,9 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base, STATE_DIR } from "../instance";
+import { takeOver } from "./singleton";
+
+if (import.meta.main) takeOver("graph");
 
 const STATE_FILE = join(STATE_DIR, "graph-links.json");
 const INTERVAL_MS = Number(process.env.GRAPH_INTERVAL ?? 15_000);

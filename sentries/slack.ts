@@ -10,6 +10,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base, STATE_DIR } from "../instance";
 import { watchNotices, type Notice } from "./slack-notify";
+import { takeOver } from "./singleton";
+
+if (import.meta.main) takeOver("slack");
 
 const WATCH_FILE = join(STATE_DIR, "slack-watch.json");
 const STATE_FILE = join(STATE_DIR, "slack-state.json");

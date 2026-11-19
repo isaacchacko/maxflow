@@ -8,6 +8,9 @@ import { cpus, loadavg } from "node:os";
 import { join } from "node:path";
 import { backgroundShells, transcriptTail } from "../background";
 import { BASE as base, STATE_DIR } from "../instance";
+import { takeOver } from "./singleton";
+
+if (import.meta.main) takeOver("meta");
 
 const STATE_FILE = join(STATE_DIR, "meta-state.json");
 const FLAGGED_FILE = join(STATE_DIR, "meta-flagged.json");

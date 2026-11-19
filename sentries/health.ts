@@ -8,6 +8,9 @@ import type { ServerWebSocket, Subprocess } from "bun";
 import { join } from "node:path";
 import { BASE as base, LIVE, PORT, TMUX_SCOPE, TMUX_SOCKET } from "../instance";
 import { LABEL, LOG, loaded, restartCommand, status as serviceStatus } from "../service";
+import { takeOver } from "./singleton";
+
+if (import.meta.main) takeOver("health");
 
 const INTERVAL_MS = Number(process.env.HEALTH_INTERVAL ?? 1000);
 const PAGE_AFTER_MS = Number(process.env.HEALTH_PAGE_AFTER_MS ?? 3000);
