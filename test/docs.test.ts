@@ -49,6 +49,21 @@ test("paths stay inside the vault", () => {
   expect(() => docs.docPath(".git/config")).toThrow();
 });
 
+test("folders, attachments and saves from yarn: saves wait for the sentry's commit, folder moves commit", () => {
+  docs.ensureVault();
+  docs.saveFile("notes/weekly review.md", "# hi\n");
+  docs.saveFile("attachments/shot.png", new Uint8Array([1, 2, 3]));
+  expect(docs.uncommitted().toSorted()).toEqual(["attachments/shot.png", "notes/weekly review.md"]);
+  expect(docs.listVault()).toEqual({ docs: [{ path: "notes/weekly review.md", open: 0 }], folders: ["attachments", "notes"], files: ["attachments/shot.png"] });
+  docs.didCommit(["."], "vault: sweep");
+  docs.moveFolder("notes", "archive/notes", "docs agent");
+  expect(docs.listVault().folders).toEqual(["archive", "archive/notes", "attachments"]);
+  docs.removeFolder("archive", "docs agent");
+  docs.removeFolder("attachments", "docs agent");
+  expect(docs.uncommitted()).toEqual([]);
+  expect(docs.versionOf("a")).not.toBe(docs.versionOf("b"));
+});
+
 test("writes, moves and removes are each a commit by the agent", () => {
   docs.ensureVault();
   docs.writeDoc("a/plan", DOC, "docs agent");
