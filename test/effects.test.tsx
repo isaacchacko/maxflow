@@ -2,48 +2,95 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, afterEach, beforeAll, expect, jest, test } from "bun:test";
 import type { Root } from "react-dom/client";
 
-// A DOM for these tests only: registered globally it would replace fetch and friends for the other test files.
+// constraint: happy-dom registered for the whole run would replace fetch and friends for the other test files
 beforeAll(() => GlobalRegistrator.register());
-afterAll(() => GlobalRegistrator.unregister());
+afterAll(async () => {
+  await GlobalRegistrator.unregister();
+});
 
 const { act, createElement: h } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { useEventListener, useNow, usePresence, useResource, useSettled } = await import("../src/lib/effects");
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
-let root: Root | undefined;
+const mounted: { root: Root | undefined } = { root: undefined };
+
+const actAsync = async (step: () => void) =>
+  act(async () => {
+    step();
+    await Promise.resolve();
+  });
+
+function currentRoot() {
+  if (mounted.root === undefined) {
+    const container = document.createElement("div");
+    document.body.append(container);
+    mounted.root = createRoot(container);
+  }
+  return mounted.root;
+}
+
 const render = async (el: React.ReactElement) => {
-  root ??= createRoot(document.body.appendChild(document.createElement("div")));
-  await act(async () => root!.render(el));
+  const root = currentRoot();
+  await actAsync(() => {
+    root.render(el);
+  });
 };
-afterEach(async () => {
-  await act(async () => root?.unmount());
-  root = undefined;
-});
-// One act per few ms: updates queued inside one act flush only when it ends.
-// The clock-driven hooks run on fake timers, moved on by hand, so a loaded machine can't change what they see.
-const tick = (ms: number) => act(async () => void jest.advanceTimersByTime(ms));
-const fakeClock = () => {
+
+const unmount = async () => {
+  const { root } = mounted;
+  await actAsync(() => {
+    root?.unmount();
+  });
+  mounted.root = undefined;
+};
+afterEach(unmount);
+
+const advanceHandMovedClockInOneAct = async (ms: number) =>
+  actAsync(() => {
+    jest.advanceTimersByTime(ms);
+  });
+
+const withHandMovedClock = async (run: () => Promise<void>) => {
   jest.useFakeTimers();
-  return { [Symbol.dispose]: () => jest.useRealTimers() };
+  try {
+    await run();
+  } finally {
+    jest.useRealTimers();
+  }
 };
+
+// constraint: React flushes the updates queued inside one act only when it ends, so waiting acts once every few ms
 const wait = async (ms: number) => {
-  for (const end = Date.now() + ms; Date.now() < end; ) await act(() => new Promise(r => setTimeout(r, 5)));
-  await act(async () => {});
+  for (const end = Date.now() + ms; Date.now() < end; )
+    await act(async () =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 5);
+      }),
+    );
+  await act(async () => {
+    await Promise.resolve();
+  });
 };
+
+function rendered<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("the reader hasn't rendered");
+  return value;
+}
 
 test("useEventListener runs the newest handler and stops at unmount", async () => {
   const seen: string[] = [];
   function Listener({ label }: { label: string }) {
-    useEventListener("ping", () => seen.push(label));
+    useEventListener("ping", () => {
+      seen.push(label);
+    });
     return null;
   }
   await render(h(Listener, { label: "first" }));
   dispatchEvent(new Event("ping"));
   await render(h(Listener, { label: "second" }));
   dispatchEvent(new Event("ping"));
-  await act(async () => root!.unmount());
-  root = undefined;
+  await unmount();
   dispatchEvent(new Event("ping"));
   expect(seen).toEqual(["first", "second"]);
 });
@@ -51,7 +98,13 @@ test("useEventListener runs the newest handler and stops at unmount", async () =
 test("useEventListener listens on the target it is given", async () => {
   let n = 0;
   function Listener() {
-    useEventListener("selectionchange", () => n++, { target: document });
+    useEventListener(
+      "selectionchange",
+      () => {
+        n += 1;
+      },
+      { target: document },
+    );
     return null;
   }
   await render(h(Listener));
@@ -60,21 +113,21 @@ test("useEventListener listens on the target it is given", async () => {
   expect(n).toBe(1);
 });
 
-test("useNow draws again after the wait it is given", async () => {
-  using _ = fakeClock();
-  const draws: number[] = [];
-  function Clock() {
-    draws.push(useNow(() => 20));
-    return null;
-  }
-  await render(h(Clock));
-  await tick(19);
-  expect(draws.length).toBe(1);
-  await tick(1);
-  await tick(20);
-  expect(draws.length).toBe(3);
-  expect(draws[2]! - draws[0]!).toBe(40);
-});
+test("useNow draws again after the wait it is given", async () =>
+  withHandMovedClock(async () => {
+    const draws: number[] = [];
+    function Clock() {
+      draws.push(useNow(() => 20));
+      return null;
+    }
+    await render(h(Clock));
+    await advanceHandMovedClockInOneAct(19);
+    expect(draws.length).toBe(1);
+    await advanceHandMovedClockInOneAct(1);
+    await advanceHandMovedClockInOneAct(20);
+    expect(draws.length).toBe(3);
+    expect((draws[2] ?? 0) - (draws[0] ?? 0)).toBe(40);
+  }));
 
 test("useSettled follows its value only once it holds still", async () => {
   const draws: string[] = [];
@@ -82,42 +135,47 @@ test("useSettled follows its value only once it holds still", async () => {
     draws.push(useSettled(q, 30));
     return null;
   }
-  using _ = fakeClock();
-  await render(h(Search, { q: "a" }));
-  await render(h(Search, { q: "ab" }));
-  await tick(29);
-  await render(h(Search, { q: "abc" }));
-  await tick(29);
-  expect(draws.at(-1)).toBe("a");
-  await tick(1);
-  expect(draws.at(-1)).toBe("abc");
-  expect(draws).not.toContain("ab");
+  await withHandMovedClock(async () => {
+    await render(h(Search, { q: "a" }));
+    await render(h(Search, { q: "ab" }));
+    await advanceHandMovedClockInOneAct(29);
+    await render(h(Search, { q: "abc" }));
+    await advanceHandMovedClockInOneAct(29);
+    expect(draws.at(-1)).toBe("a");
+    await advanceHandMovedClockInOneAct(1);
+    expect(draws.at(-1)).toBe("abc");
+    expect(draws).not.toContain("ab");
+  });
 });
 
-test("usePresence stays mounted for the way out, and shows only after it mounts", async () => {
-  using _ = fakeClock();
-  const states: { mounted: boolean; shown: boolean }[] = [];
-  function Panel({ open }: { open: boolean }) {
-    states.push(usePresence(open, 30));
-    return null;
-  }
-  await render(h(Panel, { open: false }));
-  expect(states.at(-1)).toEqual({ mounted: false, shown: false });
-  await render(h(Panel, { open: true }));
-  expect(states.at(-1)).toEqual({ mounted: true, shown: false });
-  await tick(100);
-  expect(states.at(-1)).toEqual({ mounted: true, shown: true });
-  await render(h(Panel, { open: false }));
-  expect(states.at(-1)).toEqual({ mounted: true, shown: false });
-  await tick(29);
-  expect(states.at(-1)).toEqual({ mounted: true, shown: false });
-  await tick(1);
-  expect(states.at(-1)).toEqual({ mounted: false, shown: false });
-});
+test("usePresence stays mounted for the way out, and shows only after it mounts", async () =>
+  withHandMovedClock(async () => {
+    const states: { mounted: boolean; shown: boolean }[] = [];
+    function Panel({ open }: { open: boolean }) {
+      states.push(usePresence(open, 30));
+      return null;
+    }
+    await render(h(Panel, { open: false }));
+    expect(states.at(-1)).toEqual({ mounted: false, shown: false });
+    await render(h(Panel, { open: true }));
+    expect(states.at(-1)).toEqual({ mounted: true, shown: false });
+    await advanceHandMovedClockInOneAct(100);
+    expect(states.at(-1)).toEqual({ mounted: true, shown: true });
+    await render(h(Panel, { open: false }));
+    expect(states.at(-1)).toEqual({ mounted: true, shown: false });
+    await advanceHandMovedClockInOneAct(29);
+    expect(states.at(-1)).toEqual({ mounted: true, shown: false });
+    await advanceHandMovedClockInOneAct(1);
+    expect(states.at(-1)).toEqual({ mounted: false, shown: false });
+  }));
 
 test("useResource fetches once per key while read, keeps edits, and fetches again after everyone leaves", async () => {
   let loads = 0;
-  const load = async () => ++loads;
+  const load = async () =>
+    new Promise<number>((resolve) => {
+      loads += 1;
+      resolve(loads);
+    });
   let shown: ReturnType<typeof useResource<number>> | undefined;
   function Reader({ k }: { k?: string }) {
     shown = useResource(k, load);
@@ -127,42 +185,43 @@ test("useResource fetches once per key while read, keeps edits, and fetches agai
     return h("div", null, h(Reader, { k: "a" }), h(Reader, { k: "a" }));
   }
   await render(h(Reader, {}));
-  expect(shown!.value).toBeUndefined();
+  expect(rendered(shown).value).toBeUndefined();
   expect(loads).toBe(0);
 
   await render(h(Two));
   await wait(0);
   expect(loads).toBe(1);
-  expect(shown!.value).toBe(1);
+  expect(rendered(shown).value).toBe(1);
 
-  await act(async () => shown!.set(v => (v ?? 0) + 100));
-  expect(shown!.value).toBe(101);
+  await actAsync(() => {
+    rendered(shown).set((v = 0) => v + 100);
+  });
+  expect(rendered(shown).value).toBe(101);
 
-  await act(async () => shown!.reload());
+  await act(async () => rendered(shown).reload());
   await wait(0);
-  expect(shown!.value).toBe(2);
+  expect(rendered(shown).value).toBe(2);
 
-  await act(async () => root!.unmount());
-  root = undefined;
+  await unmount();
   await wait(5);
   await render(h(Reader, { k: "a" }));
   await wait(0);
   expect(loads).toBe(3);
-  expect(shown!.value).toBe(3);
+  expect(rendered(shown).value).toBe(3);
 });
 
 test("useResource keeps the last value and reports a failed fetch", async () => {
-  let fail = false;
+  let shouldFail = false;
   let shown: ReturnType<typeof useResource<string>> | undefined;
   function Reader() {
-    shown = useResource("b", async () => (fail ? Promise.reject(new Error("down")) : "ok"));
+    shown = useResource("b", async () => (shouldFail ? Promise.reject(new Error("down")) : "ok"));
     return null;
   }
   await render(h(Reader));
   await wait(0);
-  fail = true;
-  await act(async () => shown!.reload());
+  shouldFail = true;
+  await act(async () => rendered(shown).reload());
   await wait(0);
-  expect(shown!.value).toBe("ok");
-  expect(shown!.error?.message).toBe("down");
+  expect(rendered(shown).value).toBe("ok");
+  expect(rendered(shown).error?.message).toBe("down");
 });
