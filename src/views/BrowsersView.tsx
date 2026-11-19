@@ -8,25 +8,32 @@ import { BrowserPane, useScreencast } from "@/agent/BrowserPane";
 
 const nameOf = (agent: Agent) => agent.name ?? agent.id;
 
+function FaceLink({ agent }: { agent: Agent }) {
+  return (
+    <a href={`#agent/${agent.id}`} title={`Open ${nameOf(agent)}`} data-agent={`agent-link:${agent.id}`} className="shrink-0 rounded-full transition-shadow hover:ring-2 hover:ring-link/40 focus-visible:ring-2 focus-visible:ring-link/60 focus-visible:outline-none">
+      <AgentFace id={agent.id} expression={expressionOf(agent.state)} small className="size-7" />
+    </a>
+  );
+}
+
 function BrowserCard({ agent }: { agent: Agent }) {
   const { page, mount } = useScreencast(agent.id);
+  const href = `#browsers/${agent.id}`;
   return (
-    <li>
-      <a href={`#browsers/${agent.id}`} data-agent={`browser:${agent.id}`} className="group flex flex-col overflow-hidden rounded-lg border bg-background hover:ring-2 hover:ring-link/40">
-        <div className="flex aspect-[16/10] items-center justify-center overflow-hidden border-b bg-muted/40">
-          <img ref={mount} alt={page.title === "" ? `${nameOf(agent)}'s browser` : page.title} draggable={false} className="size-full object-cover object-top select-none" />
-        </div>
-        <div className="flex min-w-0 items-center gap-2.5 px-3 py-2.5">
-          <AgentFace id={agent.id} expression={expressionOf(agent.state)} small className="size-7 shrink-0" />
-          <div className="min-w-0 flex-1">
-            <p className={cn("truncate text-sm font-medium", !hasText(agent.name) && "font-mono")}>{nameOf(agent)}</p>
-            <p title={page.url} className="truncate text-xs text-muted-foreground">
-              {page.title === "" ? page.url : page.title}
-            </p>
-            {page.title !== "" && <p className="truncate font-mono text-[11px] text-muted-foreground/80">{page.url}</p>}
-          </div>
-        </div>
+    <li className="flex flex-col overflow-hidden rounded-lg border bg-background has-[a[data-agent^='browser:']:hover]:ring-2 has-[a[data-agent^='browser:']:hover]:ring-link/40">
+      <a href={href} data-agent={`browser:${agent.id}`} tabIndex={-1} className="flex aspect-[16/10] items-center justify-center overflow-hidden border-b bg-muted/40">
+        <img ref={mount} alt={page.title === "" ? `${nameOf(agent)}'s browser` : page.title} draggable={false} className="size-full object-cover object-top select-none" />
       </a>
+      <div className="flex min-w-0 items-center gap-2.5 px-3 py-2.5">
+        <FaceLink agent={agent} />
+        <a href={href} data-agent={`browser:${agent.id}`} className="min-w-0 flex-1">
+          <p className={cn("truncate text-sm font-medium", !hasText(agent.name) && "font-mono")}>{nameOf(agent)}</p>
+          <p title={page.url} className="truncate text-xs text-muted-foreground">
+            {page.title === "" ? page.url : page.title}
+          </p>
+          {page.title !== "" && <p className="truncate font-mono text-[11px] text-muted-foreground/80">{page.url}</p>}
+        </a>
+      </div>
     </li>
   );
 }
@@ -52,7 +59,7 @@ function OneBrowser({ agent }: { agent: Agent }) {
             <ArrowLeft />
           </a>
         </Button>
-        <AgentFace id={agent.id} expression={expressionOf(agent.state)} small className="size-7 shrink-0" />
+        <FaceLink agent={agent} />
         <h1 className={cn("min-w-0 truncate text-base font-medium", !hasText(agent.name) && "font-mono")}>{nameOf(agent)}</h1>
         <Button variant="outline" size="sm" asChild className="ml-auto shrink-0">
           <a href={`#agent/${agent.id}`} data-agent={`agent-page:${agent.id}`}>
