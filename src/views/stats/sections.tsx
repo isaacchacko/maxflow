@@ -1,17 +1,19 @@
+
 import { useState } from "react";
+import { NativeSelect } from "@/components/ui/native-select";
 import { cn, hasText } from "@/lib/utils";
 import { Heatmap, Stages, inJourneyOrder } from "./charts";
 import { COUNT, Columns, Segmented, DAY_KEY, DAY_MS, Delta, GH, HOUR, LATENCY, Tile, duration, hourLabel, median, quantile, short, sum, useIsStillBefore, weekday, type Count, type Counts, type Latency, type Peek, type Stats } from "./parts";
 
 export function RepoPicker({ stats, picked, onRepo }: { stats: Stats; picked?: string | undefined; onRepo: (repo: string) => void }) {
   return (
-    <select value={picked ?? stats.gh.repo} onChange={e => onRepo(e.target.value)} className="max-w-64 rounded-md border bg-transparent px-1.5 py-0.5 text-xs" title="Repo">
+    <NativeSelect value={picked ?? stats.gh.repo} onChange={e => onRepo(e.target.value)} wrapperClassName="max-w-64" className="truncate rounded-md border bg-transparent py-0.5 pl-1.5 text-xs" title="Repo">
       {stats.gh.repos.map(r => (
         <option key={r} value={r}>
           {r}
         </option>
       ))}
-    </select>
+    </NativeSelect>
   );
 }
 

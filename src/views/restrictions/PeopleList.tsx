@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronRight, Link2, RotateCcw, Unlink } from "lucide-react";
+import { NativeSelect } from "@/components/ui/native-select";
 import { useState } from "react";
 import { useResource } from "@/lib/effects";
 import { cn, hasText } from "@/lib/utils";
@@ -43,7 +44,8 @@ function LinkAccount({ p, known, onLink }: { p: Person; known: Person[]; onLink:
     );
   }
   return (
-    <select
+    <NativeSelect
+      wrapperClassName="w-48 shrink-0"
       autoFocus
       defaultValue=""
       onBlur={() => setPicking(false)}
@@ -52,7 +54,7 @@ function LinkAccount({ p, known, onLink }: { p: Person; known: Person[]; onLink:
         setPicking(false);
         if (o) void onLink({ slack: p.slack ?? o.slack ?? "", github: p.github ?? o.github ?? "" }, true);
       }}
-      className={cn(field, "w-48 shrink-0 py-0.5 text-xs")}
+      className={cn(field, "py-0.5 text-xs")}
     >
       <option value="" disabled>
         {hasText(p.slack) ? "Their GitHub login…" : "Their Slack user…"}
@@ -62,7 +64,7 @@ function LinkAccount({ p, known, onLink }: { p: Person; known: Person[]; onLink:
           {personName(o)}
         </option>
       ))}
-    </select>
+    </NativeSelect>
   );
 }
 

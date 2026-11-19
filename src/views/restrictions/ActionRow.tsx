@@ -1,4 +1,5 @@
 import { CornerDownRight, Pencil, Plus, X } from "lucide-react";
+import { NativeSelect } from "@/components/ui/native-select";
 import { useState } from "react";
 import { useResource } from "@/lib/effects";
 import { cn, hasText } from "@/lib/utils";
@@ -68,26 +69,26 @@ function PlacePicker({ kind, objective, onObjective, repo, onRepo }: { kind: Exc
   const repos = useResource("repos", knownRepos).value ?? [];
   if (kind === "objective") {
     return (
-      <select value={objective} onChange={e => onObjective(e.target.value)} className={field}>
+      <NativeSelect value={objective} onChange={e => onObjective(e.target.value)} wrapperClassName="w-full" className={field}>
         <option value="">Pick an objective…</option>
         {objectives.map(o => (
           <option key={o.id} value={o.id}>
             {o.title}
           </option>
         ))}
-      </select>
+      </NativeSelect>
     );
   }
   if (kind !== "repo") return null;
   return (
-    <select value={repo} onChange={e => onRepo(e.target.value)} className={field}>
+    <NativeSelect value={repo} onChange={e => onRepo(e.target.value)} wrapperClassName="w-full" className={field}>
       <option value="">Pick a repository…</option>
       {repos.map(x => (
         <option key={x.path} value={x.path}>
           {x.name} ({x.path})
         </option>
       ))}
-    </select>
+    </NativeSelect>
   );
 }
 

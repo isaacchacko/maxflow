@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type SubmitEvent } from "react";
 import { ArrowLeft, ArrowRight, Minus, Plus, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
 import { cn } from "@/lib/utils";
 import { Segmented } from "@/views/stats/parts";
 import { isRecord } from "../../shared/guards";
@@ -145,11 +146,12 @@ function SizePicker({ view, ask }: { view: View | undefined; ask: (asked: Ask) =
   const name = view?.name ?? "laptop";
   return (
     <>
-      <select
+      <NativeSelect
+        wrapperClassName="shrink-0"
         aria-label="Page size"
         value={name}
         onChange={e => ask({ type: "size", size: e.target.value })}
-        className="h-9 shrink-0 rounded-md border bg-background pr-1 pl-2 text-xs text-foreground capitalize outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="h-9 rounded-md border bg-background pl-2.5 text-xs text-foreground capitalize outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {SIZES.map(size => (
           <option key={size} value={size}>
@@ -157,7 +159,7 @@ function SizePicker({ view, ask }: { view: View | undefined; ask: (asked: Ask) =
           </option>
         ))}
         {name === "custom" && <option value="custom">custom</option>}
-      </select>
+      </NativeSelect>
       {view && <span className="shrink-0 font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">{`${String(view.width)}×${String(view.height)}`}</span>}
     </>
   );
