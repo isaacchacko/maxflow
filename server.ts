@@ -24,6 +24,8 @@ import { checkShells, declareWait, shells, untilShell } from "./waits";
 import { IMAGE, ISAAC_IN_THREAD, ancestors, answered, ask, enforcing, headline, mentionsIn, message, pathTitle, pauseTimers, postIn, restrictions, resurface, schedulePause, squash, tellMembers, unforge, unpause } from "./threads";
 import { BLOCKED_SHOWN_MS, DRAFTS, activeAt, deliver } from "./delivery";
 import { RESYNC_MS, claudeStateChanged, resync } from "./turns";
+import { docsRoute } from "./docs-api";
+import { DOCS_DIR } from "./docs";
 
 const HOST = "127.0.0.1";
 function loadInbox(id: string): Pick<Session, "inbox" | "sending"> {
@@ -69,7 +71,7 @@ adoptSessions();
 
 // Sentries are ordinary sessions, started once and kept by tmux across server restarts.
 const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  ["gh", "slack", "rename", ...(LIVE ? ["health"] : []), "graph", "ram", "inbox", "approval"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
+  ["gh", "slack", "rename", ...(LIVE ? ["health"] : []), "graph", "ram", "inbox", "approval", "docs"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
 );
 // The review sentry is a claude agent; its feed runs beside it, logging out of the way of its screen.
 const reviewSource = (f: string) => new URL(`./sentries/${f}`, import.meta.url).pathname;
@@ -145,6 +147,7 @@ setInterval(() => {
 }, 15_000);
 // What an agent linked to each sentry in the graph is told about it.
 const SENTRY_USES: Record<string, string> = {
+  "sentry:docs": `It watches Isaac's docs vault (${DOCS_DIR}, markdown he edits in Obsidian): it git-commits every edit once the vault has been quiet 15s, and wakes a doc's owner (the \`owner:\` session id in its frontmatter) when he leaves a comment there that nobody has answered, else the funnel. A message starting \`[maxflow docs]\` is from it.`,
   "sentry:gh": `It polls GitHub every 30s for the PRs tied to a session and notifies that session when CI finishes, a review or comment lands (the user's own comments included), or the PR merges, closes or conflicts. A PR whose branch is checked out in your folder is tied to you already; tie any other with \`${CLI} gh watch <pr>\` (url, owner/repo#n or n). For a PR's CI, failed and pending checks, reviews and unresolved threads, run \`${CLI} gh status [pr]\` instead of \`gh pr checks\` or \`gh pr view\`: it answers from the sentry's last poll, with no GitHub call, and with no PR covers every one you're tied to. To block on one event instead: \`${CLI} sub 'gh/<owner>/<repo>/pr/<n>/ci'\`.`,
   "sentry:slack": `It polls Slack every minute for the threads, channels and searches tied to a session and notifies that session of each new message. A thread you posted in through the Slack connector is tied to you already, for 3 days after your last post; tie any other with \`${CLI} slack watch <permalink | channel id | #channel | search query>\`. To read a thread, channel or search, run \`${CLI} slack read <same> [--last N]\` instead of the Slack connector's read tools: it answers from the sentry's last poll and ties you to what you read. It also publishes every mention of the user as slack/mention: block on one with \`${CLI} sub 'slack/mention'\`, or on a thread with \`${CLI} sub 'slack/<channel>/<thread ts>/reply'\`.`,
   "sentry:inbox": `It turns what reaches the user on Slack and GitHub that no session heard (mentions of him, DMs to him, replies in threads he posted in, comments and reviews on PRs requesting his review) into tasks on his board, hands a Slack reply to the chat that posted in its thread, and sends unowned mentions and DMs to the funnel in batches. It also starts a review agent, with no GitHub writes, on big or risky PRs requesting his review, and raises stalls as board tasks, never as pings. A message starting \`[maxflow inbox]\` is from it.`,
@@ -1070,6 +1073,8 @@ Bun.serve<WsData>({
     }
 
     if (path === "/api/instance") return Response.json({ instance: INSTANCE || "live", port: PORT, pid: process.pid });
+    const docs = await docsRoute(req, url);
+    if (docs) return docs;
     if (path === "/api/sessions" && req.method === "GET") return Response.json([...sessions.values()].map((s) => describe(s)));
     if (path === "/api/sessions" && req.method === "POST") {
       const body = (await req.json().catch(() => ({}))) as { name?: string; cmd?: string[] | string; cwd?: string; role?: "router" | "worker"; parent?: string; objective?: string; scope?: string };
