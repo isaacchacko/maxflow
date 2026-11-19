@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState, type ClipboardEvent, type KeyboardEvent, type MouseEvent, type SubmitEvent } from "react";
 import { ArrowLeft, ArrowRight, Minus, Plus, RotateCw } from "lucide-react";
-import { FitRow } from "@/components/Fit";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Segmented } from "@/views/stats/parts";
@@ -76,14 +75,14 @@ function UrlBar({ url, onGo }: { url: string; onGo: (url: string) => void }) {
     setDraft(undefined);
   };
   return (
-    <form onSubmit={submit} className="min-w-24 flex-1">
+    <form onSubmit={submit} className="min-w-40 flex-1">
       <input
         aria-label="Address"
         value={draft ?? url}
         onChange={e => setDraft(e.target.value)}
         onBlur={() => setDraft(undefined)}
         spellCheck={false}
-        className="h-8 w-full rounded-md border bg-background px-2.5 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="h-9 w-full rounded-md border bg-background px-2.5 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
     </form>
   );
@@ -150,7 +149,7 @@ function SizePicker({ view, ask }: { view: View | undefined; ask: (asked: Ask) =
         aria-label="Page size"
         value={name}
         onChange={e => ask({ type: "size", size: e.target.value })}
-        className="h-8 rounded-md border bg-background px-1.5 text-xs text-foreground capitalize outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="h-9 shrink-0 rounded-md border bg-background pr-1 pl-2 text-xs text-foreground capitalize outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {SIZES.map(size => (
           <option key={size} value={size}>
@@ -159,30 +158,30 @@ function SizePicker({ view, ask }: { view: View | undefined; ask: (asked: Ask) =
         ))}
         {name === "custom" && <option value="custom">custom</option>}
       </select>
-      {view && <span className="px-1.5 font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">{`${String(view.width)}×${String(view.height)}`}</span>}
+      {view && <span className="shrink-0 font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">{`${String(view.width)}×${String(view.height)}`}</span>}
     </>
   );
 }
 
 function ZoomButtons({ zoom, ask }: { zoom: number; ask: (asked: Ask) => void }) {
   return (
-    <>
+    <div role="group" aria-label="Zoom" className="flex shrink-0 items-center">
       <Button variant="ghost" size="icon" title="Zoom out" disabled={zoom <= ZOOM.min} onClick={() => ask({ type: "zoom", zoom: zoom - ZOOM.step })}>
         <Minus />
       </Button>
-      <button title="Reset zoom" onClick={() => ask({ type: "zoom", zoom: 1 })} className="h-8 w-11 rounded-md text-xs text-muted-foreground tabular-nums hover:bg-muted hover:text-foreground">
+      <button title="Reset zoom" onClick={() => ask({ type: "zoom", zoom: 1 })} className="h-9 w-12 rounded-md text-xs text-muted-foreground tabular-nums hover:bg-muted hover:text-foreground">
         {`${String(Math.round(zoom * 100))}%`}
       </button>
       <Button variant="ghost" size="icon" title="Zoom in" disabled={zoom >= ZOOM.max} onClick={() => ask({ type: "zoom", zoom: zoom + ZOOM.step })}>
         <Plus />
       </Button>
-    </>
+    </div>
   );
 }
 
 function SizeControls({ view, ask }: { view: View | undefined; ask: (asked: Ask) => void }) {
   return (
-    <div className="flex shrink-0 items-center gap-0.5">
+    <div className="flex shrink-0 items-center gap-2.5">
       <SizePicker view={view} ask={ask} />
       <ZoomButtons zoom={view?.zoom ?? 1} ask={ask} />
     </div>
@@ -194,20 +193,22 @@ export function BrowserPane({ id }: { id: string }) {
   const { page, ask } = cast;
   return (
     <section className="viz flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border bg-background" data-agent="browser">
-      <FitRow className="h-11 shrink-0 items-center gap-1 border-b px-1.5">
-        <Button variant="ghost" size="icon" title="Back" onClick={() => ask({ type: "back" })}>
-          <ArrowLeft />
-        </Button>
-        <Button variant="ghost" size="icon" title="Forward" onClick={() => ask({ type: "forward" })}>
-          <ArrowRight />
-        </Button>
-        <Button variant="ghost" size="icon" title="Reload" onClick={() => ask({ type: "reload" })}>
-          <RotateCw />
-        </Button>
+      <header className="flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-1 border-b px-1.5 py-1">
+        <div className="flex shrink-0 items-center">
+          <Button variant="ghost" size="icon" title="Back" onClick={() => ask({ type: "back" })}>
+            <ArrowLeft />
+          </Button>
+          <Button variant="ghost" size="icon" title="Forward" onClick={() => ask({ type: "forward" })}>
+            <ArrowRight />
+          </Button>
+          <Button variant="ghost" size="icon" title="Reload" onClick={() => ask({ type: "reload" })}>
+            <RotateCw />
+          </Button>
+        </div>
         <UrlBar url={page.url} onGo={url => ask({ type: "goto", url })} />
-        <SizeControls view={page.view} ask={ask} />
         <Segmented label="Who drives the browser" options={[...MODES]} value={page.isHeld ? "drive" : "watch"} onChange={mode => ask({ type: "hold", isTaking: mode === "drive" })} />
-      </FitRow>
+        <SizeControls view={page.view} ask={ask} />
+      </header>
       {page.problem !== undefined && <p className="border-b px-3 py-1.5 text-xs text-destructive">{page.problem}</p>}
       <Screen {...cast} />
     </section>
