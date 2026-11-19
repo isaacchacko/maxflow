@@ -2,6 +2,7 @@
 # Runs this checkout as a dev maxflow beside the live one: its own port, tmux socket and state dir, and no sentries
 # unless asked for, since they act on real GitHub and Slack.
 #   ./dev.sh                    serve on http://localhost:4948 (MAXFLOW_PORT, MAXFLOW_INSTANCE and MAXFLOW_SENTRIES=1 to change)
+#   curl localhost:<port>/api/instance  {instance, port, pid}: which instance answers on a port
 #   ./dev.sh --seed             the same, first filling its state with fixtures/seed.ts (threads, objectives, tasks, todos)
 #   ./dev.sh gc                 delete the ~/.maxflow-v2-<instance> dirs of instances that aren't running
 #   ./dev.sh stop <instance>    stop that dev server, by its pid file only
@@ -51,6 +52,11 @@ case "$1" in
   reset) stop; tmux -L "$socket" kill-server 2>/dev/null || true; rm -rf "$state"; exit ;;
 esac
 [ -d node_modules ] || bun install
+# Another instance on this port would answer every request meant for this one; a harness polling the port couldn't tell.
+if lsof -nP -iTCP:"$MAXFLOW_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "port $MAXFLOW_PORT is taken ($(lsof -nP -iTCP:"$MAXFLOW_PORT" -sTCP:LISTEN -Fc | sed -n 's/^c//p' | head -1)); pick another MAXFLOW_PORT" >&2
+  exit 1
+fi
 if [ "$1" = --seed ]; then
   pid=$(cat "$state/server.pid" 2>/dev/null) && kill -0 "$pid" 2>/dev/null && { echo "maxflow $MAXFLOW_INSTANCE is running (pid $pid); ./dev.sh stop $MAXFLOW_INSTANCE first" >&2; exit 1; }
   bun fixtures/seed.ts "$state"
