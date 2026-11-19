@@ -94,7 +94,17 @@ const paneEnv = (id: string) => ["-e", `MAXFLOW_SESSION=${id}`, "-e", `MAXFLOW_P
 // Sync calls block the event loop, which owns the attach clients' ptys; the timeout keeps a stalled tmux from wedging the server.
 function tmux(...args: string[]) {
   const r = Bun.spawnSync([...TMUX, ...args], { env: termEnv, timeout: 5000 });
-  return { ok: r.exitCode === 0, out: r.stdout.toString() };
+  return { ok: r.exitCode === 0, out: r.stdout.toString(), err: r.stderr?.toString().trim() ?? "" };
+}
+// tmux 3.7 frees a pane's input parser before forking its new process and makes a new one only once the fork succeeds, so a failed
+// fork (out of processes or ptys) leaves the pane at pid -1 with no parser. Respawning that pane frees the parser again and crashes
+// the tmux server, which ended every session on the socket on 2026-11-18 at 16:16. Such a pane gets a fresh window in its place.
+function respawn(id: string, ...args: string[]) {
+  const t = tmuxName(id);
+  const [pid, index] = tmux("display-message", "-p", "-t", t, "#{pane_pid} #{window_index}").out.trim().split(" ");
+  const r = pid === "-1" ? tmux("new-window", "-k", "-t", `${t}:${index}`, ...args) : tmux("respawn-pane", "-k", "-t", t, ...args);
+  if (!r.ok) console.error(`${id}: respawning its pane failed: ${r.err}`);
+  return r.ok;
 }
 // Creating a session may start the tmux server, which must not belong to the maxflow service (see TMUX_SCOPE).
 function scoped(...args: string[]) {
@@ -1076,7 +1086,7 @@ function putToSleep(s: Session, chat: string) {
   // The respawn keeps the pane's history but wipes its screen, which holds the chat's last reply, so the placeholder prints that screen back first.
   const screen = `${STATE_DIR}/asleep-${s.id}.ans`;
   writeFileSync(screen, tmux("capture-pane", "-p", "-e", "-J", "-t", tmuxName(s.id)).out.trimEnd() + "\x1b[0m\n");
-  if (!tmux("respawn-pane", "-k", "-t", tmuxName(s.id), "--", process.execPath, `${DIR}/sleeper.ts`, screen, BASE, s.id).ok) return;
+  if (!respawn(s.id, "--", process.execPath, `${DIR}/sleeper.ts`, screen, BASE, s.id)) return;
   s.asleep = chat;
   setOption(s.id, "@mf-asleep", chat);
   setClaudeState(s, "gone");
@@ -1084,7 +1094,7 @@ function putToSleep(s: Session, chat: string) {
 function resumeAgent(s: Session) {
   if (!s.asleep || s.exitCode !== null) return;
   const bypass = s.cmd.some((a) => a.includes("bypassPermissions")) ? ["--permission-mode", "bypassPermissions"] : [];
-  if (!tmux("respawn-pane", "-k", "-t", tmuxName(s.id), "-c", s.cwd, ...paneEnv(s.id), "--", ...named(s.id, ["claude", "--resume", s.asleep, ...bypass])).ok) return;
+  if (!respawn(s.id, "-c", s.cwd, ...paneEnv(s.id), "--", ...named(s.id, ["claude", "--resume", s.asleep, ...bypass]))) return;
   s.asleep = undefined;
   setOption(s.id, "@mf-asleep", "");
 }
