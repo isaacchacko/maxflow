@@ -45,7 +45,7 @@ const usage = `usage:
                                              and restarts the sentries whose code changed
   maxflow install                            run this checkout as the login service and add its hooks to ~/.claude/settings.json`;
 import { fetchPrs, links, parsePr, readStatus, readWatches, render, writeWatches } from "./sentries/gh";
-import * as slack from "./sentries/slack";
+import * as slackRead from "./slack-read";
 import { loadRestrictions, resolve, type Restriction } from "./restrictions";
 const flag = (args: string[], k: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
 const positional = (args: string[], valued: string[]) => args.filter((a, i) => !a.startsWith("--") && !valued.includes(args[i - 1]));
@@ -137,11 +137,11 @@ if (verb === "ls") {
   }
   // A Slack wait ties the session to the thread, channel or search, so the slack sentry's next message there wakes it.
   if (kind === "slack") {
-    const found = await slack.parseTarget([target, ...rest.slice(1)].join(" "));
+    const found = await slackRead.parseTarget([target, ...rest.slice(1)].join(" "));
     if (!found) console.error(`no channel named ${target}`), process.exit(1);
     target = found;
-    const prev = slack.readWatches().find((w) => w.target === found)?.sessions ?? [];
-    slack.writeWatches([...slack.readWatches().filter((w) => w.target !== found), { target: found, sessions: [...new Set([...prev, me])] }]);
+    const prev = slackRead.readWatches().find((w) => w.target === found)?.sessions ?? [];
+    slackRead.writeWatches([...slackRead.readWatches().filter((w) => w.target !== found), { target: found, sessions: [...new Set([...prev, me])] }]);
   }
   // The server may name the wait differently: q:<n> is the thread that question moved into.
   const { wait } = await call(`/api/sessions/${me}/await`, { method: "POST", body: JSON.stringify({ kind, ref: target }) });
@@ -271,20 +271,20 @@ if (verb === "ls") {
 } else if (verb === "slack" && rest[0] === "read" && rest[1]) {
   await touchSentry("slack", "read");
   const ref = positional(rest.slice(1), ["--last"]).join(" ");
-  const target = await slack.parseTarget(ref);
+  const target = await slackRead.parseTarget(ref);
   if (!target) console.error(`no channel named ${ref}`), process.exit(1);
   const me = process.env.MAXFLOW_SESSION;
-  let got = slack.readMessages()[target];
+  let got = slackRead.readMessages()[target];
   // Not polled lately: ask Slack once, and watch it so the sentry keeps it from now on.
   if (!got || Date.now() - got.at > 180_000) {
-    got = { at: Date.now(), ...(await slack.read(target)) };
-    if (me && !slack.readWatches().some((w) => w.target === target && w.sessions.includes(me)))
-      slack.writeWatches([...slack.readWatches().filter((w) => w.target !== target), { target, sessions: [...(slack.readWatches().find((w) => w.target === target)?.sessions ?? []), me] }]);
+    got = { at: Date.now(), ...(await slackRead.read(target)) };
+    if (me && !slackRead.readWatches().some((w) => w.target === target && w.sessions.includes(me)))
+      slackRead.writeWatches([...slackRead.readWatches().filter((w) => w.target !== target), { target, sessions: [...(slackRead.readWatches().find((w) => w.target === target)?.sessions ?? []), me] }]);
   }
-  const [channel, thread] = target.split("/");
+  const { channel, thread } = slackRead.splitTarget(target);
   console.log(`${got.title}  (polled ${Math.round((Date.now() - got.at) / 1000)}s ago)`);
   for (const m of got.msgs.slice(-Number(flag(rest, "--last") ?? 20)))
-    console.log(`\n${m.who}${m.channel ? ` in ${m.channel}` : ""}  ${new Date(Number(m.ts) * 1000).toLocaleString()}  ${m.link ?? slack.permalink(channel, m.ts, thread)}\n${m.text}`);
+    console.log(`\n${m.who}${m.channel ? ` in ${m.channel}` : ""}  ${new Date(Number(m.ts) * 1000).toLocaleString()}  ${m.link ?? slackRead.permalink(channel, m.ts, thread)}\n${m.text}`);
 } else if (verb === "gh" && rest[0] === "ls") {
   for (const w of readWatches()) console.log(`${w.pr}  ${w.sessions.join(", ") || "(no session)"}`);
 } else if (verb === "gh" && (rest[0] === "watch" || rest[0] === "unwatch") && rest[1]) {
@@ -298,16 +298,16 @@ if (verb === "ls") {
   writeWatches(watches);
   console.log(`${rest[0] === "watch" ? "watching" : "unwatched"} ${pr}${rest[0] === "watch" && session ? ` for session ${session}` : ""}`);
 } else if (verb === "slack" && rest[0] === "ls") {
-  for (const w of slack.readWatches()) console.log(`${w.target}  ${w.sessions.join(", ") || "(no session)"}`);
+  for (const w of slackRead.readWatches()) console.log(`${w.target}  ${w.sessions.join(", ") || "(no session)"}`);
 } else if (verb === "slack" && (rest[0] === "watch" || rest[0] === "unwatch") && rest[1]) {
   await touchSentry("slack", "write");
-  const target = await slack.parseTarget(positional(rest.slice(1), ["--session"]).join(" "));
+  const target = await slackRead.parseTarget(positional(rest.slice(1), ["--session"]).join(" "));
   if (!target) console.error(`no channel named ${rest[1]}`), process.exit(1);
   const session = flag(rest, "--session") ?? process.env.MAXFLOW_SESSION;
-  const prev = slack.readWatches().find((w) => w.target === target)?.sessions ?? [];
-  const watches = slack.readWatches().filter((w) => w.target !== target);
+  const prev = slackRead.readWatches().find((w) => w.target === target)?.sessions ?? [];
+  const watches = slackRead.readWatches().filter((w) => w.target !== target);
   if (rest[0] === "watch") watches.push({ target, sessions: [...new Set([...prev, ...(session ? [session] : [])])] });
-  slack.writeWatches(watches);
+  slackRead.writeWatches(watches);
   console.log(`${rest[0] === "watch" ? "watching" : "unwatched"} ${target}${rest[0] === "watch" && session ? ` for session ${session}` : ""}`);
 } else if (verb === "objectives") {
   for (const o of await call("/api/objectives")) if (!o.closed) console.log(`${o.id}  ${o.title}  ${o.cwd}`);
