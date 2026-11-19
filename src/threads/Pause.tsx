@@ -1,37 +1,40 @@
 import { AlarmClock, Play } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn, hasText } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { createStore, setPaused, threadStore } from "@/store";
 import { CHIPS, formatWhen, parseWhen } from "./when";
 
 const pausing = createStore<string | undefined>(undefined);
-// What the page that opened it does once the thread is paused: the thread page climbs a level, as resolving does.
-let afterPause: (() => void) | undefined;
-/** Asks him until when to put a thread away: from its menus, its header's button, or p. */
-export const openPause = (threadId: string, then?: () => void) => ((afterPause = then), pausing.set(threadId));
+const openedBy: { afterPause: (() => void) | undefined } = { afterPause: undefined };
+export const openPause = (threadId: string, afterPause?: () => void) => {
+  openedBy.afterPause = afterPause;
+  pausing.set(threadId);
+};
 
-/** "until Tue Nov 17, 9:00 AM", what agents posted meanwhile, and what it sends him back with. */
-export const pausedLabel = (p: NonNullable<Thread["paused"]>) => `until ${formatWhen(p.until)}${p.posts ? ` · ${p.posts} new` : ""}${p.wake ? ` · will send: ${p.wake.replace(/\s+/g, " ")}` : ""}`;
+export function pausedLabel(p: NonNullable<Thread["paused"]>) {
+  const posted = p.posts > 0 ? ` · ${p.posts} new` : "";
+  const wakeMessage = hasText(p.wake) ? ` · will send: ${p.wake.replaceAll(/\s+/g, " ")}` : "";
+  return `until ${formatWhen(p.until)}${posted}${wakeMessage}`;
+}
 
-/**
- * A small box over the page: he types when ("tomorrow 9am", "in 2h", "monday", "after lunch") and sees the time it lands on
- * before Enter confirms it, or picks a chip. Below, what to send into the thread as his message when it wakes, for its router to take
- * up (kept when he pauses it again, empty for nothing). A paused thread offers to come back now, sending nothing.
- */
+function untilHint(at: Date | undefined, said: string, now: Date) {
+  if (at) return `Back ${formatWhen(at, now)}`;
+  return said.trim() ? "No time I can read in that" : "Until when?";
+}
+
 export function PauseDialog() {
   const id = pausing.use();
   const thread = threadStore.use().find(t => t.id === id);
   const close = () => pausing.set(undefined);
   return (
-    <Dialog.Root open={!!thread} onOpenChange={o => o || close()}>
+    <Dialog.Root open={Boolean(thread)} onOpenChange={o => o || close()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/20" />
         <Dialog.Content
           data-agent="pause"
           aria-describedby={undefined}
-          // Its keys are its own: the digits don't switch views, and Escape only closes it.
           onKeyDown={e => e.stopPropagation()}
           onEscapeKeyDown={e => e.stopPropagation()}
           onCloseAutoFocus={e => e.preventDefault()}
@@ -44,14 +47,51 @@ export function PauseDialog() {
   );
 }
 
-/** Keyed by its thread, so each opening starts empty, with the wake message the thread already has. */
+function PauseChips({ now, pause }: { now: Date; pause: (until: Date, words: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {CHIPS.map(c => {
+        const until = parseWhen(c.said, now);
+        return (
+          <button
+            key={c.label}
+            data-agent={`pause-chip:${c.label}`}
+            disabled={!until}
+            title={until && formatWhen(until, now)}
+            onClick={() => until && pause(until, c.label)}
+            className="rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring hover:text-foreground disabled:opacity-40"
+          >
+            {c.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Unpause({ thread, paused, close }: { thread: Thread; paused: NonNullable<Thread["paused"]>; close: () => void }) {
+  const unpause = () => {
+    close();
+    void setPaused(thread.id, null);
+  };
+  return (
+    <p className="flex items-center gap-2 border-t pt-3 text-xs text-muted-foreground">
+      <span className="flex-1">Paused {pausedLabel(paused)}</span>
+      <button data-agent="pause-unpause" onClick={unpause} className="flex items-center gap-1 rounded-full border px-2.5 py-0.5 hover:border-ring hover:text-foreground">
+        <Play className="size-3" />
+        Unpause
+      </button>
+    </p>
+  );
+}
+
 function PauseForm({ thread, close }: { thread: Thread; close: () => void }) {
   const [said, setSaid] = useState("");
   const [wake, setWake] = useState(thread.paused?.wake ?? "");
   const [now, setNow] = useState(() => new Date());
   const at = parseWhen(said, now);
   const pause = (until: Date, words: string) => {
-    const then = afterPause;
+    const then = openedBy.afterPause;
     close();
     void setPaused(thread.id, { until: until.getTime(), said: words, ...(wake.trim() && { wake: wake.trim() }) }).then(then);
   };
@@ -72,56 +112,37 @@ function PauseForm({ thread, close }: { thread: Thread; close: () => void }) {
           autoFocus
           data-agent="pause-input"
           value={said}
-          onChange={e => (setSaid(e.target.value), setNow(new Date()))}
+          onChange={e => {
+            setSaid(e.target.value);
+            setNow(new Date());
+          }}
           placeholder="tomorrow 9am, in 2h, monday, after lunch…"
           className="w-full rounded-lg border bg-background px-3 py-1.5 text-sm outline-none focus:border-ring"
         />
         <p data-agent="pause-resolved" className={cn("px-1 text-xs tabular-nums", at ? "text-foreground" : "text-muted-foreground")}>
-          {at ? `Back ${formatWhen(at, now)}` : said.trim() ? "No time I can read in that" : "Until when?"}
+          {untilHint(at, said, now)}
         </p>
       </form>
       <label className="flex flex-col gap-1 text-xs text-muted-foreground">
         When it wakes, send: <span className="sr-only">(optional)</span>
-        {/* Enter in the time box confirms; here it is a new line, and ⌘Enter confirms. */}
         <textarea
           data-agent="pause-wake"
           value={wake}
           rows={2}
           onChange={e => setWake(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && (e.metaKey || e.ctrlKey) && at && (e.preventDefault(), pause(at, said.trim()))}
+          onKeyDown={e => {
+            if (!at || e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
+            e.preventDefault();
+            pause(at, said.trim());
+          }}
           placeholder="optional, e.g. check if CI passed and merge"
           className="w-full resize-y rounded-lg border bg-background px-3 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-ring"
         />
       </label>
-      <div className="flex flex-wrap gap-1.5">
-        {CHIPS.map(c => {
-          const until = parseWhen(c.said, now);
-          return (
-            <button
-              key={c.label}
-              data-agent={`pause-chip:${c.label}`}
-              disabled={!until}
-              title={until && formatWhen(until, now)}
-              onClick={() => until && pause(until, c.label)}
-              className="rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring hover:text-foreground disabled:opacity-40"
-            >
-              {c.label}
-            </button>
-          );
-        })}
-      </div>
-      {thread.paused && (
-        <p className="flex items-center gap-2 border-t pt-3 text-xs text-muted-foreground">
-          <span className="flex-1">Paused {pausedLabel(thread.paused)}</span>
-          <button data-agent="pause-unpause" onClick={() => (close(), void setPaused(thread.id, null))} className="flex items-center gap-1 rounded-full border px-2.5 py-0.5 hover:border-ring hover:text-foreground">
-            <Play className="size-3" />
-            Unpause
-          </button>
-        </p>
-      )}
+      <PauseChips now={now} pause={pause} />
+      {thread.paused && <Unpause thread={thread} paused={thread.paused} close={close} />}
     </>
   );
 }
 
-/** Back from a pause and not yet read: the inbox lifts it to the top. */
-export const freshlyBack = (t: Thread, unread: number) => !!t.resurfaced && unread > 0;
+export const isFreshlyBack = (t: Thread, unread: number) => Boolean(t.resurfaced) && unread > 0;
