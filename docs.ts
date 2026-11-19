@@ -4,7 +4,9 @@ import { dirname, join, relative, resolve } from "node:path";
 import { LIVE } from "./instance";
 import { stateDirectory } from "./state";
 
-export const DOCS_DIR = process.env["MAXFLOW_DOCS"] ?? (LIVE ? join(homedir(), "Docs") : stateDirectory("docs"));
+const CHOSEN_DIR = process.env["MAXFLOW_DOCS"];
+const IS_HIS_VAULT = LIVE && CHOSEN_DIR === undefined;
+export const DOCS_DIR = CHOSEN_DIR ?? (LIVE ? join(homedir(), "Docs") : stateDirectory("docs"));
 const OBSIDIAN_REGISTRY = join(homedir(), "Library/Application Support/obsidian/obsidian.json");
 const ISAAC = "isaac";
 const AGENT_EMAIL = "docs@maxflow.local";
@@ -23,7 +25,7 @@ function git(args: string[], env: Record<string, string> = {}) {
 
 function registerWithObsidian() {
   type ObsidianRegistry = { vaults?: Record<string, { path: string; ts?: number }> };
-  if (!LIVE || !existsSync(dirname(OBSIDIAN_REGISTRY))) return;
+  if (!IS_HIS_VAULT || !existsSync(dirname(OBSIDIAN_REGISTRY))) return;
   const registry = (existsSync(OBSIDIAN_REGISTRY) ? JSON.parse(readFileSync(OBSIDIAN_REGISTRY, "utf8")) : {}) as ObsidianRegistry;
   const vaults = registry.vaults ?? {};
   if (Object.values(vaults).some((v) => v.path === DOCS_DIR)) return;
