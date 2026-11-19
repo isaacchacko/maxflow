@@ -9,6 +9,7 @@ import { dispatch, setWait } from "./lifecycle";
 import { IMAGE, message } from "./threads";
 import { slackChannels } from "./routing";
 import { patch } from "./patch";
+import { isFilled } from "./shared/guards";
 
 function slug(title: string) {
   const dashed = title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/^-|-$/g, "").slice(0, 32);
@@ -51,7 +52,6 @@ export function mergeThread(from: Thread, into: Thread) {
   saveThreads();
   for (const t of [from, into]) publish(`thread/${t.id}`, { thread: t.id, ...(t === from && { mergedInto: into.id }) });
 }
-const isFilled = (text: string | undefined): text is string => text !== undefined && text !== "";
 function agentAsTyped(chip: string, id: string) {
   const agent = sessions.get(id);
   return agent ? `@${agent.name.replace(/^sentry:/, "")}` : chip;

@@ -6,26 +6,25 @@ import { type Session, type Wait, sessions } from "./sessions";
 import type { Shell } from "./model";
 import { live, threads } from "./stores";
 import { createSession, endWait, screen, setArchived, setWait, tellWaiters, threadOf, waitLabel, waitsOn } from "./lifecycle";
+import { isFilled, isRecord } from "./shared/guards";
 
-// An agent's finish is told to each agent waiting on it once: when it comes to rest done (its turn over with `wait done` declared,
-// or the auto done), or at once when the wait is declared on an agent at rest done. Done but mid-turn (a turn a peer's message started
-// keeps its done) is not finished: that turn's end is a finish of its own. toldDone keeps, per waiter and agent, the finish (that
-// agent's wait.at) it was told of, so a waiter that waits again on the same finish sleeps until the next one.
-const toldDone = new Map<string, number>();
-const atRest = (s: Session) => s.claude?.state !== "working" && s.claude?.state !== "waiting";
+const finishToldByWaiterAndAgent = new Map<string, number>();
+const isAtRest = (s: Session) => s.claude?.state !== "working" && s.claude?.state !== "waiting";
 export function tellDone(on: Session) {
+  const finish = on.wait?.at;
   for (const w of sessions.values()) {
-    if (w === on || !waitsOn(w, on.id) || w.exitCode !== null || toldDone.get(`${w.id}>${on.id}`) === on.wait?.at) continue;
-    toldDone.set(`${w.id}>${on.id}`, on.wait!.at);
+    if (w === on || !waitsOn(w, on.id) || w.exitCode !== null || finishToldByWaiterAndAgent.get(`${w.id}>${on.id}`) === finish) continue;
+    if (finish === undefined) return;
+    finishToldByWaiterAndAgent.set(`${w.id}>${on.id}`, finish);
     endWait(w, `"${on.name}" (session ${on.id}) is now done`);
   }
 }
-// Waiting on agents of which one is already done with a finish this waiter wasn't told of: that is its answer.
-function alreadyDone(w: Session) {
-  for (const id of w.wait?.kind === "agent" ? w.wait.ref.split(",") : []) {
+function didEndOnAgentAlreadyDone(w: Session) {
+  const awaited = w.wait?.kind === "agent" ? w.wait.ref.split(",") : [];
+  for (const id of awaited) {
     const o = sessions.get(id);
-    if (o?.wait?.kind !== "done" || !atRest(o) || toldDone.get(`${w.id}>${id}`) === o.wait.at) continue;
-    toldDone.set(`${w.id}>${id}`, o.wait.at);
+    if (o?.wait?.kind !== "done" || !isAtRest(o) || finishToldByWaiterAndAgent.get(`${w.id}>${id}`) === o.wait.at) continue;
+    finishToldByWaiterAndAgent.set(`${w.id}>${id}`, o.wait.at);
     endWait(w, `"${o.name}" (session ${o.id}) is already done`);
     return true;
   }
@@ -34,109 +33,170 @@ function alreadyDone(w: Session) {
 const SHELLS = "shells.json";
 const SHELL_DIR = stateDirectory("shells");
 const SHELL_KEEP_MS = 7 * 86_400_000;
+const FINISHED_COMMAND_PANE_KEEP_MS = 3_600_000;
 const SHELL_TAIL_LINES = 30;
 export const shells: Shell[] = (() => { try { return (peekStateJson(SHELLS) as Shell[]).filter((x) => !x.end || Date.now() - x.end.at < SHELL_KEEP_MS); } catch { return []; } })();
-const saveShells = () => (writeStateJson(SHELLS, shells), publish("shells", { n: shells.length }));
+function saveShells() {
+  writeStateJson(SHELLS, shells);
+  publish("shells", { n: shells.length });
+}
+function addShell(x: Shell) {
+  shells.push(x);
+  saveShells();
+  return x;
+}
 const quote = (a: string) => `'${a.replaceAll("'", `'\\''`)}'`;
-function startShell(owner: Session, desc: string, cmd: string, cwd: string, path?: string): Shell {
+type ShellCommand = { desc: string; cmd: string; cwd: string; path?: string | undefined };
+function shellScript({ cmd, path }: ShellCommand, codeFile: string) {
+  return [
+    ...(isFilled(path) ? [`export PATH=${quote(path)}`] : []),
+    String.raw`printf '\033[2m$ %s\033[0m\n' ${quote(cmd)}`,
+    `"\${SHELL:-/bin/sh}" -c ${quote(cmd)}`,
+    "code=$?",
+    `echo "$code" > ${quote(codeFile)}`,
+    `printf '\\n\\033[2m[exited with code %s]\\033[0m\\n' "$code"`,
+    "exec sleep 3600",
+  ].join("\n");
+}
+function startShell(owner: Session, command: ShellCommand): Shell {
   mkdirSync(SHELL_DIR, { recursive: true });
   const token = crypto.randomUUID().slice(0, 8);
   const script = `${SHELL_DIR}/${token}.sh`;
-  writeFileSync(script, [
-    ...(path ? [`export PATH=${quote(path)}`] : []),
-    `printf '\\033[2m$ %s\\033[0m\\n' ${quote(cmd)}`,
-    `"\${SHELL:-/bin/sh}" -c ${quote(cmd)}`,
-    "code=$?",
-    `echo "$code" > ${quote(`${SHELL_DIR}/${token}.code`)}`,
-    `printf '\\n\\033[2m[exited with code %s]\\033[0m\\n' "$code"`,
-    "exec sleep 3600",
-  ].join("\n"));
+  writeFileSync(script, shellScript(command, `${SHELL_DIR}/${token}.code`));
+  const { desc, cmd, cwd } = command;
   const s = createSession(desc, ["sh", script], cwd);
-  const shell: Shell = { id: s.id, desc, owner: owner.id, kind: "cmd", cmd, cwd, file: `${SHELL_DIR}/${token}.code`, at: Date.now() };
-  return shells.push(shell), saveShells(), shell;
+  return addShell({ id: s.id, desc, owner: owner.id, kind: "cmd", cmd, cwd, file: `${SHELL_DIR}/${token}.code`, at: Date.now() });
+}
+function processEnded(pid: number | undefined): { code: number | null } | null {
+  if (pid === undefined) return { code: null };
+  try {
+    process.kill(pid, 0);
+    return null;
+  } catch (error) {
+    const failure: { code?: unknown } | undefined = isRecord(error) ? error : undefined;
+    return failure?.code === "EPERM" ? null : { code: null };
+  }
 }
 function shellEnded(x: Shell): { code: number | null } | null {
-  if (x.kind === "pid") {
-    try { process.kill(x.pid!, 0); return null; } catch (e) { return (e as { code?: string }).code === "EPERM" ? null : { code: null }; }
-  }
+  if (x.kind === "pid") return processEnded(x.pid);
   const s = sessions.get(x.id);
-  if (x.kind === "cmd") {
-    if (existsSync(x.file!)) return { code: Number(readFileSync(x.file!, "utf8").trim()) };
-  }
-  return !s || s.exitCode !== null ? { code: null } : null;
+  if (x.kind === "cmd" && x.file !== undefined && existsSync(x.file)) return { code: Number(readFileSync(x.file, "utf8").trim()) };
+  return s?.exitCode === null ? null : { code: null };
 }
 function shellTail(x: Shell) {
   const s = sessions.get(x.id);
   if (!s) return "";
   const lines = screen(s, 500).split("\n").filter((l) => !/^\[exited with code \d+\]$/.test(l));
-  while (lines.length && !lines.at(-1)!.trim()) lines.pop();
+  while (lines.length > 0 && (lines.at(-1) ?? "").trim() === "") lines.pop();
   return lines.slice(-SHELL_TAIL_LINES).join("\n");
 }
+function howShellEnded(x: Shell, code: number | null) {
+  if (code !== null) return `it exited with code ${code}`;
+  return x.kind === "pid" ? `process ${String(x.pid)} exited` : "the session ended";
+}
+function endWaitsOnShell(x: Shell, end: NonNullable<Shell["end"]>) {
+  const tail = end.tail === "" ? "" : `. Its last lines:\n\`\`\`\n${end.tail}\n\`\`\``;
+  for (const s of sessions.values()) if (s.wait?.kind === "until" && s.wait.ref === x.id) endWait(s, `${howShellEnded(x, end.code)}${tail}`);
+}
+function closeFinishedCommandPanes() {
+  for (const x of shells)
+    if (x.kind === "cmd" && x.end && Date.now() - x.end.at > FINISHED_COMMAND_PANE_KEEP_MS && live(sessions.get(x.id))) scoped("kill-session", "-t", tmuxName(x.id));
+}
 export function checkShells() {
-  let changed = false;
+  let hasChanged = false;
   for (const x of shells) {
     if (x.end) continue;
     const ended = shellEnded(x);
     if (!ended) continue;
     x.end = { at: Date.now(), code: ended.code, tail: shellTail(x) };
-    changed = true;
-    const how = x.end.code === null ? (x.kind === "pid" ? `process ${x.pid} exited` : "the session ended") : `it exited with code ${x.end.code}`;
-    const tail = x.end.tail ? `. Its last lines:\n\`\`\`\n${x.end.tail}\n\`\`\`` : "";
-    for (const s of sessions.values()) if (s.wait?.kind === "until" && s.wait.ref === x.id) endWait(s, `${how}${tail}`);
+    hasChanged = true;
+    endWaitsOnShell(x, x.end);
   }
-  // A finished command's pane closes after its hour; the record (and its tail) stays a week.
-  for (const x of shells) if (x.kind === "cmd" && x.end && Date.now() - x.end.at > 3_600_000 && live(sessions.get(x.id))) scoped("kill-session", "-t", tmuxName(x.id));
-  if (changed) saveShells();
+  closeFinishedCommandPanes();
+  if (hasChanged) saveShells();
 }
-// What `wait until` names: a new command, a maxflow session already running, or a process; the error when it can't.
+function paneShell(s: Session, desc: string, pane: string): Shell | string {
+  const o = sessions.get(pane);
+  if (!o || o === s || !live(o)) return `no other running session ${pane}`;
+  return addShell({ id: o.id, desc, owner: s.id, kind: "pane", cwd: o.cwd, at: Date.now() });
+}
+function pidShell(s: Session, desc: string, pid: number): Shell | string {
+  if (shellEnded({ id: "", desc, owner: s.id, kind: "pid", pid, at: 0 })) return `no process ${pid}`;
+  return addShell({ id: `pid-${pid}-${Date.now().toString(36)}`, desc, owner: s.id, kind: "pid", pid, at: Date.now() });
+}
 export function untilShell(s: Session, body: { desc?: string; cmd?: string; cwd?: string; path?: string; pane?: string; pid?: number }): Shell | string {
   const desc = body.desc?.trim();
-  if (!desc) return "until needs a description of what it waits for";
-  if (body.cmd?.trim()) return startShell(s, desc, body.cmd.trim(), body.cwd || s.cwd, body.path);
-  if (body.pane) {
-    const o = sessions.get(body.pane);
-    if (!o || o === s || !live(o)) return `no other running session ${body.pane}`;
-    const x: Shell = { id: o.id, desc, owner: s.id, kind: "pane", cwd: o.cwd, at: Date.now() };
-    return shells.push(x), saveShells(), x;
-  }
-  if (body.pid) {
-    if (shellEnded({ id: "", desc, owner: s.id, kind: "pid", pid: body.pid, at: 0 })) return `no process ${body.pid}`;
-    const x: Shell = { id: `pid-${body.pid}-${Date.now().toString(36)}`, desc, owner: s.id, kind: "pid", pid: body.pid, at: Date.now() };
-    return shells.push(x), saveShells(), x;
-  }
+  if (!isFilled(desc)) return "until needs a description of what it waits for";
+  const cmd = body.cmd?.trim();
+  if (isFilled(cmd)) return startShell(s, { desc, cmd, cwd: isFilled(body.cwd) ? body.cwd : s.cwd, path: body.path });
+  if (isFilled(body.pane)) return paneShell(s, desc, body.pane);
+  if (body.pid !== undefined && body.pid !== 0) return pidShell(s, desc, body.pid);
   return "until needs a command (after --), --pane <session> or --pid <pid>";
 }
 
-export function declareWait(s: Session, kind: string, ref: string, desc?: string): string | null {
-  if (!["thread", "q", "approval", "ci", "agent", "slack", "until", "done"].includes(kind)) return "kind must be thread, approval, ci, agent, slack, until or done";
-  // done is always allowed: it keeps the agent awake, and the sentries still tell it about its open PRs and questions.
-  if (kind !== "done" && !ref) return `${kind} needs a ref`;
-  // q:<n>, the wait on a question from before threads, means the thread that question moved into.
-  if (kind === "q") {
-    const t = threadOf(`q${ref.replace(/^q/, "")}`);
-    if (!t) return `no question q${ref.replace(/^q/, "")}: questions are threads now, so wait on thread:<id>`;
-    (kind = "thread"), (ref = t.id);
+type NamedWait = { kind: Wait["kind"]; ref: string; shell?: Shell };
+const WAIT_KINDS: ReadonlySet<string> = new Set<Wait["kind"]>(["thread", "approval", "ci", "agent", "slack", "until", "done"]);
+const isWaitKind = (kind: string): kind is Wait["kind"] => WAIT_KINDS.has(kind);
+function threadOfQuestionFromBeforeThreads(ref: string): NamedWait | string {
+  const t = threadOf(`q${ref.replace(/^q/, "")}`);
+  if (!t) return `no question q${ref.replace(/^q/, "")}: questions are threads now, so wait on thread:<id>`;
+  return { kind: "thread", ref: t.id };
+}
+function awaitedAgents(s: Session, ref: string): NamedWait | string {
+  const ids = [...new Set(ref.split(/[\s,]+/).map((x) => x.replace(/^agent:/, "")).filter((x) => x !== ""))];
+  const bad = ids.find((id) => {
+    const o = sessions.get(id);
+    return !o || o === s || o.exitCode !== null;
+  });
+  if (bad !== undefined) return `no other running session ${bad}`;
+  return { kind: "agent", ref: ids.join(",") };
+}
+function declaredKindAndRef(kind: string, ref: string): NamedWait | string {
+  if (kind === "q") return ref === "" ? "q needs a ref" : threadOfQuestionFromBeforeThreads(ref);
+  if (!isWaitKind(kind)) return "kind must be thread, approval, ci, agent, slack, until or done";
+  if (kind !== "done" && ref === "") return `${kind} needs a ref`;
+  return { kind, ref };
+}
+function namedWait(s: Session, kind: string, ref: string): NamedWait | string {
+  const named = declaredKindAndRef(kind, ref);
+  if (typeof named === "string") return named;
+  if (named.kind === "thread" && threads.every((o) => o.id !== named.ref)) return `no thread ${named.ref}`;
+  if (named.kind === "until") {
+    const shell = shells.find((x) => x.id === named.ref);
+    return shell ? { ...named, shell } : `no shell ${named.ref}`;
   }
-  if (kind === "thread" && !threads.some((o) => o.id === ref)) return `no thread ${ref}`;
-  const shell = kind === "until" ? shells.find((x) => x.id === ref) : undefined;
-  if (kind === "until" && !shell) return `no shell ${ref}`;
-  if (kind === "agent") {
-    const ids = [...new Set(ref.split(/[\s,]+/).map((x) => x.replace(/^agent:/, "")).filter(Boolean))];
-    const bad = ids.find((id) => { const o = sessions.get(id); return !o || o === s || o.exitCode !== null; });
-    if (bad) return `no other running session ${bad}`;
-    ref = ids.join(",");
+  return named.kind === "agent" ? awaitedAgents(s, named.ref) : named;
+}
+function tellWhoWaitsOn(s: Session, kind: Wait["kind"], was: Wait | undefined, isSameFinish: boolean) {
+  if (kind === "done") {
+    if (!isSameFinish && isAtRest(s)) tellDone(s);
+    return;
   }
-  // Done again while done is the same finish: it keeps its time, and nobody is told again.
-  const was = s.wait;
-  const again = kind === "done" && was?.kind === "done";
-  setWait(s, { kind: kind as Wait["kind"], ref: kind === "done" ? "" : ref, at: again ? was.at : Date.now(), ...(shell && { desc: desc ?? shell.desc }) });
-  // Declared mid-turn, as it usually is, the finish is told when the turn ends (afterTurn).
-  if (kind === "done") again || !atRest(s) || tellDone(s);
-  else if (!was || waitLabel(was) !== waitLabel(s.wait!)) tellWaiters(s, `is now waiting on ${waitLabel(s.wait!)}`);
-  if (kind === "agent" && alreadyDone(s)) return null;
-  // A shell already over (a quick command, or one waited on again) is answered at the next check.
-  if (shell?.end) return void endWait(s, `it had already ended${shell.end.code === null ? "" : ` with code ${shell.end.code}`}`), null;
-  // Declared between turns, it sleeps at once; mid-turn, the Stop hook puts it to sleep.
+  const wait = s.wait;
+  if (wait === undefined) return;
+  if (!was || waitLabel(was) !== waitLabel(wait)) tellWaiters(s, `is now waiting on ${waitLabel(wait)}`);
+}
+const sameFinishAtOf = (kind: Wait["kind"], was: Wait | undefined) => (kind === "done" && was?.kind === "done" ? was.at : undefined);
+function didEndOnShellAlreadyOver(s: Session, shell: Shell | undefined) {
+  const end = shell?.end;
+  if (!end) return false;
+  endWait(s, `it had already ended${end.code === null ? "" : ` with code ${end.code}`}`);
+  return true;
+}
+function sleepNowIfDeclaredBetweenTurns(s: Session, kind: Wait["kind"]) {
   if (kind !== "done" && s.claude?.state !== "working") setArchived(s, true);
+}
+export function declareWait(s: Session, kind: string, ref: string, desc?: string): string | null {
+  const named = namedWait(s, kind, ref);
+  if (typeof named === "string") return named;
+  const was = s.wait;
+  const sameFinishAt = sameFinishAtOf(named.kind, was);
+  const isSameFinish = sameFinishAt !== undefined;
+  const at = sameFinishAt ?? Date.now();
+  setWait(s, { kind: named.kind, ref: named.kind === "done" ? "" : named.ref, at, ...(named.shell && { desc: desc ?? named.shell.desc }) });
+  tellWhoWaitsOn(s, named.kind, was, isSameFinish);
+  if (named.kind === "agent" && didEndOnAgentAlreadyDone(s)) return null;
+  if (didEndOnShellAlreadyOver(s, named.shell)) return null;
+  sleepNowIfDeclaredBetweenTurns(s, named.kind);
   return null;
 }
