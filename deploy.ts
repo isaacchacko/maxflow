@@ -1,9 +1,9 @@
 // `cli.ts deploy`: the one way the live yarn changes. The live checkout holds only commits from origin, so a restart ships
 // exactly what is on its branch there, never someone's half-saved edit. Changes are made in a worktree and pushed first.
-import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
-import { BASE, LIVE } from "./instance";
+import { BASE, LIVE, STATE_DIR } from "./instance";
 import { LOG, checkout, restartCommand } from "./service";
 
 const run = (cmd: string[], cwd?: string) => {
@@ -64,32 +64,47 @@ function headAt(dir: string, ms: number) {
 }
 
 // tmux keeps a sentry across a restart, and the new server adopts it still running the code it started with, so a sentry
-// whose script, prompt (sentries/<name>.md) or anything they import differs between the commit live held when it started
-// and the one deployed has to be restarted. Measuring from its start, not from this deploy's old commit, also catches one a
-// kickstart or an older deploy left behind. A sentry older than the reflog counts as stale.
+// whose script, prompt (sentries/<name>.md) or anything they import differs between the commit it runs and the one deployed has
+// to be restarted. The commit it runs is the one a deploy last restarted it onto (sentry-commits.json, by session id, since a
+// restart keeps the session), or else the one live held when its session was created, from the live checkout's HEAD reflog,
+// which also catches one a kickstart or an older deploy left behind. A sentry older than the reflog counts as stale. fresh: its
+// brief changed, so a claude sentry starts a new chat instead of resuming.
+const COMMITS = join(STATE_DIR, "sentry-commits.json");
+const ranOn = (): Record<string, { id: string; commit: string }> => {
+  try {
+    return JSON.parse(readFileSync(COMMITS, "utf8"));
+  } catch {
+    return {};
+  }
+};
 export function staleSentries(dir: string, to: string, list: Session[]) {
   const diffs = new Map<string, Set<string>>();
   const changed = (from: string) =>
     diffs.get(from) ?? diffs.set(from, new Set(run(["git", "diff", "--name-only", from, to], dir).out.split("\n"))).get(from)!;
-  return list.filter((s) => s.name.startsWith("sentry:") && s.running).filter((s) => {
-    const from = headAt(dir, s.createdAt);
-    if (!from) return true;
-    const own = [`sentries/${s.name.slice(7)}.ts`, `sentries/${s.name.slice(7)}.md`].filter((f) => existsSync(join(dir, f)));
-    return own.some((f) => [...closure(dir, f)].some((dep) => changed(from).has(dep)));
-  }).map((s) => s.name);
+  const record = ranOn();
+  return list.filter((s) => s.name.startsWith("sentry:") && s.running).flatMap((s) => {
+    const from = record[s.name]?.id === s.id ? record[s.name].commit : headAt(dir, s.createdAt);
+    const brief = `sentries/${s.name.slice(7)}.md`;
+    if (!from) return [{ name: s.name, fresh: true }];
+    const own = [`sentries/${s.name.slice(7)}.ts`, brief].filter((f) => existsSync(join(dir, f)));
+    return own.some((f) => [...closure(dir, f)].some((dep) => changed(from).has(dep))) ? [{ name: s.name, fresh: changed(from).has(brief) }] : [];
+  });
 }
 
-// Stops each sentry named; the server's respawn check (every 15s) starts it again from the code now on disk.
-export async function restartSentries(names: string[], list: Session[]) {
-  const old = new Set(list.filter((s) => names.includes(s.name)).map((s) => s.id));
-  for (const id of old) await fetch(`${BASE}/api/sessions/${id}`, { method: "DELETE" });
-  const back = (now?: Session[]) => names.filter((n) => now?.some((s) => s.name === n && s.running && !old.has(s.id)));
-  const deadline = Date.now() + 90_000;
-  let now: Session[] | undefined;
-  while (Date.now() < deadline && back((now = await sessions())).length < names.length) await Bun.sleep(2_000);
-  const missing = names.filter((n) => !back(now).includes(n));
-  if (missing.length) fail(`restarted ${names.join(", ")}, and these haven't come back after 90s: ${missing.join(", ")}. See ${LOG}.`);
-  console.log(`restarted ${names.join(", ")}, whose code changed`);
+// Restarts each sentry in its own pane; a claude sentry resumes its chat unless fresh.
+export async function restartSentries(stale: { name: string; fresh: boolean }[], list: Session[], commit: string) {
+  const record = ranOn();
+  const done = [];
+  for (const { name, fresh } of stale) {
+    const res = await fetch(`${BASE}/api/sentries/restart`, { method: "POST", body: JSON.stringify({ name, fresh }) });
+    if (!res.ok) fail(`restarting ${name} failed: ${res.status} ${await res.text()}`);
+    const r = (await res.json()) as { resumed?: string; fresh?: boolean };
+    const id = list.find((s) => s.name === name)!.id;
+    record[name] = { id, commit };
+    done.push(r.resumed ? `${name} (resumed its chat)` : r.fresh ? `${name} (fresh chat${fresh ? ", brief changed" : ""})` : name);
+  }
+  writeFileSync(COMMITS, JSON.stringify(record, null, 2));
+  console.log(`restarted ${done.join(", ")}, whose code changed`);
 }
 
 export async function deploy() {
@@ -106,6 +121,7 @@ export async function deploy() {
   check(live, to);
 
   const before = await sessions();
+  const seq = Number((await fetch(`${BASE}/api/events?after=now`).catch(() => undefined))?.headers.get("x-maxflow-seq") ?? 0);
   if (from !== to && !run(["git", "merge", "--ff-only", to], live).ok) fail(`couldn't fast-forward ${live} to ${to.slice(0, 7)}`);
   if (!run(["bun", "install", "--frozen-lockfile"], live).ok) fail(`bun install --frozen-lockfile failed in ${live}, which is now at ${to.slice(0, 7)} but not restarted`);
   console.log(from === to ? `live is at origin/${branch} (${to.slice(0, 7)}); restarting it` : `live ${from.slice(0, 7)} -> ${to.slice(0, 7)}:\n${run(["git", "log", "--oneline", "--no-decorate", `${from}..${to}`], live).out.split("\n").map((l) => `  ${l.slice(0, 120)}`).join("\n")}`);
@@ -117,11 +133,13 @@ export async function deploy() {
   const settled = (list?: Session[]) => !!list && (!before || sentries(before).every((n) => sentries(list).includes(n)));
   while (Date.now() < deadline && !settled((after = await sessions()))) await Bun.sleep(2_000);
   if (!after) fail(`the server isn't answering ${BASE} after 2 minutes; see ${LOG}. The health sentry starts a recovery agent once it has been down 45s.`);
-  const lost = before?.filter((s) => !after!.some((a) => a.id === s.id)) ?? [];
+  // A session killed on purpose while the server restarted isn't lost.
+  const killed = new Set(seq ? ((await (await fetch(`${BASE}/api/events?topic=session/*/killed&after=${seq}`)).json()) as { data: { session: string } }[]).map((e) => e.data.session) : []);
+  const lost = before?.filter((s) => !after!.some((a) => a.id === s.id) && !killed.has(s.id)) ?? [];
   const missing = before ? sentries(before).filter((n) => !sentries(after!).includes(n)) : [];
   console.log(`${after.length} sessions (${before ? `${before.length} before` : "the server was down before"}), ${sentries(after).length} sentries running`);
   if (lost.length || missing.length)
     fail(`after the restart ${[lost.length && `these sessions are gone: ${lost.map((s) => `${s.id} ${s.name}`).join(", ")}`, missing.length && `these sentries aren't running: ${missing.join(", ")}`].filter(Boolean).join("; ")}. See ${LOG}.`);
   const stale = staleSentries(live, to, after);
-  if (stale.length) await restartSentries(stale, after);
+  if (stale.length) await restartSentries(stale, after, to);
 }

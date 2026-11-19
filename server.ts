@@ -266,6 +266,29 @@ for (const s of sessions.values())
 // MAXFLOW_SENTRIES: 0 for none, a comma list (gh,health) for those alone, 1 or unset for all.
 const sentryList = process.env.MAXFLOW_SENTRIES ?? "1";
 const wanted = Object.entries(SENTRIES).filter(([n]) => sentryList !== "0" && (sentryList === "1" || sentryList.split(",").includes(n.slice(7))));
+// A deploy restarts a sentry whose code changed in its own pane, so it keeps its session. A claude sentry resumes its chat, unless
+// its brief changed: then it starts a fresh chat, handed the last things its old one said.
+function restartSentry(s: Session, fresh: boolean) {
+  let cmd = SENTRIES[s.name];
+  // claude writes a chat's transcript at its first turn, and resuming one that never had a turn exits at once.
+  const chat = s.transcript && existsSync(s.transcript) ? chatOf(s) : undefined;
+  const claude = cmd[0] === "sh" && cmd[2].includes("exec claude ");
+  if (claude && chat && !fresh) cmd = ["sh", "-c", cmd[2].replace("exec claude ", `exec claude --resume ${chat} `)];
+  if (claude && chat && fresh && s.transcript) {
+    const said = readFileSync(s.transcript, "utf8").split("\n").flatMap((line) => {
+      try {
+        const m = JSON.parse(line);
+        return m.type === "assistant" ? m.message.content.filter((c: any) => c.type === "text").map((c: any) => c.text.trim().slice(0, 300)) : [];
+      } catch {
+        return [];
+      }
+    });
+    const digest = `${STATE_DIR}/${s.name.slice(7)}-restart-digest.txt`;
+    writeFileSync(digest, `[maxflow] Your brief (sentries/${s.name.slice(7)}.md) changed, so a deploy restarted you in a fresh chat. Your previous chat was ${chat} (transcript ${s.transcript}, if you need more of it). The last things you said there:\n${said.slice(-6).map((t) => `- ${t}`).join("\n")}`);
+    cmd = ["sh", "-c", `${cmd[2]} "$(cat '${digest}')"`];
+  }
+  return { ok: respawn(s.id, "-c", DIR, ...paneEnv(s.id), "--", ...cmd), resumed: claude && chat && !fresh ? chat : undefined, fresh: claude && (fresh || !chat) };
+}
 const sentryUp = (name: string) => [...sessions.values()].some((s) => s.sentry && s.name === name && s.exitCode === null);
 // Each start goes on the bus, so the Stats page can count a sentry's restarts.
 for (const [name, cmd] of wanted) if (!sentryUp(name)) markSentry(createSession(name, cmd, DIR)), publish("sentry/start", { name, why: "boot" });
@@ -2562,6 +2585,13 @@ Bun.serve<WsData>({
       return Response.json(describe(createSession(chat.title.slice(0, 40), cmd, chat.cwd, chat.id)), { status: 201 });
     }
 
+    if (path === "/api/sentries/restart" && req.method === "POST") {
+      const body = (await req.json().catch(() => ({}))) as { name?: string; fresh?: boolean };
+      const s = [...sessions.values()].find((o) => o.sentry && o.name === body.name && o.exitCode === null);
+      if (!s || !(s.name in SENTRIES)) return new Response(`no running sentry ${body.name}`, { status: 404 });
+      const r = restartSentry(s, !!body.fresh);
+      return r.ok ? Response.json(r) : new Response(`respawning ${s.name} failed; see the log`, { status: 500 });
+    }
     if (path === "/api/events" && req.method === "GET") {
       const p = url.searchParams;
       const after = p.get("after") === "now" ? latestSeq() : Number(p.get("after") ?? 0);
@@ -2858,6 +2888,7 @@ Bun.serve<WsData>({
       const s = sessions.get(one[1]);
       if (!s) return new Response("no such session", { status: 404 });
       if (req.method === "DELETE") {
+        publish(`session/${s.id}/killed`, { session: s.id, name: s.name });
         sessions.delete(s.id);
         tmux("kill-session", "-t", tmuxName(s.id));
         s.proc.kill();
