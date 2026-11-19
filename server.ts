@@ -120,10 +120,6 @@ async function tmuxAsync(...args: string[]) {
   const [out, code] = await Promise.all([new Response(p.stdout).text(), p.exited]);
   return { ok: code === 0, out };
 }
-// Options are only read back when a server adopts its sessions, so writes needn't block. Agents' hook state alone rewrites one
-// several times a second across the fleet, and one tmux call at a time fell minutes behind, so a session created in that time
-// came back from a restart with no name or command. Only the latest value of each option is kept, written up to 100 to a tmux
-// call, and a stopping server writes what is left (flushOptions).
 const pendingOptions = new Map<string, string[]>();
 let drainingOptions = false;
 function setOption(id: string, key: string, value: string) {
@@ -136,7 +132,6 @@ function takeOptions() {
   for (const [key] of batch) pendingOptions.delete(key);
   return batch.map(([, write]) => write);
 }
-// tmux stops a chain at its first failing command, such as a write to a session killed since, so a failed batch goes again one by one.
 async function drainOptions() {
   drainingOptions = true;
   for (let writes = takeOptions(); writes.length; writes = takeOptions())
@@ -211,7 +206,6 @@ function createSession(name: string, cmd: string[], cwd: string, chatId?: string
   const session = { id, name, cmd, cwd, chatId, createdAt: Date.now(), lastOutputAt: Date.now(), chunks: [], bytes: 0, clients: new Set(), exitCode: null, inbox: [] } as unknown as Session;
   const t = tmuxName(id);
   const meta = { name, cmd: cmd.map((a) => (a.length > 2000 ? `${a.slice(0, 2000)}…` : a)), cwd, chatId, createdAt: session.createdAt };
-  // Its name, command and role are set in the same tmux call that creates it, so no restart finds it without them.
   const created = scoped("new-session", "-d", "-s", t, "-x", String(cols), "-y", String(rows), "-c", cwd, ...paneEnv(id), "--", ...launchable(id, cmd),
     ";", "set-option", "-t", t, "@mf", JSON.stringify(meta), ...(role ? [";", "set-option", "-t", t, "@mf-role", JSON.stringify(role)] : []));
   if (!created.ok) throw new Error(`tmux new-session failed for ${cmd.join(" ").slice(0, 200)}`);

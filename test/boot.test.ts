@@ -57,8 +57,6 @@ test("it starts a session in tmux and lists it", async () => {
   expect(Bun.spawnSync(["tmux", "-L", socket, "has-session", "-t", `mf-${id}`]).exitCode).toBe(0);
 }, 30_000);
 
-// A restart (SIGTERM, as launchd's kickstart sends) right after a session is made or renamed: the next server adopts it from tmux
-// by the options written there, so they must be written before the reply, or flushed on the way out.
 test("a session made or renamed just before a restart comes back with its name", async () => {
   const made = (await (await fetch(`${base}/api/sessions`, { method: "POST", body: JSON.stringify({ name: "made-before-restart", cmd: ["sh", "-c", "sleep 60"], cwd: home }) })).json()) as { id: string };
   const renamed = (await (await fetch(`${base}/api/sessions`, { method: "POST", body: JSON.stringify({ name: "old-name", cmd: ["sh", "-c", "sleep 60"], cwd: home }) })).json()) as { id: string };
