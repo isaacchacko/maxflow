@@ -1,5 +1,6 @@
 import { AlarmClock, ArrowLeft, ArrowUpToLine, Check, ChevronRight, GitBranch, MessageSquareReply, MessagesSquare, PanelRight, Quote, RotateCcw } from "lucide-react";
-import { createContext, Fragment, useContext, useEffect, useRef, useState } from "react";
+import { createContext, Fragment, useCallback, useContext, useRef, useState } from "react";
+import { useEventListener } from "@/lib/effects";
 import { Button } from "@/components/ui/button";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
 import { AgentFace } from "@/components/AgentFace";
@@ -99,7 +100,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
   const paneOpen = !embedded && !!paneStore.use();
   const [detailWithPane, setDetailWithPane] = useState(false);
   const detail = !paneOpen || detailWithPane;
-  useEffect(() => void (paneOpen || setDetailWithPane(false)), [paneOpen]);
+  if (!paneOpen && detailWithPane) setDetailWithPane(false);
   const all = threadStore.use();
   const thread = all.find(t => t.id === id);
   const agents = agentStore.use();
@@ -110,23 +111,26 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
   if (thread && line?.id !== id) setLine({ id, at: firstUnseen(thread) });
   const lineAt = line?.id === id ? line.at : undefined;
   const lineRef = useRef<HTMLDivElement>(null);
-  const opened = useRef<string>(undefined);
 
-  // Back up from a subthread (or by Back/Forward) it is where he left it; opening with something unread scrolls to the line;
-  // otherwise, and as messages arrive, to the bottom.
-  const restored = useLayerScroll(`${embedded ? "pane:" : ""}thread:${id}`, scrollRef);
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !thread) return;
-    const opening = opened.current !== id;
-    if (opening && lineRef.current && !restored.current) lineRef.current.scrollIntoView({ block: "center" });
-    else if (!opening || !restored.current) el.scrollTop = el.scrollHeight;
-    opened.current = id;
-  }, [id, !!thread, thread?.messages.length, !!thread?.pending]);
-
-  useEffect(() => {
-    if (thread) markSeen(thread.id, thread.messages.length);
-  }, [thread?.id, thread?.messages.length]);
+  // Back up from a subthread (or by Back/Forward) it is where he left it. Landing on a message (from its subthread, or a quote's
+  // link) flashes it; otherwise opening with something unread scrolls to the "New" line, and with nothing unread to the bottom.
+  // "Reply in thread" from a menu opens in the box.
+  const attachScroll = useLayerScroll(`${embedded ? "pane:" : ""}thread:${id}`, scrollRef, (el, restored) => {
+    const landed = flashMessage();
+    if (!landed && !restored) lineRef.current ? lineRef.current.scrollIntoView({ block: "center" }) : (el.scrollTop = el.scrollHeight);
+    if (takeCompose()) composer();
+  });
+  // Drawn again each time the thread grows: what arrives is on screen, so it is seen, and the page follows it down. On opening
+  // the scroller isn't attached yet, and its arrival above decides where to land.
+  const endOfThread = useCallback(
+    (end: HTMLElement | null) => {
+      if (!end || !thread) return;
+      markSeen(thread.id, thread.messages.length);
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    },
+    [thread?.id, thread?.messages.length, !!thread?.pending],
+  );
 
   const composer = () => (scrollRef.current?.closest("[data-region]") ?? document).querySelector<HTMLElement>('[data-agent="thread-input"]')?.focus();
   // The root, then the replies: each keyed by its id, or its place for an old message without one.
@@ -155,18 +159,11 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
   };
   const firstNew = lineAt === undefined ? -1 : replies.findIndex(m => thread!.messages.indexOf(m) >= lineAt);
 
-  // Landing on a message (from its subthread, or a quote's link) flashes it; "Reply in thread" from a menu opens in the box.
-  useEffect(() => {
-    // With nothing to land on, the "New" line is brought into view, unless the page's scroll was put back as he left it.
-    const landed = flashMessage();
-    if (!landed && !restored.current) lineRef.current?.scrollIntoView({ block: "center" });
-    if (takeCompose()) composer();
-  }, [id]);
-
   // A selection inside one message offers to quote it; anything else hides the button.
   const [selected, setSelected] = useState<Selected>();
-  useEffect(() => {
-    const onChange = () => {
+  useEventListener(
+    "selectionchange",
+    () => {
       const sel = getSelection();
       const text = sel?.toString().trim();
       const at = (n: Node | null | undefined) => (n instanceof Element ? n : n?.parentElement)?.closest<HTMLElement>("[data-msg]");
@@ -174,10 +171,9 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
       if (!text || !msg || msg !== at(sel.focusNode) || !scrollRef.current?.contains(msg)) return setSelected(undefined);
       const r = sel.getRangeAt(0).getBoundingClientRect();
       setSelected({ thread: msg.dataset.thread!, message: msg.dataset.msg!, text, x: r.right, y: r.top });
-    };
-    document.addEventListener("selectionchange", onChange);
-    return () => document.removeEventListener("selectionchange", onChange);
-  }, []);
+    },
+    { target: document },
+  );
 
   if (!thread) return <p className="p-6 text-muted-foreground">No thread {id}.</p>;
 
@@ -248,7 +244,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {/* An image here opens the viewer over this thread's images, the root's included and its subthreads' not. */}
           <ShotScope.Provider value={shotsOf([...(root ? [root] : []), ...replies])}>
-          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <div ref={attachScroll} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             {root?.ext?.context && <EarlierLine />}
             {root && (
               <RowMenu agent={`msg:${keyOf(root, -1)}`} items={messageMenu(root, keyOf(root, -1))}>
@@ -335,6 +331,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
               );
             })}
             {thread.pending && <Pending pending={thread.pending} names={thread.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />}
+            <div ref={endOfThread} />
           </div>
           </ShotScope.Provider>
           <Composer agent="thread-input" draftKey={`thread:${thread.id}`} onRaise={text => void raise(text)} onSend={text => (setLine({ id }), postToThread(thread.id, "isaac", text, nudge ? "subthread" : undefined))} tools={<NudgeToggle on={nudge} set={on => setNudge(on ? "subthread" : "")} />} toolsOn={!!nudge} placeholder={thread.parentId ? "Reply in thread" : embedded ? "Reply to thread…" : "Reply…"} className="px-4 pt-1 pb-3" />

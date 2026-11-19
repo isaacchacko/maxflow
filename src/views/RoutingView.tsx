@@ -1,5 +1,6 @@
 import { Bot, ChevronLeft, ChevronRight, GitPullRequest, Hash, MessagesSquare, Network, Plus, Radar, Search, SquareArrowOutUpRight, User, Waypoints } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { useEventListener } from "@/lib/effects";
 import { routeChat } from "@/agent/route";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -175,7 +176,6 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
   const agents = agentStore.use();
   const objectives = objectiveStore.use();
   const tasks = taskStore.use();
-  const viewportRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(1200);
   const sentries = sourceStore.use();
   const [shown, setShown] = useState<Set<Source>>(new Set(["isaac", "gh", "slack", "agent", "sentry", "maxflow"]));
@@ -259,20 +259,15 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
 
   const visible = signals.filter(s => shown.has(s.source) && shownNode(`sig:${s.id}`));
 
-  useLayoutEffect(() => {
-    const ro = new ResizeObserver(() => setWidth(viewportRef.current!.clientWidth));
-    ro.observe(viewportRef.current!);
-    return () => ro.disconnect();
-  }, []);
-
   const snapRef = useRef(snap);
   snapRef.current = snap;
   const goRef = useRef(go);
   goRef.current = go;
 
-  /** One sideways swipe moves one view; trackpad momentum after it is swallowed until the swipe goes quiet. */
-  useEffect(() => {
-    const viewport = viewportRef.current!;
+  const attachViewport = useCallback((viewport: HTMLDivElement) => {
+    const ro = new ResizeObserver(() => setWidth(viewport.clientWidth));
+    ro.observe(viewport);
+    // One sideways swipe moves one view; trackpad momentum after it is swallowed until the swipe goes quiet.
     let pushed = 0;
     let spent = false;
     let lastAt = 0;
@@ -292,27 +287,23 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
       spent = true;
     };
     viewport.addEventListener("wheel", onWheel, { passive: false });
-    return () => viewport.removeEventListener("wheel", onWheel);
+    return () => (ro.disconnect(), viewport.removeEventListener("wheel", onWheel));
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
-        e.preventDefault();
-        setPalette(true);
-        return;
-      }
-      if (e.target instanceof HTMLInputElement) return;
-      if (e.key === "/") {
-        e.preventDefault();
-        setPalette(true);
-      }
-      if (e.key === "ArrowRight") go(snap + 1);
-      if (e.key === "ArrowLeft") go(snap - 1);
-    };
-    addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
-  }, [go, snap]);
+  useEventListener("keydown", e => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+      e.preventDefault();
+      setPalette(true);
+      return;
+    }
+    if (e.target instanceof HTMLInputElement) return;
+    if (e.key === "/") {
+      e.preventDefault();
+      setPalette(true);
+    }
+    if (e.key === "ArrowRight") go(snap + 1);
+    if (e.key === "ArrowLeft") go(snap - 1);
+  });
 
   const node = (id: string) => ({ "data-node": id });
   const open = (hash: string) => () => (location.hash = hash);
@@ -572,7 +563,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
       </div>
       )}
 
-      <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-hidden">
+      <div ref={attachViewport} className="relative min-h-0 flex-1 overflow-hidden">
         <div className="absolute top-1/2 z-30 flex -translate-x-1/2 -translate-y-1/2 gap-1" style={{ left: col + GAP / 2 }}>
           {[
             [-1, ChevronLeft, "Previous view"],

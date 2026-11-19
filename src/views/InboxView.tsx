@@ -1,6 +1,6 @@
 import { AlarmClock, ArrowUpToLine, Check, ChevronDown, MessageSquareReply, Pin, Quote, RotateCcw } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { localAt, type Thread } from "@/mock";
 import { markAskShown, objectiveStore, setResolved, startThread, threadStore } from "@/store";
@@ -84,17 +84,23 @@ function useSeenAt() {
       return localAt();
     }
   });
-  useEffect(() => {
-    const mark = () => {
-      try {
-        localStorage.setItem(SEEN_AT, localAt());
-      } catch {}
-    };
-    mark();
-    return mark;
-  }, []);
   return at;
 }
+const markSeenAt = () => {
+  try {
+    localStorage.setItem(SEEN_AT, localAt());
+  } catch {}
+};
+/** On the inbox's frame: he has it open from when it is drawn until it goes. */
+const openInbox = (frame: HTMLElement) => {
+  markSeenAt();
+  return markSeenAt;
+};
+
+/** Drawing an ask flagged, on a page he has in front of him, starts the clock on its agent's default. */
+const askDrawn = (row: HTMLElement | null) => {
+  if (row && document.visibilityState === "visible") markAskShown(row.dataset.ask!);
+};
 
 export function InboxView() {
   const threads = threadStore.use();
@@ -117,11 +123,6 @@ export function InboxView() {
   const replied = rows.filter(r => unseenDeep(r.t, threads) > 0);
   const firstNew = rows.findIndex(r => r.first.from !== "isaac" && r.first.at > seenAt);
   const toggle = (t: Thread) => (setKept(k => new Set(k).add(t.id)), setResolved(t.id, !t.resolved));
-  // Drawing an ask flagged, on a page he has in front of him, starts the clock on its agent's default.
-  const unshown = asks.filter(r => !r.t.asks!.shown).map(r => r.t.id);
-  useEffect(() => {
-    if (document.visibilityState === "visible") for (const id of unshown) markAskShown(id);
-  }, [unshown.join()]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lineRef = useRef<HTMLDivElement>(null);
   const open = (id: string) => (location.hash = `thread/${id}`);
@@ -140,26 +141,25 @@ export function InboxView() {
   };
 
   // Opening, it lands where he left it when coming back, on the thread he climbed out of, on the "New" line, or at the bottom.
-  const restored = useLayerScroll("inbox", scrollRef);
   const atBottom = useRef(true);
-  const mounted = useRef(false);
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
+  const attachScroll = useLayerScroll("inbox", scrollRef, (el, restored) => {
     const from = arrivedFrom();
-    if (!restored.current) {
+    if (!restored) {
       if (lineRef.current) el.scrollTop = lineRef.current.offsetTop - 48;
       else el.scrollTop = el.scrollHeight;
     }
     onScroll();
     if (from) show(from);
-  }, []);
-  // A new thread lands at the bottom, and the channel follows it there when he was already at the bottom.
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (mounted.current && el && atBottom.current) el.scrollTop = el.scrollHeight;
-    mounted.current = true;
-  }, [rows.length]);
+  });
+  // A new thread lands at the bottom, and the channel follows it there when he was already at the bottom. On opening the
+  // scroller isn't attached yet, and its arrival above decides where to land.
+  const endOfInbox = useCallback(
+    (end: HTMLElement | null) => {
+      const el = scrollRef.current;
+      if (end && el && atBottom.current) el.scrollTop = el.scrollHeight;
+    },
+    [rows.length],
+  );
   function onScroll() {
     const el = scrollRef.current!;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
@@ -252,7 +252,7 @@ export function InboxView() {
   );
 
   return (
-    <div className="flex h-full flex-col">
+    <div ref={openInbox} className="flex h-full flex-col">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-5">
             <h1 className="text-sm font-medium">Threads</h1>
             {replied.length > 0 && (
@@ -279,7 +279,7 @@ export function InboxView() {
         {asks.length > 0 && (
           <ol data-agent="inbox-asks" className="flex shrink-0 flex-col border-b bg-warn-soft/40 px-3 py-1">
             {asks.map(({ t, first }) => (
-              <li key={t.id}>
+              <li key={t.id} data-ask={t.id} ref={t.asks!.shown ? undefined : askDrawn}>
                 <button onClick={() => show(t.id)} className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-black/[0.04]">
                   <Avatar from={first.from} small />
                   <span className="shrink-0 rounded-full bg-card px-2 text-xs font-medium text-warn">needs you</span>
@@ -290,7 +290,7 @@ export function InboxView() {
           </ol>
         )}
         <section className="flex min-h-0 flex-1 flex-col">
-          <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-5 pt-0 pb-4">
+          <div ref={attachScroll} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-5 pt-0 pb-4">
             {/* Each day is a section of its own, so its pill sticks only while the day is on screen and the next day's pushes it
                 off: one pill at the top at a time, as in Slack. */}
             {sections.map(({ day, from, to }) => (
@@ -315,6 +315,7 @@ export function InboxView() {
                 })}
               </section>
             ))}
+            <div ref={endOfInbox} />
           </div>
           <Composer autoFocus agent="inbox-input" draftKey="inbox" placeholder="Message Threads" onSend={text => ((atBottom.current = true), startThread(text))} className="px-4 pt-1 pb-3" />
         </section>
