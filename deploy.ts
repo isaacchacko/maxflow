@@ -153,7 +153,7 @@ export async function deploy() {
   if (!after) fail(`the server isn't answering ${BASE} after 2 minutes; see ${LOG}. The health sentry starts a recovery agent once it has been down 45s.`);
   // A session killed on purpose while the server restarted isn't lost.
   const killed = new Set(seq ? ((await (await fetch(`${BASE}/api/events?topic=session/*/killed&after=${seq}`)).json()) as { data: { session: string } }[]).map((e) => e.data.session) : []);
-  const lost = before?.filter((s) => !after!.some((a) => a.id === s.id) && !killed.has(s.id)) ?? [];
+  const lost = before?.filter((s) => s.running && !after!.some((a) => a.id === s.id) && !killed.has(s.id)) ?? [];
   const missing = before ? sentries(before).filter((n) => !sentries(after!).includes(n)) : [];
   console.log(`${after.length} sessions (${before ? `${before.length} before` : "the server was down before"}), ${sentries(after).length} sentries running`);
   if (lost.length || missing.length)
