@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { backgroundShells } from "./background";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
 import { slackAvatar, slackNames } from "./slack-meta";
-import { stats } from "./stats";
+import { agents, calendar, health, stats } from "./stats";
 import { ghStatusTable, tasksTable, threadsTable } from "./state";
 import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
@@ -267,7 +267,8 @@ for (const s of sessions.values())
 const sentryList = process.env.MAXFLOW_SENTRIES ?? "1";
 const wanted = Object.entries(SENTRIES).filter(([n]) => sentryList !== "0" && (sentryList === "1" || sentryList.split(",").includes(n.slice(7))));
 const sentryUp = (name: string) => [...sessions.values()].some((s) => s.sentry && s.name === name && s.exitCode === null);
-for (const [name, cmd] of wanted) if (!sentryUp(name)) markSentry(createSession(name, cmd, DIR));
+// Each start goes on the bus, so the Stats page can count a sentry's restarts.
+for (const [name, cmd] of wanted) if (!sentryUp(name)) markSentry(createSession(name, cmd, DIR)), publish("sentry/start", { name, why: "boot" });
 // A sentry that dies after boot comes back too, 30s after it died and doubling while it keeps dying, up to half an hour;
 // one that has stayed up ten minutes starts over at 30s.
 const respawns = new Map<string, { tries: number; at: number }>();
@@ -282,6 +283,7 @@ setInterval(() => {
     respawns.set(name, { tries: r.tries + 1, at: Date.now() });
     console.log(`${name} is down; starting it again (try ${r.tries + 1})`);
     markSentry(createSession(name, cmd, DIR));
+    publish("sentry/start", { name, why: "respawn", tries: r.tries + 1 });
   }
 }, 15_000);
 
@@ -2620,6 +2622,10 @@ Bun.serve<WsData>({
 
     if (path === "/api/todos" && req.method === "GET") return Response.json(todos);
     if (path === "/api/stats" && req.method === "GET") return Response.json(await stats(url.searchParams.get("week") ?? undefined, url.searchParams.get("repo") ?? undefined));
+    if (path === "/api/stats/calendar" && req.method === "GET") return Response.json(await calendar());
+    if (path === "/api/stats/health" && req.method === "GET") return Response.json(health([...sessions.values()].map((s) => describe(s))));
+    if (path === "/api/stats/agents" && req.method === "GET")
+      return Response.json(agents(Math.min(90, Math.max(1, Number(url.searchParams.get("days")) || 7)), [...sessions.values()].map((s) => describe(s)), objectives));
     if (path === "/api/todos" && req.method === "POST") {
       const { text, day } = (await req.json().catch(() => ({}))) as { text?: string; day?: string };
       if (!text?.trim() || !day || !DAY.test(day)) return new Response("text, and day as YYYY-MM-DD", { status: 400 });
@@ -2924,6 +2930,7 @@ Bun.serve<WsData>({
 });
 
 console.log(`maxflow listening on http://localhost:${PORT}`);
+publish("server/start", { pid: process.pid, commit: Bun.spawnSync(["git", "-C", DIR, "rev-parse", "--short", "HEAD"]).stdout.toString().trim() });
 // Who to stop: `./dev.sh stop` kills this pid and nothing else.
 writeFileSync(`${STATE_DIR}/server.pid`, String(process.pid));
 

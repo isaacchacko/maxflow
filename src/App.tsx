@@ -37,7 +37,8 @@ const ROUTING: readonly string[] = ["events", "objectives", "agents", "threads"]
 
 type ViewId = (typeof views)[number]["id"];
 type Detail = { kind: "page"; ref: PageRef } | { kind: "agent" | "thread"; id: string };
-type Route = { view: ViewId; detail?: Detail };
+// sub: the part after the view, as the Stats tab in #stats/agents.
+type Route = { view: ViewId; detail?: Detail; sub?: string };
 
 function lastView(): ViewId {
   try {
@@ -56,7 +57,7 @@ function routeFromHash(): Route {
   try {
     sessionStorage.setItem("view", view);
   } catch {}
-  return { view };
+  return { view, ...(view === first && id && { sub: id }) };
 }
 
 /**
@@ -153,7 +154,7 @@ export function App() {
           ) : route.view === "restrictions" ? (
             <RestrictionsView />
           ) : route.view === "stats" ? (
-            <StatsView />
+            <StatsView tab={route.sub} />
           ) : route.view === "sentries" ? (
             <SentriesView />
           ) : (

@@ -35,12 +35,13 @@ const reorder = (ids: string[], dragged: string, onto: string) => {
 
 // The yarn mark toggles Stats: clicked there, it goes back to wherever he opened Stats from, or the inbox when he landed on it.
 let beforeStats = "#inbox";
+const onStats = (hash: string) => hash === "#stats" || hash.startsWith("#stats/");
 addEventListener("hashchange", e => {
   const old = new URL(e.oldURL).hash;
-  if (location.hash === "#stats" && old && old !== "#stats") beforeStats = old;
+  if (onStats(location.hash) && old && !onStats(old)) beforeStats = old;
 });
 const toggleStats = (e: MouseEvent) => {
-  if (location.hash !== "#stats") return;
+  if (!onStats(location.hash)) return;
   e.preventDefault();
   location.hash = beforeStats;
 };

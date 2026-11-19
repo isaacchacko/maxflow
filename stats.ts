@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { DIR, STATE_DIR } from "./instance";
+import { ACTIVE_GAP_MS, cost, loadUsage, type Tokens } from "./usage";
 import { threadsTable } from "./state";
 
 // The Stats page's numbers, one week at a time (Monday to Sunday in his time zone).
@@ -179,28 +180,38 @@ export type YarnWeek = { since: number; latencies: Latency[]; counts: Count[] };
 
 type Ev = { seq: number; at: number; topic: string; data: Record<string, unknown> };
 type Msg = { from: string; at: number };
-type Thread = { id: string; messages: Msg[] };
+type Thread = { id: string; messages: Msg[]; objective?: string; routers?: string[] };
 
 // Most of the log is screen reads; only these topics are parsed.
-const WANTED = /"topic":"(signal\/isaac|signal-route\/|slack\/|thread\/|ask\/|wait\/|gh\/[^"]*\/(merged|opened)")/;
+const WANTED = /"topic":"(signal\/isaac|signal-route\/|slack\/|thread\/|ask\/|wait\/|gh\/[^"]*\/(merged|opened)"|ram\/killed|claude-resync\/|server\/start|sentry\/start)/;
 
-let parsed: { size: number; events: Ev[]; since: number } | undefined;
+let parsed: { size: number; events: Ev[]; since: number; perDay: Map<string, number> } | undefined;
 function events() {
   const file = `${STATE_DIR}/events.jsonl`;
-  if (!existsSync(file)) return { events: [] as Ev[], since: Date.now() };
+  if (!existsSync(file)) return { events: [] as Ev[], since: Date.now(), perDay: new Map<string, number>() };
   const text = readFileSync(file, "utf8");
   if (parsed?.size === text.length) return parsed;
   const out: Ev[] = [];
   let since = Infinity;
+  // How many events the bus carried each day, for the Performance tab.
+  const perDay = new Map<string, number>();
+  // Days turn over on the hour in every zone he's in, so the day of each hour is worked out once.
+  const hourDay = new Map<number, string>();
   for (const line of text.split("\n")) {
     if (!line) continue;
-    if (since === Infinity) since = Number(line.match(/"at":(\d+)/)?.[1] ?? Infinity);
+    const at = Number(line.match(/"at":(\d+)/)?.[1]);
+    if (since === Infinity) since = at || Infinity;
+    if (at) {
+      const hour = Math.floor(at / 3600_000);
+      const day = hourDay.get(hour) ?? hourDay.set(hour, dayKey(at)).get(hour)!;
+      perDay.set(day, (perDay.get(day) ?? 0) + 1);
+    }
     if (!WANTED.test(line)) continue;
     try {
       out.push(JSON.parse(line));
     } catch {}
   }
-  parsed = { size: text.length, events: out, since };
+  parsed = { size: text.length, events: out, since, perDay };
   return parsed;
 }
 
@@ -308,4 +319,243 @@ export async function stats(key?: string, repo?: string) {
   const r = repo && /^[\w.-]+\/[\w.-]+$/.test(repo) ? repo : DEFAULT_REPO;
   const [now, before, list] = await Promise.all([gh(r, w), gh(r, prev), repos()]);
   return { week: w, gh: { repo: r, repos: list.includes(r) ? list : [...list, r], now, before, trend: trend(r, w) }, yarn: yarn(w), yarnBefore: yarn(prev) };
+}
+
+// ---- Overview: the contribution calendar
+
+export type Calendar = { at: number; total: number; days: { date: string; count: number }[]; error?: string };
+let calendarCache: Calendar | undefined;
+let calendarLoad: Promise<Calendar> | undefined;
+
+/** His GitHub contribution calendar for the last year, as his profile draws it: every repo, private ones counted without names.
+ * One GraphQL call, at most once an hour. */
+export function calendar(): Promise<Calendar> {
+  if (calendarCache && !calendarCache.error && Date.now() - calendarCache.at < 3600_000) return Promise.resolve(calendarCache);
+  return (calendarLoad ??= retried(`query { viewer { contributionsCollection { contributionCalendar { totalContributions weeks { contributionDays { date contributionCount } } } } } }`)
+    .then(d => {
+      const cal = d.viewer.contributionsCollection.contributionCalendar;
+      const days = (cal.weeks as { contributionDays: { date: string; contributionCount: number }[] }[]).flatMap(w => w.contributionDays.map(x => ({ date: x.date, count: x.contributionCount })));
+      return (calendarCache = { at: Date.now(), total: cal.totalContributions, days });
+    })
+    .catch((e: Error) => {
+      console.error(`stats: contribution calendar failed: ${e.message}`);
+      return calendarCache ? { ...calendarCache, error: e.message } : { at: Date.now(), total: 0, days: [], error: e.message };
+    })
+    .finally(() => (calendarLoad = undefined)));
+}
+
+// ---- Performance: how the server and its sentries are doing
+
+export type SessionInfo = { id: string; name: string; createdAt: number; running?: boolean; status?: string; archived?: boolean; asleep?: boolean; sentry?: boolean; agent?: boolean; role?: { role: string; objective: string } };
+
+const lastDays = (n: number) => Array.from({ length: n }, (_, i) => dayKey(Date.now() - (n - 1 - i) * DAY));
+
+export function health(sessions: SessionInfo[]) {
+  const { events: evs, perDay, since } = events();
+  // The bus log reaches back only so far; days before it would read as zeros.
+  const days = lastDays(14).filter(d => d >= dayKey(since));
+  const perDayOf = (topic: (t: string) => boolean) => {
+    const counts = new Map<string, number>();
+    for (const e of evs) if (topic(e.topic)) counts.set(dayKey(e.at), (counts.get(dayKey(e.at)) ?? 0) + 1);
+    return days.map(d => counts.get(d) ?? 0);
+  };
+  // Deploys are the live checkout fast-forwarding; its reflog keeps when each one landed.
+  const reflog = Bun.spawnSync(["git", "-C", DIR, "reflog", "--date=unix", "--format=%gd%x09%H%x09%gs", "-n", "300"], { stderr: "pipe" }).stdout.toString();
+  const deploys = reflog
+    .split("\n")
+    .filter(l => l.includes("Fast-forward"))
+    .map(l => {
+      const [ref, sha] = l.split("\t");
+      return { at: Number(ref!.match(/\{(\d+)\}/)?.[1]) * 1000, sha: sha!.slice(0, 7) };
+    })
+    .filter(d => d.at > Date.now() - 14 * DAY);
+  const subjects = deploys.length ? Bun.spawnSync(["git", "-C", DIR, "show", "-s", "--format=%h%x09%s", ...deploys.map(d => d.sha)], { stderr: "pipe" }).stdout.toString() : "";
+  const subject = new Map(subjects.split("\n").map(l => [l.slice(0, 7), l.slice(8)]));
+  const starts = evs.filter(e => e.topic === "server/start").map(e => e.at);
+  const respawns = new Map<string, number>();
+  for (const e of evs) if (e.topic === "sentry/start" && e.data.why === "respawn" && e.at > Date.now() - 7 * DAY) respawns.set(e.data.name as string, (respawns.get(e.data.name as string) ?? 0) + 1);
+  const agents = sessions.filter(s => s.agent && !s.sentry);
+  return {
+    days,
+    server: { upSince: Date.now() - process.uptime() * 1000, rssMb: Math.round(process.memoryUsage().rss / 1e6), starts: starts.filter(at => at > Date.now() - 14 * DAY), logSince: starts[0] },
+    deploys: deploys.map(d => ({ ...d, subject: subject.get(d.sha) ?? "" })),
+    sentries: sessions
+      .filter(s => s.sentry)
+      .map(s => ({ name: s.name, running: !!s.running, upSince: s.createdAt, respawns: respawns.get(s.name) ?? 0 }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    sessions: {
+      total: sessions.length,
+      working: agents.filter(s => s.status === "working").length,
+      idle: agents.filter(s => s.running && !s.archived && s.status !== "working").length,
+      asleep: agents.filter(s => s.archived || s.asleep).length,
+      shells: sessions.filter(s => !s.agent && !s.sentry).length,
+    },
+    events: days.map(d => perDay.get(d) ?? 0),
+    ramKills: perDayOf(t => t.startsWith("ram/killed")),
+    resyncs: perDayOf(t => t.startsWith("claude-resync/")),
+  };
+}
+
+// ---- Agents: what they cost and what came of it
+
+let usageScan: Bun.Subprocess | undefined;
+/** Starts a background read of the transcripts when the sums are over two minutes old; true while one runs. */
+function freshenUsage(at: number) {
+  if (usageScan && usageScan.exitCode === null) return true;
+  if (Date.now() - at < 120_000) return false;
+  usageScan = Bun.spawn(["bun", `${DIR}/usage.ts`], { cwd: DIR, stdout: "ignore", stderr: "inherit" });
+  return true;
+}
+
+let usageMemo: { at: number; value: ReturnType<typeof loadUsage> } | undefined;
+const names = () => {
+  try {
+    return JSON.parse(readFileSync(`${STATE_DIR}/names.json`, "utf8")) as Record<string, string>;
+  } catch {
+    return {} as Record<string, string>;
+  }
+};
+
+type Group = {
+  id: string;
+  name: string;
+  kind: "agent" | "sentry" | "outside";
+  objective?: string;
+  role?: string;
+  dollars: number;
+  saved: number;
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  messages: number;
+  activeMs: number;
+  first?: number;
+  last?: number;
+  models: Record<string, number>;
+  prs: number;
+  threads: number;
+};
+
+export function agents(windowDays: number, sessions: SessionInfo[], objectives: { id: string; title: string }[]) {
+  const raw = existsSync(`${STATE_DIR}/stats-usage.json`) ? loadUsage() : { at: 0, files: {} };
+  if (!usageMemo || usageMemo.at !== raw.at) usageMemo = { at: raw.at, value: raw };
+  const usage = usageMemo.value;
+  const scanning = freshenUsage(usage.at);
+  const days = lastDays(windowDays);
+  const inWindow = new Set(days);
+  const from = midnight(days[0]!);
+  const live = new Map(sessions.map(s => [s.id, s]));
+  const named = names();
+
+  // Every transcript joins its agent's group: a subagent's file its parent chat's, a chat outside yarn its folder's.
+  const groups = new Map<string, Group>();
+  // Per day and model: dollars and tokens.
+  const daily = new Map<string, Record<string, [number, number]>>();
+  const byModel = new Map<string, { dollars: number; tokens: number }>();
+  for (const [path, f] of Object.entries(usage.files)) {
+    const parent = f.parent ? usage.files[f.parent] : undefined;
+    const yarnId = f.yarn ?? parent?.yarn;
+    const s = yarnId ? live.get(yarnId) : undefined;
+    const cwd = f.cwd ?? parent?.cwd ?? path.split("/").slice(-2, -1)[0]!;
+    const name = yarnId ? (s?.name ?? named[yarnId] ?? f.name ?? parent?.name ?? yarnId) : cwd.replace(process.env.HOME ?? "", "~");
+    const key = yarnId ?? `outside:${cwd}`;
+    let g = groups.get(key);
+    for (const [day, d] of Object.entries(f.days)) {
+      if (!inWindow.has(day)) continue;
+      g ??= groups.set(key, {
+        id: yarnId ?? cwd,
+        name,
+        kind: !yarnId ? "outside" : s?.sentry || name.startsWith("sentry:") ? "sentry" : "agent",
+        objective: s?.role?.objective ?? f.objective ?? parent?.objective,
+        role: s?.role?.role ?? f.role ?? parent?.role,
+        dollars: 0,
+        saved: 0,
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        messages: 0,
+        activeMs: 0,
+        models: {},
+        prs: 0,
+        threads: 0,
+      }).get(key)!;
+      g.activeMs += d.activeMs;
+      const perModel = (daily.get(day) ?? daily.set(day, {}).get(day)!);
+      for (const [model, t] of Object.entries(d.models) as [string, Tokens][]) {
+        const c = cost(model, t);
+        g.dollars += c.dollars;
+        g.saved += c.saved;
+        g.tokens.input += t[0];
+        g.tokens.output += t[1];
+        g.tokens.cacheWrite += t[2] + t[3];
+        g.tokens.cacheRead += t[4];
+        g.messages += t[5];
+        g.models[model] = (g.models[model] ?? 0) + c.dollars;
+        const pm = (perModel[model] ??= [0, 0]);
+        pm[0] += c.dollars;
+        pm[1] += t[0] + t[1] + t[2] + t[3] + t[4];
+        const m = byModel.get(model) ?? byModel.set(model, { dollars: 0, tokens: 0 }).get(model)!;
+        m.dollars += c.dollars;
+        m.tokens += t[0] + t[1] + t[2] + t[3] + t[4];
+      }
+    }
+    if (g && f.first !== undefined) (g.first = Math.min(g.first ?? f.first, f.first)), (g.last = Math.max(g.last ?? f.last!, f.last!));
+  }
+
+  // What came of it: PRs merged that an agent was told of, and threads resolved that it routed, in the window.
+  const { events: evs } = events();
+  const merged = new Map<string, string[]>();
+  const resolvedAt = new Map<string, number>();
+  for (const e of evs) {
+    if (e.at < from) continue;
+    if (e.topic.startsWith("gh/") && e.topic.endsWith("/merged") && !merged.has(e.data.pr as string)) merged.set(e.data.pr as string, (e.data.told as string[]) ?? []);
+    else if (e.topic.startsWith("thread/") && "resolved" in e.data) {
+      if (e.data.resolved) resolvedAt.set(e.data.thread as string, e.at);
+      else resolvedAt.delete(e.data.thread as string);
+    }
+  }
+  for (const told of merged.values()) for (const id of told) if (groups.has(id)) groups.get(id)!.prs++;
+  const threads = threadsTable.read() as Thread[];
+  for (const t of threads) if (resolvedAt.has(t.id)) for (const id of t.routers ?? []) if (groups.has(id)) groups.get(id)!.threads++;
+
+  const all = [...groups.values()];
+  const title = new Map(objectives.map(o => [o.id, o.title]));
+  const byObjective = new Map<string, { id: string; title: string; dollars: number; agents: number; activeMs: number; prs: Set<string>; threads: number }>();
+  for (const g of all) {
+    if (!g.objective) continue;
+    const o = byObjective.get(g.objective) ?? byObjective.set(g.objective, { id: g.objective, title: title.get(g.objective) ?? g.objective, dollars: 0, agents: 0, activeMs: 0, prs: new Set(), threads: 0 }).get(g.objective)!;
+    o.dollars += g.dollars;
+    o.agents++;
+    o.activeMs += g.activeMs;
+  }
+  for (const [pr, told] of merged) for (const id of told) {
+    const o = groups.get(id)?.objective;
+    if (o) byObjective.get(o)?.prs.add(pr);
+  }
+  for (const t of threads) if (resolvedAt.has(t.id) && t.objective) {
+    const o = byObjective.get(t.objective);
+    if (o) o.threads++;
+  }
+  const sum = (f: (g: Group) => number) => all.reduce((n, g) => n + f(g), 0);
+  const yarnSpend = sum(g => (g.kind === "outside" ? 0 : g.dollars));
+  return {
+    at: usage.at,
+    scanning,
+    days,
+    activeGapMin: ACTIVE_GAP_MS / 60_000,
+    totals: {
+      dollars: sum(g => g.dollars),
+      saved: sum(g => g.saved),
+      input: sum(g => g.tokens.input),
+      output: sum(g => g.tokens.output),
+      cacheRead: sum(g => g.tokens.cacheRead),
+      cacheWrite: sum(g => g.tokens.cacheWrite),
+      messages: sum(g => g.messages),
+      activeMs: sum(g => g.activeMs),
+      agents: all.filter(g => g.kind === "agent").length,
+      yarnDollars: yarnSpend,
+      prs: merged.size,
+      threads: resolvedAt.size,
+    },
+    daily: days.map(d => ({ day: d, models: daily.get(d) ?? {} })),
+    models: [...byModel].map(([model, v]) => ({ model, ...v })).sort((a, b) => b.dollars - a.dollars),
+    groups: all.sort((a, b) => b.dollars - a.dollars).slice(0, 200),
+    objectives: [...byObjective.values()].map(o => ({ ...o, prs: o.prs.size })).sort((a, b) => b.dollars - a.dollars),
+  };
 }
