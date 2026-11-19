@@ -158,7 +158,9 @@ export function Sidebar({ view }: { view: string }) {
         {/* The row the traffic lights sit in: nothing of ours, and it drags the window. */}
         <div style={{ height: "env(titlebar-area-height, 0.5rem)" }} className="shrink-0 [app-region:drag]" />
         <div className="mb-1 flex h-10 shrink-0 items-center gap-1.5 px-1.5">
-          <Mark compact={!open} />
+          <a href="#stats" data-agent="sidebar:stats" title="Stats" className="rounded-md [app-region:no-drag]">
+            <Mark compact={!open} />
+          </a>
         </div>
         <div className="flex flex-col gap-0.5">
           <Entry view="todo" label="Todo" icon={CircleCheckBig} count={needsYou} warn active={view === "todo"} open={open} />

@@ -19,6 +19,7 @@ import { RoutingView } from "@/views/RoutingView";
 import { SentriesView } from "@/views/SentriesView";
 import { RestrictionsView } from "@/views/RestrictionsView";
 import { TodoView } from "@/views/TodoView";
+import { StatsView } from "@/views/StatsView";
 
 export const views = [
   { id: "todo", label: "Todo" },
@@ -29,6 +30,7 @@ export const views = [
   { id: "threads", label: "Thread map" },
   { id: "sentries", label: "Sentries" },
   { id: "restrictions", label: "Restrictions" },
+  { id: "stats", label: "Stats" },
 ] as const;
 /** Views of one routing canvas, in snap order; the rest are pages of their own. */
 const ROUTING: readonly string[] = ["events", "objectives", "agents", "threads"];
@@ -150,6 +152,8 @@ export function App() {
             <TodoView />
           ) : route.view === "restrictions" ? (
             <RestrictionsView />
+          ) : route.view === "stats" ? (
+            <StatsView />
           ) : route.view === "sentries" ? (
             <SentriesView />
           ) : (
