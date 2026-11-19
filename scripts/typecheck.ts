@@ -9,6 +9,11 @@ const isShrinking = process.argv.includes("--shrink");
 
 type Counts = Record<string, number>;
 
+function byCodeUnits(a: string, b: string) {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+}
+
 function typeErrors() {
   const byFile = new Map<string, string[]>();
   for (const project of PROJECTS) {
@@ -35,7 +40,7 @@ if (grew.length > 0) process.exit(1);
 
 if (!isShrinking && shrank.length > 0) console.log(`Fewer type errors than tsc-baseline.json allows in ${shrank.map(([file]) => file).join(", ")}; bun run lint:shrink locks that in.`);
 if (isShrinking) {
-  const files = [...errors.keys()].toSorted();
+  const files = errors.keys().toArray().toSorted(byCodeUnits);
   const next: Counts = Object.fromEntries(files.map((file) => [file, errors.get(file)?.length ?? 0]));
   writeFileSync(BASELINE, `${JSON.stringify(next, undefined, 2)}\n`);
 }
