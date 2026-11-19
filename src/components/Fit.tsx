@@ -5,7 +5,7 @@ const STEPS = ["full", "short", "glyph"] as const;
 
 function fitFullestStep(row: HTMLElement) {
   for (const step of STEPS) {
-    row.setAttribute("data-fit", step);
+    Object.assign(row.dataset, { fit: step });
     if (row.scrollWidth <= row.clientWidth) return;
   }
 }
