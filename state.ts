@@ -2,30 +2,42 @@ import { Database } from "bun:sqlite";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE, STATE_DIR } from "./instance";
+import type { PolledPr } from "./gh";
 
-// yarn's state, in one SQLite file. Stores move here from their JSON files one at a time; a moved store's JSON file is
-// imported once by its migration and then left as it was, a backup nothing reads or writes.
-// WAL lets other processes read while the server writes; busy_timeout makes a writer wait out another instead of failing.
 mkdirSync(STATE_DIR, { recursive: true });
 const once = <T>(make: () => T) => {
   const made: { value?: T } = {};
   return () => (made.value ??= make());
 };
 
-// Ids are kept as TEXT; a store whose ids are numbers (tasks) gets them back as numbers from its JSON.
 type Row = { id: string | number };
+const idAsText = (row: Row) => String(row.id);
 
-const createList = (db: Database, table: string) => db.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY, pos INTEGER NOT NULL, data TEXT NOT NULL)`);
-const createMap = (db: Database, table: string) => db.exec(`CREATE TABLE ${table} (key TEXT PRIMARY KEY, data TEXT NOT NULL)`);
-function importMap(db: Database, table: string, file: string) {
+function createList(db: Database, table: string) {
+  db.run(`CREATE TABLE ${table} (id TEXT PRIMARY KEY, pos INTEGER NOT NULL, data TEXT NOT NULL)`);
+}
+function createMap(db: Database, table: string) {
+  db.run(`CREATE TABLE ${table} (key TEXT PRIMARY KEY, data TEXT NOT NULL)`);
+}
+function importMapFromJsonLeftAsBackup(db: Database, table: string, file: string) {
   if (!existsSync(file)) return;
   const insert = db.prepare(`INSERT INTO ${table} (key, data) VALUES (?, ?)`);
-  for (const [key, value] of Object.entries(JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>)) insert.run(key, JSON.stringify(value));
+  const record = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(record)) insert.run(key, JSON.stringify(value));
 }
-function importList(db: Database, table: string, file: string) {
+function importListFromJsonLeftAsBackup(db: Database, table: string, file: string) {
   if (!existsSync(file)) return;
   const insert = db.prepare(`INSERT INTO ${table} (id, pos, data) VALUES (?, ?, ?)`);
-  (JSON.parse(readFileSync(file, "utf8")) as Row[]).forEach((row, pos) => insert.run(String(row.id), pos, JSON.stringify(row)));
+  const rows = JSON.parse(readFileSync(file, "utf8")) as Row[];
+  for (const [pos, row] of rows.entries()) insert.run(idAsText(row), pos, JSON.stringify(row));
+}
+function moveList(db: Database, table: string, file: string) {
+  createList(db, table);
+  importListFromJsonLeftAsBackup(db, table, `${STATE_DIR}/${file}`);
+}
+function moveMap(db: Database, table: string, file: string) {
+  createMap(db, table);
+  importMapFromJsonLeftAsBackup(db, table, `${STATE_DIR}/${file}`);
 }
 
 function relabelMessage(db: Database, { thread, message, from }: { thread: string; message: string; from: string }) {
@@ -42,16 +54,15 @@ function importInboxFiles(db: Database, dir: string) {
   for (const file of readdirSync(dir)) if (file.endsWith(".json")) insert.run(file.slice(0, -".json".length), readFileSync(`${dir}/${file}`, "utf8"));
 }
 
-// Run once each, in order, with the version bump; user_version counts the ones done. Append only. Every process that opens the
-// database runs them, so they run under the write lock, reading the version again once they hold it.
+// constraint: append only, run in order; SQLite's user_version counts the ones done, so a reordered or removed one reruns or skips others
 const MIGRATIONS: ((db: Database) => void)[] = [
-  (db) => (createList(db, "threads"), importList(db, "threads", `${STATE_DIR}/threads.json`)),
-  (db) => (createList(db, "tasks"), importList(db, "tasks", `${STATE_DIR}/tasks.json`)),
-  (db) => (createMap(db, "gh_status"), importMap(db, "gh_status", `${STATE_DIR}/gh-status.json`)),
-  (db) => (createMap(db, "slack_messages"), importMap(db, "slack_messages", `${STATE_DIR}/slack-messages.json`)),
-  (db) => (createList(db, "objectives"), importList(db, "objectives", `${STATE_DIR}/objectives.json`)),
-  (db) => (createMap(db, "names"), importMap(db, "names", `${STATE_DIR}/names.json`)),
-  (db) => (createList(db, "todos"), importList(db, "todos", `${STATE_DIR}/todos.json`)),
+  (db) => moveList(db, "threads", "threads.json"),
+  (db) => moveList(db, "tasks", "tasks.json"),
+  (db) => moveMap(db, "gh_status", "gh-status.json"),
+  (db) => moveMap(db, "slack_messages", "slack-messages.json"),
+  (db) => moveList(db, "objectives", "objectives.json"),
+  (db) => moveMap(db, "names", "names.json"),
+  (db) => moveList(db, "todos", "todos.json"),
   (db) => {
     createMap(db, "inboxes");
     importInboxFiles(db, `${STATE_DIR}/inboxes`);
@@ -59,24 +70,25 @@ const MIGRATIONS: ((db: Database) => void)[] = [
   (db) => relabelMessage(db, { thread: "th-890892", message: "m-140a9e", from: "cleopatra/yarn-browser" }),
 ];
 const version = (db: Database) => (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-function migrate(db: Database) {
+function migrateUnderWriteLockRecheckingVersion(db: Database) {
   if (version(db) >= MIGRATIONS.length) return;
   db.transaction(() => {
-    for (let v = version(db); v < MIGRATIONS.length; v++) MIGRATIONS[v](db), db.exec(`PRAGMA user_version = ${v + 1}`);
+    for (let v = version(db); v < MIGRATIONS.length; v++) {
+      MIGRATIONS[v]?.(db);
+      db.run(`PRAGMA user_version = ${String(v + 1)}`);
+    }
   }).immediate();
 }
+const READERS_BESIDE_WRITER_AND_WRITERS_WAIT_EACH_OTHER = "PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;";
 const database = once(() => {
   const db = new Database(`${STATE_DIR}/yarn.db`, { create: true, strict: true });
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
-  migrate(db);
+  db.run(READERS_BESIDE_WRITER_AND_WRITERS_WAIT_EACH_OTHER);
+  migrateUnderWriteLockRecheckingVersion(db);
   return db;
 });
 
-// A list of rows kept in order, the shape the server holds in memory. write() takes the whole list and stores only the rows
-// that changed, moved or went, in one transaction.
-function listTable<T extends Row>(table: string) {
-  // What the table holds for each id, as `${pos}\n${data}`.
-  const stored = new Map<string, string>();
+function orderedListTableWritingOnlyChangedRows<T extends Row>(table: string) {
+  const storedPosAndDataById = new Map<string, string>();
   const statements = once(() => {
     const db = database();
     const upsert = db.prepare(`INSERT INTO ${table} (id, pos, data) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET pos = excluded.pos, data = excluded.data`);
@@ -85,36 +97,42 @@ function listTable<T extends Row>(table: string) {
       select: db.prepare(`SELECT id, pos, data FROM ${table} ORDER BY pos`),
       write: db.transaction((list: T[]) => {
         const ids = new Set<string>();
-        list.forEach((row, pos) => {
-          const id = String(row.id), data = JSON.stringify(row);
+        for (const [pos, row] of list.entries()) {
+          const id = idAsText(row);
+          const data = JSON.stringify(row);
           ids.add(id);
-          if (stored.get(id) === `${pos}\n${data}`) return;
+          if (storedPosAndDataById.get(id) === `${String(pos)}\n${data}`) continue;
           upsert.run(id, pos, data);
-          stored.set(id, `${pos}\n${data}`);
-        });
-        for (const id of stored.keys()) if (!ids.has(id)) remove.run(id), stored.delete(id);
+          storedPosAndDataById.set(id, `${String(pos)}\n${data}`);
+        }
+        for (const id of storedPosAndDataById.keys()) {
+          if (ids.has(id)) continue;
+          remove.run(id);
+          storedPosAndDataById.delete(id);
+        }
       }),
     };
   });
   return {
     read(): T[] {
       const rows = statements().select.all() as { id: string; pos: number; data: string }[];
-      stored.clear();
-      for (const r of rows) stored.set(r.id, `${r.pos}\n${r.data}`);
-      return rows.map((r) => JSON.parse(r.data));
+      storedPosAndDataById.clear();
+      for (const r of rows) storedPosAndDataById.set(r.id, `${String(r.pos)}\n${r.data}`);
+      return rows.map((r) => JSON.parse(r.data) as T);
     },
-    write: (list: T[]) => statements().write(list),
+    write: (list: T[]) => {
+      statements().write(list);
+    },
   };
 }
 
-export const threadsTable = listTable<Row & { messages: unknown[] }>("threads");
-export const tasksTable = listTable<Row>("tasks");
-export const objectivesTable = listTable<Row>("objectives");
-export const todosTable = listTable<Row>("todos");
+export const threadsTable = orderedListTableWritingOnlyChangedRows<Row & { messages: unknown[] }>("threads");
+export const tasksTable = orderedListTableWritingOnlyChangedRows<Row>("tasks");
+export const objectivesTable = orderedListTableWritingOnlyChangedRows<Row>("objectives");
+export const todosTable = orderedListTableWritingOnlyChangedRows<Row>("todos");
 
-// Values by key, the shape a sentry keeps as a JSON object. write() takes the whole record and stores only the keys that
-// changed or went. fresh() rereads only when another process has committed since the last read.
-function mapTable<V>(table: string) {
+function keyedTableWritingOnlyChangedKeys<V>(table: string) {
+  type KeyedRead = { hasLoaded: boolean; dataVersionSeen: number; cached: Record<string, V> };
   const statements = once(() => {
     const db = database();
     return {
@@ -126,51 +144,60 @@ function mapTable<V>(table: string) {
       dataVersion: db.prepare("PRAGMA data_version"),
     };
   });
-  // What the table holds for each key; filled by the first read, which a write does first if nothing has read yet.
-  const stored = new Map<string, string>();
-  let loaded = false, seen = -1, cached: Record<string, V> = {};
+  const storedDataByKey = new Map<string, string>();
+  const read: KeyedRead = { hasLoaded: false, dataVersionSeen: -1, cached: {} };
   const all = (): Record<string, V> => {
     const rows = statements().select.all() as { key: string; data: string }[];
-    (loaded = true), stored.clear();
-    for (const r of rows) stored.set(r.key, r.data);
-    return Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.data)]));
+    read.hasLoaded = true;
+    storedDataByKey.clear();
+    for (const r of rows) storedDataByKey.set(r.key, r.data);
+    return Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.data) as V]));
+  };
+  const writeChangedKeys = (record: Record<string, V>) => {
+    const { upsert, remove } = statements();
+    for (const [key, value] of Object.entries(record)) {
+      const data = JSON.stringify(value);
+      if (storedDataByKey.get(key) === data) continue;
+      upsert.run(key, data);
+      storedDataByKey.set(key, data);
+    }
+    for (const key of storedDataByKey.keys()) {
+      if (Object.hasOwn(record, key)) continue;
+      remove.run(key);
+      storedDataByKey.delete(key);
+    }
   };
   return {
     all,
     get(key: string): V | undefined {
       const row = statements().one.get(key) as { data: string } | null;
-      return row ? JSON.parse(row.data) : undefined;
+      return row ? JSON.parse(row.data) as V : undefined;
     },
     fresh(): Record<string, V> {
       const v = (statements().dataVersion.get() as { data_version: number }).data_version;
-      if (v !== seen) (cached = all()), (seen = v);
-      return cached;
+      if (v !== read.dataVersionSeen) {
+        read.cached = all();
+        read.dataVersionSeen = v;
+      }
+      return read.cached;
     },
     write(record: Record<string, V>) {
-      const { db, upsert, remove } = statements();
-      db.transaction(() => {
-        if (!loaded) all();
-        // data_version moves only for other connections' commits, so this process's own write would go unseen by fresh().
-        seen = -1;
-        for (const [key, value] of Object.entries(record)) {
-          const data = JSON.stringify(value);
-          if (stored.get(key) !== data) upsert.run(key, data), stored.set(key, data);
-        }
-        for (const key of stored.keys()) if (!(key in record)) remove.run(key), stored.delete(key);
+      statements().db.transaction(() => {
+        if (!read.hasLoaded) all();
+        // constraint: SQLite's data_version moves only for other connections' commits, so fresh() wouldn't see this process's own write
+        read.dataVersionSeen = -1;
+        writeChangedKeys(record);
       })();
     },
   };
 }
 
-// The gh sentry's last whole fetch of each PR, by owner/repo#n.
-export const ghStatusTable = mapTable<{ at: number; pr: any }>("gh_status");
+export const ghStatusTable = keyedTableWritingOnlyChangedKeys<PolledPr>("gh_status");
 
-// What the slack sentry read from each thread, channel or search it watches, by target ("C…/ts", "C…", "search:…").
 export type SlackKept = { at?: number; title: string; msgs: { ts: string; uid: string; who: string; text: string; link?: string; channel?: string; bot?: boolean }[] };
-export const slackMessagesTable = mapTable<SlackKept>("slack_messages");
+export const slackMessagesTable = keyedTableWritingOnlyChangedKeys<SlackKept>("slack_messages");
 
-// The last name each session went by, by session id.
-export const namesTable = mapTable<string>("names");
+export const namesTable = keyedTableWritingOnlyChangedKeys<string>("names");
 
 export type InboxKept = { inbox: string[]; sending?: { count: number; at: number } };
 const inboxStatements = once(() => {
