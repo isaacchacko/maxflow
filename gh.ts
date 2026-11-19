@@ -139,7 +139,7 @@ export const fetchHeads = (repo: string, numbers: number[], branches: string[]) 
 export async function fetchSessions(): Promise<Session[]> {
   const res = await fetch(`${BASE}/api/sessions`, { signal: AbortSignal.timeout(SESSIONS_TIMEOUT_MS) });
   const sessions: unknown = await res.json();
-  return Array.isArray(sessions) ? sessions.filter((s) => isSession(s)) : [];
+  return Array.isArray(sessions) ? sessions.filter(isSession) : [];
 }
 
 function sessionBranchLink(s: Session): Link | undefined {
