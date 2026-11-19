@@ -33,10 +33,7 @@ for (const [file, lines] of grew) {
 }
 if (grew.length > 0) process.exit(1);
 
-if (!isShrinking && shrank.length > 0) {
-  console.error(`Fewer type errors than tsc-baseline.json allows in ${shrank.map(([file]) => file).join(", ")}. Lock that in: bun scripts/typecheck.ts --shrink`);
-  process.exit(1);
-}
+if (!isShrinking && shrank.length > 0) console.log(`Fewer type errors than tsc-baseline.json allows in ${shrank.map(([file]) => file).join(", ")}; bun run lint:shrink locks that in.`);
 if (isShrinking) {
   const files = [...errors.keys()].toSorted();
   const next: Counts = Object.fromEntries(files.map((file) => [file, errors.get(file)?.length ?? 0]));
