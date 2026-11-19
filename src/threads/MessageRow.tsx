@@ -16,6 +16,14 @@ export function when(at: string) {
  * the new ones in its conversation is muted and labelled context.
  */
 export function MessageRow({ from, at, text, ext, where = true, grouped, meta, children, className, bodyClassName, onClick }: { from: string; at: string; text: string; ext?: External; where?: boolean; grouped?: boolean; meta?: React.ReactNode; children?: React.ReactNode; className?: string; bodyClassName?: string; onClick?: (e: React.MouseEvent) => void }) {
+  // A line maxflow writes itself (a router handing the thread to another): small and muted, not anyone's message.
+  if (from === "maxflow")
+    return (
+      <article data-from={from} data-at={at} className={cn("-mx-5 flex items-baseline gap-2 px-5 py-1 text-xs text-muted-foreground", className)}>
+        <span className="w-9 shrink-0 text-right text-[10px] tabular-nums">{at.slice(11, 16)}</span>
+        <Markdown text={text} className="min-w-0 flex-1 text-xs" />
+      </article>
+    );
   return (
     <article onClick={onClick} data-from={from} data-at={at} data-context={ext?.context || undefined} className={cn("group -mx-5 flex gap-2 px-5 py-2 hover:bg-muted/50", ext?.context && "opacity-60", className)}>
       {grouped ? (
