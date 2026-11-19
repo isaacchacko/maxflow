@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { asOf, candidatesAt, funnelPick, NEW_OBJECTIVE, routeObjective, type ObjectiveRow } from "../jev";
+import { asOf, candidatesAt, funnelPick, JevCallError, NEW_OBJECTIVE, routeObjective, type ObjectiveRow } from "../jev";
 
 const objectives = new Map<string, ObjectiveRow>(
   [
@@ -32,11 +32,21 @@ test("routeObjective asks one choice over the candidates plus new and reads Jev'
     port: 0,
     async fetch(req) {
       asked = await req.json();
-      return Response.json({ model: "fake", answers: { pick: { type: "choice", choice: "dev", probabilities: { dev: 0.9, new: 0.1 }, confidence: 0.53 } } });
+      return Response.json({ model: "fake", answers: { pick: { type: "choice", choice: "dev", probabilities: { dev: 0.9, new: 0.1 }, confidence: 0.53 } }, usage: { input_tokens: 120, output_tokens: 0 } });
     },
   });
-  const answer = await routeObjective({ url: server.url.origin, key: "", model: "fake", sources: new Set(["isaac"]) }, "add vim motions to threads", [...objectives.values()].filter((o) => o.id === "dev"));
+  const answer = await routeObjective({ url: server.url.origin, key: "", model: "fake", sources: new Set(["isaac"]) }, "add vim motions to threads", objectives.values().filter((o) => o.id === "dev").toArray());
   expect(answer.choice).toBe("dev");
   expect(answer.confidence).toBe(0.53);
-  expect(asked).toMatchObject({ model: "fake", state: "add vim motions to threads", questions: { pick: { type: "choice", criteria: { dev: "maxflow development", new: expect.any(String) } } } });
+  expect(answer.usage).toEqual({ input: 120, output: 0 });
+  expect(asked).toMatchObject({ model: "fake", state: "add vim motions to threads", questions: { pick: { type: "choice", criteria: { dev: "maxflow development" } } } });
+});
+
+test("a refused call carries its status and never the key", async () => {
+  using server = Bun.serve({ port: 0, fetch: (req) => new Response(`rate limited for ${req.headers.get("authorization") ?? ""}`, { status: 429 }) });
+  const refused = routeObjective({ url: server.url.origin, key: "sk-secret", model: "fake", sources: new Set(["isaac"]) }, "hello", []);
+  expect(refused).rejects.toBeInstanceOf(JevCallError);
+  const error = await refused.catch((caught: unknown) => caught);
+  expect(error).toMatchObject({ status: 429 });
+  expect(String(error)).not.toContain("sk-secret");
 });

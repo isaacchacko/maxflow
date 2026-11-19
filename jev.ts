@@ -3,10 +3,14 @@ import { readStateText } from "./state";
 export const HOSTED_JEV = "https://api.typesafe.ai";
 export const NEW_OBJECTIVE = "new";
 const REQUEST_TIMEOUT_MS = 30_000;
+const SAME_MESSAGE_MS = 120_000;
 const STATE_CHARS = 6000;
 
 export type JevConfig = { url: string; key: string; model: string; sources: Set<string> };
-export type Choice = { choice: string; confidence: number; probabilities: Record<string, number>; ms: number };
+export type Usage = { input: number; output: number; estimated?: true };
+export type Choice = { choice: string; confidence: number; probabilities: Record<string, number>; ms: number; usage: Usage };
+export type ThreadRow = { id: string; objective?: string; mergedInto?: string; signal?: number; messages?: { from: string; at: number; text: string }[] };
+export type Signal = { seq: number; at: number; text: string };
 export type ObjectiveRow = { id: string; title: string; at: number; closed?: boolean; mergedInto?: string; page?: { kind?: string; goal?: string }[] };
 
 function settingsFile(): Record<string, string> {
@@ -28,21 +32,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export class JevCallError extends Error {
+  constructor(
+    message: string,
+    readonly status: number | "timeout" | "network",
+    readonly ms: number,
+  ) {
+    super(message);
+  }
+}
+
+function usageOf(body: unknown, sentChars: number): Usage {
+  const usage = isRecord(body) ? body["usage"] : undefined;
+  if (isRecord(usage) && typeof usage["input_tokens"] === "number")
+    return { input: usage["input_tokens"], output: typeof usage["output_tokens"] === "number" ? usage["output_tokens"] : 0 };
+  return { input: Math.round(sentChars / 4), output: 0, estimated: true };
+}
+
+async function post(config: JevConfig, body: string, started: number) {
+  try {
+    return await fetch(`${config.url}/v1/systemone`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(config.key !== "" && { authorization: `Bearer ${config.key}` }) },
+      body,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+    throw new JevCallError(`jev call failed: ${String(error)}`, timedOut ? "timeout" : "network", Math.round(performance.now() - started));
+  }
+}
+
 export async function decideChoice(config: JevConfig, state: string, instructions: string, criteria: Record<string, string>): Promise<Choice> {
   const started = performance.now();
-  const res = await fetch(`${config.url}/v1/systemone`, {
-    method: "POST",
-    headers: { "content-type": "application/json", ...(config.key === "" ? {} : { authorization: `Bearer ${config.key}` }) },
-    body: JSON.stringify({ model: config.model, state, questions: { pick: { type: "choice", instructions, criteria } } }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`jev answered ${String(res.status)}: ${(await res.text()).slice(0, 300)}`);
+  const sent = JSON.stringify({ model: config.model, state, questions: { pick: { type: "choice", instructions, criteria } } });
+  const res = await post(config, sent, started);
+  const ms = () => Math.round(performance.now() - started);
+  const scrub = (text: string) => (config.key === "" ? text : text.replaceAll(config.key, "<key>")).slice(0, 300);
+  if (!res.ok) throw new JevCallError(`jev answered ${String(res.status)}: ${scrub(await res.text())}`, res.status, ms());
   const body: unknown = await res.json();
   const answers = isRecord(body) ? body["answers"] : undefined;
   const pick = isRecord(answers) ? answers["pick"] : undefined;
   if (!isRecord(pick) || typeof pick["choice"] !== "string" || typeof pick["confidence"] !== "number" || !isRecord(pick["probabilities"]))
-    throw new TypeError(`jev's answer has no choice: ${JSON.stringify(body).slice(0, 300)}`);
-  return { choice: pick["choice"], confidence: pick["confidence"], probabilities: pick["probabilities"] as Record<string, number>, ms: Math.round(performance.now() - started) };
+    throw new JevCallError(`jev's answer has no choice: ${scrub(JSON.stringify(body))}`, res.status, ms());
+  return { choice: pick["choice"], confidence: pick["confidence"], probabilities: pick["probabilities"] as Record<string, number>, ms: ms(), usage: usageOf(body, sent.length) };
 }
 
 const goalOf = (o: ObjectiveRow) => o.page?.find((block) => block.kind === "vision")?.goal ?? "";
@@ -72,7 +105,40 @@ export function funnelPick(objectives: Map<string, ObjectiveRow>, routed: string
   return !o || o.at >= at ? NEW_OBJECTIVE : asOf(objectives, routed, at);
 }
 
-export function candidatesAt(objectives: Map<string, ObjectiveRow>, at: number, stillOpen: (o: ObjectiveRow) => boolean): ObjectiveRow[] {
-  const ids = new Set([...objectives.values()].filter((o) => o.at <= at && stillOpen(o)).map((o) => asOf(objectives, o.id, at)));
-  return [...ids].map((id) => objectives.get(id)).filter((o) => o !== undefined);
+export function candidatesAt(objectives: Map<string, ObjectiveRow>, at: number, isOpen: (o: ObjectiveRow) => boolean): ObjectiveRow[] {
+  const ids = new Set(objectives.values().filter((o) => o.at <= at && isOpen(o)).map((o) => asOf(objectives, o.id, at)));
+  return ids.values().map((id) => objectives.get(id)).filter((o) => o !== undefined).toArray();
+}
+
+export function rootThread(threads: Map<string, ThreadRow>, id: string) {
+  const seen = new Set<string>();
+  let t = threads.get(id);
+  while (t?.mergedInto !== undefined && !seen.has(t.id)) {
+    seen.add(t.id);
+    t = threads.get(t.mergedInto) ?? t;
+  }
+  return t;
+}
+
+export function threadOf(threads: Map<string, ThreadRow>, signal: Signal) {
+  const named = /as thread (th-[0-9a-f]+)/.exec(signal.text)?.[1];
+  if (named !== undefined) return threads.get(named);
+  const bySignal = threads.values().find((t) => t.signal === signal.seq);
+  if (bySignal !== undefined) return bySignal;
+  const isTheSignal = (m: { from: string; text: string }) => m.from === "isaac" && m.text.trim() === signal.text.trim();
+  const near = threads
+    .values()
+    .flatMap((t) => (t.messages ?? []).filter(isTheSignal).map((m) => ({ t, gap: Math.abs(m.at - signal.at) })))
+    .filter((hit) => hit.gap < SAME_MESSAGE_MS)
+    .toArray()
+    .toSorted((a, b) => a.gap - b.gap);
+  return near[0]?.t;
+}
+
+export function settledLabel(signal: Signal, routed: string, objectives: Map<string, ObjectiveRow>, threads: Map<string, ThreadRow>) {
+  const funnel = funnelPick(objectives, routed, signal.at);
+  const thread = threadOf(threads, signal);
+  const settled = thread === undefined ? undefined : rootThread(threads, thread.id)?.objective;
+  if (settled === undefined || settled === "") return { funnel, label: funnel, from: "route" as const, thread: thread?.id };
+  return { funnel, label: asOf(objectives, settled, signal.at), from: "thread" as const, thread: thread?.id };
 }

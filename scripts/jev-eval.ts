@@ -1,21 +1,18 @@
 #!/usr/bin/env bun
-import { asOf, candidatesAt, funnelPick, jevConfig, NEW_OBJECTIVE, objectiveCriteria, ROUTE_INSTRUCTIONS, ROUTE_PROMPT, routeObjective, type ObjectiveRow } from "../jev";
+import { candidatesAt, jevConfig, NEW_OBJECTIVE, objectiveCriteria, ROUTE_INSTRUCTIONS, ROUTE_PROMPT, routeObjective, settledLabel, type ObjectiveRow, type ThreadRow } from "../jev";
 import { appendStateText, objectivesTable, readStateText, threadsTable } from "../state";
 
 const ANSWERS_FILE = "jev-eval-answers.jsonl";
 const DOLLARS_PER_MTOK = 0.042;
 const THRESHOLDS = [0, 0.3, 0.5, 0.7, 0.8, 0.9, 0.95];
-const SAME_MESSAGE_MS = 120_000;
 
 type Event = { seq: number; at: number; topic: string; data: Record<string, unknown> };
-type Message = { from: string; at: number; text: string };
-type Thread = { id: string; objective?: string; mergedInto?: string; signal?: number; messages?: Message[] };
 type Example = { seq: number; at: number; source: string; text: string; funnel: string; label: string; labelFrom: "thread" | "route"; candidates: ObjectiveRow[] };
 type Answer = { seq: number; model: string; prompt?: string; choice: string; confidence: number };
 
 const args = process.argv.slice(2);
 const flag = (name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
-const run = args.includes("--run");
+const shouldRun = args.includes("--run");
 const config = jevConfig();
 const sources = new Set((flag("--sources") ?? [...(config?.sources ?? ["isaac"])].join(",")).split(","));
 
@@ -23,56 +20,32 @@ const events: Event[] = (readStateText("events.jsonl") ?? "").split("\n").filter
 const signals = new Map(events.filter((e) => e.topic.startsWith("signal/")).map((e) => [e.seq, e]));
 const routes = events.filter((e) => e.topic.startsWith("signal-route/"));
 const objectives = new Map((objectivesTable.read() as ObjectiveRow[]).map((o) => [o.id, o]));
-const threads = new Map((threadsTable.read() as Thread[]).map((t) => [t.id, t]));
+const threads = new Map((threadsTable.read() as ThreadRow[]).map((t) => [t.id, t]));
 
 const lastActivity = new Map<string, number>();
-for (const t of threads.values())
-  for (const m of t.messages ?? []) if (t.objective !== undefined) lastActivity.set(t.objective, Math.max(lastActivity.get(t.objective) ?? 0, m.at));
-
-function rootThread(id: string) {
-  const seen = new Set<string>();
-  let t = threads.get(id);
-  while (t?.mergedInto !== undefined && !seen.has(t.id)) {
-    seen.add(t.id);
-    t = threads.get(t.mergedInto) ?? t;
-  }
-  return t;
-}
-
-function threadOf(signal: Event, text: string) {
-  const named = /as thread (th-[0-9a-f]+)/.exec(text)?.[1];
-  if (named !== undefined) return threads.get(named);
-  const bySignal = [...threads.values()].find((t) => t.signal === signal.seq);
-  if (bySignal !== undefined) return bySignal;
-  const near = [...threads.values()]
-    .flatMap((t) => (t.messages ?? []).filter((m) => m.from === "isaac" && m.text.trim() === text.trim()).map((m) => ({ t, gap: Math.abs(m.at - signal.at) })))
-    .filter((hit) => hit.gap < SAME_MESSAGE_MS)
-    .sort((a, b) => a.gap - b.gap);
-  return near[0]?.t;
+for (const t of threads.values()) {
+  const messages = t.messages ?? [];
+  if (t.objective !== undefined) for (const m of messages) lastActivity.set(t.objective, Math.max(lastActivity.get(t.objective) ?? 0, m.at));
 }
 
 function example(route: Event): Example | undefined {
   const signal = signals.get(Number(route.data["seq"]));
   const text = signal?.data["text"];
-  const source = String(signal?.data["source"] ?? "");
-  if (signal === undefined || typeof text !== "string" || !sources.has(source)) return undefined;
-  const funnel = funnelPick(objectives, String(route.data["objective"]), signal.at);
-  const thread = threadOf(signal, text);
-  const settled = thread === undefined ? undefined : rootThread(thread.id)?.objective;
-  const fromThread = settled !== undefined && settled !== "";
-  const label = fromThread ? asOf(objectives, settled, signal.at) : funnel;
+  const source = signal?.data["source"];
+  if (signal === undefined || typeof text !== "string" || typeof source !== "string" || !sources.has(source)) return;
+  const { funnel, label, from } = settledLabel({ seq: signal.seq, at: signal.at, text }, String(route.data["objective"]), objectives, threads);
   const candidates = candidatesAt(objectives, signal.at, (o) => o.closed !== true || (lastActivity.get(o.id) ?? 0) >= signal.at);
-  return { seq: signal.seq, at: signal.at, source, text, funnel, label, labelFrom: fromThread ? "thread" : "route", candidates };
+  return { seq: signal.seq, at: signal.at, source, text, funnel, label, labelFrom: from, candidates };
 }
 
 const examples = routes.map(example).filter((e) => e !== undefined);
 const pct = (n: number, d: number) => (d === 0 ? "-" : `${((100 * n) / d).toFixed(1)}%`);
-const count = (list: Example[], test: (e: Example) => boolean) => list.filter(test).length;
+const count = (isCounted: (e: Example) => boolean) => examples.filter(isCounted).length;
 
 console.log(`${String(examples.length)} routed signals from ${[...sources].join(", ")} (of ${String(routes.length)} routes)`);
-console.log(`  labels from the signal's thread: ${String(count(examples, (e) => e.labelFrom === "thread"))}; from the route alone: ${String(count(examples, (e) => e.labelFrom === "route"))}`);
-console.log(`  label "new": ${pct(count(examples, (e) => e.label === NEW_OBJECTIVE), examples.length)}; open objectives per signal: median ${String(examples.map((e) => e.candidates.length).sort((a, b) => a - b)[Math.floor(examples.length / 2)] ?? 0)}`);
-console.log(`  funnel agrees with the settled label: ${pct(count(examples, (e) => e.funnel === e.label), examples.length)} (moves and merges corrected the rest)`);
+console.log(`  labels from the signal's thread: ${String(count((e) => e.labelFrom === "thread"))}; from the route alone: ${String(count((e) => e.labelFrom === "route"))}`);
+console.log(`  label "new": ${pct(count((e) => e.label === NEW_OBJECTIVE), examples.length)}; open objectives per signal: median ${String(examples.map((e) => e.candidates.length).toSorted((a, b) => a - b)[Math.floor(examples.length / 2)] ?? 0)}`);
+console.log(`  funnel agrees with the settled label: ${pct(count((e) => e.funnel === e.label), examples.length)} (moves and merges corrected the rest)`);
 
 const sentChars = examples.reduce((sum, e) => sum + e.text.length + ROUTE_INSTRUCTIONS.length + JSON.stringify(objectiveCriteria(e.candidates)).length, 0);
 console.log(`  a run sends about ${String(Math.round(sentChars / 4 / 1000))}k tokens, about $${((sentChars / 4 / 1e6) * DOLLARS_PER_MTOK).toFixed(3)} on hosted Jev`);
@@ -88,11 +61,12 @@ const answers = new Map(
     .map((a) => [a.seq, a]),
 );
 
-if (run) {
+if (shouldRun) {
   if (config === undefined) throw new Error("no Jev configured: set JEV_URL (and JEV_API_KEY for hosted) in ~/.maxflow-v2/jev.env");
   const unsent = [...sources].filter((source) => !config.sources.has(source));
   if (unsent.length > 0) throw new Error(`JEV_SOURCES does not clear ${unsent.join(", ")} for sending; only ${[...config.sources].join(", ")} may leave the machine`);
-  for (const e of examples.filter((x) => !answers.has(x.seq))) {
+  for (const e of examples) {
+    if (answers.has(e.seq)) continue;
     const jev = await routeObjective(config, e.text, e.candidates);
     const answer = { seq: e.seq, model: config.model, prompt: ROUTE_PROMPT, choice: jev.choice, confidence: jev.confidence };
     answers.set(e.seq, answer);
@@ -100,10 +74,7 @@ if (run) {
   }
 }
 
-const scored = examples.flatMap((e) => {
-  const a = answers.get(e.seq);
-  return a === undefined ? [] : [{ e, a }];
-});
+const scored = examples.map((e) => ({ e, a: answers.get(e.seq) })).filter((pair): pair is { e: Example; a: Answer } => pair.a !== undefined);
 if (scored.length > 0) {
   console.log(`\nJev (${config?.model ?? "?"}, prompt ${flag("--prompt") ?? ROUTE_PROMPT}) on ${String(scored.length)} signals: agrees with the label ${pct(scored.filter(({ e, a }) => a.choice === e.label).length, scored.length)}, with the funnel ${pct(scored.filter(({ e, a }) => a.choice === e.funnel).length, scored.length)}`);
   console.log("confidence >=  share decided  accuracy there  funnel accuracy there");
