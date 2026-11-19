@@ -42,7 +42,8 @@ const usage = `usage:
   maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
   maxflow deploy                             ship origin's feat/v2 to the live yarn: refuses a dirty live checkout or a commit whose CI check isn't green,
                                              fast-forwards, restarts, checks every session and sentry came back,
-                                             and restarts the sentries whose code changed
+                                             and restarts the sentries whose code changed;
+                                             one at a time, and a no-op when live is already at origin's tip
   maxflow install                            run this checkout as the login service and add its hooks to ~/.claude/settings.json`;
 import { fetchPrs, links, parsePr, readStatus, readWatches, render, writeWatches } from "./gh";
 import * as slackRead from "./slack-read";

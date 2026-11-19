@@ -1,6 +1,6 @@
 // `cli.ts deploy`: the one way the live yarn changes. The live checkout holds only commits from origin, so a restart ships
 // exactly what is on its branch there, never someone's half-saved edit. Changes are made in a worktree and pushed first.
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import { BASE, LIVE, STATE_DIR } from "./instance";
 import { LOG, checkout, restartCommand } from "./service";
@@ -102,9 +102,48 @@ export async function restartSentries(stale: { name: string; fresh: boolean }[],
   console.log(`restarted ${done.join(", ")}, whose code changed`);
 }
 
+const DEPLOY_LOCK = join(STATE_DIR, "deploy.lock");
+const LOCK_WAIT_MS = 30 * 60_000;
+function lockHolder() {
+  try {
+    return Number(readFileSync(DEPLOY_LOCK, "utf8"));
+  } catch {
+    return 0;
+  }
+}
+const isDeploying = (pid: number) => run(["ps", "-o", "command=", "-p", String(pid)]).out.includes("cli.ts deploy");
+function tryLock() {
+  try {
+    writeFileSync(DEPLOY_LOCK, String(process.pid), { flag: "wx" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function takeDeployLock() {
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  const announced = new Set<number>();
+  while (!tryLock()) {
+    const holder = lockHolder();
+    if (holder === 0) continue;
+    if (!isDeploying(holder)) {
+      if (lockHolder() === holder) rmSync(DEPLOY_LOCK, { force: true });
+      continue;
+    }
+    if (Date.now() > deadline) fail(`the deploy in pid ${holder} has held ${DEPLOY_LOCK} for ${LOCK_WAIT_MS / 60_000} minutes`);
+    if (!announced.has(holder)) console.log(`waiting for the deploy already running (pid ${holder}) to finish`);
+    announced.add(holder);
+    await Bun.sleep(2000);
+  }
+  process.on("exit", () => {
+    if (lockHolder() === process.pid) rmSync(DEPLOY_LOCK, { force: true });
+  });
+}
+
 export async function deploy() {
   if (!LIVE) fail("a dev instance runs from its own checkout; deploy ships the live yarn");
   const live = checkout() ?? fail("no service is installed; run cli.ts install from the live checkout");
+  await takeDeployLock();
   const dirty = run(["git", "status", "--porcelain"], live).out;
   if (dirty) fail(`${live} has uncommitted changes, and a restart would ship them:\n${dirty}\nWhoever owns them commits them from their own worktree and pushes; nobody edits the live checkout.`);
   const branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], live).out;
@@ -113,13 +152,17 @@ export async function deploy() {
   const to = run(["git", "rev-parse", "FETCH_HEAD"], live).out;
   if (!run(["git", "merge-base", "--is-ancestor", from, to], live).ok)
     fail(`live has commits origin/${branch} doesn't:\n${run(["git", "log", "--oneline", `${to}..${from}`], live).out}\nPush them to origin/${branch} first.`);
+  if (from === to) {
+    console.log(`live is already at origin/${branch} (${to.slice(0, 7)}); nothing to deploy`);
+    return;
+  }
   await awaitGreenCi(live, to);
 
   const before = await sessions();
   const seq = Number((await fetch(`${BASE}/api/events?after=now`).catch(() => undefined))?.headers.get("x-maxflow-seq") ?? 0);
-  if (from !== to && !run(["git", "merge", "--ff-only", to], live).ok) fail(`couldn't fast-forward ${live} to ${to.slice(0, 7)}`);
+  if (!run(["git", "merge", "--ff-only", to], live).ok) fail(`couldn't fast-forward ${live} to ${to.slice(0, 7)}`);
   if (!run(["bun", "install", "--frozen-lockfile"], live).ok) fail(`bun install --frozen-lockfile failed in ${live}, which is now at ${to.slice(0, 7)} but not restarted`);
-  console.log(from === to ? `live is at origin/${branch} (${to.slice(0, 7)}); restarting it` : `live ${from.slice(0, 7)} -> ${to.slice(0, 7)}:\n${run(["git", "log", "--oneline", "--no-decorate", `${from}..${to}`], live).out.split("\n").map((l) => `  ${l.slice(0, 120)}`).join("\n")}`);
+  console.log(`live ${from.slice(0, 7)} -> ${to.slice(0, 7)}:\n${run(["git", "log", "--oneline", "--no-decorate", `${from}..${to}`], live).out.split("\n").map((l) => `  ${l.slice(0, 120)}`).join("\n")}`);
   if (!run(["sh", "-c", restartCommand]).ok) fail(`${restartCommand} failed`);
 
   // Adopting every tmux session takes ~20s, and the sentries start after that.
