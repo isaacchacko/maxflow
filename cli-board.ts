@@ -78,18 +78,17 @@ function taskText(t: Reply) {
 
 async function listTasks(args: string[]) {
   const isAll = args.includes("--all");
-  for (const t of replies(await call("/api/tasks"))) if (isAll || (t["status"] !== "done" && t["status"] !== "dropped")) console.log(taskText(t));
+  const tasks = replies(await call("/api/tasks"));
+  for (const t of tasks) if (isAll || (t["status"] !== "done" && t["status"] !== "dropped")) console.log(taskText(t));
 }
 
 const TASK_VALUED = ["--title", "--status", "--answer", "--session", "--link", "--event", "--at", "--objective"];
 
-function parsedAt(at: string | undefined) {
-  if (isBlank(at)) return undefined;
-  return /^\d+$/.test(at ?? "") ? Number(at) : Date.parse(at ?? "");
-}
+const parsedAt = (at: string) => (/^\d+$/.test(at) ? Number(at) : Date.parse(at));
 
 async function editTask(args: string[]) {
   const [ref, ...words] = positional(args, TASK_VALUED);
+  const at = flag(args, "--at");
   if (ref === undefined) fail("usage: maxflow task new <title...> | maxflow task <id> [--title T] ...");
   const edit = {
     title: flag(args, "--title") ?? (ref === "new" ? words.join(" ") : undefined),
@@ -100,18 +99,20 @@ async function editTask(args: string[]) {
     link: flag(args, "--link"),
     event: flag(args, "--event"),
     objective: flag(args, "--objective"),
-    at: parsedAt(flag(args, "--at")),
+    at: isBlank(at) ? undefined : parsedAt(at),
   };
   const t = replyOf(await post(ref === "new" ? "/api/tasks" : `/api/tasks/${ref.replace(/^t/, "")}`, edit));
   console.log(`t${str(t, "id")} ${str(t, "status")}: ${str(t, "title")}`);
 }
 
 async function listObjectives() {
-  for (const o of replies(await call("/api/objectives"))) if (!isTruthy(o["closed"])) console.log(`${str(o, "id")}  ${str(o, "title")}  ${str(o, "cwd")}`);
+  const objectives = replies(await call("/api/objectives"));
+  for (const o of objectives) if (!isTruthy(o["closed"])) console.log(`${str(o, "id")}  ${str(o, "title")}  ${str(o, "cwd")}`);
 }
 
 async function newObjective(args: string[]) {
-  const o = replyOf(await post("/api/objectives", { title: positional(args.slice(1), ["--cwd", "--scope"]).join(" "), cwd: flag(args, "--cwd") ?? process.cwd(), scope: flag(args, "--scope") }));
+  const title = positional(args.slice(1), ["--cwd", "--scope"]).join(" ");
+  const o = replyOf(await post("/api/objectives", { title, cwd: flag(args, "--cwd") ?? process.cwd(), scope: flag(args, "--scope") }));
   console.log(`objective ${str(o, "id")}, router ${str(o, "router")}  ${base}/#objective/${str(o, "id")}`);
 }
 

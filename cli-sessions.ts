@@ -5,7 +5,8 @@ type NewSession = { name: string | undefined; cwd: string; cmd: string[] | undef
 async function create(body: NewSession) {
   const res = await fetch(`${base}/api/sessions`, { method: "POST", ...(caller && { headers: caller }), body: JSON.stringify(body), signal: timeout() });
   if (!res.ok) fail(`${res.status} ${await res.text()}`);
-  console.log(`${base}/#agent/${str(replyOf(await res.json()), "id")}`);
+  const created = replyOf(await res.json());
+  console.log(`${base}/#agent/${str(created, "id")}`);
 }
 
 async function sessionList() {
@@ -13,16 +14,18 @@ async function sessionList() {
 }
 
 async function listSessions() {
-  for (const s of await sessionList()) console.log(`${str(s, "id")}  ${isTruthy(s["running"]) ? "run " : "exit"}  ${str(s, "name")}  ${base}/#agent/${str(s, "id")}`);
+  const sessions = await sessionList();
+  for (const s of sessions) console.log(`${str(s, "id")}  ${isTruthy(s["running"]) ? "run " : "exit"}  ${str(s, "name")}  ${base}/#agent/${str(s, "id")}`);
 }
 
 function chatMark(c: Reply) {
   if (isTruthy(c["session"])) return "mf  ";
-  return isTruthy(c["live"]) ? "live" : "    ";
+  return isTruthy(c["live"]) ? "live" : " ".repeat(4);
 }
 
 async function listChats(args: string[]) {
-  const chats = replies(await (await fetch(`${base}/api/chats?limit=30&q=${encodeURIComponent(args.join(" "))}`, { signal: timeout() })).json());
+  const res = await fetch(`${base}/api/chats?limit=30&q=${encodeURIComponent(args.join(" "))}`, { signal: timeout() });
+  const chats = replies(await res.json());
   for (const c of chats) console.log(`${str(c, "id")}  ${chatMark(c)}  ${str(c, "title").slice(0, 60).padEnd(60)}  ${str(c, "cwd")}`);
 }
 
@@ -30,7 +33,8 @@ async function resumeChat(args: string[]) {
   const res = await fetch(`${base}/api/chats/${argAt(args, 0)}/resume`, { method: "POST", body: JSON.stringify({ bypass: !args.includes("--safe"), force: args.includes("--force") }), signal: timeout() });
   if (res.status === 409) fail("that chat is open in another claude process; rerun with --force to fork it");
   if (!res.ok) fail(await res.text());
-  console.log(`${base}/#agent/${str(replyOf(await res.json()), "id")}`);
+  const resumed = replyOf(await res.json());
+  console.log(`${base}/#agent/${str(resumed, "id")}`);
 }
 
 async function newSession(args: string[]) {
@@ -95,7 +99,8 @@ async function agentsAround(args: string[]) {
   const live = all.filter(hasRole).filter((s) => s.running && s.id !== me.id && s.role.objective === me.role.objective);
   const picker = pickerFor(me, argAt(args, 0));
   if (!picker) fail("who router|parent|workers|objective");
-  for (const s of live.filter(picker)) console.log(`mf-${s.id}  ${s.role.role.padEnd(6)}  ${s.status.padEnd(7)}  ${s.name}`);
+  const picked = live.filter(picker);
+  for (const s of picked) console.log(`mf-${s.id}  ${s.role.role.padEnd(6)}  ${s.status.padEnd(7)}  ${s.name}`);
 }
 
 async function notify(args: string[]) {
@@ -105,7 +110,8 @@ async function notify(args: string[]) {
 
 async function publish(args: string[]) {
   const data: unknown = hasArg(args, 1) ? JSON.parse(argAt(args, 1)) : null;
-  console.log(JSON.stringify(await post("/api/events", { topic: argAt(args, 0), data })));
+  const event = await post("/api/events", { topic: argAt(args, 0), data });
+  console.log(JSON.stringify(event));
 }
 
 async function subscribe(args: string[]) {
@@ -125,6 +131,11 @@ async function subscribe(args: string[]) {
   }
 }
 
+async function printScreen(args: string[]) {
+  const screen = replyOf(await call(`/api/sessions/${argAt(args, 0)}/screen?history=${flag(args, "--history") ?? 0}`));
+  console.log(screen["screen"]);
+}
+
 export const sessionVerbs: Verb[] = [
   { matches: (verb) => verb === "ls", run: listSessions },
   { matches: (verb) => verb === "chats", run: listChats },
@@ -135,7 +146,7 @@ export const sessionVerbs: Verb[] = [
       await post(`/api/sessions/${argAt(args, 0)}/input`, { keys: args.slice(1) });
     },
   },
-  { matches: (verb, args) => verb === "screen" && hasArg(args, 0), run: async (args) => console.log(replyOf(await call(`/api/sessions/${argAt(args, 0)}/screen?history=${flag(args, "--history") ?? 0}`))["screen"]) },
+  { matches: (verb, args) => verb === "screen" && hasArg(args, 0), run: printScreen },
   { matches: (verb, args) => verb === "wait" && hasArg(args, 0), run: screenWait },
   { matches: (verb, args) => verb === "rename" && hasArg(args, 1), run: async (args) => {
       await call(`/api/sessions/${argAt(args, 0)}`, { method: "PATCH", body: JSON.stringify({ name: args.slice(1).join(" ") }) });

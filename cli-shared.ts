@@ -6,7 +6,7 @@ const CLI_FETCH_TIMEOUT_MS = 60_000;
 export const timeout = () => AbortSignal.timeout(CLI_FETCH_TIMEOUT_MS);
 export const mySession = () => process.env["MAXFLOW_SESSION"];
 export const isBlank = (value: string | undefined) => value === undefined || value === "";
-export const isTruthy = (value: unknown) => Boolean(value);
+export const isTruthy: (value: unknown) => boolean = Boolean;
 
 const session = mySession();
 export const caller = session === undefined || session === "" ? undefined : { "x-maxflow-from": session };

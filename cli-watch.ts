@@ -13,14 +13,14 @@ function prOnBranch(l: Link, polled: Record<string, PolledPr>) {
 }
 
 async function prsTiedToMe(ref: string | undefined, polled: Record<string, PolledPr>) {
-  if (!isBlank(ref)) return [parsePr(ref ?? "", process.cwd())];
+  if (!isBlank(ref)) return [parsePr(ref, process.cwd())];
   const me = mySession();
   const mine = (await links()).filter((l) => l.session === me);
   return [...new Set(mine.flatMap((l) => l.pr ?? prOnBranch(l, polled) ?? []))];
 }
 
 function watchPrFrom(key: string, me: string | undefined) {
-  if (isBlank(me) || me === undefined) return;
+  if (isBlank(me)) return;
   if (readWatches().every((w) => !(w.pr === key && w.sessions.includes(me))))
     writeWatches([...readWatches().filter((w) => w.pr !== key), { pr: key, sessions: [...(readWatches().find((w) => w.pr === key)?.sessions ?? []), me] }]);
 }
@@ -42,14 +42,15 @@ async function ghStatus(args: string[]) {
   const prs = await prsTiedToMe(ref, polled);
   if (prs.includes(null)) fail(`can't tell which repo ${String(ref)} is in; use owner/repo#n or a PR url`);
   if (prs.length === 0) fail("you're tied to no PR; name one");
-  for (const key of prs.filter((pr) => pr !== null)) {
+  const keys = prs.filter((pr) => pr !== null);
+  for (const key of keys) {
     const entry = freshEntry(key, polled);
     console.log(args.includes("--json") ? JSON.stringify(entry.pr) : `${render(key, entry.pr, entry.at)}\n`);
   }
 }
 
 function watchSlackFrom(target: string, me: string | undefined) {
-  if (isBlank(me) || me === undefined) return;
+  if (isBlank(me)) return;
   if (slackRead.readWatches().every((w) => !(w.target === target && w.sessions.includes(me))))
     slackRead.writeWatches([...slackRead.readWatches().filter((w) => w.target !== target), { target, sessions: [...(slackRead.readWatches().find((w) => w.target === target)?.sessions ?? []), me] }]);
 }
@@ -70,12 +71,12 @@ async function slackReadVerb(args: string[]) {
   const got = await freshSlack(target);
   const { channel, thread } = slackRead.splitTarget(target);
   console.log(`${got.title}  (polled ${Math.round((Date.now() - got.at) / 1000)}s ago)`);
-  for (const m of got.msgs.slice(-Number(flag(args, "--last") ?? 20)))
-    console.log(`\n${m.who}${isBlank(m.channel) ? "" : ` in ${String(m.channel)}`}  ${new Date(Number(m.ts) * 1000).toLocaleString()}  ${m.link ?? slackRead.permalink(channel, m.ts, thread)}\n${m.text}`);
+  const shown = got.msgs.slice(-Number(flag(args, "--last") ?? 20));
+  for (const m of shown) console.log(`\n${m.who}${isBlank(m.channel) ? "" : ` in ${m.channel}`}  ${new Date(Number(m.ts) * 1000).toLocaleString()}  ${m.link ?? slackRead.permalink(channel, m.ts, thread)}\n${m.text}`);
 }
 
-const withSession = (sessions: string[], session: string | undefined) => [...new Set([...sessions, ...(isBlank(session) || session === undefined ? [] : [session])])];
-const watchedLine = (isWatch: boolean, what: string, session: string | undefined) => `${isWatch ? "watching" : "unwatched"} ${what}${isWatch && !isBlank(session) ? ` for session ${String(session)}` : ""}`;
+const withSession = (sessions: string[], session: string | undefined) => [...new Set([...sessions, ...(isBlank(session) ? [] : [session])])];
+const watchedLine = (isWatch: boolean, what: string, session: string | undefined) => `${isWatch ? "watching" : "unwatched"} ${what}${isWatch && !isBlank(session) ? ` for session ${session}` : ""}`;
 
 async function ghWatch(args: string[]) {
   await didTouchSentry("gh", "write");
