@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { STATE_DIR } from "./instance";
 
 // yarn's state, in one SQLite file. Stores move here from their JSON files one at a time; a moved store's JSON file is
@@ -25,6 +25,13 @@ function importList(table: string, file: string) {
   (JSON.parse(readFileSync(file, "utf8")) as Row[]).forEach((row, pos) => insert.run(String(row.id), pos, JSON.stringify(row)));
 }
 
+// The inboxes 02a95ee kept as one <session id>.json file each.
+function importInboxes(dir: string) {
+  if (!existsSync(dir)) return;
+  const insert = db.prepare("INSERT INTO inboxes (key, data) VALUES (?, ?)");
+  for (const file of readdirSync(dir).filter((f) => f.endsWith(".json"))) insert.run(file.slice(0, -5), readFileSync(`${dir}/${file}`, "utf8"));
+}
+
 // Run once each, in order, with the version bump; user_version counts the ones done. Append only. Every process that opens the
 // database runs them, so they run under the write lock, reading the version again once they hold it.
 const MIGRATIONS: (() => void)[] = [
@@ -35,6 +42,7 @@ const MIGRATIONS: (() => void)[] = [
   () => (createList("objectives"), importList("objectives", `${STATE_DIR}/objectives.json`)),
   () => (createMap("names"), importMap("names", `${STATE_DIR}/names.json`)),
   () => (createList("todos"), importList("todos", `${STATE_DIR}/todos.json`)),
+  () => (createMap("inboxes"), importInboxes(`${STATE_DIR}/inboxes`)),
 ];
 const version = () => (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
 if (version() < MIGRATIONS.length)
@@ -126,3 +134,22 @@ export const slackMessagesTable = mapTable<SlackKept>("slack_messages");
 
 // The last name each session went by, by session id.
 export const namesTable = mapTable<string>("names");
+
+// Each session's messages not yet seen as a prompt, and how many of them are pasted and in flight since when, by session id.
+// Written before the server types anything, so a restart confirms the paste in flight instead of pasting it again.
+export type InboxKept = { inbox: string[]; sending?: { count: number; at: number } };
+const inboxGet = db.prepare("SELECT data FROM inboxes WHERE key = ?");
+const inboxPut = db.prepare("INSERT INTO inboxes (key, data) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET data = excluded.data");
+const inboxDelete = db.prepare("DELETE FROM inboxes WHERE key = ?");
+export const inboxesTable = {
+  get(id: string): InboxKept | undefined {
+    const row = inboxGet.get(id) as { data: string } | null;
+    return row ? (JSON.parse(row.data) as InboxKept) : undefined;
+  },
+  put(id: string, kept: InboxKept) {
+    inboxPut.run(id, JSON.stringify(kept));
+  },
+  delete(id: string) {
+    inboxDelete.run(id);
+  },
+};

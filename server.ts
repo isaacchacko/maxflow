@@ -1,11 +1,11 @@
 import type { ServerWebSocket, Subprocess } from "bun";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { backgroundShells } from "./background";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
 import { slackAvatar, slackNames } from "./slack-meta";
 import { agents, calendar, health, stats } from "./stats";
-import { ghStatusTable, namesTable, objectivesTable, slackMessagesTable, tasksTable, threadsTable, todosTable } from "./state";
+import { ghStatusTable, inboxesTable, namesTable, objectivesTable, slackMessagesTable, tasksTable, threadsTable, todosTable } from "./state";
 import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
@@ -217,39 +217,21 @@ function createSession(name: string, cmd: string[], cwd: string, chatId?: string
   return session;
 }
 
-// A session's inbox, and the messages of it pasted but not yet seen as a prompt, kept in a file written before anything is typed, so
-// a restart delivers each message once: it confirms what was in flight against the transcript instead of pasting it again. They
-// were a tmux option, which tmux refuses past ~16KB ("command too long"), so a long inbox (the funnel's) kept an old value holding
+// A session's inbox and the paste in flight, kept in state.ts before anything is typed, so a restart delivers each message once.
+// They were the tmux option @mf-inbox, which tmux refuses past ~16KB ("command too long"), so a long inbox kept an old value holding
 // messages already delivered, and each restart in a run of deploys delivered them again (258121 four times on 2026-11-19).
-const INBOXES = `${STATE_DIR}/inboxes`;
-mkdirSync(INBOXES, { recursive: true });
 function saveInbox(s: Session) {
-  const file = `${INBOXES}/${s.id}.json`;
-  if (!s.inbox.length && !s.sending) return rmSync(file, { force: true });
-  writeFileSync(`${file}.tmp`, JSON.stringify({ inbox: s.inbox, sending: s.sending && { count: s.sending.count, at: s.sending.at } }));
-  renameSync(`${file}.tmp`, file);
+  if (s.inbox.length === 0 && s.sending === undefined) inboxesTable.delete(s.id);
+  else inboxesTable.put(s.id, { inbox: s.inbox, sending: s.sending && { count: s.sending.count, at: s.sending.at } });
 }
-function loadInbox(id: string, option: string | undefined): Pick<Session, "inbox" | "sending"> {
-  try {
-    const { inbox, sending } = JSON.parse(readFileSync(`${INBOXES}/${id}.json`, "utf8")) as { inbox: string[]; sending?: { count: number; at: number } };
-    return { inbox, sending: sending && { ...sending, text: inbox.slice(0, sending.count).join("\n") } };
-  } catch {}
-  // Kept by a server from before the file: the last value tmux took. Read once: the file takes over and the option goes, since no
-  // file also means an inbox emptied, and an option left behind was delivered again on every restart (1eb5a8f4's four reports at 03:11Z).
-  if (!option) return { inbox: [] };
-  tmux("set-option", "-u", "-t", tmuxName(id), "@mf-inbox");
-  try {
-    const inbox = JSON.parse(option) || [];
-    if (inbox.length) writeFileSync(`${INBOXES}/${id}.json`, JSON.stringify({ inbox }));
-    return { inbox };
-  } catch {
-    return { inbox: [] };
-  }
+function loadInbox(id: string): Pick<Session, "inbox" | "sending"> {
+  const { inbox, sending } = inboxesTable.get(id) ?? { inbox: [] };
+  return { inbox, sending: sending && { ...sending, text: inbox.slice(0, sending.count).join("\n") } };
 }
 
 // Pick up sessions that outlived a previous server, seeding scrollback from tmux's history.
 // One display-message reads every option a session keeps, so adopting costs two tmux calls per session instead of ten.
-const ADOPT_FIELDS = ["history_size", "@mf", "@mf-inbox", "@mf-claude", "@mf-transcript", "@mf-archived", "@mf-asleep", "@mf-sentry", "@mf-wait", "@mf-role"];
+const ADOPT_FIELDS = ["history_size", "@mf", "@mf-claude", "@mf-transcript", "@mf-archived", "@mf-asleep", "@mf-sentry", "@mf-wait", "@mf-role"];
 function adoptSessions() {
   for (const t of tmux("list-sessions", "-F", "#{session_name}").out.split("\n")) {
     if (!t.startsWith("mf-")) continue;
@@ -261,7 +243,7 @@ function adoptSessions() {
       } catch {}
     };
     const meta = json(f["@mf"]) ?? { name: t, cmd: [], cwd: "", createdAt: Date.now() };
-    const session = { id, ...meta, chunks: [], bytes: 0, clients: new Set(), exitCode: null, ...loadInbox(id, f["@mf-inbox"]) } as unknown as Session;
+    const session = { id, ...meta, chunks: [], bytes: 0, clients: new Set(), exitCode: null, ...loadInbox(id) } as unknown as Session;
     const history = Number(f.history_size) > 0 ? tmux("capture-pane", "-p", "-e", "-J", "-t", t, "-S", "-", "-E", "-1").out : "";
     if (history.trim()) push(session, new TextEncoder().encode(history.replace(/\n/g, "\r\n")));
     session.lastOutputAt = session.createdAt;
@@ -2956,7 +2938,7 @@ Bun.serve<WsData>({
       if (req.method === "DELETE") {
         publish(`session/${s.id}/killed`, { session: s.id, name: s.name });
         sessions.delete(s.id);
-        rmSync(`${INBOXES}/${s.id}.json`, { force: true });
+        inboxesTable.delete(s.id);
         tmux("kill-session", "-t", tmuxName(s.id));
         s.proc.kill();
         for (const ws of s.clients) ws.close();

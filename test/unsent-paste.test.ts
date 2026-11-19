@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterAll, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,8 +55,10 @@ test("a message left pasted in the prompt unsent gets its Enter", async () => {
   expect((await fetch(`${base}/api/sessions/${id}/notify`, { method: "POST", body: JSON.stringify({ text: "[maxflow] one\ntwo\nthree" }) })).status).toBe(202);
   for (const end = Date.now() + 20_000; !existsSync(submitted) && Date.now() < end; ) await Bun.sleep(250);
   expect(existsSync(submitted)).toBe(true);
-  // The box emptied, which with no transcript confirms it: the message leaves the inbox file a restart would read.
-  const inbox = join(home, `.maxflow-v2-${instance}`, "inboxes", `${id}.json`);
-  for (const end = Date.now() + 10_000; existsSync(inbox) && Date.now() < end; ) await Bun.sleep(250);
-  expect(existsSync(inbox)).toBe(false);
+  // The box emptied, which with no transcript confirms it: the message leaves the stored inbox a restart would read.
+  const db = new Database(join(home, `.maxflow-v2-${instance}`, "yarn.db"), { readonly: true });
+  const stored = () => db.query("SELECT data FROM inboxes WHERE key = ?").get(id);
+  for (const end = Date.now() + 10_000; stored() !== null && Date.now() < end; ) await Bun.sleep(250);
+  expect(stored()).toBeNull();
+  db.close();
 }, 45_000);
