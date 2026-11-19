@@ -9,6 +9,11 @@ import { yarn } from "./lint/plugin";
 const EFFECT_ADVICE =
   "derive it in render, do it in the event handler, read a store with useSyncExternalStore, reset with a key, use a ref callback for the DOM node, or use a hook from src/lib/effects.ts.";
 const EFFECTS = ["useEffect", "useLayoutEffect", "useInsertionEffect"];
+const CHILD_PROCESS_MESSAGE = "Use Bun.spawn with an argv array: no shell string to quote, and no sync variant to block the event loop.";
+const CHILD_PROCESS = [
+  { name: "child_process", message: CHILD_PROCESS_MESSAGE },
+  { name: "node:child_process", message: CHILD_PROCESS_MESSAGE },
+];
 
 export default defineConfig(
   { ignores: ["node_modules/**", "src/components/ui/**", "**/*.d.ts"] },
@@ -78,8 +83,7 @@ export default defineConfig(
         "error",
         {
           paths: [
-            { name: "child_process", message: "Use Bun.spawn with an argv array: no shell string to quote, and no sync variant to block the event loop." },
-            { name: "node:child_process", message: "Use Bun.spawn with an argv array: no shell string to quote, and no sync variant to block the event loop." },
+            ...CHILD_PROCESS,
             { name: "react", importNames: EFFECTS, message: `Effects live only in src/lib/effects.ts: ${EFFECT_ADVICE}` },
           ],
         },
@@ -118,14 +122,14 @@ export default defineConfig(
   },
   {
     files: ["src/lib/effects.ts"],
-    rules: { "no-restricted-imports": "off", "no-restricted-properties": "off" },
+    rules: { "no-restricted-imports": ["error", { paths: CHILD_PROCESS }], "no-restricted-properties": "off" },
   },
   {
     files: ["eslint.config.ts", "lint/rules/*.ts"],
     rules: { "no-restricted-syntax": "off" },
   },
   {
-    files: ["test/**/*.ts", "fixtures/**/*.ts"],
+    files: ["test/**/*.{ts,tsx}", "fixtures/**/*.ts"],
     rules: { "max-lines-per-function": "off", "max-nested-callbacks": "off", "max-statements": "off" },
   },
 );
