@@ -134,9 +134,10 @@ export const FILE = `${STATE_DIR}/restrictions.json`;
 export function loadRestrictions(file = FILE): Restriction[] {
   const seededFile = file.replace(/\.json$/, "-seeded.json");
   if (!existsSync(file)) return saveRestrictions(SEED, file), writeFileSync(seededFile, JSON.stringify(SEED.map((r) => r.id))), structuredClone(SEED);
-  let list: Restriction[];
-  try { list = JSON.parse(readFileSync(file, "utf8")); } catch { return structuredClone(SEED); }
-  const seeded = new Set<string>((() => { try { return JSON.parse(readFileSync(seededFile, "utf8")); } catch { return list.map((r) => r.id); } })());
+  let list: Restriction[], text: string;
+  try { list = JSON.parse((text = readFileSync(file, "utf8"))); } catch { return structuredClone(SEED); }
+  const seededText = (() => { try { return readFileSync(seededFile, "utf8"); } catch { return ""; } })();
+  const seeded = new Set<string>((() => { try { return JSON.parse(seededText); } catch { return list.map((r) => r.id); } })());
   for (const s of SEED) {
     const r = list.find((o) => o.id === s.id);
     if (r) {
@@ -147,8 +148,9 @@ export function loadRestrictions(file = FILE): Restriction[] {
     } else if (!seeded.has(s.id) && (!s.parent || list.some((o) => o.id === s.parent))) list.push(structuredClone(s));
     seeded.add(s.id);
   }
-  writeFileSync(seededFile, JSON.stringify([...seeded]));
-  saveRestrictions(list, file);
+  // Every hook process loads this on every tool call, so it writes only what the catalog changed.
+  if (JSON.stringify([...seeded]) !== seededText) writeFileSync(seededFile, JSON.stringify([...seeded]));
+  if (JSON.stringify(list, null, 2) !== text) saveRestrictions(list, file);
   return list;
 }
 export const saveRestrictions = (list: Restriction[], file = FILE) => writeFileSync(file, JSON.stringify(list, null, 2));
