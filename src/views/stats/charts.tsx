@@ -1,19 +1,18 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { DAY_KEY, Delta, StageBars, HOUR, HOUR_MS, JOURNEY, LATENCY, duration, hourLabel, median, quantile, short, weekday, type Latency, type Peek, type YarnWeek } from "./parts";
+import { DAY_KEY, Delta, ShadeKey, StageBars, HOUR, HOUR_MS, JOURNEY, LATENCY, duration, hourLabel, median, quantile, short, weekday, type Latency, type Peek, type YarnWeek } from "./parts";
 
-const HEAT_KEY = [0.08, 0.31, 0.54, 0.77, 1];
-const heat = (fraction: number) => `color-mix(in srgb, var(--viz) ${Math.round(8 + 92 * fraction)}%, var(--viz-track))`;
-const HOURS_PER_COLUMN = 2;
-const COLUMNS = 24 / HOURS_PER_COLUMN;
-const twoDigits = (h: number) => String(h).padStart(2, "0");
+const heat = (fraction: number) => (fraction > 0 ? `color-mix(in oklab, var(--viz) ${Math.round(18 + 82 * fraction)}%, var(--viz-track))` : "var(--viz-track)");
+const HEAT_KEY = [0, 0.25, 0.5, 0.75, 1].map(heat);
+const HOURS = Array.from({ length: 24 }, (_, h) => h);
+const HOURS_BETWEEN_LABELS = 3;
 
-function countsByDayAndColumn(times: number[], days: string[]) {
-  const grid = days.map(() => Array.from({ length: COLUMNS }, () => 0));
+function countsByDayAndHour(times: number[], days: string[]) {
+  const grid = days.map(() => HOURS.map(() => 0));
   for (const at of times) {
     const row = grid[days.indexOf(DAY_KEY.format(at))];
-    const column = Math.floor((Number(HOUR.format(at)) % 24) / HOURS_PER_COLUMN);
-    if (row) row[column] = (row[column] ?? 0) + 1;
+    const hour = Number(HOUR.format(at)) % 24;
+    if (row) row[hour] = (row[hour] ?? 0) + 1;
   }
   return grid;
 }
@@ -21,51 +20,44 @@ function countsByDayAndColumn(times: number[], days: string[]) {
 const labelTone = (isLit: boolean) => (isLit ? "text-[var(--viz-text)]" : "text-[var(--viz-text-3)]");
 
 export function Heatmap({ times, days, onPeek, noun }: { times: number[]; days: string[]; onPeek: (p: Peek) => void; noun: string }) {
-  const grid = countsByDayAndColumn(times, days);
+  const grid = countsByDayAndHour(times, days);
   const max = Math.max(1, ...grid.flat());
   const [hover, setHover] = useState<[number, number]>();
   const leave = () => {
     setHover(undefined);
     onPeek(undefined);
   };
-  const enter = (d: number, c: number) => {
+  const enter = (d: number, h: number) => {
     const day = days[d] ?? "";
-    const from = c * HOURS_PER_COLUMN;
-    setHover([d, c]);
-    onPeek({ value: (grid[d]?.[c] ?? 0).toLocaleString(), label: `${noun} · ${weekday(day, "short")} ${short(day)}, ${hourLabel(from)}–${hourLabel((from + HOURS_PER_COLUMN) % 24)}` });
+    setHover([d, h]);
+    onPeek({ value: (grid[d]?.[h] ?? 0).toLocaleString(), label: `${noun} · ${weekday(day, "short")} ${short(day)}, ${hourLabel(h)}–${hourLabel((h + 1) % 24)}` });
   };
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2" onMouseLeave={leave}>
-      <div className="grid h-56 w-full gap-1" style={{ gridTemplateColumns: `auto repeat(${COLUMNS}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${days.length}, minmax(0, 1fr)) auto` }}>
+    <div className="flex min-h-0 flex-1 flex-col gap-2.5" onMouseLeave={leave}>
+      <div className="grid h-52 w-full gap-[3px] p-0.5" style={{ gridTemplateColumns: `2.5rem repeat(24, minmax(0, 1fr))`, gridTemplateRows: `repeat(${days.length}, minmax(0, 1fr)) auto` }}>
         {days.map((day, d) => (
           <div key={day} className="contents">
-            <span className={cn("flex items-center pe-2 text-xs font-medium whitespace-nowrap transition-colors duration-150", labelTone(hover?.[0] === d))}>{weekday(day, "short")}</span>
-            {(grid[d] ?? []).map((n, c) => (
+            <span className={cn("self-center text-[11px] transition-colors duration-150", labelTone(hover?.[0] === d))}>{weekday(day, "short")}</span>
+            {(grid[d] ?? []).map((n, h) => (
               <div
-                key={c}
+                key={h}
                 role="img"
-                aria-label={`${weekday(day, "short")} ${twoDigits(c * HOURS_PER_COLUMN)}: ${n}`}
-                onMouseEnter={() => enter(d, c)}
-                className={cn("min-h-0 rounded-[4px] transition-[background-color,box-shadow] duration-150 ease-out", hover?.[0] === d && hover[1] === c && "ring-2 ring-[var(--viz-cursor)]")}
+                aria-label={`${weekday(day, "short")} ${hourLabel(h)}: ${n}`}
+                onMouseEnter={() => enter(d, h)}
+                className={cn("min-h-0 rounded-[3px] outline-offset-1", hover?.[0] === d && hover[1] === h && "outline-2 outline-[var(--viz-text-2)]")}
                 style={{ background: heat(n / max) }}
               />
             ))}
           </div>
         ))}
         <span aria-hidden="true" />
-        {Array.from({ length: COLUMNS }, (_, c) => (
-          <span key={c} className={cn("truncate pt-0.5 text-center text-xs font-medium transition-colors duration-150", labelTone(hover?.[1] === c))}>
-            {twoDigits(c * HOURS_PER_COLUMN)}
+        {HOURS.map(h => (
+          <span key={h} className={cn("mt-1 text-left text-[11px] leading-none whitespace-nowrap transition-colors duration-150", labelTone(hover?.[1] === h))}>
+            {h % HOURS_BETWEEN_LABELS === 0 ? hourLabel(h) : ""}
           </span>
         ))}
       </div>
-      <div className="flex items-center justify-end gap-1.5 pb-1 text-xs font-medium text-[var(--viz-text-3)]">
-        <span>Less</span>
-        {HEAT_KEY.map(f => (
-          <span key={f} className="size-3 rounded-[3px]" style={{ background: heat(f) }} />
-        ))}
-        <span>More</span>
-      </div>
+      <ShadeKey shades={HEAT_KEY} />
     </div>
   );
 }

@@ -230,9 +230,9 @@
    re-rasters the inbox's full-size image previews, which made zooming crawl. */
 :root[data-viewing] #root *, :root[data-viewing] #root *::before, :root[data-viewing] #root *::after { animation-play-state: paused !important; }
 
-/* The Stats page, drawn in BoardUI's tokens (boardui.com, MIT theme.css): its card surface, inner cards, chart track and hover
-   cursor, its three text greys, the lime/rose delta chips, and its chart accents over Tailwind's palette (chart-6 blue for
-   yarn's one series; chart-6, -1, -5, -8 for the model families). */
+/* The Stats page's tokens, after BoardUI's free MIT theme (see CREDITS.md): card surface, inner cards, chart track and cursor,
+   three text greys, the lime/rose delta chips, and chart accents over Tailwind's palette (one blue for yarn's series; blue,
+   teal, purple and yellow for the model families). */
 .viz {
   --viz-tile: #f7f7f7; --viz-inner: #fff; --viz-track: #ebebeb; --viz-cursor: oklch(87% 0 0); --viz-neutral: oklch(87% 0 0);
   --viz-text: oklch(14.5% 0 0); --viz-text-2: oklch(55.6% 0 0); --viz-text-3: oklch(70.8% 0 0);
@@ -240,12 +240,10 @@
   --viz-up-bg: oklch(93.8% 0.127 124.321); --viz-up: oklch(45.3% 0.124 130.933); --viz-down-bg: oklch(89.2% 0.058 10.001); --viz-down: oklch(45.5% 0.188 13.697);
   --viz: #3392ff; --viz-active: oklch(62.3% 0.214 259.815);
   --viz-2: oklch(77.7% 0.152 181.912); --viz-3: oklch(71.4% 0.203 305.504); --viz-4: oklch(85.2% 0.199 91.936);
-  --viz-cal-1: oklch(88.2% 0.059 254.128); --viz-cal-2: #3392ff; --viz-cal-3: oklch(62.3% 0.214 259.815); --viz-cal-4: oklch(54.6% 0.245 262.881); --viz-cal-5: oklch(48.8% 0.243 264.376);
 }
 .dark .viz {
   --viz-tile: oklch(24.5% 0 0); --viz-inner: oklch(29% 0 0); --viz-track: oklch(31% 0 0); --viz-cursor: oklch(42% 0 0); --viz-neutral: oklch(31% 0 0);
   --viz-text: oklch(98.5% 0 0); --viz-text-2: oklch(55.6% 0 0); --viz-text-3: oklch(43.9% 0 0);
   --viz-shadow: 0 1px 1px 0 rgb(0 0 0 / 0.14); --viz-seg: oklch(33% 0 0); --viz-seg-shadow: 0 1px rgb(0 0 0 / 0.16);
   --viz-up-bg: color-mix(in srgb, oklch(27.4% 0.072 132.109) 60%, transparent); --viz-up: oklch(76.8% 0.233 130.85); --viz-down-bg: color-mix(in srgb, oklch(27.1% 0.105 12.094) 60%, transparent); --viz-down: oklch(64.5% 0.246 16.439);
-  --viz-cal-1: oklch(28.2% 0.091 267.935); --viz-cal-2: oklch(42.4% 0.199 265.638); --viz-cal-3: oklch(48.8% 0.243 264.376); --viz-cal-4: oklch(54.6% 0.245 262.881); --viz-cal-5: oklch(62.3% 0.214 259.815);
 }

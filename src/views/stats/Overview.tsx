@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { cn, hasText } from "@/lib/utils";
 import { useJson } from "./load";
-import { InnerStat, SectionHead, Tile, short, type Peek, type Stats } from "./parts";
+import { HOVER_OUTLINE, InnerStat, SectionHead, ShadeKey, Tile, short, type Peek, type Stats } from "./parts";
 import { CountTiles, GhNote, GhTrendTiles, RepoPicker, RhythmTile, ThroughputTile, YarnNote } from "./sections";
 
 type Calendar = { at: number; total: number; days: { date: string; count: number }[]; error?: string };
@@ -27,22 +27,21 @@ function runEndingTodayOrYesterday(days: Day[]) {
   return current;
 }
 
-function tierCuts(days: Day[]) {
+function quartileCuts(days: Day[]) {
   const busy = days
     .map(d => d.count)
     .filter(n => n > 0)
     .toSorted((a, b) => a - b);
-  return [0.2, 0.4, 0.6, 0.8].map(q => busy[Math.floor(q * (busy.length - 1))] ?? 0);
+  return [0.25, 0.5, 0.75].map(q => busy[Math.floor(q * (busy.length - 1))] ?? 0);
 }
 
-function tierOf(n: number, cuts: number[]) {
+function shadeOf(n: number, cuts: number[]) {
   if (n === 0) return 0;
-  const above = cuts.findIndex(cut => n <= cut);
-  return above === -1 ? TIERS : above + 1;
+  const below = cuts.findIndex(cut => n <= cut);
+  return below === -1 ? SHADES.length - 1 : below + 1;
 }
 
-const TIERS = 5;
-const TIER_FILL = ["var(--viz-neutral)", "var(--viz-cal-1)", "var(--viz-cal-2)", "var(--viz-cal-3)", "var(--viz-cal-4)", "var(--viz-cal-5)"];
+const SHADES = ["var(--viz-track)", ...[30, 55, 78, 100].map(p => `color-mix(in oklab, var(--viz) ${p}%, var(--viz-track))`)];
 const WEEKDAY_LABELS = ["", "Mon", "", "Wed", "", "Fri", ""];
 const isSunday = (date: string) => new Date(`${date}T12:00:00Z`).getUTCDay() === 0;
 const weekdayIndex = (date: string) => new Date(`${date}T12:00:00Z`).getUTCDay();
@@ -87,7 +86,7 @@ const contributions = (n: number) => (n === 1 ? "1 contribution" : `${n.toLocale
 
 function ContributionCalendar({ cal, onDay }: { cal: Calendar; onDay: (date: string) => void }) {
   const [peek, setPeek] = useState<Peek>();
-  const cuts = tierCuts(cal.days);
+  const cuts = quartileCuts(cal.days);
   const weeks = weeksFromSunday(cal.days);
   const columns = { gridTemplateColumns: `auto repeat(${weeks.length}, var(--cell))` };
   return (
@@ -98,10 +97,10 @@ function ContributionCalendar({ cal, onDay }: { cal: Calendar; onDay: (date: str
           <p className="text-sm font-medium text-[var(--viz-text-2)]">Activity</p>
           <p className="text-[13px] font-medium text-[var(--viz-text-3)]">Click a day to see its week below</p>
         </div>
-        <div ref={scrollToToday} className="overflow-x-auto pb-1 [--cell:13px] lg:overflow-visible lg:[--cell:minmax(0,1fr)]" onMouseLeave={() => setPeek(undefined)}>
-          <div className="grid w-max grid-rows-[repeat(7,auto)_auto] gap-1 lg:w-full" style={columns}>
+        <div ref={scrollToToday} className="overflow-x-auto px-0.5 pt-0.5 pb-2 [--cell:12px] lg:overflow-visible lg:[--cell:minmax(0,1fr)]" onMouseLeave={() => setPeek(undefined)}>
+          <div className="grid w-max grid-rows-[repeat(7,auto)_auto] gap-[3px] lg:w-full" style={columns}>
             {WEEKDAY_LABELS.map((d, i) => (
-              <span key={i} className="flex items-center pe-1 text-xs leading-none font-medium text-[var(--viz-text-3)]" style={{ gridColumn: 1, gridRow: i + 1 }}>
+              <span key={i} className="self-center pr-2 text-[11px] leading-none text-[var(--viz-text-3)]" style={{ gridColumn: 1, gridRow: i + 1 }}>
                 {d}
               </span>
             ))}
@@ -110,30 +109,23 @@ function ContributionCalendar({ cal, onDay }: { cal: Calendar; onDay: (date: str
                 <button
                   key={d.date}
                   type="button"
-                  data-tier={tierOf(d.count, cuts)}
                   aria-label={`${contributions(d.count)} on ${LONG_DAY(d.date)}`}
                   title={`${contributions(d.count)} on ${LONG_DAY(d.date)}`}
                   onClick={() => onDay(d.date)}
                   onMouseEnter={() => setPeek({ value: d.count.toLocaleString(), label: LONG_DAY(d.date) })}
-                  className="aspect-square w-full cursor-pointer rounded-[3px] outline-none hover:ring-2 hover:ring-[var(--viz-cursor)] focus-visible:ring-2 focus-visible:ring-[var(--viz-cursor)]"
-                  style={{ background: TIER_FILL[tierOf(d.count, cuts)], gridColumn: i + 2, gridRow: weekdayIndex(d.date) + 1 }}
+                  className={cn("aspect-square cursor-pointer rounded-[2px]", HOVER_OUTLINE)}
+                  style={{ background: SHADES[shadeOf(d.count, cuts)], gridColumn: i + 2, gridRow: weekdayIndex(d.date) + 1 }}
                 />
               )),
             )}
             {monthStarts(weeks).map(m => (
-              <span key={m.column} className="pt-1 text-[13px] leading-none font-medium whitespace-nowrap text-[var(--viz-text-3)]" style={{ gridColumn: m.column, gridRow: 8 }}>
+              <span key={m.column} className="mt-1.5 text-[11px] leading-none whitespace-nowrap text-[var(--viz-text-3)]" style={{ gridColumn: m.column, gridRow: 8 }}>
                 {m.label}
               </span>
             ))}
           </div>
         </div>
-        <div className="flex items-center justify-end gap-1.5 text-xs font-medium text-[var(--viz-text-3)]">
-          <span>Less</span>
-          {TIER_FILL.map(fill => (
-            <span key={fill} className="size-3 rounded-[3px]" style={{ background: fill }} />
-          ))}
-          <span>More</span>
-        </div>
+        <ShadeKey shades={SHADES} />
       </div>
     </Tile>
   );

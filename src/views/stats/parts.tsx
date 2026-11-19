@@ -163,10 +163,11 @@ type ColumnsProps = {
 
 const localeNumber = (v: number) => v.toLocaleString();
 export const AXIS_TICK = { fontSize: 13, fill: "var(--viz-text-3)" };
-const BAR_RADIUS = 10;
-const FADED = "color-mix(in srgb, var(--viz) 45%, var(--viz-track))";
-const OUTLINE_INSET = 3;
-const MIN_VISIBLE_BAR_PX = 6;
+const BAR_RADIUS = 6;
+const FADED = "color-mix(in oklab, var(--viz) 40%, var(--viz-track))";
+const HOVERED_TRACK = "color-mix(in oklab, var(--viz) 14%, var(--viz-track))";
+const CHART_EDGE = 2;
+const MIN_VISIBLE_BAR_PX = 4;
 const visibleWhenAboveZero = (v: number | undefined | null) => (v !== undefined && v !== null && v > 0 ? MIN_VISIBLE_BAR_PX : 0);
 export const indexOf = (state: MouseHandlerDataParam) => (state.isTooltipActive && state.activeTooltipIndex !== undefined ? Number(state.activeTooltipIndex) : undefined);
 
@@ -193,29 +194,26 @@ function shownTicks(count: number) {
   return new Set(count > 7 ? [0, count - 1] : Array.from({ length: count }, (_, i) => i));
 }
 
-function trackWithHoverOutline(hover: number | undefined) {
+function trackTintedOnHover(hover: number | undefined) {
   type TrackProps = { x?: number; y?: number; width?: number; height?: number; index?: number };
   return function Track({ x = 0, y = 0, width = 0, height = 0, index }: TrackProps) {
     const radius = Math.min(BAR_RADIUS, width / 2);
-    return (
-      <g>
-        <rect x={x} y={y} width={width} height={height} rx={radius} ry={radius} fill="var(--viz-track)" />
-        <rect
-          x={x - OUTLINE_INSET}
-          y={y - OUTLINE_INSET}
-          width={width + 2 * OUTLINE_INSET}
-          height={height + 2 * OUTLINE_INSET}
-          rx={radius + OUTLINE_INSET}
-          ry={radius + OUTLINE_INSET}
-          fill="none"
-          stroke="var(--viz-cursor)"
-          strokeWidth={2}
-          opacity={hover === index ? 1 : 0}
-          className="transition-opacity duration-150 ease-out"
-        />
-      </g>
-    );
+    return <rect x={x} y={y} width={width} height={height} rx={radius} ry={radius} fill={hover === index ? HOVERED_TRACK : "var(--viz-track)"} className="transition-[fill] duration-150" />;
   };
+}
+
+export const HOVER_OUTLINE = "outline-offset-1 hover:outline-2 hover:outline-[var(--viz-text-2)] focus-visible:outline-2 focus-visible:outline-[var(--viz-text-2)]";
+
+export function ShadeKey({ shades }: { shades: string[] }) {
+  return (
+    <div className="flex items-center justify-end gap-1 text-[11px] text-[var(--viz-text-3)]">
+      <span className="mr-0.5">Less</span>
+      {shades.map(fill => (
+        <span key={fill} className="size-2.5 rounded-[2px]" style={{ background: fill }} />
+      ))}
+      <span className="ml-0.5">More</span>
+    </div>
+  );
 }
 
 export function Columns({ values, labels, ticks: tickLabels = labels, strong, onPeek, onPick, height = "h-28", format = localeNumber }: ColumnsProps) {
@@ -240,18 +238,18 @@ export function Columns({ values, labels, ticks: tickLabels = labels, strong, on
   return (
     <div className={cn("min-h-0 w-full", height, onPick !== undefined && "cursor-pointer")}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={rows} margin={{ top: OUTLINE_INSET, right: OUTLINE_INSET, bottom: 0, left: OUTLINE_INSET }} barCategoryGap="22%" onMouseMove={enter} onMouseLeave={leave} onClick={pick}>
+        <BarChart data={rows} margin={{ top: CHART_EDGE, right: CHART_EDGE, bottom: 0, left: CHART_EDGE }} barCategoryGap="18%" onMouseMove={enter} onMouseLeave={leave} onClick={pick}>
           <Tooltip content={() => null} cursor={false} />
           <XAxis dataKey="tick" interval={0} axisLine={false} tickLine={false} tickMargin={8} height={24} tick={edgeAnchoredTick(ticks, values.length)} />
           <Bar
             dataKey="v"
             radius={BAR_RADIUS}
-            maxBarSize={32}
+            maxBarSize={28}
             minPointSize={visibleWhenAboveZero}
-            background={trackWithHoverOutline(hover)}
+            background={trackTintedOnHover(hover)}
             shape={(props: BarShapeProps) => <Rectangle {...props} fill={hover === props.index || strong(props.index) ? "var(--viz)" : FADED} />}
             isAnimationActive
-            animationDuration={450}
+            animationDuration={300}
           />
         </BarChart>
       </ResponsiveContainer>
@@ -273,26 +271,25 @@ export function StageBars({ rows, fmt = localeNumber, top, onPeek }: { rows: Sta
     onPeek?.(undefined);
   };
   return (
-    <div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 py-1" onMouseLeave={leave}>
+    <ul className="flex w-full flex-col gap-2.5" onMouseLeave={leave}>
       {rows.map(r => {
-        const isFaded = hover !== undefined && hover !== r.key;
-        const width = r.value !== undefined && r.value > 0 ? `max(${(r.value / most) * 100}%, 1.25rem)` : "0%";
+        const share = r.value !== undefined && r.value > 0 ? `max(${(r.value / most) * 100}%, 0.5rem)` : "0%";
         return (
-          <div key={r.key} className="contents" onMouseEnter={() => enter(r)}>
-            <span className={cn("max-w-40 truncate text-end text-sm text-[var(--viz-text-2)] transition-opacity duration-200", isFaded && "opacity-40")} title={r.label}>
-              {r.label}
-            </span>
-            <div className={cn("relative h-5 min-w-0 overflow-hidden rounded-full bg-[var(--viz-track)] transition-opacity duration-200", isFaded && "opacity-40")}>
-              <div className="absolute inset-y-0 start-0 rounded-full transition-[width,background-color] duration-500 ease-out" style={{ width, background: hover === r.key ? "var(--viz-active)" : (r.color ?? "var(--viz)") }} />
+          <li key={r.key} className={cn("flex flex-col gap-1 transition-opacity duration-150", hover !== undefined && hover !== r.key && "opacity-50")} onMouseEnter={() => enter(r)}>
+            <div className="flex items-baseline gap-2 text-[13px]">
+              <span className="min-w-0 flex-1 truncate text-[var(--viz-text-2)]" title={r.label}>
+                {r.label}
+              </span>
+              <span className="font-medium text-[var(--viz-text)] tabular-nums">{r.value === undefined ? "–" : fmt(r.value)}</span>
+              {hasText(r.note) && <span className="w-12 text-right text-[11px] text-[var(--viz-text-3)] tabular-nums">{r.note}</span>}
             </div>
-            <span className={cn("flex items-baseline justify-end gap-1.5 whitespace-nowrap transition-opacity duration-200", isFaded && "opacity-40")}>
-              <span className="text-sm font-medium text-[var(--viz-text)] tabular-nums">{r.value === undefined ? "–" : fmt(r.value)}</span>
-              {hasText(r.note) && <span className="text-xs font-medium text-[var(--viz-text-3)] tabular-nums">{r.note}</span>}
-            </span>
-          </div>
+            <div className="h-2 overflow-hidden rounded-[4px] bg-[var(--viz-track)]">
+              <div className="h-full rounded-[4px] transition-[width,background-color] duration-300" style={{ width: share, background: hover === r.key ? "var(--viz-active)" : (r.color ?? "var(--viz)") }} />
+            </div>
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }
 
