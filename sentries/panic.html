@@ -61,8 +61,8 @@
     <div class="status" id="status" role="status"><span class="spin"></span><span id="line">Restarting…</span></div>
     <ol class="steps">
       <li class="done" id="s1">Noticed the tangle <span id="since"></span></li>
-      <li class="now" id="s2">Rewinding the ball (restart) <span id="runs"></span></li>
-      <li id="s3">Calling in a helper if it's still knotted</li>
+      <li class="now" id="s2"><span id="s2text">Rewinding the ball (restart)</span> <span id="runs"></span></li>
+      <li id="s3"><span id="s3text">Calling in a helper if it's still knotted</span></li>
       <li id="pane" hidden></li>
       <li id="s4">Back to knitting: this page reloads itself, where you were</li>
     </ol>
@@ -80,7 +80,10 @@
   const span = (s) => s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`;
   const secs = (t) => Math.max(0, Math.round((Date.now() - t) / 1000));
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  let last = null, termAgent = null, agentId = null, back = false, buildWaitSince = 0, ws = null, term = null;
+  let last = null, termAgent = null, agentId = null, back = false, buildWaitSince = 0, ws = null, term = null, pollTimer = 0, polling = false;
+  // Every request gives up after a few seconds, so one that hangs (a swapping Mac, the port changing hands) can't stall the poll.
+  const get = (url) => fetch(url, { cache: "no-store", signal: AbortSignal.timeout(4000) });
+  const isPanic = (r) => !!(r.headers.get("x-yarn-panic") || r.headers.get("x-maxflow-down"));
 
   // The helper's terminal, once one starts: the panel widens to make room for it (no space is kept for it before), and he can type to it.
   // A new helper (the last one stopped while yarn was still down) gets a fresh terminal on the same panel.
@@ -106,8 +109,14 @@
     new ResizeObserver(() => fit.fit()).observe($("term"));
   }
 
-  // One line that says where it stands, kept current in place; the steps below it say the same as a list.
+  // A step's label lives in its own span, so setting it never removes the counters beside it. render() can't throw: a throw
+  // there once ended the poll, and the page sat on "Deploying" after the server was back (th-c4cf1e).
   function render() {
+    try { draw(); } catch (e) { console.error("panic page render:", e); }
+  }
+
+  // One line that says where it stands, kept current in place; the steps below it say the same as a list.
+  function draw() {
     if (!last || back) return;
     const down = secs(last.downSince);
     $("since").textContent = `· ${span(down)} ago`;
@@ -127,44 +136,55 @@
     }
     if (helping) {
       $("s2").className = "done"; $("s3").className = "now";
-      $("s3").textContent = "Calling in a helper: it's on it";
+      $("s3text").textContent = "Calling in a helper: it's on it";
       $("line").textContent = `A helper is untangling it · ${span(secs(last.agent.at))}`;
     } else if (last.gaveUp) {
       $("s2").className = "done"; $("s3").className = "now";
-      $("s3").textContent = "Gave up calling helpers";
+      $("s3text").textContent = "Gave up calling helpers";
       $("line").textContent = `Gave up: ${last.gaveUp.why}. Restart it by hand: ${last.gaveUp.restart}`;
     } else if (last.deploy) {
       const late = Date.now() - last.deploy.at > last.deploy.expectedMs;
-      $("s2").textContent = `Deploying ${last.deploy.commit}: restarting onto it`;
+      $("s2text").textContent = `Deploying ${last.deploy.commit}: restarting onto it`;
       $("line").textContent = late ? (left ? `The deploy's restart is running late, calling in a helper in ${span(left)}` : "Calling in a helper…") : `Deploying ${last.deploy.commit} · restarting ${span(secs(last.deploy.at))}`;
     } else {
       $("line").textContent = left ? `Still down, calling in a helper in ${span(left)}` : "Calling in a helper…";
     }
-    $("log").textContent = last.log;
+    $("log").textContent = last.log ?? "";
   }
 
-  // Back is the real server answering: /api/world as JSON without the panic page's header. Until then nothing reloads, so the
-  // page never lands on the browser's own "can't connect" page, which never retries.
+  // Back is the real server answering: its tiny /api/instance as JSON without the panic page's header (not /api/world, 2.5 MB
+  // to fetch and parse on a swapping Mac). Until then nothing reloads, so the page never lands on the browser's own "can't
+  // connect" page, which never retries.
   async function serverBack() {
-    const w = await fetch("/api/world", { cache: "no-store" }).catch(() => null);
-    if (!w || !w.ok || (w.headers.get("x-yarn-panic") || w.headers.get("x-maxflow-down"))) return false;
-    try { await w.json(); } catch { return false; }
+    const r = await get("/api/instance").catch(() => null);
+    if (!r || !r.ok || isPanic(r)) return false;
+    const instance = await r.json().catch(() => null);
+    if (!instance || typeof instance.pid !== "number") return false;
     // Its frontend may still be building; give that a little while, then reload anyway (a broken build has its own agent).
-    const page = await fetch(location.pathname, { cache: "no-store" }).catch(() => null);
+    const page = await get(location.pathname).catch(() => null);
     if (page && page.status >= 500 && Date.now() - (buildWaitSince ||= Date.now()) < 10_000) return false;
     return true;
   }
 
+  // One check at a time; the next is always scheduled in finally, so nothing a check does can end the chain. Coming back
+  // to the window checks at once, since a background window's timers are throttled.
   async function poll() {
-    if (back) return;
+    if (back || polling) return;
+    polling = true;
+    clearTimeout(pollTimer);
     try {
-      const r = await fetch("/__panic/state", { cache: "no-store" });
-      if (r.headers.get("x-yarn-panic") || r.headers.get("x-maxflow-down")) last = await r.json();
+      const r = await get("/__panic/state");
+      if (isPanic(r)) last = await r.json();
       else if (await serverBack()) return comeBack();
     } catch { /* the port changing hands while the server starts */ }
-    render();
-    setTimeout(poll, 1000);
+    finally {
+      polling = false;
+      render();
+      if (!back) pollTimer = setTimeout(poll, 1000);
+    }
   }
+  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && poll());
+  window.addEventListener("focus", () => poll());
 
   // A reload, not location.assign(location.href): assigning the same URL with a #hash is a jump within the page, which never
   // reloads. The URL and hash he was on are kept.
