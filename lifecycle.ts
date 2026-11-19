@@ -138,8 +138,8 @@ export async function stopAgent(s: Session) {
 }
 function putToSleep(s: Session, chat: string) {
   // The respawn keeps the pane's history but wipes its screen, which holds the chat's last reply, so the placeholder prints that screen back first.
-  const screen = writeStateText(`asleep-${s.id}.ans`, tmux("capture-pane", "-p", "-e", "-J", "-t", tmuxName(s.id)).out.trimEnd() + "\x1b[0m\n");
-  if (!respawn(s.id, "--", process.execPath, `${DIR}/sleeper.ts`, screen, BASE, s.id)) return;
+  const screenFile = writeStateText(`asleep-${s.id}.ans`, tmux("capture-pane", "-p", "-e", "-J", "-t", tmuxName(s.id)).out.trimEnd() + "\x1b[0m\n");
+  if (!respawn(s.id, "--", process.execPath, `${DIR}/sleeper.ts`, screenFile, BASE, s.id)) return;
   s.asleep = chat;
   setOption(s.id, "@mf-asleep", chat);
   setClaudeState(s, "gone");
@@ -262,7 +262,7 @@ export async function inputBox(s: Session) {
   const lines = (await tmuxAsync("capture-pane", "-p", "-e", "-t", tmuxName(s.id))).out.split("\n");
   const plain = (l: string) => l.replace(/\x1b\[[\d;]*m/g, "");
   const border = (l: string) => /^─{10,}/.test(plain(l).trim());
-  const i = lines.findLastIndex((l, i) => i > 0 && plain(l).startsWith("❯") && border(lines[i - 1]));
+  const i = lines.findLastIndex((l, j) => j > 0 && plain(l).startsWith("❯") && border(lines[j - 1]));
   if (i < 0) return null;
   const end = lines.findIndex((l, j) => j > i && border(l));
   const first = lines[i].slice(lines[i].indexOf("❯") + 1).replace(/^[\s\u00a0]+/, "");
