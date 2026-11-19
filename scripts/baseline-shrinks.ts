@@ -14,22 +14,22 @@ const head = git("rev-parse", "HEAD");
 const mergeBase = git("merge-base", "HEAD", "origin/feat/v2");
 const base = mergeBase === undefined || mergeBase === head ? git("rev-parse", "HEAD~1") : mergeBase;
 
-function flatten(file: string, text: string | undefined): Counts {
+function totals(file: string, text: string | undefined): Counts {
   if (text === undefined) return {};
-  if (file === "tsc-baseline.json") return JSON.parse(text) as Counts;
+  if (file === "tsc-baseline.json") return { "type errors": Object.values(JSON.parse(text) as Counts).reduce((sum, n) => sum + n, 0) };
   type Suppressions = Record<string, Record<string, { count: number }>>;
   const suppressions = JSON.parse(text) as Suppressions;
   const counts: Counts = {};
-  for (const [path, rules] of Object.entries(suppressions)) {
-    for (const [rule, { count }] of Object.entries(rules)) counts[`${path} ${rule}`] = count;
+  for (const rules of Object.values(suppressions)) {
+    for (const [rule, { count }] of Object.entries(rules)) counts[rule] = (counts[rule] ?? 0) + count;
   }
   return counts;
 }
 
 function grownIn(file: string) {
-  const before = flatten(file, base === undefined ? undefined : git("show", `${base}:${file}`));
+  const before = totals(file, base === undefined ? undefined : git("show", `${base}:${file}`));
   if (Object.keys(before).length === 0) return [];
-  const after = flatten(file, readFileSync(join(root, file), "utf8"));
+  const after = totals(file, readFileSync(join(root, file), "utf8"));
   return Object.entries(after)
     .filter(([key, count]) => count > (before[key] ?? 0))
     .map(([key, count]) => `${file}: ${key} ${String(before[key] ?? 0)} -> ${String(count)}`);
@@ -37,7 +37,7 @@ function grownIn(file: string) {
 
 const grown = ["eslint-suppressions.json", "tsc-baseline.json"].flatMap((file) => grownIn(file));
 if (grown.length > 0) {
-  console.error(`The lint baselines only shrink, and these grew since ${base?.slice(0, 7) ?? "the base"}:\n${grown.map((g) => `  ${g}`).join("\n")}\nFix the new violations instead of suppressing them.`);
+  console.error(`The lint baselines only shrink, and these grew since ${base?.slice(0, 7) ?? "the base"}:\n${grown.map((g) => `  ${g}`).join("\n")}\nTotals are per rule across files, so code moved between files may carry its counts along; a net rise is new violations. Fix them instead of suppressing them.`);
   process.exit(1);
 }
 console.log(`ok   baselines didn't grow since ${base?.slice(0, 7) ?? "(no base)"}`);

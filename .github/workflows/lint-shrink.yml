@@ -12,7 +12,7 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      - name: lower each baseline count to what the code has now; a count never rises here
+      - name: rewrite both baselines to exactly what the code has now; baseline-shrinks.ts refuses a commit whose totals rose
         run: bun run lint:shrink || true
       - uses: actions/upload-artifact@v4
         with:
