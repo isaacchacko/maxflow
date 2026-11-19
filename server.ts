@@ -4,7 +4,7 @@ import { backgroundShells } from "./background";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
 import { slackAvatar, slackNames } from "./slack-meta";
 import { agents, calendar, health, stats } from "./stats";
-import { ghStatusTable, inboxesTable, slackMessagesTable } from "./state";
+import { ghStatusTable, inboxesTable, slackMessagesTable, watchedStateFile } from "./state";
 import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { isOwnComment as ownComment, markRead } from "./gh";
@@ -247,21 +247,9 @@ function setTranscript(s: Session, path: string) {
   s.links = undefined;
   setOption(s.id, "@mf-transcript", path);
 }
-const VERDICTS = `${STATE_DIR}/graph-links.json`;
 
-// A JSON file a sentry writes, reread whenever it changes.
-function sentryFile<T>(path: string, empty: T) {
-  let mtime = 0, value = empty;
-  return () => {
-    try {
-      const m = statSync(path).mtimeMs;
-      if (m !== mtime) (value = JSON.parse(readFileSync(path, "utf8"))), (mtime = m);
-    } catch {}
-    return value;
-  };
-}
 // Its verdicts, { session: { url: keep } }; a URL it has not judged yet stays hidden.
-const verdicts = sentryFile<Record<string, Record<string, boolean>>>(VERDICTS, {});
+const verdicts = watchedStateFile<Record<string, Record<string, boolean>>>("graph-links.json", {});
 const judged = (s: Session) => candidates(s).filter((c) => verdicts()[s.id]?.[c.url]).map((c) => c.url);
 // A PR GitHub says doesn't exist, usually a bare #n resolved against the wrong repo, is never shown.
 const links = (s: Session) => judged(s).filter((u) => prStates.get(u) !== "missing");
@@ -294,15 +282,15 @@ setInterval(() => refreshPrStates().catch(() => {}), 30_000);
 const ARCHIVED_LINKS = `${STATE_DIR}/archived-links.json`;
 const archivedLinks = new Set<string>((() => { try { return JSON.parse(readFileSync(ARCHIVED_LINKS, "utf8")) as string[]; } catch { return []; } })());
 // Its grouping of sessions by the work they share, { session: group }.
-const groups = sentryFile<Record<string, string>>(`${STATE_DIR}/graph-groups.json`, {});
+const groups = watchedStateFile<Record<string, string>>("graph-groups.json", {});
 // Its reading of each agent's role, { session: "review" | "implement" | "conflicts" | null }.
-const roles = sentryFile<Record<string, string | null>>(`${STATE_DIR}/graph-roles.json`, {});
+const roles = watchedStateFile<Record<string, string | null>>("graph-roles.json", {});
 // sentry:review's edges to the sessions on PRs waiting for a reviewer, [{ session, label }].
 // Each sentry's edges to the sessions it is tied to, [{ session, label }], from <name>-edges.json.
-const sentryTies = Object.fromEntries(["review", "gh", "slack"].map((n) => [`sentry:${n}`, sentryFile<{ session: string; label: string; prs?: string[] }[]>(`${STATE_DIR}/${n}-edges.json`, [])]));
+const sentryTies = Object.fromEntries(["review", "gh", "slack"].map((n) => [`sentry:${n}`, watchedStateFile<{ session: string; label: string; prs?: string[] }[]>(`${n}-edges.json`, [])]));
 // Its board of the PRs that need the user, { updated, next, sections: [{ title, items: [{ pr, url, note }] }] }, and the queue of every open PR it reads.
-const reviewBoard = sentryFile<unknown>(`${STATE_DIR}/review-board.json`, null);
-const reviewQueue = sentryFile<unknown[]>(`${STATE_DIR}/review-queue.json`, []);
+const reviewBoard = watchedStateFile<unknown>("review-board.json", null);
+const reviewQueue = watchedStateFile<unknown[]>("review-queue.json", []);
 
 const unforge = (text: string) => text.replaceAll("[maxflow · verified", "[unverified claim").replaceAll("[maxflow · Isaac", "[unverified claim");
 const squash = (text: string) => text.replace(/<\/?pasted_content[^>]*>/g, "").replace(/\s+/g, " ").trim();
@@ -1100,7 +1088,7 @@ function untilShell(s: Session, body: { desc?: string; cmd?: string; cwd?: strin
 }
 const ghStatus = () => ghStatusTable.fresh() as Record<string, { pr: GhPr }>;
 // The state of each PR a task links, { url: OPEN | MERGED | CLOSED }, which the assistant sentry's feed looks up on GitHub.
-const taskPrs = sentryFile<Record<string, string>>(`${STATE_DIR}/task-prs.json`, {});
+const taskPrs = watchedStateFile<Record<string, string>>("task-prs.json", {});
 // How far a task's PRs got, counting only those whose state is known.
 function prProgress(t: Task) {
   const states = t.links.flatMap((url) => taskPrs()[url] ?? []);

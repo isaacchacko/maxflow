@@ -282,3 +282,21 @@ export function stateDirectory(name: string): string {
   mkdirSync(path, { recursive: true });
   return path;
 }
+
+export function watchedStateFile<T>(name: string, empty: T) {
+  const path = stateFile(name);
+  let mtime = 0;
+  let value = empty;
+  return () => {
+    try {
+      const modifiedAt = statSync(path).mtimeMs;
+      if (modifiedAt !== mtime) {
+        value = JSON.parse(readFileSync(path, "utf8")) as T;
+        mtime = modifiedAt;
+      }
+    } catch {
+      return value;
+    }
+    return value;
+  };
+}
