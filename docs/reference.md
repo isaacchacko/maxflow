@@ -45,6 +45,14 @@ id=$(./cli.ts new --name job -- claude); id=${id##*/}
 
 Every session's shell carries `MAXFLOW_SESSION=<id>`. A `SessionStart` hook in `~/.claude/settings.json` runs `hooks/claude-intro.sh` whenever claude starts, resumes, clears or compacts with that variable set, and puts `GET /api/sessions/:id/intro` into its context: what maxflow is, the agent's own id and name, how to rename, message other sessions, subscribe to events and wait (`cli.ts wait <kind>:<ref>` to sleep on one thing, `wait done` when finished; never archive itself), and what each running sentry does for it (the same text the graph's sentry edges send). Edit `intro()` in `server.ts` to change it.
 
+## Browsers
+
+Every agent can have a headless Chrome of its own, the same job Superset's browser pane does. `./cli.ts browser open <url>` starts it on first use (`browsers.ts`), with a profile under `~/.maxflow-v2/browsers/<session>` and none of Isaac's logins, then the agent drives it with `goto`, `screenshot [path]`, `read [--ax]` (the page's text or accessibility tree), `click <selector | visible text>`, `type <target> <text> [--enter]` (replaces the field's text, as Playwright's `fill` does), `eval <js>`, `console [--last N]`, `cdp` (the page's DevTools socket, for anything the verbs don't cover) and `close`. Every verb is `POST /api/browsers/<session>/<verb>` and refuses another agent's `x-maxflow-from`. Clicks and keys are real CDP input events. Only http(s) and about:blank open.
+
+At most 3 run at once (`MAXFLOW_BROWSERS_MAX`); another one closes the least recently used unwatched browser, whose profile stays on disk. Every 30s the server closes a browser nobody used or watched for 10 minutes (`MAXFLOW_BROWSER_IDLE_MS`) and deletes the profile of a session that ended. A Chrome that outlives a restart is adopted, so a deploy keeps an agent's page. Chrome is found at the usual paths, or `MAXFLOW_CHROME`.
+
+While an agent has a browser, its page in the UI shows it beside the terminal (`src/agent/BrowserPane.tsx`): a CDP screencast over `/ws/browser/<session>` (`browser-screencast.ts`, one per browser, fanned out to every viewer), with back, forward, reload and an address bar. **Take over** hands Isaac the wheel: his clicks, wheel, keys and pastes go into the page, and the agent's verbs answer 409 until he picks **Watch** again or closes the page.
+
 ## Events and sentries
 
 maxflow has a small event bus (`~/.maxflow/events.jsonl`). Topics are `/`-separated; `*` matches one segment, `**` any number.

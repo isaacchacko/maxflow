@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn, hasText } from "@/lib/utils";
 import { agentStateColor, type Agent } from "@/mock";
+import { BrowserPane } from "./BrowserPane";
 import { agentStore, api, liveStore, objectiveStore, pathOf, sentryStore, setArchived, shellStore, signalStore, taskStore } from "@/store";
 import { RouterSidebar } from "./RouterSidebar";
 import { SentryPage } from "./SentryPage";
@@ -107,9 +108,12 @@ function AgentBody({ agent, back }: { agent: Agent; back: string }) {
       <AgentHeader agent={agent} crew={crew} back={back} isLive={isLive} />
       <div className="flex min-h-0 flex-1 gap-4 pl-3">
         {isLive ? (
-          <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-background p-2">
-            <Terminal key={agent.id} id={agent.id} />
-          </section>
+          <>
+            <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-background p-2">
+              <Terminal key={agent.id} id={agent.id} />
+            </section>
+            {agent.browser === true && <BrowserPane key={agent.id} id={agent.id} />}
+          </>
         ) : (
           <Tty agent={agent} lines={lines} />
         )}

@@ -21,6 +21,9 @@ import { recordUserComment, seedUserComments } from "./events";
 import { restrictionsRoute } from "./routes-restrictions";
 import { statsTodosRoute } from "./routes-stats";
 import { tasksLinksRoute } from "./routes-tasks";
+import { browserRoute } from "./routes-browser";
+import { reapBrowsers } from "./browsers";
+import { closeViewer, openViewer, viewerAsked } from "./browser-screencast";
 import { SENTRIES } from "./sentry-commands";
 import { BARE_AGENT_SENTRIES, FED_AGENT_SENTRIES } from "./sentry-names";
 import { miscRoute } from "./routes-misc";
@@ -253,6 +256,16 @@ if (seedUserComments)
       }
   } catch {}
 setInterval(checkShells, 2000);
+async function reapBrowsersNow() {
+  try {
+    await reapBrowsers((id) => sessions.get(id)?.exitCode === null);
+  } catch (error) {
+    console.error("reapBrowsers", error);
+  }
+}
+setInterval(() => {
+  void reapBrowsersNow();
+}, 30_000);
 // Questions from before threads: each open one moves into a thread of its own, once, and its asker hears where.
 function migrateQuestions() {
   type Question = { id: number; session: string; name: string; status: string; at: number; thread: { from: string; text: string; at: number }[]; default?: string };
@@ -336,6 +349,8 @@ Bun.serve<WsData>({
     const url = new URL(req.url);
     const path = url.pathname;
 
+    const castMatch = /^\/ws\/browser\/([\w-]+)$/.exec(path);
+    if (castMatch) return server.upgrade(req, { data: { id: castMatch[1] ?? "", browser: true } }) ? undefined : new Response("upgrade failed", { status: 400 });
     const wsMatch = path.match(/^\/ws\/([\w-]+)$/);
     if (wsMatch) {
       if (!sessions.has(wsMatch[1])) return new Response("no such session", { status: 404 });
@@ -355,6 +370,8 @@ Bun.serve<WsData>({
     if (objectivesRouteAnswer) return objectivesRouteAnswer;
     const threadsRouteAnswer = await threadsRoute(req, url, path);
     if (threadsRouteAnswer) return threadsRouteAnswer;
+    const browserAnswer = await browserRoute(req, path);
+    if (browserAnswer) return browserAnswer;
     const miscRouteAnswer = await miscRoute(req, url, path);
     if (miscRouteAnswer) return miscRouteAnswer;
     const statsTodosRouteAnswer = await statsTodosRoute(req, url, path);
@@ -378,6 +395,10 @@ Bun.serve<WsData>({
   websocket: {
     open(ws) {
       if (ws.data.world) return void openWorld(ws);
+      if (ws.data.browser) {
+        void openViewer(ws);
+        return;
+      }
       const s = sessions.get(ws.data.id)!;
       s.clients.add(ws);
       ws.sendText("replayed");
@@ -393,6 +414,10 @@ Bun.serve<WsData>({
     },
     message(ws, raw) {
       // A tab that missed a patch asks for the whole world again.
+      if (ws.data.browser) {
+        void viewerAsked(ws, String(raw));
+        return;
+      }
       if (ws.data.world) return void (String(raw) === "full" && built && ws.sendText(JSON.stringify({ type: "world", v: built.v, world: built.w })));
       const pty = ws.data.pty;
       if (!pty || pty.exitCode !== null) return;
@@ -402,6 +427,10 @@ Bun.serve<WsData>({
     },
     close(ws) {
       if (ws.data.world) return void worldClients.delete(ws);
+      if (ws.data.browser) {
+        closeViewer(ws);
+        return;
+      }
       ws.data.pty?.kill();
       sessions.get(ws.data.id)?.clients.delete(ws);
     },

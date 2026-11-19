@@ -11,6 +11,7 @@ import { funnel, live_thread, reachable, waitLabel } from "./lifecycle";
 import { shells } from "./waits";
 import { BLOCKED_SHOWN_MS, activeAt } from "./delivery";
 import { DOCS_DIR } from "./docs";
+import { isBrowsing } from "./browsers";
 
 // What an agent linked to each sentry in the graph is told about it.
 export const SENTRY_USES: Record<string, string> = {
@@ -222,6 +223,7 @@ async function world() {
     cwd: s.cwd,
     links: links(s),
     wait: s.wait ?? null,
+    ...(isBrowsing(s.id) && { browser: true }),
   });
   const out = agents.map(agentOf);
   // Agents nobody routed sit under the funnel, the router of everything not yet routed.

@@ -75,6 +75,7 @@ export type Agent = {
   cwd?: string;
   links?: string[];
   wait?: Wait | null;
+  browser?: boolean;
 };
 export type Wait = { kind: string; ref: string; at: number; desc?: string };
 export type Shell = { id: string; desc: string; owner: string; kind: "cmd" | "pane" | "pid"; cmd?: string; cwd?: string; pid?: number; at: number; end?: { at: number; code: number | null; tail: string } };

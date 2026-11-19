@@ -266,6 +266,10 @@ export function removeState(name: string) {
   rmSync(stateFile(name), { force: true });
 }
 
+export function removeStateDirectory(name: string) {
+  rmSync(stateFile(name), { force: true, recursive: true });
+}
+
 const DEPLOY_LOCK = stateFile("deploy.lock");
 const lockHolder = () => {
   try {

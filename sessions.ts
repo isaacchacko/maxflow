@@ -58,7 +58,7 @@ export type ClaudeState = "working" | "waiting" | "idle";
 
 // Each browser tab gets its own tmux client, so tmux hands it the full terminal state (modes, screen) on connect.
 // world: a browser tab following the world (/api/world/ws), not a terminal.
-export type WsData = { id: string; pty?: Subprocess; world?: true };
+export type WsData = { id: string; pty?: Subprocess; world?: true; browser?: true };
 
 export const sessions = new Map<string, Session>();
 

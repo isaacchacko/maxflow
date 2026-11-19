@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { boardVerbs, objectiveVerbs } from "./cli-board";
+import { browserVerbs } from "./cli-browser";
 import { docVerbs } from "./cli-docs";
 import { eventVerbs, sessionVerbs } from "./cli-sessions";
 import { base, type Verb } from "./cli-shared";
@@ -49,6 +50,9 @@ const usage = `usage:
   maxflow thread move <thread id> <objective id>   re-home a thread and its subthreads onto that objective and its routers
   maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
   maxflow docs ls | read <path> | write <path> [text...] | mv <path> <to> | rm <path>   Isaac's docs vault (markdown, git-committed per write; stdin when no text)
+  maxflow browser open <url> | goto <url>   your own headless Chrome (started on demand, closed after 10 min unused): load a page, print its url and title
+  maxflow browser screenshot [path] | read [--ax] | console [--last N]   a PNG (prints its path), the page's text or accessibility tree, its console
+  maxflow browser click <selector | visible text> | type <selector | text> <text...> [--enter] | eval <js> | cdp | close   real input events; cdp prints the page's DevTools socket
   maxflow deploy                             ship origin's feat/v2 to the live yarn: refuses a dirty live checkout or a commit whose CI check isn't green,
                                              fast-forwards, restarts, checks every session and sentry came back,
                                              and restarts the sentries whose code changed;
@@ -73,7 +77,7 @@ const shipVerbs: Verb[] = [
   { matches: (verb) => verb === "install", run: install },
 ];
 
-const VERBS: Verb[] = [...waitVerbs, ...sessionVerbs, ...boardVerbs, ...eventVerbs, ...watchVerbs, ...objectiveVerbs, ...threadVerbs, ...docVerbs, ...shipVerbs];
+const VERBS: Verb[] = [...waitVerbs, ...sessionVerbs, ...boardVerbs, ...eventVerbs, ...watchVerbs, ...objectiveVerbs, ...threadVerbs, ...docVerbs, ...browserVerbs, ...shipVerbs];
 
 const [verb, ...rest] = process.argv.slice(2);
 const chosen = VERBS.find((v) => v.matches(verb, rest));
