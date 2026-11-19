@@ -1,4 +1,4 @@
-import { resize } from "./browser-size";
+import { resize, takeNews } from "./browser-size";
 import { accessibilityTree, click, evalIn, goTo, pageText, screenshot, typeInto } from "./browser-verbs";
 import { BrowserCap, browserFor, CONSOLE_KEPT, closeBrowser, hasBrowser, isHeld, pageSocketUrl, type Browser } from "./browsers";
 import { CdpError } from "./cdp";
@@ -51,9 +51,8 @@ const ACTS: Record<string, Act> = {
 };
 
 function withSizeNews(browser: Browser, res: Response) {
-  if (browser.sizeNews === undefined) return res;
-  res.headers.set("x-maxflow-browser-news", browser.sizeNews);
-  browser.sizeNews = undefined;
+  const said = takeNews(browser);
+  if (said !== undefined) res.headers.set("x-maxflow-browser-news", said);
   return res;
 }
 

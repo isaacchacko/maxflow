@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from "bun";
-import { applyView, describeView, parseSize, viewMessage, zoomWithin, type View } from "./browser-size";
+import { applyView, describeView, parseSize, tellAgent, viewMessage, viewOf, zoomWithin, type View } from "./browser-size";
 import { goTo, whereItIs } from "./browser-verbs";
 import { browserFor, hasBrowser, type Browser } from "./browsers";
 import { unlessItFails, type CdpEvent } from "./cdp";
@@ -40,8 +40,8 @@ function onPageEvent(cast: Cast, { method, params }: CdpEvent) {
 
 async function recast(cast: Cast) {
   await cast.browser.page.send("Page.stopScreencast");
-  await cast.browser.page.send("Page.startScreencast", frameOf(cast.browser.view));
-  toEveryViewer(cast, viewMessage(cast.browser.view));
+  await cast.browser.page.send("Page.startScreencast", frameOf(viewOf(cast.browser)));
+  toEveryViewer(cast, viewMessage(viewOf(cast.browser)));
 }
 
 async function startCast(session: string): Promise<Cast> {
@@ -59,7 +59,7 @@ async function startCast(session: string): Promise<Cast> {
     stopEvents();
   };
   casts.set(session, cast);
-  await browser.page.send("Page.startScreencast", frameOf(browser.view));
+  await browser.page.send("Page.startScreencast", frameOf(viewOf(browser)));
   return cast;
 }
 
@@ -78,7 +78,7 @@ async function watch(viewer: Viewer) {
   cast.viewers.add(viewer);
   cast.browser.watchers = cast.viewers.size;
   await tellWhereItIs(cast);
-  viewer.sendText(viewMessage(cast.browser.view));
+  viewer.sendText(viewMessage(viewOf(cast.browser)));
   viewer.sendText(JSON.stringify({ type: "held", isHeld: cast.holder !== undefined }));
 }
 
@@ -140,12 +140,12 @@ async function didForwardInput(cast: Cast, viewer: Viewer, asked: Record<string,
 
 async function viewAsked(browser: Browser, view: View) {
   await applyView(browser, view);
-  browser.sizeNews = `Isaac set your browser to ${describeView(view)}`;
+  tellAgent(browser, `Isaac set your browser to ${describeView(view)}`);
 }
 
 const NAVIGATIONS: Record<string, (browser: Browser, asked: Record<string, unknown>) => Promise<unknown>> = {
-  size: async (browser, asked) => viewAsked(browser, { ...browser.view, size: parseSize(String(asked["size"])) }),
-  zoom: async (browser, asked) => viewAsked(browser, { ...browser.view, zoom: zoomWithin(Number(asked["zoom"])) }),
+  size: async (browser, asked) => viewAsked(browser, { ...viewOf(browser), size: parseSize(String(asked["size"])) }),
+  zoom: async (browser, asked) => viewAsked(browser, { ...viewOf(browser), zoom: zoomWithin(Number(asked["zoom"])) }),
   goto: async (browser, asked) => goTo(browser, String(asked["url"])),
   back: async (browser) => stepThroughHistory(browser, -1),
   forward: async (browser) => stepThroughHistory(browser, 1),

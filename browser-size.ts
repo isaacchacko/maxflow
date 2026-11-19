@@ -36,6 +36,20 @@ export function phoneAgentFrom(desktop: string) {
 }
 
 const viewFileOf = (session: string) => `browsers/${session}/view.json`;
+const views = new Map<string, View>();
+const news = new Map<string, string>();
+
+export const viewOf = (browser: Browser) => views.get(browser.session) ?? FIRST_VIEW;
+
+export function tellAgent(browser: Browser, said: string) {
+  news.set(browser.session, said);
+}
+
+export function takeNews(browser: Browser) {
+  const said = news.get(browser.session);
+  news.delete(browser.session);
+  return said;
+}
 
 export function parseSize(asked: string): Size {
   const preset = Object.hasOwn(SIZES, asked.toLowerCase()) ? SIZES[asked.toLowerCase()] : undefined;
@@ -85,13 +99,13 @@ async function emulate(browser: Browser, view: View) {
 
 export async function applyView(browser: Browser, view: View) {
   await emulate(browser, view);
-  browser.view = view;
+  views.set(browser.session, view);
   writeStateJson(viewFileOf(browser.session), view);
   for (const resized of browser.resized) resized();
 }
 
 export async function resize(browser: Browser, asked: string) {
-  if (asked.trim() !== "") await applyView(browser, { ...browser.view, size: parseSize(asked) });
-  browser.sizeNews = undefined;
-  return describeView(browser.view);
+  if (asked.trim() !== "") await applyView(browser, { ...viewOf(browser), size: parseSize(asked) });
+  news.delete(browser.session);
+  return describeView(viewOf(browser));
 }
