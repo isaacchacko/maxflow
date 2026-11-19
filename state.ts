@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { STATE_DIR } from "./instance";
 
 // yarn's state, in one SQLite file. Stores move here from their JSON files one at a time; a moved store's JSON file is
@@ -153,3 +154,38 @@ export const inboxesTable = {
     inboxDelete.run(id);
   },
 };
+
+const stateFile = (name: string) => join(STATE_DIR, name);
+
+export function readStateText(name: string): string | undefined {
+  try {
+    return readFileSync(stateFile(name), "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+export function readStateJson(name: string): unknown {
+  const text = readStateText(name);
+  if (text === undefined) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeStateJson(name: string, value: unknown) {
+  const file = stateFile(name);
+  const temporary = `${file}.${String(process.pid)}.tmp`;
+  writeFileSync(temporary, JSON.stringify(value));
+  renameSync(temporary, file);
+}
+
+export function appendStateText(name: string, text: string) {
+  appendFileSync(stateFile(name), text);
+}
+
+export function removeState(name: string) {
+  rmSync(stateFile(name), { force: true });
+}
