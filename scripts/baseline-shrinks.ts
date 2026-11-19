@@ -9,7 +9,6 @@ const git = (...args: string[]) => {
 };
 
 type Counts = Record<string, number>;
-type Suppressions = Record<string, Record<string, { count: number }>>;
 
 const head = git("rev-parse", "HEAD");
 const mergeBase = git("merge-base", "HEAD", "origin/feat/v2");
@@ -18,8 +17,10 @@ const base = mergeBase === undefined || mergeBase === head ? git("rev-parse", "H
 function flatten(file: string, text: string | undefined): Counts {
   if (text === undefined) return {};
   if (file === "tsc-baseline.json") return JSON.parse(text) as Counts;
+  type Suppressions = Record<string, Record<string, { count: number }>>;
+  const suppressions = JSON.parse(text) as Suppressions;
   const counts: Counts = {};
-  for (const [path, rules] of Object.entries(JSON.parse(text) as Suppressions)) {
+  for (const [path, rules] of Object.entries(suppressions)) {
     for (const [rule, { count }] of Object.entries(rules)) counts[`${path} ${rule}`] = count;
   }
   return counts;
