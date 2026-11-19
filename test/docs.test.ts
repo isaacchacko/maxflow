@@ -32,6 +32,10 @@ test("a thread is open while Isaac has the last word", () => {
   expect(docs.commentsIn(DOC)).toHaveLength(2);
 });
 
+test("a comment shown as an example in a code block is not one", () => {
+  expect(docs.commentsIn("```\n> [!comment]\n> example\n```\n")).toEqual([]);
+});
+
 test("owner comes from frontmatter, and is added only where missing", () => {
   expect(docs.ownerOf(DOC)).toBe("abc123");
   expect(docs.withOwner(DOC, "zzz")).toBe(DOC);

@@ -90,10 +90,20 @@ function addLine(thread: CommentThread, inner: string) {
   if (last) last.text = `${last.text}\n${nested ?? inner}`.trim();
 }
 
+const FENCE = /^\s*(```|~~~)/;
+
+function outsideCode(text: string) {
+  let isInCode = false;
+  return text.split("\n").map((line) => {
+    if (FENCE.test(line)) isInCode = !isInCode;
+    return isInCode || FENCE.test(line) ? "" : line;
+  });
+}
+
 export function commentsIn(text: string): CommentThread[] {
   const threads: CommentThread[] = [];
   let current: CommentThread | undefined;
-  for (const [i, line] of text.split("\n").entries()) {
+  for (const [i, line] of outsideCode(text).entries()) {
     const inner = quoted(line);
     const start = inner === undefined ? null : CALLOUT.exec(inner);
     if (start?.[1]?.toLowerCase() === "comment") {
