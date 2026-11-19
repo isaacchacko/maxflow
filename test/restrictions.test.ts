@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { matches, resolve, SEED } from "../restrictions";
+import { invalid, matches, resolve, SEED, type Call, type Restriction } from "../restrictions";
 import { commandStarts, shellText } from "../restrictions-shell";
 
 const verdict = (command: string) => resolve(SEED, { tool: "Bash", input: { command } });
@@ -58,4 +58,48 @@ describe("commandStarts", () => {
   test("a path's basename counts", () => expect(words("/usr/bin/pkill x")).toEqual(["/usr/bin/pkill", "pkill"]));
   test("every word after a wrapper counts", () => expect(words("sudo -u me pkill x")).toEqual(["sudo", "-u", "me", "pkill", "x"]));
   test("an inlined script starts its own command", () => expect(shellText("bash -c 'pkill x'")).toContain("; pkill x ;"));
+});
+
+describe("the seed catalog", () => {
+  const judged = (call: Call, list: Restriction[] = SEED) => {
+    const v = resolve(list, call);
+    return [v.mode, v.restriction?.id];
+  };
+  const bash = (command: string, extra: Partial<Call> = {}): Call => ({ tool: "Bash", input: { command }, ...extra });
+
+  test("quoted text and data heredocs are data, not commands", () => {
+    expect(shellText(`git commit -m "gh pr merge 12"`)).not.toContain("gh pr merge");
+    expect(shellText("cat > notes.md <<'EOF'\ngh pr merge 12\nEOF\n")).not.toContain("gh pr merge");
+  });
+
+  test("each builtin judges the calls it was written for", () => {
+    expect(judged(bash("gh pr review 12 --approve"))).toEqual(["allow", "pr-approve"]);
+    expect(judged(bash("gh pr review 12 --comment -b ok"))).toEqual(["allow", "pr-comment"]);
+    expect(judged(bash("gh pr create --title x --reviewer felix"))).toEqual(["deny", "pr-reviewers"]);
+    expect(judged({ tool: "mcp__claude_ai_Slack__slack_send_message" })).toEqual(["ask", "slack"]);
+    expect(judged({ tool: "mcp__claude_ai_Slack__slack_send_message_draft" })).toEqual(["allow", undefined]);
+  });
+
+  test("an outsider's PR asks first where a teammate's is allowed", () => {
+    const merge = (team: boolean) => judged(bash("gh pr merge 12", { people: [{ github: "someone", team }] }));
+    expect(merge(true)).toEqual(["allow", "pr-merge"]);
+    expect(merge(false)).toEqual(["ask", "pr-merge-outsiders"]);
+  });
+
+  test("a call reaching several people gets the strictest verdict", () => {
+    const list: Restriction[] = [
+      ...SEED,
+      { id: "felix", action: "message", label: "Message Felix", mode: "allow", match: {}, parent: "slack", scope: { people: [{ slack: "U1" }] } },
+    ];
+    const send = (...slack: string[]) => judged({ tool: "mcp__claude_ai_Slack__slack_send_message", people: slack.map((id) => ({ slack: id })) }, list);
+    expect(send("U1")).toEqual(["allow", "felix"]);
+    expect(send("U1", "U2")).toEqual(["ask", "slack"]);
+  });
+
+  test("invalid explains what keeps a restriction from saving", () => {
+    expect(invalid({ action: "x", mode: "deny", match: { bash: ["x"] } })).toBe("label required");
+    expect(invalid({ label: "x", action: "x", mode: "deny", match: {} })).toBe("match needs a tools or bash regex");
+    expect(invalid({ label: "x", action: "x", mode: "deny", match: { bash: ["("] } })).toStartWith("bad regex (");
+    expect(invalid({ label: "x", action: "x", mode: "deny", match: { bash: ["x"] } })).toBeUndefined();
+  });
 });
