@@ -65,7 +65,7 @@ export const SEED: Restriction[] = [
     "Gmail and Outlook. Drafts are not covered.", ["email", "Email {name}"]),
   builtin(["teams", "message", "Message someone on Teams", "ask"], { tools: [`${M365}teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat)`] },
     "A person is known only when the agent starts a chat with them, by their address.", ["email", "Message {name} on Teams"]),
-  builtin(["board", "message", "Write on a Vercel Board", "ask"], { bash: ["\\b(vercel(@\\S+)?\\s+board|dboard|vb|@vercel/board(@\\S+)?)\\s+(post|reply|schedule|edit|delete|react|label|typing|sync|tasks\\s+(create|claim|renew|complete|fail|release|block|assign|cancel)|grants\\s+(create|update|revoke)|channels\\s+create)\\b"] },
+  builtin(["board", "message", "Write on a Vercel Board", "ask"], { bash: ["\\b((npx|bunx|pnpm\\s+dlx|yarn\\s+dlx)(\\s+-\\S+)*\\s+)?(vercel(@\\S+)?\\s+board|dboard|vb|@vercel/board(@\\S+)?)\\s+(post|reply|schedule|edit|delete|react|label|typing|sync|tasks\\s+(create|claim|renew|complete|fail|release|block|assign|cancel)|grants\\s+(create|update|revoke)|channels\\s+create)\\b"] },
     "Teammates and their agents read the board, and a synced thread reaches Slack, GitHub or Linear, in his name."),
   builtin(["mallory-phone", "message", "Mallory to your phone", "ask"], { bash: ["\\bmallory\\s+send\\b.*--to\\s+(umbrella|all)\\b"] },
     "umbrella is his phone, with no agent: he reads it. Only he is on the other end, so it is never set per person. Agent-to-agent mallory is not covered."),
