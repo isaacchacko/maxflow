@@ -34,22 +34,25 @@ export function Page({ pageRef, back }: { pageRef: PageRef; back: string }) {
   return (
     <div className="flex h-full flex-col gap-3 overflow-hidden pb-3">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
-        <Button variant="ghost" size="icon" asChild data-agent="back">
+        <Button variant="ghost" size="icon" asChild data-agent="back" className="shrink-0">
           <a href={`#${back}`}><ArrowLeft /></a>
         </Button>
-        {isObjective ? <Waypoints className="size-5 text-agent" /> : <span className={cn("size-2.5 rounded-full", statusColor[subject.status])} />}
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-        {isObjective && <Badge variant="outline" className="capitalize">{subject.status}</Badge>}
-        {agent && <Badge variant="secondary">{agent}</Badge>}
+        {isObjective ? <Waypoints className="size-5 shrink-0 text-agent" /> : <span className={cn("size-2.5 shrink-0 rounded-full", statusColor[subject.status])} />}
+        {/* One line whatever the width: the title gives way first, cut short with its whole text on hover, and the chips keep their size. */}
+        <h1 title={title} className="min-w-0 truncate text-xl font-semibold tracking-tight">
+          {title}
+        </h1>
+        {isObjective && <Badge variant="outline" className="shrink-0 capitalize">{subject.status}</Badge>}
+        {agent && <Badge variant="secondary" className="shrink-0">{agent}</Badge>}
         {subject.pr && (
-          <Badge variant="outline" className="gap-1">
+          <Badge variant="outline" className="shrink-0 gap-1">
             <GitPullRequest className="size-3" />#{subject.pr}
           </Badge>
         )}
         {objective && (
-          <a href={`#objective/${objective.id}`} data-agent={`objective:${objective.id}`} className="ml-auto flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-            <Waypoints className="size-4" />
-            {objective.title}
+          <a href={`#objective/${objective.id}`} data-agent={`objective:${objective.id}`} title={objective.title} className="ml-auto hidden max-w-64 min-w-0 shrink-[2] items-center gap-1.5 text-sm whitespace-nowrap text-muted-foreground hover:text-foreground md:flex">
+            <Waypoints className="size-4 shrink-0" />
+            <span className="truncate">{objective.title}</span>
           </a>
         )}
       </header>

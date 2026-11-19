@@ -273,18 +273,27 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
   return (
     <div className="flex h-full flex-col gap-3 overflow-hidden pb-3">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
-        <Button variant="ghost" size="icon" asChild data-agent="back">
+        <Button variant="ghost" size="icon" asChild data-agent="back" className="shrink-0">
           <a href={`#${back}`}>
             <ArrowLeft />
           </a>
         </Button>
-        <AgentFace id={agent.id} expression={expressionOf(agent.state)} className="size-9" />
-        <h1 className={cn("text-lg", !agent.name && "font-mono")}>{agent.name ?? agent.id}</h1>
-        <Badge variant="outline">{agent.role}</Badge>
-        {agent.role === "router" && <span className="truncate text-sm text-muted-foreground">{agent.scope}</span>}
-        <Waiting wait={agent.wait} className="truncate text-sm text-muted-foreground" />
+        <AgentFace id={agent.id} expression={expressionOf(agent.state)} className="size-9 shrink-0" />
+        {/* One line whatever the width: the title gives way first, cut short with its whole text on hover, and the chips and buttons keep their size. */}
+        <h1 title={agent.name ?? agent.id} className={cn("min-w-0 truncate text-lg", !agent.name && "font-mono")}>
+          {agent.name ?? agent.id}
+        </h1>
+        <Badge variant="outline" className="shrink-0">
+          {agent.role}
+        </Badge>
         {agent.role === "router" && (
-          <span className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+          <span title={agent.scope} className="hidden max-w-48 min-w-0 shrink-[2] truncate text-sm whitespace-nowrap text-muted-foreground md:block">
+            {agent.scope}
+          </span>
+        )}
+        <Waiting wait={agent.wait} className="hidden max-w-72 min-w-0 shrink-[2] truncate text-sm whitespace-nowrap text-muted-foreground lg:block" />
+        {agent.role === "router" && (
+          <span className="hidden shrink-0 items-center gap-3 text-xs whitespace-nowrap text-muted-foreground xl:flex">
             {stateOrder.map(state => {
               const n = crew.filter(a => a.state === state).length;
               return n ? (
@@ -296,18 +305,19 @@ export function AgentPage({ id, back }: { id: string; back: string }) {
             })}
           </span>
         )}
-        <div className="ml-auto flex gap-1.5">
+        {/* On a phone the buttons keep only their icons. */}
+        <div className="ml-auto flex shrink-0 gap-1.5">
           {agent.state === "asleep" ? (
-            <Button variant="outline" size="sm" onClick={() => setArchived(agent.id, false)}>
-              <Play /> Resume
+            <Button variant="outline" size="sm" title="Resume" onClick={() => setArchived(agent.id, false)}>
+              <Play /> <span className="hidden sm:inline">Resume</span>
             </Button>
           ) : (
-            <Button variant="outline" size="sm" onClick={pause} disabled={agent.state !== "working"}>
-              <Pause /> Pause
+            <Button variant="outline" size="sm" title="Pause" onClick={pause} disabled={agent.state !== "working"}>
+              <Pause /> <span className="hidden sm:inline">Pause</span>
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={() => setArchived(agent.id, true)} disabled={agent.state === "asleep"}>
-            <Archive /> Archive
+          <Button variant="outline" size="sm" title="Archive" onClick={() => setArchived(agent.id, true)} disabled={agent.state === "asleep"}>
+            <Archive /> <span className="hidden sm:inline">Archive</span>
           </Button>
         </div>
       </header>
@@ -432,9 +442,13 @@ function SentryPage({ id, back }: { id: string; back: string }) {
             <ArrowLeft />
           </a>
         </Button>
-        <Radar className="size-4 text-command" />
-        <h1 className="text-lg">{sentry.name}</h1>
-        <Badge variant="outline">sentry</Badge>
+        <Radar className="size-4 shrink-0 text-command" />
+        <h1 title={sentry.name} className="min-w-0 truncate text-lg">
+          {sentry.name}
+        </h1>
+        <Badge variant="outline" className="shrink-0">
+          sentry
+        </Badge>
       </header>
       <div className="flex min-h-0 flex-1 gap-4 pl-3">
         <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-background p-2">
@@ -480,9 +494,13 @@ function ShellPage({ id, back }: { id: string; back: string }) {
             <ArrowLeft />
           </a>
         </Button>
-        <SquareTerminal className="size-4 text-command" />
-        <h1 className="truncate text-lg">{shell.desc}</h1>
-        <Badge variant="outline">shell</Badge>
+        <SquareTerminal className="size-4 shrink-0 text-command" />
+        <h1 title={shell.desc} className="min-w-0 truncate text-lg">
+          {shell.desc}
+        </h1>
+        <Badge variant="outline" className="shrink-0">
+          shell
+        </Badge>
       </header>
       <div className="flex min-h-0 flex-1 gap-4 pl-3">
         <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-background p-2">

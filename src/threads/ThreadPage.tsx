@@ -201,23 +201,26 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
       {!embedded && (
       <RowMenu agent="thread-header" items={threadItems(thread, all, { resolve: () => resolveOrReopen(thread, climb), pause: () => openPause(thread.id, climb) })}>
       <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
-        <Button variant="ghost" size="icon" asChild data-agent="back">
+        <Button variant="ghost" size="icon" asChild data-agent="back" className="shrink-0">
           <a href={thread.parentId ? `#thread/${thread.parentId}` : `#${back}`}>
             <ArrowLeft />
           </a>
         </Button>
-        <MessagesSquare className="size-4 text-muted-foreground" />
+        <MessagesSquare className="size-4 shrink-0 text-muted-foreground" />
         {ancestors.map(a => (
           <Fragment key={a.id}>
-            <a href={`#thread/${a.id}`} data-agent={`thread-up:${a.id}`} className="max-w-56 truncate text-sm text-muted-foreground hover:text-foreground">
+            <a href={`#thread/${a.id}`} data-agent={`thread-up:${a.id}`} title={a.title} className="hidden max-w-56 min-w-0 shrink-[2] truncate text-sm whitespace-nowrap text-muted-foreground hover:text-foreground md:block">
               {a.title}
             </a>
-            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+            <ChevronRight className="hidden size-3.5 shrink-0 text-muted-foreground md:block" />
           </Fragment>
         ))}
-        <h1 className={cn("truncate text-xl font-semibold tracking-tight", thread.resolved && "text-muted-foreground")}>{thread.title}</h1>
-        {thread.resolved && <span className="text-xs text-muted-foreground">resolved {when(thread.resolved.at)}</span>}
-        {thread.paused && <span data-agent="thread-paused" title={`paused ${pausedLabel(thread.paused)}`} className="min-w-0 truncate text-xs whitespace-nowrap text-muted-foreground">paused {pausedLabel(thread.paused)}</span>}
+        {/* One line whatever the width: the title gives way first, cut short with its whole text on hover, and the buttons keep their size. */}
+        <h1 title={thread.title} className={cn("min-w-0 truncate text-xl font-semibold tracking-tight", thread.resolved && "text-muted-foreground")}>
+          {thread.title}
+        </h1>
+        {thread.resolved && <span className="hidden shrink-0 text-xs whitespace-nowrap text-muted-foreground md:inline">resolved {when(thread.resolved.at)}</span>}
+        {thread.paused && <span data-agent="thread-paused" title={`paused ${pausedLabel(thread.paused)}`} className="hidden min-w-0 shrink-[2] truncate text-xs whitespace-nowrap text-muted-foreground md:block">paused {pausedLabel(thread.paused)}</span>}
         <span className="ml-auto" />
         <AgentStack thread={thread} onOpen={() => (setDetailWithPane(true), requestAnimationFrame(() => document.getElementById(`agents-${thread.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })))} />
         {paneOpen && (
@@ -227,14 +230,14 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
         )}
         <PinToggle thread={thread} />
         {!thread.parentId && (
-          <Button variant="outline" size="sm" data-agent="thread-pause" title="Pause until a time" onClick={() => openPause(thread.id, climb)}>
+          <Button variant="outline" size="sm" data-agent="thread-pause" title="Pause until a time" onClick={() => openPause(thread.id, climb)} className="shrink-0">
             <AlarmClock />
-            {thread.paused ? "Paused" : "Pause"}
+            <span className="hidden sm:inline">{thread.paused ? "Paused" : "Pause"}</span>
           </Button>
         )}
-        <Button variant="outline" size="sm" data-agent="thread-resolve" onClick={() => resolveOrReopen(thread, climb)}>
+        <Button variant="outline" size="sm" data-agent="thread-resolve" title={thread.resolved ? "Reopen" : "Resolve"} onClick={() => resolveOrReopen(thread, climb)} className="shrink-0">
           {thread.resolved ? <RotateCcw /> : <Check />}
-          {thread.resolved ? "Reopen" : "Resolve"}
+          <span className="hidden sm:inline">{thread.resolved ? "Reopen" : "Resolve"}</span>
         </Button>
       </header>
       </RowMenu>
