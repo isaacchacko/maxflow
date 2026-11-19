@@ -1,76 +1,114 @@
-// What the browser needs to draw Slack as Slack: each conversation's name for a link's chip, and each person's picture.
-// Names come from what the slack sentry already read (its DMs, its store, the channels events named); pictures from Slack's user
-// search, the one read that carries them, cached on disk by user id and looked up again after a day.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { STATE_DIR } from "./instance";
 import { mcp } from "./mcp";
-import { slackMessagesTable } from "./state";
+import { isRecord } from "./shared/guards";
+import { peekStateJson, readStateJson, slackMessagesTable, stateDirectory, writeStateJson, type SlackKept } from "./state";
 
-const AVATARS = join(STATE_DIR, "avatars");
+const AVATARS = "avatars";
 const AVATAR_INDEX = join(AVATARS, "slack.json");
 const DAY = 86_400_000;
-const readJson = <T>(path: string, fallback: T): T => { try { return JSON.parse(readFileSync(path, "utf8")); } catch { return fallback; } };
+const NAMES_KEPT_MS = 60_000;
+const FETCH_MS = 30_000;
+export const ME = process.env["SLACK_ME"] ?? "U0B33G87YH4";
 
-// #name for a channel, "DM with X" for a DM, "group DM with X, Y" for a group DM, by channel id; and each person's name by user id.
-let names: { at: number; map: Record<string, string> } = { at: 0, map: {} };
-export function slackNames(channels: Record<string, string> = {}) {
-  if (Date.now() - names.at < 60_000) return names.map;
-  const map: Record<string, string> = { ...channels };
-  for (const [id, d] of Object.entries(readJson<{ dms?: Record<string, { who: string }> }>(join(STATE_DIR, "slack-state.json"), {}).dms ?? {})) map[id] = `DM with ${d.who}`;
-  const store = slackMessagesTable.all();
-  const people: Record<string, Set<string>> = {};
-  for (const [target, { title, msgs }] of Object.entries(store)) {
+export function dmPartnersByChannel(): Record<string, unknown> {
+  const slackState = peekStateJson("slack-state.json");
+  const dms = isRecord(slackState) && isRecord(slackState["dms"]) ? slackState["dms"] : {};
+  return Object.fromEntries(Object.entries(dms).map(([id, dm]) => [id, isRecord(dm) ? dm["who"] : undefined]));
+}
+
+const dmNamesByChannel = () => Object.fromEntries(Object.entries(dmPartnersByChannel()).map(([id, who]) => [id, `DM with ${String(who)}`]));
+
+type Msgs = SlackKept["msgs"];
+
+const namedUsers = (msgs: Msgs) => msgs.filter((m) => m.uid !== "" && m.who !== "").map((m): [string, string] => [m.uid, m.who]);
+const firstNamesOfPeople = (msgs: Msgs) => msgs.filter((m) => m.bot !== true && m.uid !== ME).map((m) => m.who.split(" ", 1)[0] ?? "");
+
+function namesFromStore() {
+  const names: Record<string, string> = {};
+  const peopleByChannel: Record<string, Set<string>> = {};
+  for (const [target, { title, msgs }] of Object.entries(slackMessagesTable.all())) {
     if (target.startsWith("search:")) continue;
-    const channel = target.split("/")[0];
-    const named = title.match(/(?:^| in )(#[\w-]+)$/)?.[1];
-    if (named) map[channel] ??= named;
-    for (const m of msgs) {
-      // A user's name by their id, for a mention that carries only the id.
-      if (m.uid && m.who) map[m.uid] ??= m.who;
-      if (!m.bot && m.uid !== ME) (people[channel] ??= new Set()).add(m.who.split(" ")[0]);
-    }
+    const channel = target.split("/", 1)[0] ?? "";
+    const named = /(?:^| in )(#[\w-]+)$/.exec(title)?.[1];
+    if (named !== undefined && named !== "") names[channel] ??= named;
+    for (const [uid, who] of namedUsers(msgs)) names[uid] ??= who;
+    const people = firstNamesOfPeople(msgs);
+    if (people.length > 0) peopleByChannel[channel] = new Set([...(peopleByChannel[channel] ?? []), ...people]);
   }
-  for (const [channel, who] of Object.entries(people)) if (!map[channel] && channel.startsWith("C")) map[channel] = `group DM with ${[...who].slice(0, 3).join(", ")}`;
-  names = { at: Date.now(), map };
+  return { names, peopleByChannel };
+}
+
+const cachedNames: { at: number; map: Record<string, string> } = { at: 0, map: {} };
+export function slackNames(channels: Record<string, string> = {}) {
+  if (Date.now() - cachedNames.at < NAMES_KEPT_MS) return cachedNames.map;
+  const { names, peopleByChannel } = namesFromStore();
+  const map: Record<string, string> = { ...names, ...channels, ...dmNamesByChannel() };
+  for (const [channel, who] of Object.entries(peopleByChannel)) {
+    if ((map[channel] ?? "") === "" && channel.startsWith("C")) map[channel] = `group DM with ${[...who].slice(0, 3).join(", ")}`;
+  }
+  cachedNames.at = Date.now();
+  cachedNames.map = map;
   return map;
 }
-export const ME = process.env.SLACK_ME ?? "U0B33G87YH4";
 
-type Index = Record<string, { file?: string; at: number }>;
+type Avatar = { file?: string; at: number };
+type Index = Record<string, Avatar>;
+const isAvatar = (value: unknown): value is Avatar => isRecord(value) && typeof value["at"] === "number" && (value["file"] === undefined || typeof value["file"] === "string");
+function readIndex(): Index {
+  const parsed = readStateJson(AVATAR_INDEX, isRecord);
+  return Object.fromEntries(Object.entries(parsed ?? {}).filter((entry): entry is [string, Avatar] => isAvatar(entry[1])));
+}
+
 const lookups = new Map<string, Promise<string | undefined>>();
-// The file holding a Slack user's picture, fetched on first ask and again a day later; undefined when Slack has none for them.
-export function slackAvatar(user: string, name: string) {
-  if (!/^[UW]\w+$/.test(user)) return Promise.resolve(undefined);
-  const index = readJson<Index>(AVATAR_INDEX, {});
-  const hit = index[user];
-  if (hit && Date.now() - hit.at < DAY) return Promise.resolve(hit.file && existsSync(hit.file) ? hit.file : undefined);
-  if (!lookups.has(user))
-    lookups.set(user, lookUp(user, name).finally(() => lookups.delete(user)));
-  // A stale picture is served while the new one is fetched.
-  return hit?.file && existsSync(hit.file) ? Promise.resolve(hit.file) : lookups.get(user)!;
+const existingFile = (file: string | undefined) => (file !== undefined && file !== "" && existsSync(file) ? file : undefined);
+
+async function lookUpOnce(user: string, name: string) {
+  try {
+    return await lookUp(user, name);
+  } finally {
+    lookups.delete(user);
+  }
+}
+
+export async function slackAvatar(user: string, name: string): Promise<string | undefined> {
+  if (!/^[UW]\w+$/.test(user)) return undefined;
+  const hit = readIndex()[user];
+  if (hit !== undefined && Date.now() - hit.at < DAY) return existingFile(hit.file);
+  const lookup = lookups.get(user) ?? lookUpOnce(user, name);
+  lookups.set(user, lookup);
+  const staleWhileFetching = existingFile(hit?.file);
+  return staleWhileFetching ?? lookup;
+}
+
+async function fetchSizedPicture(url: string) {
+  // constraint: Slack keeps each picture at fixed sizes beside the original; 192 is sharp at 36px on a retina screen.
+  const sized = await fetch(url.replace(/_original\.(\w+)$/, "_192.$1"), { signal: AbortSignal.timeout(FETCH_MS) });
+  return sized.ok ? sized : fetch(url, { signal: AbortSignal.timeout(FETCH_MS) });
+}
+
+async function savedPicture(user: string, name: string): Promise<string | undefined> {
+  const out = (await mcp("claude.ai/slack", "slack_search_users", { query: name === "" ? user : name })).out.replaceAll(/\\\\?\//g, "/");
+  const resultOfUser = out.split("### Result").find((b) => b.includes(`User ID: ${user}`));
+  const url = resultOfUser === undefined ? undefined : /Profile Pic: \[Photo\]\((https:[^)]+)\)/.exec(resultOfUser)?.[1];
+  if (url === undefined || url === "") return;
+  const res = await fetchSizedPicture(url);
+  if (!res.ok) return;
+  const file = join(stateDirectory(AVATARS), `slack-${user}.${/\.(\w+)$/.exec(url)?.[1] ?? "jpg"}`);
+  writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+  return file;
 }
 
 async function lookUp(user: string, name: string) {
   let file: string | undefined;
   try {
-    const out = (await mcp("claude.ai/slack", "slack_search_users", { query: name || user })).out.replace(/\\\\?\//g, "/");
-    // Each result is a block; the one with this user's id carries the picture.
-    const block = out.split(/### Result/).find((b) => b.includes(`User ID: ${user}`));
-    const url = block?.match(/Profile Pic: \[Photo\]\((https:[^)]+)\)/)?.[1];
-    if (url) {
-      // Slack keeps the same picture at fixed sizes beside the original; 192 is sharp at 36px on a retina screen.
-      const res = await fetch(url.replace(/_original\.(\w+)$/, "_192.$1")).then((r) => (r.ok ? r : fetch(url)));
-      if (res.ok) {
-        mkdirSync(AVATARS, { recursive: true });
-        file = join(AVATARS, `slack-${user}.${url.match(/\.(\w+)$/)?.[1] ?? "jpg"}`);
-        writeFileSync(file, Buffer.from(await res.arrayBuffer()));
-      }
-    }
-  } catch {}
-  const index = readJson<Index>(AVATAR_INDEX, {});
-  index[user] = { ...(file && { file }), at: Date.now() };
-  mkdirSync(AVATARS, { recursive: true });
-  writeFileSync(AVATAR_INDEX, JSON.stringify(index));
+    file = await savedPicture(user, name);
+  } catch {
+    file = undefined;
+  }
+  const index = readIndex();
+  index[user] = { ...(file !== undefined && { file }), at: Date.now() };
+  stateDirectory(AVATARS);
+  writeStateJson(AVATAR_INDEX, index);
   return file;
 }
