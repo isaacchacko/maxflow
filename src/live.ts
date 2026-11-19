@@ -1,6 +1,6 @@
 import type { Agent, Objective, Sentry, SentrySession, Shell, Signal, Task, Thread } from "./mock";
 import { markResurfaced } from "./threads/seen";
-import { agentStore, changes, liveStore, movedStore, objectiveStore, nameStore, prStore, type Pr, refreshed, sentryStore, shellStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
+import { agentStore, ownChanges, liveStore, movedStore, objectiveStore, nameStore, prStore, type Pr, refreshed, sentryStore, shellStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
 
 type World = { objectives: Objective[]; agents: Agent[]; tasks: Task[]; threads: Thread[]; signals: Signal[]; sentries: SentrySession[]; shells?: Shell[]; names?: Record<string, string>; prs: Record<string, Pr> };
 
@@ -54,7 +54,7 @@ addEventListener("hashchange", setTitle);
 // again after that, the page reloads, so a restart's new code and a fresh world come in by themselves.
 let misses = 0;
 async function refresh() {
-  const n = changes.n;
+  const n = ownChanges.count;
   try {
     // A tab that already has this version is answered 304 and keeps its copy.
     const res = await fetch("/api/world", { cache: "no-cache" });
@@ -64,7 +64,7 @@ async function refresh() {
       misses = 0;
       const w = await res.json();
       // Fetched across one of his own changes, it may not have it yet; the refetch that change asks for brings it.
-      if (changes.n === n) (current = w), (version = Number(res.headers.get("x-world-v")) || version), apply(w);
+      if (ownChanges.count === n) (current = w), (version = Number(res.headers.get("x-world-v")) || version), apply(w);
     }
   } catch {
     if (liveStore.get()) misses++;
@@ -95,7 +95,7 @@ function follow() {
     if (m.type === "world") (current = m.world), (version = m.v);
     else if (!current || m.from !== version) return ws.send("full");
     else (current = patch(current, m)), (version = m.v);
-    if (!changes.busy) apply(current!);
+    if (ownChanges.inFlight === 0) apply(current!);
   };
   ws.onclose = () => {
     if (socket === ws) socket = undefined;

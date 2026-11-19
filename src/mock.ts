@@ -46,9 +46,9 @@ export type Thread = {
   objectiveId: string;
   routerIds: string[];
   pending?: { routerIds: string[]; since: string; status?: string; stale: boolean };
-  resolved?: { at: string };
-  pinned?: { at: string; order: number };
-  paused?: { until: string; at: string; said: string; posts: number; wake?: string };
+  resolved?: { at: string } | undefined;
+  pinned?: { at: string; order: number } | undefined;
+  paused?: { until: string; at: string; said: string; posts: number; wake?: string | undefined } | undefined;
   resurfaced?: { at: string; from: number };
   feed?: { source: string; who: string; link: string };
   asks?: { sessionId: string; since: string; shown: boolean };
@@ -56,7 +56,7 @@ export type Thread = {
   taskId?: string;
   parentId?: string;
   parentMessageId?: string;
-  messages: { id?: string; from: string; at: string; text: string; nudge?: "subthread"; wake?: boolean; ext?: External }[];
+  messages: { id?: string; from: string; at: string; text: string; nudge?: "subthread" | undefined; wake?: boolean; ext?: External }[];
 };
 
 export type AgentState = "working" | "waiting" | "idle" | "asleep";
