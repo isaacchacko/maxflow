@@ -104,7 +104,7 @@ function complexity(dir: string, base: string, paths: string[]) {
   };
   const before = ccn("base"), after = ccn("head");
   rmSync(tmp, { recursive: true, force: true });
-  return [...after].filter(([fn, n]) => (n >= 15 && (before.get(fn) ?? 0) < 15) || n - (before.get(fn) ?? 1) >= 5)
+  return [...after].filter(([fn, n]) => (n >= 15 && (before.get(fn) ?? 0) < 15) || (before.has(fn) && n - before.get(fn)! >= 5))
     .map(([fn, n]) => `${fn} ${before.has(fn) ? `${before.get(fn)}→` : "new, "}${n}`);
 }
 
