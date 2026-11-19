@@ -14,7 +14,7 @@ type Call = {
   question?: string;
   funnel: string;
   jev?: string;
-  thread?: string;
+  thread?: string | undefined;
   confidence?: number;
   ms?: number;
   status?: number | "timeout" | "network";
