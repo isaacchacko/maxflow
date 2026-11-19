@@ -159,7 +159,7 @@ function record(key: string, h: Head) {
   appendStateText("approval-log.md", logEntry(key, h));
 }
 
-async function notifySession(id: string, text: string) {
+async function didNotify(id: string, text: string) {
   try {
     await fetch(`${BASE}/api/sessions/${id}/notify`, { method: "POST", body: JSON.stringify({ text }), signal: AbortSignal.timeout(NOTIFY_TIMEOUT_MS) });
     return true;
@@ -196,7 +196,7 @@ async function handBack(key: string, h: Head) {
   const text = owner === undefined
     ? `[maxflow approval] ${h.url} has no session. Get these findings to its chat as in your job 1 (revive the chat that opened it, or start one on its branch), verbatim, and tell it to fix and push:\n\n${ask}`
     : `[maxflow approval] ${ask}`;
-  if (to !== "") await notifySession(to, text);
+  if (to !== "") await didNotify(to, text);
   log(`${key}: findings (round ${rounds}) to ${owner ?? `the review sentry ${to === "" ? "(not found)" : to}`}`);
 }
 

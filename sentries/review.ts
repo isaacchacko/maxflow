@@ -97,7 +97,7 @@ function approvedPrs(mine: Pr[]): Pr[] {
 }
 
 const uiOf = new Map<string, boolean>();
-const touchesUi = (n: UiNode) => n.files?.nodes.some((f) => UI_FILE.test(f.path) && !UI_TEST_FILE.test(f.path)) ?? false;
+const isTouchingUi = (n: UiNode) => n.files?.nodes.some((f) => UI_FILE.test(f.path) && !UI_TEST_FILE.test(f.path)) ?? false;
 
 function lookUpUi(prs: Pr[]) {
   const ids = prs.map((pr) => pr.id).filter((id) => !uiOf.has(id));
@@ -106,7 +106,7 @@ function lookUpUi(prs: Pr[]) {
     const r = Bun.spawnSync(["gh", "api", "graphql", "-f", `query=${q}`], { stderr: "pipe" });
     if (r.exitCode !== 0) continue;
     const nodes = listAt(r.stdout.toString(), ["data", "nodes"]).filter(isUiNode);
-    for (const n of nodes) uiOf.set(n.id, touchesUi(n));
+    for (const n of nodes) uiOf.set(n.id, isTouchingUi(n));
   }
 }
 
@@ -184,7 +184,7 @@ async function wake(pr: Pr, owners: string[], problem: string) {
   logAction(key, `no reachable owner; asked the review agent for a resolver (${problem})`);
 }
 
-const needsRetarget = (pr: Pr, main: string) => pr.baseRefName !== main && (pr.baseRef === null || pr.baseRef.associatedPullRequests.totalCount > 0);
+const isRetargetNeeded = (pr: Pr, main: string) => pr.baseRefName !== main && (pr.baseRef === null || pr.baseRef.associatedPullRequests.totalCount > 0);
 
 function retarget(pr: Pr, main: string) {
   const r = gh(["pr", "edit", String(pr.number), "-R", pr.repository.nameWithOwner, "--base", main]);
@@ -210,7 +210,7 @@ function merge(pr: Pr) {
 
 async function land(pr: Pr, owners: string[]) {
   const main = pr.repository.defaultBranchRef.name;
-  if (needsRetarget(pr, main)) {
+  if (isRetargetNeeded(pr, main)) {
     retarget(pr, main);
     return;
   }

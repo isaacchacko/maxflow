@@ -68,7 +68,8 @@ const transcriptOf = (s: Session) => s.transcript ?? chatTranscript(s.chatId ?? 
 
 async function agentCalls() {
   const calls: string[] = [];
-  for (const s of await fetchSessions()) {
+  const sessions = await fetchSessions();
+  for (const s of sessions) {
     if (s.sentry) continue;
     const path = transcriptOf(s);
     if (path !== undefined && existsSync(path)) calls.push(...newToolCalls(path));

@@ -50,8 +50,8 @@ function readHead(path: string): unknown {
 
 export function history(key: string): ReviewedHead[] {
   const dir = join(OUT_DIR, key.replaceAll(/[/#]/g, "_"));
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
+  const files = existsSync(dir) ? readdirSync(dir) : [];
+  return files
     .filter((f) => f.endsWith(".json"))
     .map((f) => readHead(join(dir, f)))
     .filter(isReviewedHead)
