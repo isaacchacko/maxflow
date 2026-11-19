@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, type MouseHandlerDataParam } from "recharts";
+import { Bar, BarChart, Rectangle, ResponsiveContainer, Tooltip, XAxis, type BarShapeProps, type MouseHandlerDataParam } from "recharts";
 import { useNow } from "@/lib/effects";
 import { cn, hasText } from "@/lib/utils";
 
@@ -164,12 +164,11 @@ type ColumnsProps = {
 const localeNumber = (v: number) => v.toLocaleString();
 export const AXIS_TICK = { fontSize: 13, fill: "var(--viz-text-3)" };
 const BAR_RADIUS = 10;
+const FADED = "color-mix(in srgb, var(--viz) 45%, var(--viz-track))";
 const OUTLINE_INSET = 3;
 const MIN_VISIBLE_BAR_PX = 6;
 const visibleWhenAboveZero = (v: number | undefined | null) => (v !== undefined && v !== null && v > 0 ? MIN_VISIBLE_BAR_PX : 0);
 export const indexOf = (state: MouseHandlerDataParam) => (state.isTooltipActive && state.activeTooltipIndex !== undefined ? Number(state.activeTooltipIndex) : undefined);
-
-type TickProps = { x?: number | string; y?: number | string; payload?: { value?: unknown; index?: number } };
 
 function anchorOf(i: number, isOnlyEnds: boolean) {
   if (!isOnlyEnds) return "middle";
@@ -177,25 +176,25 @@ function anchorOf(i: number, isOnlyEnds: boolean) {
 }
 
 function edgeAnchoredTick(shown: Set<number>, count: number) {
+  type TickProps = { x?: number | string; y?: number | string; payload?: { value?: unknown; index?: number } };
   return function EdgeAnchoredTick({ x = 0, y = 0, payload }: TickProps) {
     const i = payload?.index ?? 0;
     if (!shown.has(i)) return <g />;
     const anchor = anchorOf(i, shown.size === 2 && count > 2);
     return (
       <text x={Number(x)} y={Number(y)} dy={10} textAnchor={anchor} fontSize={AXIS_TICK.fontSize} fill={AXIS_TICK.fill}>
-        {String(payload?.value ?? "")}
+        {typeof payload?.value === "string" ? payload.value : ""}
       </text>
     );
   };
 }
 
 function shownTicks(count: number) {
-  return count > 7 ? new Set([0, count - 1]) : new Set(Array.from({ length: count }, (_, i) => i));
+  return new Set(count > 7 ? [0, count - 1] : Array.from({ length: count }, (_, i) => i));
 }
 
-type TrackProps = { x?: number; y?: number; width?: number; height?: number; index?: number };
-
 function trackWithHoverOutline(hover: number | undefined) {
+  type TrackProps = { x?: number; y?: number; width?: number; height?: number; index?: number };
   return function Track({ x = 0, y = 0, width = 0, height = 0, index }: TrackProps) {
     const radius = Math.min(BAR_RADIUS, width / 2);
     return (
@@ -244,11 +243,16 @@ export function Columns({ values, labels, ticks: tickLabels = labels, strong, on
         <BarChart data={rows} margin={{ top: OUTLINE_INSET, right: OUTLINE_INSET, bottom: 0, left: OUTLINE_INSET }} barCategoryGap="22%" onMouseMove={enter} onMouseLeave={leave} onClick={pick}>
           <Tooltip content={() => null} cursor={false} />
           <XAxis dataKey="tick" interval={0} axisLine={false} tickLine={false} tickMargin={8} height={24} tick={edgeAnchoredTick(ticks, values.length)} />
-          <Bar dataKey="v" radius={BAR_RADIUS} maxBarSize={32} minPointSize={visibleWhenAboveZero} background={trackWithHoverOutline(hover)} isAnimationActive animationDuration={450}>
-            {rows.map((_, i) => (
-              <Cell key={i} fill={strong(i) || hover === i ? "var(--viz)" : "color-mix(in srgb, var(--viz) 45%, var(--viz-track))"} />
-            ))}
-          </Bar>
+          <Bar
+            dataKey="v"
+            radius={BAR_RADIUS}
+            maxBarSize={32}
+            minPointSize={visibleWhenAboveZero}
+            background={trackWithHoverOutline(hover)}
+            shape={(props: BarShapeProps) => <Rectangle {...props} fill={hover === props.index || strong(props.index) ? "var(--viz)" : FADED} />}
+            isAnimationActive
+            animationDuration={450}
+          />
         </BarChart>
       </ResponsiveContainer>
     </div>

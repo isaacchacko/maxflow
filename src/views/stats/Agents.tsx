@@ -110,7 +110,7 @@ function FamiliesOnScreen({ slices }: { slices: Slice[] }) {
 }
 
 function dayTicks(days: string[]) {
-  return days.length > 14 ? new Set([0, Math.floor(days.length / 2), days.length - 1]) : new Set(days.map((_, i) => i));
+  return new Set(days.length > 14 ? [0, Math.floor(days.length / 2), days.length - 1] : days.map((_, i) => i));
 }
 
 const STACK_TOP_RADIUS: [number, number, number, number] = [4, 4, 0, 0];

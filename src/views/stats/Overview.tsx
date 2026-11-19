@@ -58,11 +58,12 @@ function weeksFromSunday(days: Day[]) {
 }
 
 function monthStarts(weeks: Day[][]) {
-  return weeks.flatMap((w, i) => {
-    const first = w[0]?.date ?? "";
-    const isNewMonth = i === 0 || first.slice(5, 7) !== weeks[i - 1]?.[0]?.date.slice(5, 7);
-    return isNewMonth && i < weeks.length - 2 ? [{ column: i + 2, label: MONTH.format(new Date(`${first}T12:00:00Z`)) }] : [];
-  });
+  const firstDay = (i: number) => weeks[i]?.[0]?.date ?? "";
+  const isNewMonth = (i: number) => i === 0 || firstDay(i).slice(5, 7) !== firstDay(i - 1).slice(5, 7);
+  return weeks
+    .map((_, i) => i)
+    .filter(i => isNewMonth(i) && i < weeks.length - 2)
+    .map(i => ({ column: i + 2, label: MONTH.format(new Date(`${firstDay(i)}T12:00:00Z`)) }));
 }
 
 function CalendarFacts({ cal, weeks }: { cal: Calendar; weeks: Day[][] }) {
@@ -79,7 +80,7 @@ function CalendarFacts({ cal, weeks }: { cal: Calendar; weeks: Day[][] }) {
 }
 
 function scrollToToday(scroller: HTMLDivElement | null) {
-  if (scroller) scroller.scrollLeft = scroller.scrollWidth;
+  scroller?.scrollTo({ left: scroller.scrollWidth });
 }
 
 const contributions = (n: number) => (n === 1 ? "1 contribution" : `${n.toLocaleString()} contributions`);
