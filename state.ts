@@ -25,11 +25,10 @@ function importList(table: string, file: string) {
   (JSON.parse(readFileSync(file, "utf8")) as Row[]).forEach((row, pos) => insert.run(String(row.id), pos, JSON.stringify(row)));
 }
 
-// The inboxes 02a95ee kept as one <session id>.json file each.
-function importInboxes(dir: string) {
+function importInboxFiles(dir: string) {
   if (!existsSync(dir)) return;
   const insert = db.prepare("INSERT INTO inboxes (key, data) VALUES (?, ?)");
-  for (const file of readdirSync(dir).filter((f) => f.endsWith(".json"))) insert.run(file.slice(0, -5), readFileSync(`${dir}/${file}`, "utf8"));
+  for (const file of readdirSync(dir)) if (file.endsWith(".json")) insert.run(file.slice(0, -".json".length), readFileSync(`${dir}/${file}`, "utf8"));
 }
 
 // Run once each, in order, with the version bump; user_version counts the ones done. Append only. Every process that opens the
@@ -42,7 +41,10 @@ const MIGRATIONS: (() => void)[] = [
   () => (createList("objectives"), importList("objectives", `${STATE_DIR}/objectives.json`)),
   () => (createMap("names"), importMap("names", `${STATE_DIR}/names.json`)),
   () => (createList("todos"), importList("todos", `${STATE_DIR}/todos.json`)),
-  () => (createMap("inboxes"), importInboxes(`${STATE_DIR}/inboxes`)),
+  () => {
+    createMap("inboxes");
+    importInboxFiles(`${STATE_DIR}/inboxes`);
+  },
 ];
 const version = () => (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
 if (version() < MIGRATIONS.length)
@@ -135,8 +137,6 @@ export const slackMessagesTable = mapTable<SlackKept>("slack_messages");
 // The last name each session went by, by session id.
 export const namesTable = mapTable<string>("names");
 
-// Each session's messages not yet seen as a prompt, and how many of them are pasted and in flight since when, by session id.
-// Written before the server types anything, so a restart confirms the paste in flight instead of pasting it again.
 export type InboxKept = { inbox: string[]; sending?: { count: number; at: number } };
 const inboxGet = db.prepare("SELECT data FROM inboxes WHERE key = ?");
 const inboxPut = db.prepare("INSERT INTO inboxes (key, data) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET data = excluded.data");
