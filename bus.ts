@@ -1,52 +1,62 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { STATE_DIR } from "./instance";
+import { isRecord } from "./shared/guards";
+import { appendStateText, readStateText } from "./state";
 
-const LOG = join(STATE_DIR, "events.jsonl");
+const LOG = "events.jsonl";
 const KEEP = 5000;
 
 export type Event = { seq: number; at: number; topic: string; data: unknown };
 
-mkdirSync(STATE_DIR, { recursive: true });
-const events: Event[] = existsSync(LOG)
-  ? readFileSync(LOG, "utf8").trim().split("\n").filter(Boolean).slice(-KEEP).map((l) => JSON.parse(l))
-  : [];
-let seq = events.at(-1)?.seq ?? 0;
+const isEvent = (value: unknown): value is Event =>
+  isRecord(value) && typeof value["seq"] === "number" && typeof value["at"] === "number" && typeof value["topic"] === "string" && "data" in value;
+
+const parseEvent = (line: string): unknown => JSON.parse(line);
+
+const events: Event[] = (readStateText(LOG) ?? "").trim().split("\n").filter(Boolean).slice(-KEEP).map(parseEvent).filter(isEvent);
+const latest = { seq: events.at(-1)?.seq ?? 0 };
 const waiters = new Set<() => void>();
 
-// `*` matches one topic segment, `**` any number of them.
+const escapeRegExp = (text: string) => text.replaceAll(/[.+?^${}()|[\]\\]/g, String.raw`\$&`);
+
+const segmentPattern = (segment: string) => (segment === "**" ? ".*" : segment.split("*").map(escapeRegExp).join("[^/]*"));
+
 export function topicMatcher(glob: string) {
-  const re = glob.split("/").map((seg) => (seg === "**" ? ".*" : seg.split("*").map((p) => p.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join("[^/]*"))).join("/");
-  return (topic: string) => new RegExp(`^${re}$`).test(topic);
+  const pattern = new RegExp(`^${glob.split("/").map(segmentPattern).join("/")}$`);
+  return (topic: string) => pattern.test(topic);
 }
 
-// Told of every event as it is published (the server's shared world marks itself stale).
 export const onPublish = new Set<(ev: Event) => void>();
 
 export function publish(topic: string, data: unknown) {
-  const ev = { seq: ++seq, at: Date.now(), topic, data };
+  latest.seq += 1;
+  const ev = { seq: latest.seq, at: Date.now(), topic, data };
   events.push(ev);
   if (events.length > KEEP) events.shift();
-  appendFileSync(LOG, JSON.stringify(ev) + "\n");
+  appendStateText(LOG, `${JSON.stringify(ev)}\n`);
   for (const wake of waiters) wake();
   for (const f of onPublish) f(ev);
   return ev;
 }
 
-export const latestSeq = () => seq;
+export const latestSeq = () => latest.seq;
 
-// Events after `after` on `glob`; with `wait`, blocks until one arrives or the wait runs out.
-export async function query(glob: string, after: number, wait: number) {
-  const matches = topicMatcher(glob);
-  const found = () => events.filter((e) => e.seq > after && matches(e.topic));
+const nextPublishOrDeadline = async (deadline: number) =>
+  new Promise<void>((resolve) => {
+    const wake = () => {
+      waiters.delete(wake);
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(wake, deadline - Date.now());
+    waiters.add(wake);
+  });
+
+export async function query(glob: string, afterSeq: number, waitMs: number) {
+  const isMatch = topicMatcher(glob);
+  const found = () => events.filter((e) => e.seq > afterSeq && isMatch(e.topic));
   let hits = found();
-  const deadline = Date.now() + wait;
-  while (!hits.length && Date.now() < deadline) {
-    await new Promise<void>((resolve) => {
-      const wake = () => (waiters.delete(wake), clearTimeout(timer), resolve());
-      const timer = setTimeout(wake, deadline - Date.now());
-      waiters.add(wake);
-    });
+  const deadline = Date.now() + waitMs;
+  while (hits.length === 0 && Date.now() < deadline) {
+    await nextPublishOrDeadline(deadline);
     hits = found();
   }
   return hits;
