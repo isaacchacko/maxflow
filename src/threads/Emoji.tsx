@@ -4,6 +4,7 @@ import { useKeyedState } from "@/lib/useKeyedState";
 import { emojiReady, emojiTable, loadEmoji, recentEmoji, searchEmoji, searchEmojiIn, usedEmoji, type Emoji } from "@/lib/emoji";
 import { cn } from "@/lib/utils";
 import { caretAt } from "./Mention";
+import { isAcceptKey, isNextKey, isPreviousKey } from "./picker-keys";
 
 const CATEGORY_MARKS_IN_DATA_ORDER = ["😀", "👋", "🐈", "🍎", "✈️", "⚽", "💡", "❤️", "🏁"];
 
@@ -77,10 +78,6 @@ export function EmojiPanel({ onPick }: { onPick: (emoji: string) => void }) {
 const COLON_AND_SHORTCODE_AT_CARET = /(?:^|\s):([a-z0-9_+'-]{2,40})$/i;
 const PANEL_WIDTH_PX = 288;
 const ROOM_ABOVE_PX = 320;
-
-const isNextKey = (e: React.KeyboardEvent) => e.key === "ArrowDown" || (e.ctrlKey && e.key === "n");
-const isPreviousKey = (e: React.KeyboardEvent) => e.key === "ArrowUp" || (e.ctrlKey && e.key === "p");
-const isAcceptKey = (e: React.KeyboardEvent) => (e.key === "Enter" || e.key === "Tab") && !e.shiftKey && !e.nativeEvent.isComposing;
 
 type Caret = NonNullable<ReturnType<typeof caretAt>>;
 
