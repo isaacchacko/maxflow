@@ -10,7 +10,7 @@ import { createSession, live_thread } from "./lifecycle";
 import { ask, enforcing, postIn, sessionless } from "./threads";
 import { describe } from "./world";
 import { externalSignal, feedMore } from "./routing";
-import { pointsAtItself, relayRefusal } from "./objectives";
+import { doesPointAtItself, relayRefusal } from "./objectives";
 import { onEvent } from "./events";
 import { reviewBoard, reviewQueue, touchFrom } from "./sentry-files";
 import { favicons, fetchFavicon } from "./favicons";
@@ -43,7 +43,7 @@ export async function miscRoute(req: Request, url: URL, path: string): Promise<R
     const outside = from ? undefined : sessionless(req, body.as);
     if (outside && "refusal" in outside) return new Response(outside.refusal, { status: 403 });
     if (body.feed && from && isSentry(from)) return await feedMore(t, from, text, body.posts), Response.json(t, { status: 201 });
-    if (from && pointsAtItself(text, t))
+    if (from && doesPointAtItself(text, t))
       return new Response(`${threadPost[1] !== t.id ? `${threadPost[1]} was merged into ${t.id}, so this would land in ${t.id}` : `This is ${t.id}`}, and a pointer to it there points at itself. Post only what is new for him, or nothing.`, { status: 409 });
     const relay = from === undefined ? undefined : relayRefusal(t, from, text);
     if (relay !== undefined) return new Response(relay, { status: 409 });

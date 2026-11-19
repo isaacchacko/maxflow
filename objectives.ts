@@ -30,8 +30,8 @@ export function newObjective(title: string, cwd: string) {
   publish(`objective/${id}`, { id, title });
   return o;
 }
-export const pointsAtItself = (text: string, t: Thread) => text.includes(`[[thread:${t.id}]]`) || new RegExp(String.raw`\b${t.id}\b`).test(text);
-const isKeptWhenFoldedInto = (m: Message, into: Thread) => m.from === "isaac" || m.from === "feed" || !pointsAtItself(m.text, into);
+export const doesPointAtItself = (text: string, t: Thread) => text.includes(`[[thread:${t.id}]]`) || new RegExp(String.raw`\b${t.id}\b`).test(text);
+const isKeptWhenFoldedInto = (m: Message, into: Thread) => m.from === "isaac" || m.from === "feed" || !doesPointAtItself(m.text, into);
 function joinMembers(from: Thread, into: Thread) {
   const joining = [...new Set(from.members)].filter((id) => into.members?.includes(id) !== true);
   if (joining.length === 0) return;
