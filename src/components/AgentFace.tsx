@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { useEffect, useId, useRef } from "react";
+import { useCallback, useId, useRef } from "react";
 import { createLife, restFrame, step, type Expression, type Frame, type Life } from "./face/rig";
 
 // An agent's face: a soft paper body with a deeper edge behind it, and all the expression in the eyes and brows, no mouth.
@@ -149,7 +149,7 @@ const zAt = (x: number, y: number, size: number) => `translate(${x} ${r1(y - siz
 // Every living face on the page shares one animation frame loop: 60fps while any of them is mid-change or blinking, 30 while they
 // only drift. It draws nothing while the tab is hidden, while the image viewer is open (data-viewing: a moving face under its scrim
 // re-rastered the page beneath every frame) or for a face scrolled out of view.
-type Live = { life: Life; target: Expression; geometry: Geometry; els: Els; visible: boolean };
+type Live = { life: Life; target: () => Expression; geometry: Geometry; els: Els; visible: boolean };
 type Els = { shadowClip: SVGPathElement | null; slabClips: SVGPathElement[]; cap: SVGGElement; shadow: SVGGElement; capFill: SVGPathElement; eyes: SVGGElement; slabs: SVGPathElement[]; head: SVGGElement; left: SVGPathElement; right: SVGPathElement; browL: SVGPathElement; browR: SVGPathElement; brows: SVGGElement; zs: SVGPathElement[] };
 const live = new Set<Live>();
 let frame = 0;
@@ -190,8 +190,9 @@ function tick(t: number) {
   busy = false;
   for (const l of live) {
     if (!l.visible) continue;
-    const f = step(l.life, l.target, dt);
-    busy ||= l.life.blink.on || Object.values(l.life.vel).some(v => v !== 0) || l.target === "working" || l.target === "waiting" || l.target === "done";
+    const target = l.target();
+    const f = step(l.life, target, dt);
+    busy ||= l.life.blink.on || Object.values(l.life.vel).some(v => v !== 0) || target === "working" || target === "waiting" || target === "done";
     apply(l, f);
   }
 }
@@ -212,26 +213,24 @@ export function AgentFace({ id, expression = "idle", still, small, shape, colors
   const r = body.round ?? 0;
   const geometry: Geometry = { lx, ly, rx, ry, k, brows: !small && body.brows !== false, small: !!small, face, back: line, line, round: r > 0 };
 
-  const svg = useRef<SVGSVGElement>(null);
   const uid = useId().replace(/:/g, "");
   const tile = small ? "" : grainTile();
-  const self = useRef<Live | null>(null);
   // A living face is drawn by React once, in the pose it starts in; after that only the ticker touches its eyes, so a new
   // expression springs from wherever they are rather than jumping.
   const first = useRef(expression);
+  const now = useRef(expression);
+  now.current = expression;
   const animated = !still;
-  useEffect(() => {
-    const el = svg.current;
-    if (!animated || !el || reduced()) return;
+  const mount = useCallback((el: SVGSVGElement) => {
+    if (!animated || reduced()) return;
     const q = <T extends Element>(s: string) => el.querySelector(s) as T;
     const me: Live = {
       life: createLife(hash(id) ^ (Math.random() * 2 ** 32), first.current),
-      target: first.current,
+      target: () => now.current,
       geometry,
       visible: true,
       els: { shadowClip: q("[data-face=shadow-clip]"), slabClips: [...el.querySelectorAll("[data-face=slab-clip]")] as SVGPathElement[], cap: q("[data-face=cap]"), shadow: q("[data-face=shadow]"), capFill: q("[data-face=cap-fill]"), eyes: q("[data-face=eyes]"), slabs: [...el.querySelectorAll("[data-face=slab]")] as SVGPathElement[], head: q("[data-face=head]"), left: q("[data-face=left]"), right: q("[data-face=right]"), browL: q("[data-face=brow-l]"), browR: q("[data-face=brow-r]"), brows: q("[data-face=brows]"), zs: [...el.querySelectorAll("[data-face=z]")] as SVGPathElement[] },
     };
-    self.current = me;
     live.add(me);
     busy = true;
     if (!frame) (last = 0), (frame = requestAnimationFrame(tick));
@@ -240,16 +239,12 @@ export function AgentFace({ id, expression = "idle", still, small, shape, colors
     return () => {
       io.disconnect();
       live.delete(me);
-      self.current = null;
     };
   }, [animated, id, shape, small]);
-  useEffect(() => {
-    if (self.current) (self.current.target = expression), (busy = true);
-  }, [expression]);
 
   const p = paint(restFrame(animated ? first.current : expression), geometry);
   return (
-    <svg ref={svg} viewBox="0 0 32 32" aria-hidden overflow="visible" className={cn("agent-face shrink-0", className)}>
+    <svg ref={mount} viewBox="0 0 32 32" aria-hidden overflow="visible" className={cn("agent-face shrink-0", className)}>
       <g data-face="head" transform={p.head}>
         <g transform={small && body.smallZoom ? `translate(16 16) scale(${body.smallZoom}) translate(-16 -16)` : undefined}>
           <g data-face="shadow" transform={p.cap}>

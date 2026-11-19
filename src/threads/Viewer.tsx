@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, Download, ExternalLink, X } from "lucide-react";
 import { Dialog } from "radix-ui";
-import { createContext, memo, useEffect, useRef, useState } from "react";
+import { createContext, memo, useCallback, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { createStore } from "@/store";
@@ -37,8 +37,7 @@ export function Viewer() {
   const img = useRef<HTMLImageElement>(null);
   const frame = useRef(0);
   const settle = useRef<ReturnType<typeof setTimeout>>(undefined);
-  // State, not a ref: the dialog mounts its content after the first effects run, and the wheel listener waits for it.
-  const [stage, setStage] = useState<HTMLDivElement | null>(null);
+  const stage = useRef<HTMLDivElement>(null);
   // A drag's pointer capture lands its click on the scrim, which mustn't close: `moved` marks the click as the drag's.
   const drag = useRef<{ x: number; y: number; moved?: boolean } | null>(null);
   const shot = open?.shots[open.at];
@@ -61,10 +60,11 @@ export function Viewer() {
     });
   };
   const reset = (ease = false) => ((zoom.current = { s: 1, x: 0, y: 0 }), apply(ease));
-  useEffect(() => reset(), [shot?.url, open?.at]);
-  useEffect(() => () => (cancelAnimationFrame(frame.current), clearTimeout(settle.current)), []);
-  // The page under the scrim holds still while it is open (index.css), so the GPU spends its frames on the image.
-  useEffect(() => void document.documentElement.toggleAttribute("data-viewing", !!shot), [!!shot]);
+  // Each image opens unzoomed: the img is keyed by its place, so a new one is a new element.
+  const attachImg = useCallback((el: HTMLImageElement | null) => {
+    img.current = el;
+    if (el) reset();
+  }, []);
 
   // Zoom keeps the point under the pointer (or the middle, from the keys) where it is.
   const zoomBy = (k: number, px = 0, py = 0, ease = false) => {
@@ -75,18 +75,26 @@ export function Viewer() {
     apply(ease);
   };
 
-  // The wheel is passive in React, and a pinch arrives as a ctrl-wheel that would zoom the whole page.
-  useEffect(() => {
-    const el = stage;
-    if (!el) return;
+  const attachStage = useCallback((el: HTMLDivElement) => {
+    stage.current = el;
+    // The page under the scrim holds still while it is open (index.css), so the GPU spends its frames on the image.
+    document.documentElement.toggleAttribute("data-viewing", true);
+    // The wheel is passive in React, and a pinch arrives as a ctrl-wheel that would zoom the whole page.
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const r = el.getBoundingClientRect();
       zoomBy(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.002)), e.clientX - r.left - r.width / 2, e.clientY - r.top - r.height / 2);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, [stage]);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      document.documentElement.toggleAttribute("data-viewing", false);
+      cancelAnimationFrame(frame.current);
+      clearTimeout(settle.current);
+      frame.current = 0;
+      stage.current = null;
+    };
+  }, []);
 
   const go = (by: number) => open && viewing.set({ ...open, at: (open.at + by + n) % n });
   const onKey = (e: React.KeyboardEvent) => {
@@ -140,7 +148,7 @@ export function Viewer() {
               </header>
               {/* A click on the scrim around the image closes; on the image it doesn't. */}
               <div
-                ref={setStage}
+                ref={attachStage}
                 data-agent="viewer-stage"
                 onClick={e => (drag.current?.moved ? (drag.current = null) : e.target === e.currentTarget && viewing.set(undefined))}
                 onPointerDown={e => zoom.current.s > 1 && e.target !== e.currentTarget && ((drag.current = { x: e.clientX - zoom.current.x, y: e.clientY - zoom.current.y }), e.currentTarget.setPointerCapture(e.pointerId))}
@@ -154,8 +162,8 @@ export function Viewer() {
                 {loaded !== shot.url && <span className="absolute text-xs text-white/50">loading…</span>}
                 {/* Shown once decoded, off the main thread, so the first frame of a big sheet doesn't stall on it. */}
                 <img
-                  key={shot.url}
-                  ref={img}
+                  key={`${open!.at}:${shot.url}`}
+                  ref={attachImg}
                   src={shot.url}
                   alt=""
                   decoding="async"
@@ -163,7 +171,7 @@ export function Viewer() {
                   onLoad={e => void e.currentTarget.decode().catch(() => {}).then(() => setLoaded(shot.url))}
                   className={cn("max-h-full max-w-full object-contain", zoomed ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in", loaded !== shot.url && "opacity-0")}
                   onDoubleClick={e => {
-                    const r = stage!.getBoundingClientRect();
+                    const r = stage.current!.getBoundingClientRect();
                     zoom.current.s > 1 ? reset(true) : zoomBy(2.5, e.clientX - r.left - r.width / 2, e.clientY - r.top - r.height / 2, true);
                   }}
                 />
