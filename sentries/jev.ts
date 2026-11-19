@@ -70,7 +70,7 @@ function objectiveQuestion(route: BusEvent, signal: { signalSeq: number; at: num
 
 function sizeQuestion(event: BusEvent, signal: { text: string }, config: JevConfig): Asked | undefined {
   const size = event.data["size"];
-  if (event.data["by"] !== "funnel" || typeof size !== "string") return;
+  if (typeof size !== "string" || event.data["by"] !== "funnel") return;
   const extra = { thread: event.data["thread"], session: event.data["session"] };
   return { question: "size", funnel: size, prompt: SIZE_PROMPT, extra, ask: async () => await sizeRequest(config, signal.text) };
 }
