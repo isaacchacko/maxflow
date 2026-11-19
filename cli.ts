@@ -39,6 +39,8 @@ const usage = `usage:
   maxflow thread merge <thread id> <into thread id>   fold a duplicate into another thread: messages, routers, ask and waits move, the duplicate leaves the inbox
   maxflow thread move <thread id> <objective id>   re-home a thread and its subthreads onto that objective and its routers
   maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
+  maxflow deploy                             ship origin's feat/v2 to the live yarn: refuses a dirty live checkout or a commit that doesn't build,
+                                             fast-forwards, restarts, and checks every session and sentry came back
   maxflow install                            run this checkout as the login service and add its hooks to ~/.claude/settings.json`;
 import { fetchPrs, links, parsePr, readStatus, readWatches, render, writeWatches } from "./sentries/gh";
 import * as slack from "./sentries/slack";
@@ -338,6 +340,8 @@ if (verb === "ls") {
 } else if (verb === "page" && (rest[0] === "put" || rest[0] === "rm") && rest[2]) {
   const body = rest[0] === "put" ? { ref: rest[1], block: JSON.parse(rest[2]) } : { ref: rest[1], id: rest[2] };
   await call("/api/pages", { method: rest[0] === "put" ? "POST" : "DELETE", body: JSON.stringify(body) });
+} else if (verb === "deploy") {
+  await (await import("./deploy")).deploy();
 } else if (verb === "install") {
   const { install, LABEL, LOG } = await import("./service");
   const r = install();

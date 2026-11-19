@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { STATE_DIR } from "./instance";
+import { DIR, STATE_DIR } from "./instance";
 import { commandStarts, shellText } from "./restrictions-shell";
 
 // His autonomy restrictions: what his agents may do on their own (allow), must ask him first (ask), or may never do (deny).
@@ -10,7 +10,8 @@ import { commandStarts, shellText } from "./restrictions-shell";
 export const MODES = ["allow", "ask", "deny"] as const;
 export type Mode = (typeof MODES)[number];
 // match.tools: regexes on the whole Claude Code tool_name; match.bash: regexes matched where a command
-// in a Bash command starts (commandStarts), so a file named pkill.md isn't pkill.
+// in a Bash command starts (commandStarts), so a file named pkill.md isn't pkill; match.paths: regexes on the file a
+// matched tool writes (file_path or notebook_path), which a tools match then also needs.
 // scope: it applies only on that objective, only under that path prefix, and only to those people; no scope applies everywhere.
 // parent: an override of another restriction, for some people or some place, which uses that one's matchers instead of its own.
 // reaches: the account the person on the other end of the call is known by (a Slack message's recipient, an email's, a PR's
@@ -24,7 +25,7 @@ export type Restriction = {
   action: string;
   label: string;
   mode: Mode;
-  match: { tools?: string[]; bash?: string[] };
+  match: { tools?: string[]; bash?: string[]; paths?: string[] };
   scope?: { objective?: string; cwd?: string; people?: Person[] };
   parent?: string;
   reaches?: Reach;
@@ -88,6 +89,8 @@ export const SEED: Restriction[] = [
   builtin("delete-files", "delete", "Delete files recursively", "allow", { bash: ["\\brm\\s+(-\\S*[rR]|--recursive)"], tools: [`${M365}sharepoint_delete_item`] }, ""),
   builtin("delete-branches", "delete", "Delete a branch", "allow", { bash: ["\\bgit\\s+branch\\s+(-D|--delete|-d)\\b", "\\bgit\\s+push\\b.*(--delete|\\s:\\S)"] }, ""),
   builtin("delete-mail", "delete", "Trash or delete mail", "ask", { tools: [`${GMAIL}trash_(message|thread)`, `${M365}outlook_(trash_thread|batch_delete_messages)`] }, ""),
+  builtin("edit-live", "yarn", "Edit the live yarn checkout", "deny", { tools: ["Edit", "Write", "MultiEdit", "NotebookEdit"], paths: [`^${DIR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/`] },
+    "Live runs only committed code: change yarn in your own worktree, push to feat/v2, and ship it with cli.ts deploy."),
   builtin("kill-processes", "processes", "Kill processes by pattern", "deny", { bash: ["\\bpkill\\b", "\\bkillall\\b", "\\blsof\\b.*\\|\\s*xargs\\s+kill"] },
     "They match the live yarn, other agents' work and his Chrome. Kill a PID you started."),
   outsiders("pr-comment", "review", "Comment on or review a PR", "ask", "A PR from outside the team: a comment there is public."),
@@ -118,6 +121,7 @@ const EXPLAIN: Record<string, Explain> = {
   "delete-files": { about: "Deleting a folder and everything in it (rm -r), or a SharePoint item.", examples: ["An agent deletes a build folder"], noun: "delete", exceptions: ["repo"] },
   "delete-branches": { about: "Deleting a git branch, on your machine or on GitHub.", examples: ["An agent deletes its merged branch"], noun: "delete", exceptions: ["repo"] },
   "delete-mail": { about: "Moving emails to the trash.", examples: ["An agent trashes a newsletter"], noun: "delete", exceptions: ["objective"] },
+  "edit-live": { about: "Editing a file in the checkout the live yarn runs from. Changes go through a worktree and cli.ts deploy.", examples: ["An agent edits server.ts in ~/Worktrees/maxflow-v2"], noun: "edit", exceptions: [] },
   "kill-processes": { about: "Killing processes by name or pattern (pkill, killall) instead of the one process it started.", examples: ["An agent runs pkill -f bun"], noun: "kill", exceptions: [] },
   "spend-money": { about: "Anything that charges money: Stripe charges, cloud purchases, billing changes.", examples: ["An agent buys an AWS reservation"], noun: "purchase", exceptions: [] },
 };
@@ -160,7 +164,7 @@ export function invalid(r: Partial<Restriction>, list: Restriction[] = []): stri
   const reaches = r.parent ? list.find((o) => o.id === r.parent)?.reaches : r.reaches;
   if (r.scope?.people?.length && !reaches) return "nobody is on the other end of this action, so it can't be set per person";
   for (const p of r.scope?.people ?? []) if (p.team === undefined && !p.slack && !p.email && !p.github) return "a person needs a Slack id, an email or a GitHub login";
-  const patterns = [...(r.match?.tools ?? []), ...(r.match?.bash ?? [])];
+  const patterns = [...(r.match?.tools ?? []), ...(r.match?.bash ?? []), ...(r.match?.paths ?? [])];
   if (!r.parent && !patterns.length) return "match needs a tools or bash regex";
   for (const p of patterns) try { new RegExp(p); } catch (e) { return `bad regex ${p}: ${(e as Error).message}`; }
 }
@@ -196,7 +200,9 @@ export const matches = (r: Restriction, call: Call, list: Restriction[] = []) =>
   const m = r.parent ? list.find((o) => o.id === r.parent)?.match : r.match;
   const command = call.tool === "Bash" && typeof call.input?.command === "string" ? shellText(call.input.command) : undefined;
   const starts = command === undefined ? [] : commandStarts(command);
-  return !!m && ((m.tools ?? []).some((p) => test(p, call.tool, true)) || (command !== undefined && (m.bash ?? []).some((p) => testAt(p, command, starts))));
+  const path = call.input?.file_path ?? call.input?.notebook_path;
+  const onPath = !m?.paths?.length || (typeof path === "string" && m.paths.some((p) => test(p, path, false)));
+  return !!m && (((m.tools ?? []).some((p) => test(p, call.tool, true)) && onPath) || (command !== undefined && (m.bash ?? []).some((p) => testAt(p, command, starts))));
 };
 const applies = (r: Restriction, call: Call, who?: Person) =>
   (!r.scope?.objective || r.scope.objective === call.objective) && (!r.scope?.cwd || (!!call.cwd && under(call.cwd, r.scope.cwd))) && personFit(r, who) > 0;

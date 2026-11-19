@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DIR } from "./instance";
 
@@ -31,6 +31,12 @@ export function status() {
   const out = run(["systemctl", "--user", "show", LABEL, "-p", "ActiveState,SubState,NRestarts,ExecMainStatus,ExecMainPID"]).out;
   const field = (k: string) => out.match(new RegExp(`^${k}=(.*)$`, "m"))?.[1];
   return { runs: field("NRestarts"), lastExit: field("ExecMainStatus"), text: out.trim() };
+}
+
+// The checkout the installed service runs from, whichever checkout asks.
+export function checkout() {
+  const file = MAC ? PLIST : UNIT;
+  return existsSync(file) ? readFileSync(file, "utf8").match(MAC ? /<key>WorkingDirectory<\/key><string>([^<]+)</ : /^WorkingDirectory=(.+)$/m)?.[1] : undefined;
 }
 
 export const restartCommand = MAC ? `launchctl kickstart -k gui/$(id -u)/${LABEL}` : `systemctl --user restart ${LABEL}`;

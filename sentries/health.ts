@@ -6,7 +6,7 @@
 // the server adopts that session like any other once it is back.
 import type { ServerWebSocket, Subprocess } from "bun";
 import { join } from "node:path";
-import { BASE as base, LIVE, PORT, TMUX_SCOPE, TMUX_SOCKET } from "../instance";
+import { BASE as base, CLI, LIVE, PORT, TMUX_SCOPE, TMUX_SOCKET } from "../instance";
 import { LABEL, LOG, loaded, restartCommand, status as serviceStatus } from "../service";
 import { takeOver } from "./singleton";
 
@@ -57,7 +57,7 @@ async function buildOk() {
   }
 }
 
-const RULES = `Other agents edit this repo with uncommitted work in the tree: fix the breakage in place rather than reverting or stashing their changes, and don't commit. Don't kill any tmux session on the maxflow socket; they are the user's running work. When it is fixed, say in a few lines what broke and what you changed.`;
+const RULES = `Live runs only committed code, and nobody edits its checkout (${DIR}): a fix to the code goes in your own worktree (\`git -C ${DIR} worktree add ~/Worktrees/maxflow-v2-recovery -b fix/recovery-<what> origin/feat/v2\`), is committed, rebased onto origin/feat/v2 and pushed to feat/v2, and ships with \`${CLI} deploy\`, which refuses a dirty live checkout or a commit that fails \`bun run check\`. If the live checkout is dirty, don't revert or stash it; find whose it is. Don't kill any tmux session on the maxflow socket; they are the user's running work. When it is fixed, say in a few lines what broke and what you changed.`;
 
 function downTask(since: number) {
   const status = serviceStatus().text;
@@ -69,7 +69,7 @@ ${status}
 Last lines of ${LOG}:
 ${run(["tail", "-n", "80", LOG]).out}
 
-Find the root cause and fix it, then restart with \`${restartCommand}\` and confirm \`curl -s ${base}/api/sessions\` answers with the session list. ${RULES}`;
+Find the root cause. If the code needs to change, ship the fix with deploy as below; if not, restart with \`${restartCommand}\`. Then confirm \`curl -s ${base}/api/sessions\` answers with the session list. ${RULES}`;
 }
 
 function buildTask(since: number) {
@@ -78,7 +78,7 @@ function buildTask(since: number) {
 Last lines of ${LOG} (the build error is in there):
 ${run(["tail", "-n", "80", LOG]).out}
 
-The cause is usually another agent's edit caught halfway: a file cut off, or an import of a file not written yet. Check \`git status\`/\`git diff\` and which maxflow session is editing that file (\`./cli.ts ls\`, \`./cli.ts screen <id>\`); if its agent is still working on it, finish the edit the way it was clearly heading. Hot reload picks up the fix, no restart needed: confirm \`curl -s -o /dev/null -w '%{http_code}' ${base}/\` gives 200. ${RULES}`;
+Look at \`git -C ${DIR} status\` (an edit made in the live checkout despite the rule: find its owner with \`${CLI} ls\` and \`${CLI} screen <id>\`) and \`git -C ${DIR} log -3\` (a deployed commit that doesn't build). Fix it forward and deploy, as below, then confirm \`curl -s -o /dev/null -w '%{http_code}' ${base}/\` gives 200. ${RULES}`;
 }
 
 function startAgent(prompt: string) {

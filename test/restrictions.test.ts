@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { invalid, matches, resolve, SEED, type Call, type Restriction } from "../restrictions";
 import { commandStarts, shellText } from "../restrictions-shell";
+import { DIR } from "../instance";
 
 const verdict = (command: string) => resolve(SEED, { tool: "Bash", input: { command } });
 const hit = (id: string, command: string) => matches(SEED.find((r) => r.id === id)!, { tool: "Bash", input: { command } }, SEED);
@@ -78,6 +79,13 @@ describe("the seed catalog", () => {
     expect(judged(bash("gh pr create --title x --reviewer felix"))).toEqual(["deny", "pr-reviewers"]);
     expect(judged({ tool: "mcp__claude_ai_Slack__slack_send_message" })).toEqual(["ask", "slack"]);
     expect(judged({ tool: "mcp__claude_ai_Slack__slack_send_message_draft" })).toEqual(["allow", undefined]);
+  });
+
+  test("edits under the live checkout are denied, and nothing else is", () => {
+    expect(judged({ tool: "Edit", input: { file_path: `${DIR}/server.ts` } })).toEqual(["deny", "edit-live"]);
+    expect(judged({ tool: "NotebookEdit", input: { notebook_path: `${DIR}/a.ipynb` } })).toEqual(["deny", "edit-live"]);
+    expect(judged({ tool: "Write", input: { file_path: `${DIR}-topic/server.ts` } })).toEqual(["allow", undefined]);
+    expect(judged({ tool: "Read", input: { file_path: `${DIR}/server.ts` } })).toEqual(["allow", undefined]);
   });
 
   test("an outsider's PR asks first where a teammate's is allowed", () => {
