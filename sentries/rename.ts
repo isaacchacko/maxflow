@@ -77,20 +77,19 @@ function newChars(id: string, lines: string[]) {
   return lines.filter((l) => !before.has(l)).reduce((n, l) => n + l.length, 0);
 }
 
-async function retitle(s: Session, mark: Mark) {
+async function retitle(s: Session, mark: Mark): Promise<Mark> {
   const hasTitled = mark.lastSet !== undefined && mark.lastSet !== "";
   const isRenamedByHand = hasTitled && s.name !== mark.lastSet;
-  if (isRenamedByHand) mark.pinned = true;
-  if (mark.pinned === true) return;
+  if (isRenamedByHand || mark.pinned === true) return { ...mark, pinned: true };
   const lines = await screenLines(s.id);
   countOnlyTextArrivingAfterARestart(s, mark, lines);
-  if (newChars(s.id, lines) < (hasTitled ? EVERY_CHARS : FIRST_CHARS)) return;
+  if (newChars(s.id, lines) < (hasTitled ? EVERY_CHARS : FIRST_CHARS)) return mark;
   const name = await title(s, lines);
   linesAtLastRename.set(s.id, new Set(lines));
-  if (name === "" || name === "SKIP" || name === s.name) return;
+  if (["", "SKIP", s.name].includes(name)) return mark;
   await fetch(`${base}/api/sessions/${s.id}`, { method: "PATCH", headers: HEADERS_SO_THE_GRAPH_DRAWS_THIS_SENTRY, body: JSON.stringify({ name }), signal: AbortSignal.timeout(API_TIMEOUT_MS) });
-  mark.lastSet = name;
   console.log(`${new Date().toLocaleTimeString()}  ${s.id}  ${s.name}  ->  ${name}`);
+  return { ...mark, lastSet: name };
 }
 
 async function tick() {
@@ -99,7 +98,7 @@ async function tick() {
   for (const s of sessions) {
     const mark = marks.get(s.id) ?? {};
     marks.set(s.id, mark);
-    await retitle(s, mark);
+    marks.set(s.id, await retitle(s, mark));
   }
   writeFileSync(STATE_FILE, JSON.stringify(Object.fromEntries(marks)));
 }

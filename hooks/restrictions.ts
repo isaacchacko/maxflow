@@ -51,22 +51,21 @@ async function askServerToEnforce(body: { session: string }) {
 const input = hookInput(JSON.parse(await Bun.stdin.text()));
 const call = {
   session,
-  tool: String(input.tool_name ?? ""),
+  tool: typeof input.tool_name === "string" ? input.tool_name : "",
   input: isRecord(input.tool_input) ? input.tool_input : {},
-  cwd: String(input.cwd ?? process.cwd()),
+  cwd: typeof input.cwd === "string" ? input.cwd : process.cwd(),
 };
 
 const list = loadOrNone();
-const onlyAllowRestrictionsMatch = list.every((r) => r.mode === "allow" || !matches(r, call, list));
-if (onlyAllowRestrictionsMatch) process.exit(0);
+const areOnlyAllowRestrictionsMatched = list.every((r) => r.mode === "allow" || !matches(r, call, list));
+if (areOnlyAllowRestrictionsMatched) process.exit(0);
 const peopleOf = await loadPeopleOf();
 const peopleReached: Person[] = peopleOf ? peopleOf(call.tool, call.input, call.cwd) : [];
 const callWithPeople = { ...call, people: peopleReached };
 
 function blocksOnlyWithServerDown(): Verdict {
   const { mode, restriction } = resolve(list, callWithPeople);
-  if (mode !== "deny") return { decision: "allow" };
-  return { decision: "deny", reason: `Blocked by a yarn restriction (${String(restriction?.label)}), which Isaac set to block.` };
+  return mode === "deny" ? { decision: "deny", reason: `Blocked by a yarn restriction (${String(restriction?.label)}), which Isaac set to block.` } : { decision: "allow" };
 }
 
 async function verdictOf(res: Response | null): Promise<Verdict> {
