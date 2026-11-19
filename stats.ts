@@ -555,7 +555,7 @@ export function agents(windowDays: number, sessions: SessionInfo[], objectives: 
     },
     daily: days.map(d => ({ day: d, models: daily.get(d) ?? {} })),
     models: [...byModel].map(([model, v]) => ({ model, ...v })).sort((a, b) => b.dollars - a.dollars),
-    groups: all.sort((a, b) => b.dollars - a.dollars).slice(0, 200),
+    groups: all.sort((a, b) => b.dollars - a.dollars),
     objectives: [...byObjective.values()].map(o => ({ ...o, prs: o.prs.size })).sort((a, b) => b.dollars - a.dollars),
   };
 }

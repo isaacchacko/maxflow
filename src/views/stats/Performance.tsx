@@ -116,7 +116,7 @@ function HealthSection({ h }: { h: Health }) {
                   <span className="text-right text-muted-foreground tabular-nums" title={`up since ${when(s.upSince)}`}>
                     {s.running ? `up ${since(s.upSince)}` : "–"}
                   </span>
-                  <span className={cn("text-right tabular-nums", s.respawns ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground")}>{s.respawns ? `${s.respawns} restarts` : "steady"}</span>
+                  <span className={cn("text-right tabular-nums", s.respawns ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground")}>{s.respawns ? `${s.respawns} restart${s.respawns > 1 ? "s" : ""}` : "steady"}</span>
                 </li>
               ))}
             </ul>
