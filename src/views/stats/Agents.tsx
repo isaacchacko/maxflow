@@ -2,7 +2,8 @@ import { useState } from "react";
 import { cn, hasText } from "@/lib/utils";
 import { Jev } from "./Jev";
 import { useJson } from "./load";
-import { SectionHead, Tile, short, weekday } from "./parts";
+import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { AXIS_TICK, Segmented, SectionHead, StageBars, Tile, indexOf, short, weekday } from "./parts";
 
 type Group = {
   id: string;
@@ -45,7 +46,7 @@ const FAMILIES: Family[] = [
   [/sonnet/, "Sonnet", "var(--viz-3)"],
   [/fable|mythos/, "Fable", "var(--viz-4)"],
 ];
-const ANY_OTHER_FAMILY_IN_GREY: Family = [/./, "Other", "color-mix(in oklab, var(--muted-foreground) 45%, var(--viz-track))"];
+const ANY_OTHER_FAMILY_IN_GREY: Family = [/./, "Other", "var(--viz-cursor)"];
 const family = (model: string) => FAMILIES.find(([re]) => re.test(model)) ?? ANY_OTHER_FAMILY_IN_GREY;
 const familyOrder = (label: string) => FAMILIES.findIndex(f => f[1] === label);
 const modelName = (model: string) => model.replace(/^claude-/, "").replace(/-(\d+)-(\d+)$/, " $1.$2").replace(/-(\d+)$/, " $1").replace(/^./, c => c.toUpperCase());
@@ -84,11 +85,11 @@ function familyStack(models: Record<string, [number, number]>, at: 0 | 1) {
 
 function SliceLegend({ slices, fmt }: { slices: Slice[]; fmt: (v: number) => string }) {
   return (
-    <span className="flex gap-2 text-xs text-muted-foreground">
+    <span className="flex gap-3 text-[13px] font-medium text-[var(--viz-text-2)]">
       {slices.map(x => (
-        <span key={x.label} className="flex items-center gap-1">
-          <span className="size-2 rounded-sm" style={{ background: x.color }} />
-          {x.label} {fmt(x.v)}
+        <span key={x.label} className="flex items-center gap-1.5">
+          <span className="size-2 rounded-full" style={{ background: x.color }} />
+          {x.label} <span className="text-[var(--viz-text)] tabular-nums">{fmt(x.v)}</span>
         </span>
       ))}
     </span>
@@ -97,27 +98,33 @@ function SliceLegend({ slices, fmt }: { slices: Slice[]; fmt: (v: number) => str
 
 function FamiliesOnScreen({ slices }: { slices: Slice[] }) {
   return (
-    <div className="flex gap-3 text-xs text-muted-foreground">
+    <dl className="flex shrink-0 items-center gap-4 text-[13px] font-medium text-[var(--viz-text-2)]">
       {slices.map(x => (
-        <span key={x.label} className="flex items-center gap-1.5">
-          <span className="size-2 rounded-sm" style={{ background: x.color }} />
-          {x.label}
-        </span>
+        <div key={x.label} className="flex items-center gap-1.5">
+          <span className="size-2 rounded-full" style={{ background: x.color }} aria-hidden />
+          <dt>{x.label}</dt>
+        </div>
       ))}
-    </div>
+    </dl>
   );
 }
+
+function dayTicks(days: string[]) {
+  return days.length > 14 ? new Set([0, Math.floor(days.length / 2), days.length - 1]) : new Set(days.map((_, i) => i));
+}
+
+const STACK_TOP_RADIUS: [number, number, number, number] = [4, 4, 0, 0];
 
 function Daily({ data, measure }: { data: AgentStats; measure: Measure }) {
   const [hover, setHover] = useState<number>();
   const stacks = data.daily.map(d => familyStack(d.models, measure === "cost" ? 0 : 1));
   const totals = stacks.map(s => sumOf(s.map(x => x.v)));
-  const max = Math.max(1e-9, ...totals);
-  const shown = new Map(stacks.flat().map(x => [x.label, x])).values().toArray();
+  const shown = new Map(stacks.flat().map(x => [x.label, x])).values().toArray().toSorted((a, b) => familyOrder(a.label) - familyOrder(b.label));
+  const rows = data.days.map((day, i) => ({ day, ...Object.fromEntries((stacks[i] ?? []).map(x => [x.label, x.v])) }));
+  const ticks = dayTicks(data.days);
   const fmt = measure === "cost" ? money : count;
   const hoveredDay = hover === undefined ? undefined : data.days[hover];
   const hoveredStack = hover === undefined ? undefined : stacks[hover];
-  const ticks = data.days.length > 14 ? [0, Math.floor(data.days.length / 2), data.days.length - 1] : data.days.map((_, i) => i);
   return (
     <Tile
       label={hoveredDay === undefined ? `${measure === "cost" ? "Cost" : "Tokens"} per day` : `${weekday(hoveredDay, "short")} ${short(hoveredDay)}`}
@@ -125,48 +132,19 @@ function Daily({ data, measure }: { data: AgentStats; measure: Measure }) {
       delta={hoveredStack && <SliceLegend slices={hoveredStack} fmt={fmt} />}
       aside={<FamiliesOnScreen slices={shown} />}
     >
-      <div className="mt-4 flex h-36 items-end gap-[2px]" onMouseLeave={() => setHover(undefined)}>
-        {stacks.map((s, i) => (
-          <div key={data.days[i]} onMouseEnter={() => setHover(i)} className="relative flex h-full flex-1 flex-col justify-end overflow-hidden rounded-[4px] bg-[var(--viz-track)]">
-            <div className={cn("flex flex-col-reverse gap-[2px] transition-opacity", hover !== undefined && hover !== i && "opacity-40")} style={{ height: `${((totals[i] ?? 0) / max) * 100}%` }}>
-              {s.map(x => (
-                <span key={x.label} style={{ flexGrow: x.v, background: x.color }} className="min-h-0" />
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-1.5 flex gap-[2px] text-[10px] leading-none text-muted-foreground">
-        {data.days.map((d, i) => (
-          <span key={d} className={cn("flex-1 whitespace-nowrap", i === data.days.length - 1 && ticks.length < data.days.length ? "flex justify-end" : "")}>
-            {ticks.includes(i) ? short(d) : ""}
-          </span>
-        ))}
+      <div className="h-56 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={rows} margin={{ top: 4, right: 6, bottom: 0, left: 0 }} barCategoryGap="22%" onMouseMove={state => setHover(indexOf(state))} onMouseLeave={() => setHover(undefined)}>
+            <YAxis width={44} tickCount={4} tickFormatter={fmt} tickLine={false} axisLine={false} tick={{ ...AXIS_TICK, fontSize: 12 }} />
+            <XAxis dataKey="day" interval={0} axisLine={false} tickLine={false} tickMargin={12} tick={AXIS_TICK} tickFormatter={(d: string, i: number) => (ticks.has(i) ? short(d) : "")} />
+            <Tooltip content={() => null} cursor={{ fill: "var(--viz-track)", opacity: 0.5 }} />
+            {shown.map((x, k) => (
+              <Bar key={x.label} dataKey={x.label} stackId="day" fill={x.color} radius={k === shown.length - 1 ? STACK_TOP_RADIUS : 0} isAnimationActive animationDuration={450} />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
       </div>
     </Tile>
-  );
-}
-
-type RankedRow = { key: string; label: string; value: number; note?: string | undefined; color?: string };
-
-function Ranked({ rows, fmt }: { rows: RankedRow[]; fmt: (v: number) => string }) {
-  const top = Math.max(1e-9, ...rows.map(r => r.value));
-  return (
-    <div className="mt-3 flex flex-col gap-2">
-      {rows.map(r => (
-        <div key={r.key} className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_7.5rem] items-center gap-3 text-xs">
-          <span className="truncate" title={r.label}>
-            {r.label}
-          </span>
-          <span className="relative h-3 overflow-hidden rounded-full bg-[var(--viz-track)]">
-            <span className="absolute inset-y-0 left-0 rounded-full" style={{ width: `max(${(r.value / top) * 100}%, 0.5rem)`, background: r.color ?? "var(--viz)" }} />
-          </span>
-          <span className="text-right tabular-nums">
-            {fmt(r.value)} {hasText(r.note) && <span className="text-muted-foreground">{r.note}</span>}
-          </span>
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -176,7 +154,7 @@ const KINDS = [
   { id: "outside", label: "Outside yarn" },
 ] as const;
 
-const NONE = <span className="text-muted-foreground">–</span>;
+const NONE = <span className="text-[var(--viz-text-2)]">–</span>;
 const valueOf = (g: Group, measure: Measure) => (measure === "cost" ? g.dollars : tokensOf(g));
 
 function SpendByModelBar({ g, width }: { g: Group; width: number }) {
@@ -206,7 +184,7 @@ function AgentRow({ g, measure, top }: { g: Group; measure: Measure; top: number
           </a>
         )}
         {hasText(g.objective) && (
-          <span className="block truncate text-[11px] text-muted-foreground">
+          <span className="block truncate text-[11px] text-[var(--viz-text-2)]">
             {g.role === "router" ? "router · " : ""}
             {g.objective}
           </span>
@@ -218,8 +196,8 @@ function AgentRow({ g, measure, top }: { g: Group; measure: Measure; top: number
           <span className="shrink-0 tabular-nums">{measure === "cost" ? money(v) : count(v)}</span>
         </div>
       </td>
-      <td className="py-1.5 text-right text-muted-foreground tabular-nums">{hours(g.activeMs)}</td>
-      <td className="py-1.5 text-right text-muted-foreground tabular-nums">{g.messages.toLocaleString()}</td>
+      <td className="py-1.5 text-right text-[var(--viz-text-2)] tabular-nums">{hours(g.activeMs)}</td>
+      <td className="py-1.5 text-right text-[var(--viz-text-2)] tabular-nums">{g.messages.toLocaleString()}</td>
       <td className="py-1.5 text-right tabular-nums">{g.prs > 0 ? g.prs : NONE}</td>
       <td className="py-1.5 text-right tabular-nums">{g.threads > 0 ? g.threads : NONE}</td>
       <td className="py-1.5 text-right tabular-nums">{g.prs > 0 ? money(g.dollars / g.prs) : NONE}</td>
@@ -228,15 +206,7 @@ function AgentRow({ g, measure, top }: { g: Group; measure: Measure; top: number
 }
 
 function KindPicker({ kind, onKind }: { kind: Group["kind"]; onKind: (kind: Group["kind"]) => void }) {
-  return (
-    <div className="flex shrink-0 rounded-lg bg-[var(--viz-track)] p-0.5 text-xs">
-      {KINDS.map(k => (
-        <button key={k.id} onClick={() => onKind(k.id)} className={cn("rounded-md px-2 py-0.5", kind === k.id ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-          {k.label}
-        </button>
-      ))}
-    </div>
-  );
+  return <Segmented label="Kind" options={[...KINDS]} value={kind} onChange={onKind} />;
 }
 
 function AgentTable({ data, measure }: { data: AgentStats; measure: Measure }) {
@@ -250,7 +220,7 @@ function AgentTable({ data, measure }: { data: AgentStats; measure: Measure }) {
     <Tile label="Most expensive" value={`${rows.length.toLocaleString()} ${kindLabel.toLowerCase()}`} aside={<KindPicker kind={kind} onKind={setKind} />}>
       <div className="mt-3 overflow-x-auto">
         <table className="w-full min-w-[46rem] table-fixed text-xs">
-          <thead className="text-left text-[11px] text-muted-foreground">
+          <thead className="text-left text-[11px] text-[var(--viz-text-2)]">
             <tr>
               <th className="w-[30%] pb-2 font-normal">{kind === "outside" ? "Folder" : "Agent"}</th>
               <th className="w-[24%] pb-2 font-normal">{measure === "cost" ? "Cost" : "Tokens"}</th>
@@ -270,7 +240,7 @@ function AgentTable({ data, measure }: { data: AgentStats; measure: Measure }) {
           </tbody>
         </table>
         {rows.length > 15 && (
-          <button onClick={() => setShowingAll(!isShowingAll)} className="mt-2 text-xs text-muted-foreground hover:text-foreground">
+          <button onClick={() => setShowingAll(!isShowingAll)} className="mt-2 text-xs text-[var(--viz-text-2)] hover:text-foreground">
             {isShowingAll ? "Show the top 15" : `Show all ${rows.length}`}
           </button>
         )}
@@ -295,20 +265,8 @@ function kpisOf(t: AgentStats["totals"], measure: Measure): [string, string, str
 function UsageToggles({ measure, onMeasure, days, onDays }: { measure: Measure; onMeasure: (m: Measure) => void; days: number; onDays: (n: number) => void }) {
   return (
     <div className="ml-auto flex gap-2">
-      <div className="flex rounded-lg bg-[var(--viz-track)] p-0.5 text-xs">
-        {MEASURES.map(m => (
-          <button key={m} onClick={() => onMeasure(m)} className={cn("rounded-md px-2 py-0.5 capitalize", measure === m ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-            {m}
-          </button>
-        ))}
-      </div>
-      <div className="flex rounded-lg bg-[var(--viz-track)] p-0.5 text-xs">
-        {RANGES.map(n => (
-          <button key={n} onClick={() => onDays(n)} className={cn("rounded-md px-2 py-0.5 tabular-nums", days === n ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-            {n}d
-          </button>
-        ))}
-      </div>
+      <Segmented label="Measure" options={MEASURES.map(m => ({ id: m, label: m === "cost" ? "Cost" : "Tokens" }))} value={measure} onChange={onMeasure} />
+      <Segmented label="Range" options={RANGES.map(n => ({ id: n, label: `${n}d` }))} value={days} onChange={onDays} />
     </div>
   );
 }
@@ -318,14 +276,14 @@ function ByModelAndObjective({ d, measure }: { d: AgentStats; measure: Measure }
   const share = (dollars: number) => `${Math.round((dollars / Math.max(1e-9, d.totals.dollars)) * 100)}%`;
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-      <Tile label="By model" value={String(d.models.length)} delta={<span className="text-xs text-muted-foreground">models used</span>}>
-        <Ranked
+      <Tile label="By model" value={String(d.models.length)} delta={<span className="text-xs text-[var(--viz-text-2)]">models used</span>}>
+        <StageBars
           rows={d.models.slice(0, 8).map(m => ({ key: m.model, label: modelName(m.model), value: measure === "cost" ? m.dollars : m.tokens, color: family(m.model)[2], note: measure === "cost" ? share(m.dollars) : undefined }))}
           fmt={fmt}
         />
       </Tile>
-      <Tile label="By objective" value={String(d.objectives.length)} delta={<span className="text-xs text-muted-foreground">objectives with spend</span>}>
-        <Ranked rows={d.objectives.slice(0, 8).map(o => ({ key: o.id, label: o.title, value: o.dollars, note: o.prs > 0 ? `${money(o.dollars / o.prs)}/PR` : `${o.agents} agents` }))} fmt={money} />
+      <Tile label="By objective" value={String(d.objectives.length)} delta={<span className="text-xs text-[var(--viz-text-2)]">objectives with spend</span>}>
+        <StageBars rows={d.objectives.slice(0, 8).map(o => ({ key: o.id, label: o.title, value: o.dollars, note: o.prs > 0 ? `${money(o.dollars / o.prs)}/PR` : `${o.agents} agents` }))} fmt={money} />
       </Tile>
     </div>
   );
@@ -335,13 +293,13 @@ export function Agents({ live, days, onDays }: { live: boolean; days: number; on
   const [measure, setMeasure] = useState<Measure>("cost");
   const data = useJson<AgentStats>(live ? `/api/stats/agents?days=${days}` : undefined, d => d.scanning);
   const d = data.value;
-  if (!d) return <p className={cn("text-sm", hasText(data.error) ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>{data.error ?? "Reading Claude Code's transcripts…"}</p>;
+  if (!d) return <p className={cn("text-sm", hasText(data.error) ? "text-rose-600 dark:text-rose-400" : "text-[var(--viz-text-2)]")}>{data.error ?? "Reading Claude Code's transcripts…"}</p>;
   const hasNoYarnAgent = d.groups.every(g => g.kind !== "agent");
   return (
     <>
       <section>
         <SectionHead title="Usage">
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-[var(--viz-text-2)]">
             from Claude Code's transcripts, read {new Date(d.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
             {d.scanning && " · reading what's new…"}
           </span>
@@ -351,14 +309,14 @@ export function Agents({ live, days, onDays }: { live: boolean; days: number; on
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {kpisOf(d.totals, measure).map(([label, value, note]) => (
               <Tile key={label} label={label} value={value}>
-                <div className="mt-1 text-xs text-muted-foreground">{note}</div>
+                <div className="mt-1 text-xs text-[var(--viz-text-2)]">{note}</div>
               </Tile>
             ))}
           </div>
           <Daily data={d} measure={measure} />
           <ByModelAndObjective d={d} measure={measure} />
           <AgentTable data={d} measure={measure} />
-          {hasNoYarnAgent && <p className="text-xs text-muted-foreground">No yarn agent ran in this range.</p>}
+          {hasNoYarnAgent && <p className="text-xs text-[var(--viz-text-2)]">No yarn agent ran in this range.</p>}
         </div>
       </section>
       <Jev days={days} />

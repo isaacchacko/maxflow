@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
+import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, type MouseHandlerDataParam } from "recharts";
 import { useNow } from "@/lib/effects";
-import { cn } from "@/lib/utils";
+import { cn, hasText } from "@/lib/utils";
 
 export type Counts = { commits: number; opened: number; merged: number; closed: number; reviews: number; requested: number; added: number; deleted: number };
 export type GhWeek = { at: number; final: boolean; counts?: Counts; commitTimes?: number[]; error?: string };
@@ -75,19 +76,19 @@ export function useIsStillBefore(at: number | undefined) {
 }
 
 function deltaLook(pct: number, isLowerBetter: boolean) {
-  if (pct === 0) return "bg-muted text-muted-foreground";
+  if (pct === 0) return "bg-[var(--viz-track)] text-[var(--viz-text-2)]";
   const isGood = isLowerBetter ? pct < 0 : pct > 0;
-  return isGood ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-rose-500/15 text-rose-700 dark:text-rose-300";
+  return isGood ? "bg-[var(--viz-up-bg)] text-[var(--viz-up)]" : "bg-[var(--viz-down-bg)] text-[var(--viz-down)]";
 }
 
 type DeltaProps = { now?: number | undefined; before?: number | undefined; isLowerBetter?: boolean; isWeekRunning?: boolean };
 
 export function Delta({ now, before, isLowerBetter = false, isWeekRunning = false }: DeltaProps) {
-  if (isWeekRunning && before !== undefined) return <span className="text-xs text-muted-foreground tabular-nums">{before.toLocaleString()} last week</span>;
+  if (isWeekRunning && before !== undefined) return <span className="truncate text-[13px] font-medium whitespace-nowrap text-[var(--viz-text-3)] tabular-nums">{before.toLocaleString()} last week</span>;
   if (now === undefined || before === undefined || before === 0) return null;
   const pct = Math.round(((now - before) / before) * 100);
   return (
-    <span className={cn("rounded-md px-1.5 py-px text-xs font-medium tabular-nums", deltaLook(pct, isLowerBetter))}>
+    <span className={cn("inline-flex items-center rounded-md px-1.5 py-0.5 text-sm font-medium whitespace-nowrap tabular-nums", deltaLook(pct, isLowerBetter))}>
       {pct > 0 ? "+" : ""}
       {pct}%
     </span>
@@ -100,18 +101,51 @@ type TileProps = { label: string; value: string; delta?: ReactNode; peek?: Peek;
 
 export function Tile({ label, value, delta, peek, hint, aside, className, children }: TileProps) {
   return (
-    <div className={cn("flex flex-col rounded-2xl bg-[var(--viz-tile)] p-4", className)} title={hint}>
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs text-muted-foreground">{peek?.label ?? label}</div>
-          <div className="mt-0.5 flex items-baseline gap-2">
-            <span className="text-2xl font-semibold tracking-tight tabular-nums">{peek?.value ?? value}</span>
+    <section className={cn("flex min-w-0 flex-col gap-4 rounded-2xl bg-[var(--viz-tile)] px-4 pt-4 pb-3", className)} title={hint}>
+      <div className="flex w-full items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <p className="truncate text-sm font-medium text-[var(--viz-text-2)]">{peek?.label ?? label}</p>
+          <div className="flex min-h-[2.125rem] min-w-0 items-center gap-2">
+            <p key={peek?.value ?? value} className="animate-in fade-in text-2xl leading-[2.125rem] font-medium whitespace-nowrap text-[var(--viz-text)] tabular-nums duration-200">
+              {peek?.value ?? value}
+            </p>
             {!peek && delta}
           </div>
         </div>
         {aside}
       </div>
       {children}
+    </section>
+  );
+}
+
+export function InnerStat({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="flex min-w-0 flex-1 flex-col items-start rounded-[10px] bg-[var(--viz-inner)] p-2.5 shadow-[var(--viz-shadow)]">
+      <p className="w-full truncate text-sm font-medium text-[var(--viz-text)] tabular-nums">{value}</p>
+      <p className="w-full truncate text-sm font-medium text-[var(--viz-text-2)]">{label}</p>
+    </div>
+  );
+}
+
+export function Segmented<T extends string | number>({ options, value, onChange, label }: { options: { id: T; label: string }[]; value: T; onChange: (id: T) => void; label: string }) {
+  return (
+    <div role="radiogroup" aria-label={label} className="inline-flex shrink-0 items-start gap-0.5 rounded-[10px] bg-[var(--viz-tile)] p-1">
+      {options.map(o => (
+        <button
+          key={o.id}
+          type="button"
+          role="radio"
+          aria-checked={value === o.id}
+          onClick={() => onChange(o.id)}
+          className={cn(
+            "rounded-md px-2.5 py-1 text-sm whitespace-nowrap transition-colors duration-200",
+            value === o.id ? "bg-[var(--viz-seg)] font-medium text-[var(--viz-text)] shadow-[var(--viz-seg-shadow)]" : "text-[var(--viz-text-2)] hover:text-[var(--viz-text)]",
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -128,57 +162,140 @@ type ColumnsProps = {
 };
 
 const localeNumber = (v: number) => v.toLocaleString();
+export const AXIS_TICK = { fontSize: 13, fill: "var(--viz-text-3)" };
+const BAR_RADIUS = 10;
+const OUTLINE_INSET = 3;
+const MIN_VISIBLE_BAR_PX = 6;
+const visibleWhenAboveZero = (v: number | undefined | null) => (v !== undefined && v !== null && v > 0 ? MIN_VISIBLE_BAR_PX : 0);
+export const indexOf = (state: MouseHandlerDataParam) => (state.isTooltipActive && state.activeTooltipIndex !== undefined ? Number(state.activeTooltipIndex) : undefined);
 
-function tickPlace(isOnlyEnds: boolean, isLast: boolean) {
-  if (!isOnlyEnds) return "text-center";
-  return isLast ? "flex justify-end" : "";
+type TickProps = { x?: number | string; y?: number | string; payload?: { value?: unknown; index?: number } };
+
+function anchorOf(i: number, isOnlyEnds: boolean) {
+  if (!isOnlyEnds) return "middle";
+  return i === 0 ? "start" : "end";
 }
 
-function Column({ v, max, isLit, isPickable, onEnter, onPick }: { v: number | undefined; max: number; isLit: boolean; isPickable: boolean; onEnter: () => void; onPick: () => void }) {
-  return (
-    <button type="button" onMouseEnter={onEnter} onClick={onPick} className={cn("relative h-full max-w-9 flex-1 overflow-hidden rounded-[6px] bg-[var(--viz-track)]", !isPickable && "cursor-default")}>
-      <span
-        className="absolute inset-x-0 bottom-0 rounded-[6px] transition-[height,background-color] duration-300"
-        style={{ height: v !== undefined && v > 0 ? `max(${(v / max) * 100}%, 4px)` : 0, background: isLit ? "var(--viz)" : "color-mix(in oklab, var(--viz) 40%, var(--viz-track))" }}
-      />
-    </button>
-  );
+function edgeAnchoredTick(shown: Set<number>, count: number) {
+  return function EdgeAnchoredTick({ x = 0, y = 0, payload }: TickProps) {
+    const i = payload?.index ?? 0;
+    if (!shown.has(i)) return <g />;
+    const anchor = anchorOf(i, shown.size === 2 && count > 2);
+    return (
+      <text x={Number(x)} y={Number(y)} dy={10} textAnchor={anchor} fontSize={AXIS_TICK.fontSize} fill={AXIS_TICK.fill}>
+        {String(payload?.value ?? "")}
+      </text>
+    );
+  };
 }
 
-export function Columns({ values, labels, ticks: tickLabels = labels, strong, onPeek, onPick, height = "h-16", format = localeNumber }: ColumnsProps) {
+function shownTicks(count: number) {
+  return count > 7 ? new Set([0, count - 1]) : new Set(Array.from({ length: count }, (_, i) => i));
+}
+
+type TrackProps = { x?: number; y?: number; width?: number; height?: number; index?: number };
+
+function trackWithHoverOutline(hover: number | undefined) {
+  return function Track({ x = 0, y = 0, width = 0, height = 0, index }: TrackProps) {
+    const radius = Math.min(BAR_RADIUS, width / 2);
+    return (
+      <g>
+        <rect x={x} y={y} width={width} height={height} rx={radius} ry={radius} fill="var(--viz-track)" />
+        <rect
+          x={x - OUTLINE_INSET}
+          y={y - OUTLINE_INSET}
+          width={width + 2 * OUTLINE_INSET}
+          height={height + 2 * OUTLINE_INSET}
+          rx={radius + OUTLINE_INSET}
+          ry={radius + OUTLINE_INSET}
+          fill="none"
+          stroke="var(--viz-cursor)"
+          strokeWidth={2}
+          opacity={hover === index ? 1 : 0}
+          className="transition-opacity duration-150 ease-out"
+        />
+      </g>
+    );
+  };
+}
+
+export function Columns({ values, labels, ticks: tickLabels = labels, strong, onPeek, onPick, height = "h-28", format = localeNumber }: ColumnsProps) {
   const [hover, setHover] = useState<number>();
-  const max = Math.max(1, ...values.map((v = 0) => v));
-  const ticks = labels.length > 7 ? [0, labels.length - 1] : labels.map((_, i) => i);
+  const rows = values.map((v, i) => ({ v, tick: tickLabels[i] ?? "" }));
+  const ticks = shownTicks(values.length);
+  const enter = (state: MouseHandlerDataParam) => {
+    const i = indexOf(state);
+    setHover(i);
+    if (i === undefined) return;
+    const v = values[i];
+    onPeek?.({ value: v === undefined ? "–" : format(v), label: labels[i] ?? "" });
+  };
   const leave = () => {
     setHover(undefined);
     onPeek?.(undefined);
   };
-  const enter = (i: number, v: number | undefined) => {
-    setHover(i);
-    onPeek?.({ value: v === undefined ? "–" : format(v), label: labels[i] ?? "" });
+  const pick = (state: MouseHandlerDataParam) => {
+    const i = indexOf(state);
+    if (i !== undefined) onPick?.(i);
   };
   return (
-    <div className="mt-4">
-      <div className={cn("flex items-end justify-between gap-[3px]", height)} onMouseLeave={leave}>
-        {values.map((v, i) => (
-          <Column key={i} v={v} max={max} isLit={hover === undefined ? strong(i) : hover === i} isPickable={onPick !== undefined} onEnter={() => enter(i, v)} onPick={() => onPick?.(i)} />
-        ))}
-      </div>
-      <div className="mt-1.5 flex justify-between gap-[3px] text-[10px] leading-none text-muted-foreground">
-        {tickLabels.map((l, i) => (
-          <span key={i} className={cn("max-w-9 flex-1 whitespace-nowrap", tickPlace(ticks.length === 2, i === tickLabels.length - 1))}>
-            {ticks.includes(i) ? l : ""}
-          </span>
-        ))}
-      </div>
+    <div className={cn("min-h-0 w-full", height, onPick !== undefined && "cursor-pointer")}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={rows} margin={{ top: OUTLINE_INSET, right: OUTLINE_INSET, bottom: 0, left: OUTLINE_INSET }} barCategoryGap="22%" onMouseMove={enter} onMouseLeave={leave} onClick={pick}>
+          <Tooltip content={() => null} cursor={false} />
+          <XAxis dataKey="tick" interval={0} axisLine={false} tickLine={false} tickMargin={8} height={24} tick={edgeAnchoredTick(ticks, values.length)} />
+          <Bar dataKey="v" radius={BAR_RADIUS} maxBarSize={32} minPointSize={visibleWhenAboveZero} background={trackWithHoverOutline(hover)} isAnimationActive animationDuration={450}>
+            {rows.map((_, i) => (
+              <Cell key={i} fill={strong(i) || hover === i ? "var(--viz)" : "color-mix(in srgb, var(--viz) 45%, var(--viz-track))"} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+export type StageRow = { key: string; label: string; value: number | undefined; note?: string | undefined; color?: string | undefined };
+
+export function StageBars({ rows, fmt = localeNumber, top, onPeek }: { rows: StageRow[]; fmt?: (v: number) => string; top?: number; onPeek?: (p: Peek) => void }) {
+  const [hover, setHover] = useState<string>();
+  const most = top ?? Math.max(1e-9, ...rows.map(r => r.value ?? 0));
+  const enter = (r: StageRow) => {
+    setHover(r.key);
+    onPeek?.({ value: r.value === undefined ? "–" : fmt(r.value), label: r.label });
+  };
+  const leave = () => {
+    setHover(undefined);
+    onPeek?.(undefined);
+  };
+  return (
+    <div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 py-1" onMouseLeave={leave}>
+      {rows.map(r => {
+        const isFaded = hover !== undefined && hover !== r.key;
+        const width = r.value !== undefined && r.value > 0 ? `max(${(r.value / most) * 100}%, 1.25rem)` : "0%";
+        return (
+          <div key={r.key} className="contents" onMouseEnter={() => enter(r)}>
+            <span className={cn("max-w-40 truncate text-end text-sm text-[var(--viz-text-2)] transition-opacity duration-200", isFaded && "opacity-40")} title={r.label}>
+              {r.label}
+            </span>
+            <div className={cn("relative h-5 min-w-0 overflow-hidden rounded-full bg-[var(--viz-track)] transition-opacity duration-200", isFaded && "opacity-40")}>
+              <div className="absolute inset-y-0 start-0 rounded-full transition-[width,background-color] duration-500 ease-out" style={{ width, background: hover === r.key ? "var(--viz-active)" : (r.color ?? "var(--viz)") }} />
+            </div>
+            <span className={cn("flex items-baseline justify-end gap-1.5 whitespace-nowrap transition-opacity duration-200", isFaded && "opacity-40")}>
+              <span className="text-sm font-medium text-[var(--viz-text)] tabular-nums">{r.value === undefined ? "–" : fmt(r.value)}</span>
+              {hasText(r.note) && <span className="text-xs font-medium text-[var(--viz-text-3)] tabular-nums">{r.note}</span>}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 export function SectionHead({ title, children }: { title: string; children?: ReactNode }) {
   return (
-    <div className="mb-3 flex flex-wrap items-baseline gap-2">
-      <h2 className="text-base font-semibold">{title}</h2>
+    <div className="mb-3 flex flex-wrap items-center gap-2">
+      <h2 className="text-base font-medium text-[var(--viz-text)]">{title}</h2>
       {children}
     </div>
   );

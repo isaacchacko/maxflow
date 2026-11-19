@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { cn, hasText } from "@/lib/utils";
 import { Heatmap, Stages, inJourneyOrder } from "./charts";
-import { COUNT, Columns, DAY_KEY, DAY_MS, Delta, GH, HOUR, LATENCY, Tile, duration, hourLabel, median, quantile, short, sum, useIsStillBefore, weekday, type Count, type Counts, type Latency, type Peek, type Stats } from "./parts";
+import { COUNT, Columns, Segmented, DAY_KEY, DAY_MS, Delta, GH, HOUR, LATENCY, Tile, duration, hourLabel, median, quantile, short, sum, useIsStillBefore, weekday, type Count, type Counts, type Latency, type Peek, type Stats } from "./parts";
 
 export function RepoPicker({ stats, picked, onRepo }: { stats: Stats; picked?: string | undefined; onRepo: (repo: string) => void }) {
   return (
@@ -18,7 +18,7 @@ export function RepoPicker({ stats, picked, onRepo }: { stats: Stats; picked?: s
 export function GhNote({ stats }: { stats: Stats }) {
   const { now, trend } = stats.gh;
   return (
-    <span className="text-xs text-muted-foreground">
+    <span className="text-xs text-[var(--viz-text-2)]">
       checked {new Date(now.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
       {trend.pending && " · filling in earlier weeks…"}
       {hasText(now.error) && <span className="text-rose-600 dark:text-rose-400"> · last fetch failed{now.counts ? ", showing older numbers" : ""}</span>}
@@ -44,7 +44,6 @@ function GhTrendTile({ stats, tile, isWeekRunning, onWeek }: { stats: Stats; til
         strong={i => i === trend.weeks.length - 1}
         onPeek={setPeek}
         onPick={pick}
-        height="h-14"
       />
     </Tile>
   );
@@ -73,7 +72,7 @@ function LatencyTile({ stats, l }: { stats: Stats; l: Latency }) {
   const meta = LATENCY[l.id] ?? { label: l.id, hint: "" };
   return (
     <Tile label={meta.label} hint={meta.hint} value={duration(median(ms))} delta={<Delta now={median(ms)} before={prev} isLowerBetter />} peek={peek}>
-      <div className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+      <div className="-mt-3 text-[13px] font-medium text-[var(--viz-text-3)] tabular-nums">
         p90 {duration(quantile(ms, 0.9))} · {ms.length} times
       </div>
       <Columns values={byDay} labels={week.days.map(d => weekday(d))} strong={() => true} format={duration} onPeek={p => setPeek(p && { ...p, label: `${meta.label} · median` })} />
@@ -135,15 +134,7 @@ function busiestHour(times: number[]): number | undefined {
 }
 
 function SeriesPicker({ stats, series, onSeries }: { stats: Stats; series: string; onSeries: (id: string) => void }) {
-  return (
-    <div className="flex shrink-0 rounded-lg bg-[var(--viz-track)] p-0.5 text-xs">
-      {HEAT_SERIES.filter(s => s.id !== "commits" || stats.gh.now.commitTimes !== undefined).map(s => (
-        <button key={s.id} onClick={() => onSeries(s.id)} className={cn("rounded-md px-2 py-0.5", series === s.id ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-          {s.label}
-        </button>
-      ))}
-    </div>
-  );
+  return <Segmented label="Series" options={HEAT_SERIES.filter(s => s.id !== "commits" || stats.gh.now.commitTimes !== undefined)} value={series} onChange={onSeries} />;
 }
 
 export function RhythmTile({ stats, className }: { stats: Stats; className?: string }) {
@@ -155,9 +146,9 @@ export function RhythmTile({ stats, className }: { stats: Stats; className?: str
   return (
     <Tile
       className={className}
-      label={`${label} this week`}
+      label="By hour this week"
       value={times.length.toLocaleString()}
-      delta={peakHour !== undefined && <span className="text-xs text-muted-foreground">busiest around {hourLabel(peakHour)}</span>}
+      delta={peakHour !== undefined && <span className="text-xs text-[var(--viz-text-2)]">busiest around {hourLabel(peakHour)}</span>}
       peek={peek}
       aside={<SeriesPicker stats={stats} series={series} onSeries={setSeries} />}
     >
@@ -175,10 +166,10 @@ export function ThroughputTile({ stats, className }: { stats: Stats; className?:
     { title: `Your PRs on ${stats.gh.repo.split("/", 2)[1] ?? ""}`, stages: [{ label: "Opened", value: gh?.opened }, { label: "Merged", value: gh?.merged }, { label: "Closed unmerged", value: gh?.closed }] },
   ];
   return (
-    <Tile className={className} label="Threads resolved" value={`${Math.round((c("resolved") / Math.max(1, c("opened"))) * 100)}%`} delta={<span className="text-xs text-muted-foreground">of those opened this week</span>}>
+    <Tile className={className} label="Threads resolved" value={`${Math.round((c("resolved") / Math.max(1, c("opened"))) * 100)}%`} delta={<span className="text-xs text-[var(--viz-text-2)]">of those opened this week</span>}>
       {funnels.map(f => (
-        <div key={f.title} className="mt-4">
-          <div className="text-xs font-medium">{f.title}</div>
+        <div key={f.title} className="flex flex-col gap-1">
+          <div className="text-sm font-medium text-[var(--viz-text)]">{f.title}</div>
           <Stages stages={f.stages} />
         </div>
       ))}
@@ -194,5 +185,5 @@ function yarnLogNote({ yarn, week }: Stats) {
 
 export function YarnNote({ stats }: { stats: Stats }) {
   const text = yarnLogNote(stats);
-  return text === "" ? null : <span className="text-xs text-muted-foreground">{text}</span>;
+  return text === "" ? null : <span className="text-xs text-[var(--viz-text-2)]">{text}</span>;
 }

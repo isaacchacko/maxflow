@@ -129,9 +129,9 @@ export function StatsView({ tab: wanted }: { tab?: string }) {
     <div className="viz flex h-full flex-col">
       <FitRow className="h-12 shrink-0 items-center gap-3 border-b px-5 data-[fit=glyph]:gap-2 data-[fit=glyph]:px-3">
         <h1 className="shrink-0 text-sm font-medium group-data-[fit=glyph]/fit:hidden">Stats</h1>
-        <nav className="flex shrink-0 rounded-lg bg-[var(--viz-track)] p-0.5 text-xs">
+        <nav className="flex shrink-0 gap-0.5 rounded-[10px] bg-[var(--viz-tile)] p-1 text-sm">
           {TABS.map(t => (
-            <a key={t.id} href={`#stats/${t.id}`} title={t.label} className={cn("rounded-md px-2.5 py-0.5", tab === t.id ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+            <a key={t.id} href={`#stats/${t.id}`} title={t.label} className={cn("rounded-md px-2.5 py-0.5 transition-colors duration-200", tab === t.id ? "bg-[var(--viz-seg)] font-medium text-[var(--viz-text)] shadow-[var(--viz-seg-shadow)]" : "text-[var(--viz-text-2)] hover:text-[var(--viz-text)]")}>
               <FitLabel full={t.label} short={"short" in t ? t.short : undefined} />
             </a>
           ))}

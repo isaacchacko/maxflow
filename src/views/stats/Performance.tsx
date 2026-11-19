@@ -23,12 +23,12 @@ function Segments({ parts }: { parts: { label: string; value: number; color: str
   const total = Math.max(1, sum(parts.map(p => p.value)));
   return (
     <div className="mt-4">
-      <div className="flex h-3 gap-[2px] overflow-hidden rounded-full">
+      <div className="flex h-5 gap-[3px] overflow-hidden rounded-full bg-[var(--viz-track)]">
         {parts.filter(p => p.value > 0).map(p => (
           <div key={p.label} style={{ width: `${(p.value / total) * 100}%`, background: p.color }} title={`${p.label}: ${p.value}`} />
         ))}
       </div>
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--viz-text-2)]">
         {parts.map(p => (
           <span key={p.label} className="flex items-center gap-1.5">
             <span className="size-2 rounded-sm" style={{ background: p.color }} />
@@ -43,13 +43,12 @@ function Segments({ parts }: { parts: { label: string; value: number; color: str
 function DailyTile({ label, values, days, hint, unit }: { label: string; values: number[]; days: string[]; hint?: string; unit: string }) {
   const [peek, setPeek] = useState<Peek>();
   return (
-    <Tile label={label} hint={hint} value={sum(values).toLocaleString()} delta={<span className="text-xs text-muted-foreground">in {days.length} days</span>} peek={peek}>
+    <Tile label={label} hint={hint} value={sum(values).toLocaleString()} delta={<span className="text-xs text-[var(--viz-text-2)]">in {days.length} days</span>} peek={peek}>
       <Columns
         values={values}
         labels={days.map(d => `${label} · ${weekday(d, "short")} ${short(d)}`)}
         ticks={days.map(d => short(d))}
         strong={i => i === days.length - 1}
-        height="h-14"
         format={v => `${v.toLocaleString()} ${unit}`}
         onPeek={setPeek}
       />
@@ -63,18 +62,18 @@ function HealthSection({ h }: { h: Health }) {
   return (
     <section>
       <SectionHead title="Server health">
-        <span className="text-xs text-muted-foreground">last {h.days.length} days, as far back as the event log goes</span>
+        <span className="text-xs text-[var(--viz-text-2)]">last {h.days.length} days, as far back as the event log goes</span>
       </SectionHead>
       <div className="flex flex-col gap-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Tile label="Server up for" value={since(h.server.upSince)} delta={<span className="text-xs text-muted-foreground">{h.server.rssMb} MB</span>}>
-            <div className="mt-2 text-xs text-muted-foreground">
+          <Tile label="Server up for" value={since(h.server.upSince)} delta={<span className="text-xs text-[var(--viz-text-2)]">{h.server.rssMb} MB</span>}>
+            <div className="mt-2 text-xs text-[var(--viz-text-2)]">
               since {when(h.server.upSince)}
               {h.server.logSince === undefined ? " · restarts are logged from this deploy on" : ` · ${h.server.starts.length} restarts logged`}
             </div>
           </Tile>
           <Tile label="Sentries running" value={`${up} of ${h.sentries.length}`} delta={up < h.sentries.length ? <span className="rounded-md bg-rose-500/15 px-1.5 py-px text-xs font-medium text-rose-700 dark:text-rose-300">down: {h.sentries.filter(s => !s.running).map(s => s.name.slice(7)).join(", ")}</span> : <span className="rounded-md bg-emerald-500/15 px-1.5 py-px text-xs font-medium text-emerald-700 dark:text-emerald-300">all up</span>}>
-            <div className="mt-2 text-xs text-muted-foreground">{sum(h.sentries.map(s => s.respawns))} restarts after a crash this week</div>
+            <div className="mt-2 text-xs text-[var(--viz-text-2)]">{sum(h.sentries.map(s => s.respawns))} restarts after a crash this week</div>
           </Tile>
           <Tile label="Sessions" value={h.sessions.total.toLocaleString()} className="sm:col-span-2">
             <Segments
@@ -88,13 +87,13 @@ function HealthSection({ h }: { h: Health }) {
           </Tile>
         </div>
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
-          <Tile label="Deploys" value={h.deploys.length.toLocaleString()} delta={<span className="text-xs text-muted-foreground">in 14 days</span>} className="lg:col-span-3">
-            <Columns values={deploysPerDay} labels={h.days.map(d => `Deploys · ${weekday(d, "short")} ${short(d)}`)} ticks={h.days.map(d => short(d))} strong={i => i === h.days.length - 1} height="h-12" />
+          <Tile label="Deploys" value={h.deploys.length.toLocaleString()} delta={<span className="text-xs text-[var(--viz-text-2)]">in 14 days</span>} className="lg:col-span-3">
+            <Columns values={deploysPerDay} labels={h.days.map(d => `Deploys · ${weekday(d, "short")} ${short(d)}`)} ticks={h.days.map(d => short(d))} strong={i => i === h.days.length - 1} height="h-24" />
             <ol className="mt-4 flex max-h-56 flex-col gap-1.5 overflow-y-auto pr-1">
               {h.deploys.slice(0, 30).map(d => (
                 <li key={`${d.at}${d.sha}`} className="grid grid-cols-[6.5rem_3.5rem_minmax(0,1fr)] items-baseline gap-2 text-xs">
-                  <span className="text-muted-foreground tabular-nums">{when(d.at)}</span>
-                  <code className="text-muted-foreground">{d.sha}</code>
+                  <span className="text-[var(--viz-text-2)] tabular-nums">{when(d.at)}</span>
+                  <code className="text-[var(--viz-text-2)]">{d.sha}</code>
                   <span className="truncate" title={d.subject}>
                     {d.subject}
                   </span>
@@ -111,10 +110,10 @@ function HealthSection({ h }: { h: Health }) {
                     <span className="truncate">{s.name.slice(7)}</span>
                     {!s.running && <span className="text-rose-600 dark:text-rose-400">down</span>}
                   </span>
-                  <span className="text-right text-muted-foreground tabular-nums" title={`up since ${when(s.upSince)}`}>
+                  <span className="text-right text-[var(--viz-text-2)] tabular-nums" title={`up since ${when(s.upSince)}`}>
                     {s.running ? `up ${since(s.upSince)}` : "–"}
                   </span>
-                  <span className={cn("text-right tabular-nums", s.respawns > 0 ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground")}>{s.respawns > 0 ? `${s.respawns} restart${s.respawns > 1 ? "s" : ""}` : "steady"}</span>
+                  <span className={cn("text-right tabular-nums", s.respawns > 0 ? "text-amber-700 dark:text-amber-300" : "text-[var(--viz-text-2)]")}>{s.respawns > 0 ? `${s.respawns} restart${s.respawns > 1 ? "s" : ""}` : "steady"}</span>
                 </li>
               ))}
             </ul>
@@ -150,7 +149,7 @@ export function Performance({ stats, live }: { stats: Stats; live: boolean }) {
       {health.value ? (
         <HealthSection h={health.value} />
       ) : (
-        <p className={cn("text-sm", hasText(health.error) ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>{health.error ?? "Checking the server…"}</p>
+        <p className={cn("text-sm", hasText(health.error) ? "text-rose-600 dark:text-rose-400" : "text-[var(--viz-text-2)]")}>{health.error ?? "Checking the server…"}</p>
       )}
     </>
   );
