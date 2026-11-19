@@ -75,6 +75,7 @@ async function withImages(text: string, args: string[]) {
 
 async function create(body: { name?: string; cmd?: string[]; cwd?: string; role?: string; objective?: string; parent?: string; scope?: string }) {
   const res = await fetch(`${base}/api/sessions`, { method: "POST", headers: caller, body: JSON.stringify(body) });
+  if (!res.ok) console.error(`${res.status} ${await res.text()}`), process.exit(1);
   const s = await res.json();
   console.log(`${base}/#agent/${s.id}`);
 }

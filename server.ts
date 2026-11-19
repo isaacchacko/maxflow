@@ -8,7 +8,7 @@ import { stats } from "./stats";
 import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
-import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR, TMUX_SCOPE, TMUX_SOCKET } from "./instance";
+import { BASE, CLI, DIR, INERT_AGENTS, INERT_CWD, INSTANCE, LIVE, MAX_SESSIONS, PORT, STATE_DIR, TMUX_SCOPE, TMUX_SOCKET } from "./instance";
 import { enforce, onReply } from "./restrictions-enforce";
 import { invalid, loadRestrictions, resolve, saveRestrictions, type Person, type Restriction } from "./restrictions";
 import { backfill, link, people as restrictionPeople } from "./restrictions-identities";
@@ -160,7 +160,12 @@ function attachViewer(session: Session, cols = 120, rows = 34) {
 
 // tmux rejects a command over ~16KB ("command too long"), so a long one (an agent's prompt) runs from a script that deletes itself.
 // A claude is named mf-<id> natively, so agents address each other with SendMessage by their maxflow id.
-const named = (id: string, cmd: string[]) => (cmd[0] === "claude" && !cmd.includes("--name") ? [cmd[0], "--name", `mf-${id}`, ...cmd.slice(1)] : cmd);
+// A dev instance's claudes run haiku unless asked for another model (INERT_AGENTS).
+const named = (id: string, cmd: string[]) => {
+  if (cmd[0] !== "claude") return cmd;
+  if (INERT_AGENTS && !cmd.includes("--model")) cmd = [cmd[0], "--model", "haiku", ...cmd.slice(1)];
+  return cmd.includes("--name") ? cmd : [cmd[0], "--name", `mf-${id}`, ...cmd.slice(1)];
+};
 function launchable(id: string, cmd: string[]) {
   cmd = named(id, cmd);
   if (cmd.join(" ").length < 8000) return cmd;
@@ -169,7 +174,14 @@ function launchable(id: string, cmd: string[]) {
   return ["sh", script];
 }
 
+// Answered as a plain 429 rather than Bun's error page, so an agent's cli call reads why.
+class SessionCap extends Error {}
 function createSession(name: string, cmd: string[], cwd: string, chatId?: string, role?: Role, cols = 120, rows = 34): Session {
+  const running = [...sessions.values()].filter((s) => s.exitCode === null && !s.sentry).length;
+  if (running >= MAX_SESSIONS && !name.startsWith("sentry:"))
+    throw new SessionCap(`dev instance "${INSTANCE}" already runs ${running} sessions, its cap; end some, or raise MAXFLOW_MAX_SESSIONS`);
+  // A resumed chat keeps its own folder, since claude finds its transcript by cwd.
+  if (INERT_AGENTS && cmd[0] === "claude" && !cmd.includes("--resume")) mkdirSync((cwd = INERT_CWD), { recursive: true });
   const id = crypto.randomUUID().slice(0, 8);
   const session = { id, name, cmd, cwd, chatId, createdAt: Date.now(), lastOutputAt: Date.now(), chunks: [], bytes: 0, clients: new Set(), exitCode: null, inbox: [] } as unknown as Session;
   const t = tmuxName(id);
@@ -2114,6 +2126,7 @@ Bun.serve<WsData>({
   idleTimeout: 0, // `wait` and event subscriptions long-poll
   development: { hmr: true },
   routes: { "/": app },
+  error: (err) => (err instanceof SessionCap ? new Response(err.message, { status: 429 }) : undefined),
   async fetch(req, server) {
     if (!sameOrigin(req)) return new Response("forbidden", { status: 403 });
     const url = new URL(req.url);
