@@ -9,23 +9,23 @@ import type { Person } from "./restrictions";
 import app from "./src/index.html";
 import { TMUX, flushOptions, paneEnv, paste, pressEnter, respawn, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
 import { type ClaudeState, type Role, type Session, type Wait, type WsData, chatOf, isAgent, isSentry, sessions } from "./sessions";
-import { candidates } from "./mentions";
-import { type Block, type Feed, type FeedPost, type Message, type Task, type TaskEdit, type Thread } from "./model";
+import type { Block, Feed, FeedPost, Message, Thread } from "./model";
 import { live, names, objectives, saveObjectives, saveTasks, saveThreads, tasks, threads, threadsDirty, writeThreads } from "./stores";
 import { DEFAULT_AFTER_H, DEFAULT_AFTER_MS, VERIFIED, intro } from "./intro";
-import { SessionCap, attachViewer, createSession, derive, dispatch, editTask, endWait, funnel, live_thread, push, routersOf, screen, setArchived, setClaudeState, setWait, settleTasks, stopAgent, taskPrs, waitsOn, wake } from "./lifecycle";
+import { SessionCap, attachViewer, createSession, derive, dispatch, endWait, funnel, live_thread, push, routersOf, screen, setArchived, setClaudeState, setWait, settleTasks, stopAgent, waitsOn, wake } from "./lifecycle";
 import { checkShells, declareWait, untilShell } from "./waits";
 import { ISAAC_IN_THREAD, ancestors, answered, ask, enforcing, headline, mentionsIn, message, pathTitle, pauseTimers, postIn, resurface, schedulePause, squash, tellMembers, unforge, unpause } from "./threads";
 import { DRAFTS, deliver } from "./delivery";
 import { RESYNC_MS, claudeStateChanged, resync } from "./turns";
 import { docsRoute } from "./docs-api";
 import { sizingRoute } from "./sizing";
-import { ARCHIVED_LINKS, SENTRY_USES, archivedLinks, built, describe, freshWorld, judged, openWorld, prStates, worldClients } from "./world";
+import { SENTRY_USES, built, describe, freshWorld, judged, openWorld, prStates, worldClients } from "./world";
 import { EXTERNAL_SEEN, ROUTER_BRIEF, acceptTrust, externalSeen, externalSignal, feedMore, feedPosts, feedToFunnel, known, requested, reroute, slackChannels, startRouter } from "./routing";
 import { handOff, mergeThread, newObjective, pointsAtItself, relayRefusal, setRole, subthread, titleOf } from "./objectives";
-import { onEvent, openUserComments, recordUserComment, seedUserComments } from "./events";
+import { onEvent, recordUserComment, seedUserComments } from "./events";
 import { restrictionsRoute } from "./routes-restrictions";
 import { statsTodosRoute } from "./routes-stats";
+import { tasksLinksRoute } from "./routes-tasks";
 
 const HOST = "127.0.0.1";
 function loadInbox(id: string): Pick<Session, "inbox" | "sending"> {
@@ -340,11 +340,6 @@ if (seedUserComments)
       }
   } catch {}
 setInterval(checkShells, 2000);
-// How far a task's PRs got, counting only those whose state is known.
-function prProgress(t: Task) {
-  const states = t.links.flatMap((url) => taskPrs()[url] ?? []);
-  return { merged: states.filter((s) => s === "MERGED").length, closed: states.filter((s) => s === "CLOSED").length, total: states.length };
-}
 
 // An edge drawn in the graph: tell each agent end who is on the other side and how to reach it.
 function introduce(to: Session, other: Session, why?: string) {
@@ -869,26 +864,8 @@ Bun.serve<WsData>({
     if (statsTodosRouteAnswer) return statsTodosRouteAnswer;
     const restrictionsRouteAnswer = await restrictionsRoute(req, url, path);
     if (restrictionsRouteAnswer) return restrictionsRouteAnswer;
-
-    if (path === "/api/tasks" && req.method === "GET") return Response.json(tasks.map((t) => ({ ...t, prs: prProgress(t) })));
-    if (path === "/api/comments" && req.method === "GET") return Response.json(openUserComments());
-    const task = path.match(/^\/api\/tasks(?:\/(\d+))?$/);
-    if (task && req.method === "POST") {
-      const t = task[1] ? tasks.find((o) => o.id === Number(task[1])) : undefined;
-      if (task[1] && !t) return new Response("no such task", { status: 404 });
-      const done = editTask(t, (await req.json().catch(() => ({}))) as TaskEdit);
-      return typeof done === "string" ? new Response(done, { status: 400 }) : Response.json(done, { status: t ? 200 : 201 });
-    }
-    if (path === "/api/links" && req.method === "GET")
-      return Response.json([...sessions.values()].filter((s) => !isSentry(s)).map((s) => ({ id: s.id, name: s.name, cwd: s.cwd, running: s.exitCode === null, candidates: candidates(s) })));
-
-    if (path === "/api/links" && req.method === "PATCH") {
-      const body = (await req.json().catch(() => ({}))) as { urls?: string[]; archived?: boolean };
-      if (!body.urls?.length || typeof body.archived !== "boolean") return new Response("urls and archived required", { status: 400 });
-      for (const u of body.urls) body.archived ? archivedLinks.add(u) : archivedLinks.delete(u);
-      writeStateJson(ARCHIVED_LINKS, [...archivedLinks]);
-      return new Response(null, { status: 204 });
-    }
+    const tasksLinksRouteAnswer = await tasksLinksRoute(req, url, path);
+    if (tasksLinksRouteAnswer) return tasksLinksRouteAnswer;
 
     // yarn as an installed app: its manifest, the service worker that makes it installable (at the root, so its scope is the whole
     // app) and the app icons. Never cached, so a change shows up on the next load.
