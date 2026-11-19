@@ -56,15 +56,18 @@ function useBottomWatch(thread: Thread) {
   const bottom = useRef({ id: thread.id, isAtBottom: true });
   const latest = useLatest({ id: thread.id, count: thread.messages.length });
   const watch = useCallback(
-    (el: HTMLElement) => {
-      const onScroll = () => {
-        const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
-        bottom.current = { id: latest.current.id, isAtBottom };
-        if (isAtBottom) markSeen(latest.current.id, latest.current.count);
-      };
-      onScroll();
-      el.addEventListener("scroll", onScroll, { passive: true });
-      return () => el.removeEventListener("scroll", onScroll);
+    (sentinel: HTMLElement | null) => {
+      if (!sentinel) return;
+      const observer = new IntersectionObserver(
+        ([entry]) => {
+          const isAtBottom = entry?.isIntersecting === true;
+          bottom.current = { id: latest.current.id, isAtBottom };
+          if (isAtBottom) markSeen(latest.current.id, latest.current.count);
+        },
+        { root: sentinel.parentElement, rootMargin: `0px 0px ${NEAR_BOTTOM_PX}px 0px` },
+      );
+      observer.observe(sentinel);
+      return () => observer.disconnect();
     },
     [latest],
   );
@@ -189,17 +192,6 @@ function ThreadBody({ thread, all, back, isEmbedded }: BodyProps) {
   const focusComposer = () => (scrollRef.current?.closest("[data-region]") ?? document).querySelector<HTMLElement>('[data-agent="thread-input"]')?.focus();
   const attachScroll = useLayerScroll(`${isEmbedded ? "pane:" : ""}thread:${thread.id}`, scrollRef, (el, isRestored) => landOnArrival(el, isRestored, lineRef.current, focusComposer));
   const { bottom, watch: watchBottom } = useBottomWatch(thread);
-  const attachScroller = useCallback(
-    (el: HTMLDivElement) => {
-      const detach = attachScroll(el);
-      const unwatch = watchBottom(el);
-      return () => {
-        detach();
-        unwatch();
-      };
-    },
-    [attachScroll, watchBottom],
-  );
   const { root, replies, actions, messageMenu, firstNew, newKeys, holdNewLine, clearNewLine } = useThreadMessages(thread, all, nav, focusComposer);
   const followArrivals = useFollowArrivals(thread, scrollRef, bottom, holdNewLine);
   const selected = useQuotableSelection(scrollRef);
@@ -210,9 +202,10 @@ function ThreadBody({ thread, all, back, isEmbedded }: BodyProps) {
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <ShotScope.Provider value={shotsOf([...(root ? [root] : []), ...replies])}>
             <div className="relative flex min-h-0 flex-1 flex-col">
-              <div ref={attachScroller} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              <div ref={attachScroll} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
                 <ThreadMessages thread={thread} all={all} root={root} replies={replies} firstNew={firstNew} lineRef={lineRef} actions={actions} messageMenu={messageMenu} nav={nav} selected={selected} onResolve={onResolve} onPause={onPause} />
                 <div key={`${thread.messages.length}:${thread.pending !== undefined}`} ref={followArrivals} />
+                <div ref={watchBottom} />
               </div>
               <JumpToNew threadId={thread.id} newKeys={newKeys} scrollRef={scrollRef} />
             </div>

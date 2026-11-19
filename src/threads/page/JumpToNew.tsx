@@ -2,12 +2,10 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { useCallback, useState } from "react";
 import { highlight } from "../jump";
 
-type Spot = "above" | "below" | "met";
-
 const rowIn = (scroller: HTMLElement, key: string) => scroller.querySelector<HTMLElement>(`[data-row="${CSS.escape(key)}"]`);
 
 function useNewSpots(threadId: string, newKeys: string[], scrollRef: React.RefObject<HTMLElement | null>) {
-  const [spots, setSpots] = useState<{ id: string; of: Record<string, Spot> }>({ id: threadId, of: {} });
+  const [spots, setSpots] = useState<{ id: string; of: Record<string, "above" | "below" | "met"> }>({ id: threadId, of: {} });
   if (spots.id !== threadId) setSpots({ id: threadId, of: {} });
   const keys = newKeys.join("\n");
   const watch = useCallback(
