@@ -1,215 +1,146 @@
 #!/usr/bin/env bun
-// meta sentry's feed: runs beside the meta agent (sentries/meta.md) in its pane. Every 15 minutes it reads the part of each live
-// agent's transcript it hasn't read yet, times its turns, tool calls and model replies, and notifies the agent of the ones over a
-// threshold, with the full digests in meta-flagged.json. It also reports agents sitting idle without having declared what they wait on
-// (`maxflow wait`), once per idle stretch, with the last thing each said. Exits with the agent.
-import { existsSync, openSync, readSync, closeSync, statSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, statSync, writeFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import { join } from "node:path";
 import { backgroundShells, transcriptTail } from "../background";
-import { BASE as base, STATE_DIR } from "../instance";
+import { BASE as base } from "../instance";
+import { isRecord } from "../shared/guards";
+import { readStateJson, stateDirectory, writeStateJson } from "../state";
+import { isSlow, REPEATS, SLOW_MODEL_MS, SLOW_TOOL_MS, SLOW_TURN_MS, TranscriptWindow, type Digest, type Mark } from "./meta-digest";
+import { waitForServer } from "./feed-process";
 import { takeOver } from "./singleton";
+import { fullLinesAppendedSince, lastLinesWithin, lastReply } from "./transcript-read";
 
 if (import.meta.main) takeOver("meta");
 
-const STATE_FILE = join(STATE_DIR, "meta-state.json");
-const FLAGGED_FILE = join(STATE_DIR, "meta-flagged.json");
-const INTERVAL_MS = Number(process.env.META_INTERVAL ?? 15 * 60_000);
-const SLOW_TURN_MS = Number(process.env.META_SLOW_TURN_MS ?? 10 * 60_000);
-const SLOW_TOOL_MS = Number(process.env.META_SLOW_TOOL_MS ?? 5 * 60_000);
-const SLOW_MODEL_MS = Number(process.env.META_SLOW_MODEL_MS ?? 3 * 60_000);
-const REPEATS = Number(process.env.META_REPEATS ?? 4);
-const IDLE_MS = Number(process.env.META_IDLE_MS ?? 10 * 60_000);
+const STATE_FILE = "meta-state.json";
+const FLAGGED_FILE = join(stateDirectory("."), "meta-flagged.json");
+const INTERVAL_MS = Number(process.env["META_INTERVAL"] ?? 15 * 60_000);
+const IDLE_MS = Number(process.env["META_IDLE_MS"] ?? 10 * 60_000);
+const FIRST_READ_TAIL_BYTES = 2_000_000;
+const LAST_TEXT_TAIL_BYTES = 400_000;
+const LAST_TEXT_CHARS = 600;
+const SHOWN_CHARS = 120;
+const FETCH_MS = 30_000;
 
 type Session = {
   id: string; name: string; running: boolean; sentry: boolean; agent: boolean; status: string; transcript?: string;
-  archived: boolean; activeAt: number; pending: number; wait: { kind: string; ref: string; at: number } | null;
-  blocked: { count: number; since: number } | null;
+  archived: boolean; activeAt: number; pending?: number; wait?: { kind: string; ref: string; at: number } | null;
+  blocked?: { count: number; since: number } | null;
 };
-type Open = { name: string; what: string; at: number };
-// idleAt: the activeAt of the idle stretch already reported, so each stretch is reported once; blockedAt likewise for messages stuck behind a draft.
-type Mark = { offset: number; tools: Record<string, Open>; turnAt?: number; askedAt?: number; idleAt?: number; blockedAt?: number };
+type ReadableSession = Session & { transcript: string };
 type Idle = { id: string; title: string; idleMs: number; lastText: string };
-type Digest = {
-  id: string;
-  title: string;
-  turns: number[];
-  toolCalls: number;
-  toolMs: number;
-  modelMs: number;
-  openTurnMs?: number;
-  slowTools: { tool: string; what: string; ms: number; running?: boolean }[];
-  slowReplies: number[];
-  waitingOnModelMs?: number;
-  repeated: { what: string; times: number }[];
+type Blocked = { id: string; title: string; count: number; ms: number };
+type Found = { flagged: Digest[]; idle: Idle[]; blocked: Blocked[] };
+
+const isSession = (value: unknown): value is Session =>
+  isRecord(value) && typeof value["id"] === "string" && typeof value["name"] === "string" && typeof value["status"] === "string";
+const isLiveAgent = (s: Session): s is ReadableSession => s.running && s.agent && !s.sentry && typeof s.transcript === "string" && s.transcript !== "";
+const isMark = (value: unknown): value is Mark => isRecord(value) && typeof value["offset"] === "number" && isRecord(value["tools"]);
+
+const kept = readStateJson(STATE_FILE, isRecord);
+const store: { marks: Record<string, Mark> } = {
+  marks: Object.fromEntries(Object.entries(kept ?? {}).filter((entry): entry is [string, Mark] => isMark(entry[1]))),
 };
+const readWindow = { since: Date.now() - INTERVAL_MS };
+const caller = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
+const notify = async (text: string) =>
+  fetch(`${base}/api/sessions/${String(process.env["MAXFLOW_SESSION"])}/notify`, {
+    method: "POST",
+    headers: caller,
+    body: JSON.stringify({ text: `[maxflow meta] ${text}` }),
+    signal: AbortSignal.timeout(FETCH_MS),
+  });
+const min = (ms: number) => `${(ms / 60_000).toFixed(0)}m`;
 
-const load = <T>(path: string, empty: T): T => (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : empty);
-const marks = load<Record<string, Mark>>(STATE_FILE, {});
-const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
-const notify = (text: string) =>
-  fetch(`${base}/api/sessions/${process.env.MAXFLOW_SESSION}/notify`, { method: "POST", headers: caller, body: JSON.stringify({ text: `[maxflow meta] ${text}` }) });
-let since = Date.now() - INTERVAL_MS;
-
-// The bytes appended since the last read, cut at the last full line.
-function delta(path: string, mark: Mark) {
-  const size = statSync(path).size;
-  if (size < mark.offset) mark.offset = 0;
-  const buf = Buffer.alloc(size - mark.offset);
-  const fd = openSync(path, "r");
-  readSync(fd, buf, 0, buf.length, mark.offset);
-  closeSync(fd);
-  const end = buf.lastIndexOf(10) + 1;
-  mark.offset += end;
-  return buf.subarray(0, end).toString("utf8").split("\n").filter(Boolean);
+function lastTextItEndedItsTurnOn(path: string) {
+  const text = lastReply(lastLinesWithin(path, LAST_TEXT_TAIL_BYTES));
+  return text.length > LAST_TEXT_CHARS ? `…${text.slice(-LAST_TEXT_CHARS)}` : text;
 }
 
-// Head and tail both, since a chain like "sed -i ... && <test suite>" hides its heavy part at the end.
-function short(input: any) {
-  const text = String(input?.command ?? input?.description ?? input?.file_path ?? input?.pattern ?? input?.url ?? JSON.stringify(input ?? "")).replace(/\s+/g, " ");
-  return text.length <= 400 ? text : `${text.slice(0, 220)} … ${text.slice(-160)}`;
+async function isIdleWithNothingToWakeIt(s: ReadableSession, mark: Mark, now: number) {
+  const isIdleUnreported = s.status === "idle" && !s.archived && (s.wait ?? undefined) === undefined && (s.pending ?? 0) === 0 && now - s.activeAt >= IDLE_MS && mark.idleAt !== s.activeAt;
+  return isIdleUnreported && backgroundShells(await transcriptTail(s.transcript)).size === 0;
 }
 
-// An agent declares its wait again after each message wakes it, so repeating `maxflow wait` is the design working, not a loop.
-// Any kind (thread:, approval:, ci:, agent:, slack:, done), through the CLI's path, $MAXFLOW_CLI or `maxflow`.
-const isWait = (what: string) => /(?:cli\.ts|\$\{?MAXFLOW_CLI\}?|\bmaxflow)["']? wait ["']?([a-z]+:\S+|done)\b/.test(what);
-
-function digest(s: Session, mark: Mark, lines: string[], now: number): Digest {
-  const d: Digest = { id: s.id, title: s.name, turns: [], toolCalls: 0, toolMs: 0, modelMs: 0, slowTools: [], slowReplies: [], repeated: [] };
-  const counts = new Map<string, number>();
-  for (const line of lines) {
-    let e: any;
-    try {
-      e = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const at = Date.parse(e.timestamp);
-    if (!at) continue;
-    const recent = at >= since;
-    // turn_duration is written for only some turns; the Stop hook's summary ends every one.
-    if (e.type === "system" && (e.subtype === "stop_hook_summary" || e.subtype === "turn_duration")) {
-      if (mark.turnAt !== undefined && recent) d.turns.push(at - mark.turnAt);
-      mark.turnAt = undefined;
-    } else if (e.type === "api-request" && e.querySource === "repl_main_thread") {
-      mark.askedAt = at;
-    } else if (e.type === "assistant" && !e.isSidechain) {
-      if (mark.askedAt !== undefined && recent) {
-        d.modelMs += at - mark.askedAt;
-        if (at - mark.askedAt >= SLOW_MODEL_MS) d.slowReplies.push(at - mark.askedAt);
-      }
-      mark.askedAt = undefined;
-      for (const c of e.message?.content ?? [])
-        if (c.type === "tool_use") {
-          const what = short(c.input);
-          mark.tools[c.id] = { name: c.name, what, at };
-          if (recent && !isWait(what)) counts.set(`${c.name}: ${what}`, (counts.get(`${c.name}: ${what}`) ?? 0) + 1);
-        }
-    } else if (e.type === "user" && !e.isSidechain) {
-      const content = e.message?.content;
-      if (!e.isMeta && (typeof content === "string" || content?.some((c: any) => c.type === "text"))) mark.turnAt = at;
-      for (const c of Array.isArray(content) ? content : [])
-        if (c.type === "tool_result" && mark.tools[c.tool_use_id]) {
-          const t = mark.tools[c.tool_use_id];
-          delete mark.tools[c.tool_use_id];
-          if (recent) d.toolCalls++, (d.toolMs += at - t.at);
-          if (recent && at - t.at >= SLOW_TOOL_MS) d.slowTools.push({ tool: t.name, what: t.what, ms: at - t.at });
-        }
-    }
+async function readAgent(s: ReadableSession, now: number, found: Found) {
+  const known = store.marks[s.transcript] ?? { offset: Math.max(0, statSync(s.transcript).size - FIRST_READ_TAIL_BYTES), tools: {} };
+  const { offset, lines } = fullLinesAppendedSince(s.transcript, known.offset);
+  const window = new TranscriptWindow(s.id, s.name, { ...known, offset }, readWindow.since);
+  window.read(lines);
+  const { digest, mark } = window.finish(s.status === "working", now);
+  store.marks[s.transcript] = mark;
+  if (isSlow(digest)) found.flagged.push(digest);
+  if (await isIdleWithNothingToWakeIt(s, mark, now)) {
+    mark.idleAt = s.activeAt;
+    found.idle.push({ id: s.id, title: s.name, idleMs: now - s.activeAt, lastText: lastTextItEndedItsTurnOn(s.transcript) });
   }
-  // Only a working agent is still on its turn; an idle one with leftovers was interrupted, and a waiting one waits on the user.
-  if (s.status !== "working") mark.tools = {}, (mark.turnAt = mark.askedAt = undefined);
-  for (const t of Object.values(mark.tools)) if (now - t.at >= SLOW_TOOL_MS) d.slowTools.push({ tool: t.name, what: t.what, ms: now - t.at, running: true });
-  if (mark.turnAt) d.openTurnMs = now - mark.turnAt;
-  if (mark.askedAt) d.waitingOnModelMs = now - mark.askedAt;
-  d.repeated = [...counts].filter(([, n]) => n >= REPEATS).map(([what, times]) => ({ what, times }));
-  return d;
+  const blocked = s.blocked ?? undefined;
+  if (blocked === undefined || mark.blockedAt === blocked.since) return;
+  mark.blockedAt = blocked.since;
+  found.blocked.push({ id: s.id, title: s.name, count: blocked.count, ms: now - blocked.since });
 }
 
-// The last text the agent wrote, from the transcript's tail: what it ended its turn on.
-function lastText(path: string) {
-  const size = statSync(path).size;
-  const buf = Buffer.alloc(Math.min(size, 400_000));
-  const fd = openSync(path, "r");
-  readSync(fd, buf, 0, buf.length, size - buf.length);
-  closeSync(fd);
-  for (const line of buf.toString("utf8").split("\n").reverse()) {
-    if (!line.includes('"assistant"')) continue;
-    try {
-      const e = JSON.parse(line);
-      const text = e.type === "assistant" && !e.isSidechain ? (e.message?.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n").trim() : "";
-      if (text) return text.length > 600 ? `…${text.slice(-600)}` : text;
-    } catch {}
+function digestLine(d: Digest) {
+  const parts = [`${d.id} (${d.title})`, ...d.turns.filter((ms) => ms >= SLOW_TURN_MS).map((ms) => `turn ${min(ms)}`)];
+  if ((d.openTurnMs ?? 0) >= SLOW_TURN_MS) parts.push(`turn running ${min(d.openTurnMs ?? 0)}`);
+  parts.push(...d.slowTools.map((t) => `${t.tool} ${min(t.ms)}${t.running === true ? " still running" : ""}: ${t.what.slice(0, SHOWN_CHARS)}`));
+  if (d.slowReplies.length > 0) parts.push(`${d.slowReplies.length} slow model replies`);
+  if ((d.waitingOnModelMs ?? 0) >= SLOW_MODEL_MS) parts.push(`waiting on the model ${min(d.waitingOnModelMs ?? 0)}`);
+  parts.push(...d.repeated.map((r) => `ran ${r.times}x: ${r.what.slice(0, SHOWN_CHARS)}`));
+  return parts.join("; ");
+}
+
+function noticeText({ flagged, idle, blocked }: Found, read: number) {
+  const sections: string[] = [];
+  if (flagged.length > 0) {
+    const machine = `${cpus().length} cores, load ${loadavg().map((n) => n.toFixed(1)).join(" ")}`;
+    sections.push(`${flagged.length} of ${read} agents over a threshold in the last window (${machine}); digests in ${FLAGGED_FILE}:\n${flagged.map((d) => `- ${digestLine(d)}`).join("\n")}`);
   }
-  return "";
+  if (idle.length > 0) {
+    const lines = idle.map((i) => `- ${i.id} (${i.title}) idle ${min(i.idleMs)}: ${JSON.stringify(i.lastText.replaceAll(/\s+/g, " "))}`);
+    sections.push(`${idle.length} agents idle with no declared wait (nothing will wake them); each one's last words:\n${lines.join("\n")}`);
+  }
+  if (blocked.length > 0) {
+    const lines = blocked.map((b) => `- ${b.id} (${b.title}): ${b.count} waiting for ${min(b.ms)}`);
+    sections.push(
+      `${blocked.length} agents with messages queued behind a draft the user left in their prompt (the server clears an unchanged draft after 5m, 1m for his own request, and types it back):\n${lines.join("\n")}`,
+    );
+  }
+  return sections.join("\n\n");
 }
 
-const isSlow = (d: Digest) =>
-  d.turns.some((ms) => ms >= SLOW_TURN_MS) || (d.openTurnMs ?? 0) >= SLOW_TURN_MS || d.slowTools.length > 0 || d.slowReplies.length > 0 || (d.waitingOnModelMs ?? 0) >= SLOW_MODEL_MS || d.repeated.length > 0;
+async function liveAgents() {
+  const sessions: unknown = await (await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(FETCH_MS) })).json();
+  return (Array.isArray(sessions) ? sessions.filter(isSession) : []).filter(isLiveAgent);
+}
 
 async function tick() {
   const now = Date.now();
-  const sessions = ((await (await fetch(`${base}/api/sessions`)).json()) as Session[]).filter((s) => s.running && s.agent && !s.sentry && s.transcript);
-  const live = new Set(sessions.map((s) => s.transcript!));
-  for (const path of Object.keys(marks)) if (!live.has(path)) delete marks[path];
-  const flagged: Digest[] = [];
-  const idle: Idle[] = [];
-  const blocked: { id: string; title: string; count: number; ms: number }[] = [];
-  for (const s of sessions) {
-    if (!existsSync(s.transcript!)) continue;
-    // A transcript seen for the first time is read from its last 2MB; only lines inside the window count anyway.
-    const mark = (marks[s.transcript!] ??= { offset: Math.max(0, statSync(s.transcript!).size - 2_000_000), tools: {} });
-    const d = digest(s, mark, delta(s.transcript!, mark), now);
-    if (isSlow(d)) flagged.push(d);
-    // An agent is working or asleep on a declared wait; idle at its prompt with neither, nothing will wake it, unless a background shell
-    // it started is still running, whose exit re-invokes it (the server's auto done skips those too).
-    if (s.status === "idle" && !s.archived && !s.wait && !s.pending && now - s.activeAt >= IDLE_MS && mark.idleAt !== s.activeAt && !backgroundShells(await transcriptTail(s.transcript!)).size) {
-      mark.idleAt = s.activeAt;
-      idle.push({ id: s.id, title: s.name, idleMs: now - s.activeAt, lastText: lastText(s.transcript!) });
-    }
-    if (s.blocked && mark.blockedAt !== s.blocked.since) {
-      mark.blockedAt = s.blocked.since;
-      blocked.push({ id: s.id, title: s.name, count: s.blocked.count, ms: now - s.blocked.since });
-    }
-  }
-  since = now;
-  writeFileSync(STATE_FILE, JSON.stringify(marks));
-  const stamp = new Date(now).toLocaleTimeString();
-  console.log(`${stamp}  ${sessions.length} agents read, ${flagged.length} over a threshold, ${idle.length} idle without a wait, ${blocked.length} with messages behind a draft`);
-  if (!flagged.length && !idle.length && !blocked.length) return;
+  const sessions = await liveAgents();
+  const live = new Set(sessions.map((s) => s.transcript));
+  store.marks = Object.fromEntries(Object.entries(store.marks).filter(([path]) => live.has(path)));
+  const found: Found = { flagged: [], idle: [], blocked: [] };
+  const withTranscript = sessions.filter((agent) => existsSync(agent.transcript));
+  for (const s of withTranscript) await readAgent(s, now, found);
+  readWindow.since = now;
+  writeStateJson(STATE_FILE, store.marks);
+  const { flagged, idle, blocked } = found;
+  console.log(`${new Date(now).toLocaleTimeString()}  ${sessions.length} agents read, ${flagged.length} over a threshold, ${idle.length} idle without a wait, ${blocked.length} with messages behind a draft`);
+  if (flagged.length === 0 && idle.length === 0 && blocked.length === 0) return;
   writeFileSync(FLAGGED_FILE, JSON.stringify({ at: now, read: sessions.length, flagged, idle, blocked }, null, 2));
-  const min = (ms: number) => `${(ms / 60_000).toFixed(0)}m`;
-  const line = (d: Digest) =>
-    [
-      `${d.id} (${d.title})`,
-      ...d.turns.filter((ms) => ms >= SLOW_TURN_MS).map((ms) => `turn ${min(ms)}`),
-      d.openTurnMs && d.openTurnMs >= SLOW_TURN_MS && `turn running ${min(d.openTurnMs)}`,
-      ...d.slowTools.map((t) => `${t.tool} ${min(t.ms)}${t.running ? " still running" : ""}: ${t.what.slice(0, 120)}`),
-      d.slowReplies.length && `${d.slowReplies.length} slow model replies`,
-      d.waitingOnModelMs && d.waitingOnModelMs >= SLOW_MODEL_MS && `waiting on the model ${min(d.waitingOnModelMs)}`,
-      ...d.repeated.map((r) => `ran ${r.times}x: ${r.what.slice(0, 120)}`),
-    ]
-      .filter(Boolean)
-      .join("; ");
-  const machine = `${cpus().length} cores, load ${loadavg().map((n) => n.toFixed(1)).join(" ")}`;
-  const slow = flagged.length ? `${flagged.length} of ${sessions.length} agents over a threshold in the last window (${machine}); digests in ${FLAGGED_FILE}:\n${flagged.map((d) => `- ${line(d)}`).join("\n")}` : "";
-  const waitless = idle.length
-    ? `${idle.length} agents idle with no declared wait (nothing will wake them); each one's last words:\n${idle.map((i) => `- ${i.id} (${i.title}) idle ${min(i.idleMs)}: ${JSON.stringify(i.lastText.replace(/\s+/g, " "))}`).join("\n")}`
-    : "";
-  const stuck = blocked.length
-    ? `${blocked.length} agents with messages queued behind a draft the user left in their prompt (the server clears an unchanged draft after 5m, 1m for his own request, and types it back):\n${blocked.map((b) => `- ${b.id} (${b.title}): ${b.count} waiting for ${min(b.ms)}`).join("\n")}`
-    : "";
-  await notify([slow, waitless, stuck].filter(Boolean).join("\n\n"));
+  await notify(noticeText(found, sessions.length));
 }
 
-console.log(`meta sentry: every ${INTERVAL_MS / 60_000}m reads each agent's new transcript lines; slow is a turn over ${SLOW_TURN_MS / 60_000}m, a tool over ${SLOW_TOOL_MS / 60_000}m, a reply over ${SLOW_MODEL_MS / 60_000}m, or a command run ${REPEATS}+ times`);
-// Started with the server, so wait for it to answer before the first read.
-while (!(await fetch(`${base}/api/sessions`).then((r) => r.ok, () => false))) await Bun.sleep(2_000);
+console.log(
+  `meta sentry: every ${INTERVAL_MS / 60_000}m reads each agent's new transcript lines; slow is a turn over ${SLOW_TURN_MS / 60_000}m, a tool over ${SLOW_TOOL_MS / 60_000}m, a reply over ${SLOW_MODEL_MS / 60_000}m, or a command run ${REPEATS}+ times`,
+);
+await waitForServer();
 for (;;) {
   try {
     await tick();
-  } catch (e) {
-    console.error(`${new Date().toLocaleTimeString()}  tick failed:`, e);
+  } catch (error) {
+    console.error(`${new Date().toLocaleTimeString()}  tick failed:`, error);
   }
   await Bun.sleep(INTERVAL_MS);
   if (process.ppid === 1) process.exit(0);
