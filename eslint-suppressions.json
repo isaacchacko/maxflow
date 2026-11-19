@@ -258,6 +258,20 @@
       "count": 8
     }
   },
+  "favicons.ts": {
+    "@typescript-eslint/no-non-null-assertion": {
+      "count": 1
+    },
+    "@typescript-eslint/strict-boolean-expressions": {
+      "count": 2
+    },
+    "unicorn/prefer-await": {
+      "count": 1
+    },
+    "yarn/no-comments": {
+      "count": 2
+    }
+  },
   "instance.ts": {
     "@typescript-eslint/no-non-null-assertion": {
       "count": 1
@@ -557,6 +571,28 @@
       "count": 5
     }
   },
+  "pages.ts": {
+    "unicorn/prefer-split-limit": {
+      "count": 1
+    },
+    "yarn/no-comments": {
+      "count": 1
+    }
+  },
+  "repos.ts": {
+    "@typescript-eslint/no-non-null-assertion": {
+      "count": 2
+    },
+    "@typescript-eslint/strict-boolean-expressions": {
+      "count": 1
+    },
+    "unicorn/no-array-sort": {
+      "count": 1
+    },
+    "unicorn/require-array-sort-compare": {
+      "count": 1
+    }
+  },
   "restrictions-identities.ts": {
     "unicorn/consistent-boolean-name": {
       "count": 1
@@ -564,6 +600,182 @@
   },
   "restrictions.ts": {
     "yarn/state-dir-in-state": {
+      "count": 1
+    }
+  },
+  "routes-misc.ts": {
+    "@typescript-eslint/consistent-type-imports": {
+      "count": 2
+    },
+    "@typescript-eslint/no-non-null-assertion": {
+      "count": 2
+    },
+    "@typescript-eslint/prefer-nullish-coalescing": {
+      "count": 2
+    },
+    "@typescript-eslint/prefer-regexp-exec": {
+      "count": 2
+    },
+    "@typescript-eslint/strict-boolean-expressions": {
+      "count": 18
+    },
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    },
+    "max-statements": {
+      "count": 1
+    },
+    "no-implicit-coercion": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 1
+    },
+    "unicorn/consistent-existence-index-check": {
+      "count": 1
+    },
+    "unicorn/max-nested-calls": {
+      "count": 2
+    },
+    "unicorn/no-computed-property-existence-check": {
+      "count": 1
+    },
+    "unicorn/no-for-each": {
+      "count": 1
+    },
+    "unicorn/no-negated-condition": {
+      "count": 1
+    },
+    "unicorn/prefer-await": {
+      "count": 9
+    },
+    "unicorn/prefer-iterator-helpers": {
+      "count": 3
+    },
+    "unicorn/prefer-iterator-to-array": {
+      "count": 4
+    },
+    "unicorn/prefer-simple-condition-first": {
+      "count": 1
+    },
+    "yarn/no-comments": {
+      "count": 6
+    }
+  },
+  "routes-restrictions.ts": {
+    "@typescript-eslint/no-confusing-void-expression": {
+      "count": 2
+    },
+    "@typescript-eslint/no-non-null-assertion": {
+      "count": 4
+    },
+    "@typescript-eslint/no-unsafe-argument": {
+      "count": 1
+    },
+    "@typescript-eslint/no-unused-expressions": {
+      "count": 2
+    },
+    "@typescript-eslint/prefer-nullish-coalescing": {
+      "count": 2
+    },
+    "@typescript-eslint/prefer-regexp-exec": {
+      "count": 1
+    },
+    "@typescript-eslint/strict-boolean-expressions": {
+      "count": 9
+    },
+    "complexity": {
+      "count": 1
+    },
+    "max-statements": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 3
+    },
+    "unicorn/no-return-array-push": {
+      "count": 1
+    },
+    "unicorn/prefer-await": {
+      "count": 5
+    },
+    "yarn/no-comments": {
+      "count": 9
+    }
+  },
+  "routes-stats.ts": {
+    "@typescript-eslint/no-confusing-void-expression": {
+      "count": 1
+    },
+    "@typescript-eslint/no-non-null-assertion": {
+      "count": 2
+    },
+    "@typescript-eslint/no-unused-expressions": {
+      "count": 1
+    },
+    "@typescript-eslint/prefer-regexp-exec": {
+      "count": 2
+    },
+    "@typescript-eslint/strict-boolean-expressions": {
+      "count": 3
+    },
+    "complexity": {
+      "count": 1
+    },
+    "max-statements": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 2
+    },
+    "unicorn/max-nested-calls": {
+      "count": 3
+    },
+    "unicorn/no-negated-array-predicate": {
+      "count": 1
+    },
+    "unicorn/no-return-array-push": {
+      "count": 1
+    },
+    "unicorn/prefer-await": {
+      "count": 2
+    },
+    "unicorn/prefer-iterator-to-array": {
+      "count": 2
+    },
+    "unicorn/prefer-simple-condition-first": {
+      "count": 1
+    },
+    "yarn/no-comments": {
+      "count": 1
+    }
+  },
+  "routes-tasks.ts": {
+    "@typescript-eslint/consistent-type-imports": {
+      "count": 1
+    },
+    "@typescript-eslint/no-unused-expressions": {
+      "count": 1
+    },
+    "@typescript-eslint/prefer-regexp-exec": {
+      "count": 1
+    },
+    "@typescript-eslint/strict-boolean-expressions": {
+      "count": 3
+    },
+    "complexity": {
+      "count": 1
+    },
+    "unicorn/prefer-await": {
+      "count": 2
+    },
+    "unicorn/prefer-iterator-to-array": {
+      "count": 1
+    },
+    "unicorn/prefer-simple-condition-first": {
       "count": 1
     }
   },
@@ -746,15 +958,64 @@
       "count": 1
     }
   },
+  "sentry-commands.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    },
+    "@typescript-eslint/no-unsafe-assignment": {
+      "count": 1
+    },
+    "@typescript-eslint/no-unsafe-call": {
+      "count": 4
+    },
+    "@typescript-eslint/no-unsafe-member-access": {
+      "count": 6
+    },
+    "@typescript-eslint/no-unsafe-return": {
+      "count": 2
+    },
+    "@typescript-eslint/strict-boolean-expressions": {
+      "count": 6
+    },
+    "complexity": {
+      "count": 1
+    },
+    "unicorn/consistent-boolean-name": {
+      "count": 2
+    },
+    "unicorn/no-unsafe-string-replacement": {
+      "count": 1
+    },
+    "unicorn/relative-url-style": {
+      "count": 1
+    },
+    "yarn/no-comments": {
+      "count": 4
+    },
+    "yarn/state-dir-in-state": {
+      "count": 1
+    },
+    "yarn/state-writes-in-state": {
+      "count": 1
+    }
+  },
+  "sentry-files.ts": {
+    "unicorn/consistent-boolean-name": {
+      "count": 1
+    },
+    "yarn/no-comments": {
+      "count": 2
+    }
+  },
   "server.ts": {
     "@typescript-eslint/no-confusing-void-expression": {
-      "count": 8
+      "count": 5
     },
     "@typescript-eslint/no-empty-function": {
       "count": 1
     },
     "@typescript-eslint/no-explicit-any": {
-      "count": 4
+      "count": 2
     },
     "@typescript-eslint/no-floating-promises": {
       "count": 3
@@ -766,7 +1027,7 @@
       "count": 2
     },
     "@typescript-eslint/no-non-null-assertion": {
-      "count": 30
+      "count": 19
     },
     "@typescript-eslint/no-shadow": {
       "count": 2
@@ -778,34 +1039,34 @@
       "count": 1
     },
     "@typescript-eslint/no-unsafe-argument": {
-      "count": 9
+      "count": 7
     },
     "@typescript-eslint/no-unsafe-assignment": {
-      "count": 18
+      "count": 17
     },
     "@typescript-eslint/no-unsafe-call": {
-      "count": 10
+      "count": 6
     },
     "@typescript-eslint/no-unsafe-member-access": {
-      "count": 25
+      "count": 19
     },
     "@typescript-eslint/no-unsafe-return": {
-      "count": 4
+      "count": 2
     },
     "@typescript-eslint/no-unused-expressions": {
-      "count": 15
+      "count": 11
     },
     "@typescript-eslint/prefer-includes": {
       "count": 1
     },
     "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 18
+      "count": 14
     },
     "@typescript-eslint/prefer-optional-chain": {
       "count": 2
     },
     "@typescript-eslint/prefer-regexp-exec": {
-      "count": 25
+      "count": 19
     },
     "@typescript-eslint/promise-function-async": {
       "count": 1
@@ -814,13 +1075,13 @@
       "count": 1
     },
     "@typescript-eslint/strict-boolean-expressions": {
-      "count": 146
+      "count": 104
     },
     "@typescript-eslint/use-unknown-in-catch-callback-variable": {
       "count": 3
     },
     "complexity": {
-      "count": 6
+      "count": 5
     },
     "max-depth": {
       "count": 6
@@ -838,7 +1099,7 @@
       "count": 4
     },
     "no-implicit-coercion": {
-      "count": 13
+      "count": 12
     },
     "no-nested-ternary": {
       "count": 11
@@ -847,7 +1108,7 @@
       "count": 4
     },
     "no-restricted-syntax": {
-      "count": 18
+      "count": 12
     },
     "no-useless-assignment": {
       "count": 1
@@ -859,10 +1120,7 @@
       "count": 4
     },
     "unicorn/consistent-boolean-name": {
-      "count": 13
-    },
-    "unicorn/consistent-existence-index-check": {
-      "count": 1
+      "count": 10
     },
     "unicorn/consistent-function-scoping": {
       "count": 2
@@ -874,13 +1132,10 @@
       "count": 7
     },
     "unicorn/max-nested-calls": {
-      "count": 6
-    },
-    "unicorn/no-array-sort": {
       "count": 1
     },
     "unicorn/no-computed-property-existence-check": {
-      "count": 3
+      "count": 2
     },
     "unicorn/no-declarations-before-early-exit": {
       "count": 1
@@ -889,19 +1144,19 @@
       "count": 1
     },
     "unicorn/no-for-each": {
-      "count": 3
+      "count": 2
     },
     "unicorn/no-negated-array-predicate": {
-      "count": 2
+      "count": 1
     },
     "unicorn/no-negated-condition": {
-      "count": 2
+      "count": 1
     },
     "unicorn/no-nested-ternary": {
       "count": 9
     },
     "unicorn/no-return-array-push": {
-      "count": 3
+      "count": 1
     },
     "unicorn/no-top-level-assignment-in-function": {
       "count": 2
@@ -910,7 +1165,7 @@
       "count": 2
     },
     "unicorn/no-unsafe-string-replacement": {
-      "count": 4
+      "count": 3
     },
     "unicorn/no-useless-coercion": {
       "count": 1
@@ -919,16 +1174,16 @@
       "count": 2
     },
     "unicorn/prefer-await": {
-      "count": 44
+      "count": 25
     },
     "unicorn/prefer-default-parameters": {
       "count": 2
     },
     "unicorn/prefer-iterator-helpers": {
-      "count": 4
+      "count": 1
     },
     "unicorn/prefer-iterator-to-array": {
-      "count": 11
+      "count": 4
     },
     "unicorn/prefer-minimal-ternary": {
       "count": 2
@@ -937,10 +1192,10 @@
       "count": 1
     },
     "unicorn/prefer-simple-condition-first": {
-      "count": 9
+      "count": 6
     },
     "unicorn/prefer-split-limit": {
-      "count": 3
+      "count": 2
     },
     "unicorn/prefer-string-replace-all": {
       "count": 5
@@ -952,25 +1207,22 @@
       "count": 3
     },
     "unicorn/relative-url-style": {
-      "count": 3
-    },
-    "unicorn/require-array-sort-compare": {
-      "count": 1
+      "count": 2
     },
     "yarn/fetch-needs-timeout": {
       "count": 2
     },
     "yarn/no-comments": {
-      "count": 112
+      "count": 86
     },
     "yarn/no-sync-spawn-in-server": {
-      "count": 3
+      "count": 2
     },
     "yarn/state-dir-in-state": {
       "count": 1
     },
     "yarn/state-writes-in-state": {
-      "count": 3
+      "count": 2
     }
   },
   "service.ts": {
@@ -1118,6 +1370,11 @@
     },
     "yarn/no-comments": {
       "count": 4
+    }
+  },
+  "task-prs.ts": {
+    "yarn/no-comments": {
+      "count": 1
     }
   },
   "threads.ts": {

@@ -1,31 +1,31 @@
 import { existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { slackAvatar, slackNames } from "./slack-meta";
-import { inboxesTable, slackMessagesTable, watchedStateFile, writeStateJson } from "./state";
-import { latestSeq, publish, query } from "./bus";
-import { findChat, listChats } from "./chats";
+import { inboxesTable, slackMessagesTable, writeStateJson } from "./state";
+import { publish } from "./bus";
 import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR } from "./instance";
-import { enforce } from "./restrictions-enforce";
-import type { Person } from "./restrictions";
 import app from "./src/index.html";
-import { TMUX, flushOptions, paneEnv, paste, pressEnter, respawn, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
-import { type ClaudeState, type Role, type Session, type Wait, type WsData, chatOf, isAgent, isSentry, sessions } from "./sessions";
-import type { Block, Feed, FeedPost, Message, Thread } from "./model";
-import { live, names, objectives, saveObjectives, saveTasks, saveThreads, tasks, threads, threadsDirty, writeThreads } from "./stores";
+import { TMUX, flushOptions, paste, pressEnter, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
+import { type ClaudeState, type Role, type Session, type Wait, type WsData, isAgent, isSentry, sessions } from "./sessions";
+import type { Feed, FeedPost, Message, Thread } from "./model";
+import { live, objectives, saveObjectives, saveTasks, saveThreads, tasks, threads, threadsDirty, writeThreads } from "./stores";
 import { DEFAULT_AFTER_H, DEFAULT_AFTER_MS, VERIFIED, intro } from "./intro";
 import { SessionCap, attachViewer, createSession, derive, dispatch, endWait, funnel, live_thread, push, routersOf, screen, setArchived, setClaudeState, setWait, settleTasks, stopAgent, waitsOn, wake } from "./lifecycle";
 import { checkShells, declareWait, untilShell } from "./waits";
-import { ISAAC_IN_THREAD, ancestors, answered, ask, enforcing, headline, mentionsIn, message, pathTitle, pauseTimers, postIn, resurface, schedulePause, squash, tellMembers, unforge, unpause } from "./threads";
+import { ISAAC_IN_THREAD, ancestors, answered, headline, mentionsIn, message, pathTitle, pauseTimers, postIn, resurface, schedulePause, squash, tellMembers, unforge, unpause } from "./threads";
 import { DRAFTS, deliver } from "./delivery";
 import { RESYNC_MS, claudeStateChanged, resync } from "./turns";
 import { docsRoute } from "./docs-api";
 import { sizingRoute } from "./sizing";
 import { SENTRY_USES, built, describe, freshWorld, judged, openWorld, prStates, worldClients } from "./world";
-import { EXTERNAL_SEEN, ROUTER_BRIEF, acceptTrust, externalSeen, externalSignal, feedMore, feedPosts, feedToFunnel, known, requested, reroute, slackChannels, startRouter } from "./routing";
-import { handOff, mergeThread, newObjective, pointsAtItself, relayRefusal, setRole, subthread, titleOf } from "./objectives";
-import { onEvent, recordUserComment, seedUserComments } from "./events";
+import { EXTERNAL_SEEN, ROUTER_BRIEF, acceptTrust, externalSeen, externalSignal, feedPosts, feedToFunnel, known, requested, reroute, slackChannels, startRouter } from "./routing";
+import { handOff, mergeThread, newObjective, setRole, subthread, titleOf } from "./objectives";
+import { recordUserComment, seedUserComments } from "./events";
 import { restrictionsRoute } from "./routes-restrictions";
 import { statsTodosRoute } from "./routes-stats";
 import { tasksLinksRoute } from "./routes-tasks";
+import { touchFrom } from "./sentry-files";
+import { SENTRIES } from "./sentry-commands";
+import { miscRoute } from "./routes-misc";
 
 const HOST = "127.0.0.1";
 function loadInbox(id: string): Pick<Session, "inbox" | "sending"> {
@@ -68,11 +68,6 @@ function adoptSessions() {
 if (LIVE && (await fetch(`${BASE}/api/sessions`).then((r) => r.ok, () => false)))
   console.error(`the live maxflow is already running on ${BASE}; run ./dev.sh for a dev instance`), process.exit(1);
 adoptSessions();
-
-// Sentries are ordinary sessions, started once and kept by tmux across server restarts.
-const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  ["gh", "slack", "rename", ...(LIVE ? ["health"] : []), "graph", "ram", "inbox", "approval", "docs", "jev"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
-);
 // The review sentry is a claude agent; its feed runs beside it, logging out of the way of its screen.
 const reviewSource = (f: string) => new URL(`./sentries/${f}`, import.meta.url).pathname;
 SENTRIES["sentry:review"] = ["sh", "-c",
@@ -102,29 +97,6 @@ for (const s of sessions.values())
 // MAXFLOW_SENTRIES: 0 for none, a comma list (gh,health) for those alone, 1 or unset for all.
 const sentryList = process.env.MAXFLOW_SENTRIES ?? "1";
 const wanted = Object.entries(SENTRIES).filter(([n]) => sentryList !== "0" && (sentryList === "1" || sentryList.split(",").includes(n.slice(7))));
-// A deploy restarts a sentry whose code changed in its own pane, so it keeps its session. A claude sentry resumes its chat, unless
-// its brief changed: then it starts a fresh chat, handed the last things its old one said.
-function restartSentry(s: Session, fresh: boolean) {
-  let cmd = SENTRIES[s.name];
-  // claude writes a chat's transcript at its first turn, and resuming one that never had a turn exits at once.
-  const chat = s.transcript && existsSync(s.transcript) ? chatOf(s) : undefined;
-  const claude = cmd[0] === "sh" && cmd[2].includes("exec claude ");
-  if (claude && chat && !fresh) cmd = ["sh", "-c", cmd[2].replace("exec claude ", `exec claude --resume ${chat} `)];
-  if (claude && chat && fresh && s.transcript) {
-    const said = readFileSync(s.transcript, "utf8").split("\n").flatMap((line) => {
-      try {
-        const m = JSON.parse(line);
-        return m.type === "assistant" ? m.message.content.filter((c: any) => c.type === "text").map((c: any) => c.text.trim().slice(0, 300)) : [];
-      } catch {
-        return [];
-      }
-    });
-    const digest = `${STATE_DIR}/${s.name.slice(7)}-restart-digest.txt`;
-    writeFileSync(digest, `[maxflow] Your brief (sentries/${s.name.slice(7)}.md) changed, so a deploy restarted you in a fresh chat. Your previous chat was ${chat} (transcript ${s.transcript}, if you need more of it). The last things you said there:\n${said.slice(-6).map((t) => `- ${t}`).join("\n")}`);
-    cmd = ["sh", "-c", `${cmd[2]} "$(cat '${digest}')"`];
-  }
-  return { ok: respawn(s.id, "-c", DIR, ...paneEnv(s.id), "--", ...cmd), resumed: claude && chat && !fresh ? chat : undefined, fresh: claude && (fresh || !chat) };
-}
 const sentryUp = (name: string) => [...sessions.values()].some((s) => s.sentry && s.name === name && s.exitCode === null);
 // Each start goes on the bus, so the Stats page can count a sentry's restarts.
 for (const [name, cmd] of wanted) if (!sentryUp(name)) markSentry(createSession(name, cmd, DIR)), publish("sentry/start", { name, why: "boot" });
@@ -145,11 +117,6 @@ setInterval(() => {
     publish("sentry/start", { name, why: "respawn", tries: r.tries + 1 });
   }
 }, 15_000);
-// Lets the graph show one session reading or writing another; held is true while a wait is still watching.
-function touchFrom(req: Request, s: Session, kind: "read" | "write", held = false) {
-  const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-  if (from && from !== s) publish(`touch/${from.id}/${s.id}`, { from: from.id, to: s.id, kind, held });
-}
 const UPLOADS = `${STATE_DIR}/uploads`;
 for (const s of sessions.values()) if (existsSync(`${DRAFTS}/${s.id}.txt`)) s.savedDraft = readFileSync(`${DRAFTS}/${s.id}.txt`, "utf8");
 
@@ -183,9 +150,6 @@ async function refreshPrStates() {
   }
 }
 setInterval(() => refreshPrStates().catch(() => {}), 30_000);
-// Its board of the PRs that need the user, { updated, next, sections: [{ title, items: [{ pr, url, note }] }] }, and the queue of every open PR it reads.
-const reviewBoard = watchedStateFile<unknown>("review-board.json", null);
-const reviewQueue = watchedStateFile<unknown[]>("review-queue.json", []);
 // What Isaac himself typed into the funnel: its transcript's prompts, minus every part the server stamped as from a session.
 function isaacPrompts(funnel: Session) {
   let raw = "";
@@ -296,17 +260,6 @@ for (const t of threads) if (t.paused) schedulePause(t);
 setInterval(() => {
   for (const t of threads) if (t.paused && !pauseTimers.has(t.id)) t.paused.until <= Date.now() ? resurface(t) : schedulePause(t);
 }, 60_000);
-
-// A page (an objective's or a task's) is a grid of cards its agents keep current.
-function pageOf(ref: string): { page: Block[]; save: () => void } | null {
-  const [type, id] = ref.split("/");
-  if (type === "objective") {
-    const o = objectives.find((x) => x.id === id);
-    return o ? { page: o.page, save: saveObjectives } : null;
-  }
-  const t = type === "task" ? tasks.find((x) => x.id === Number(id.replace(/^t/, ""))) : undefined;
-  return t ? { page: (t.page ??= []), save: saveTasks } : null;
-}
 // Whether claude itself runs in each agent's pane, read from the process table rather than the screen: a stop, a crash or a kill
 // can leave the pane at the asleep prompt or a shell while the session still reads as claude's. A claude found gone takes its
 // hook state with it, so the session can't stay "working"; an archived one kept up by a draft is stopped once the box is empty.
@@ -410,18 +363,6 @@ setInterval(async () => {
     delivering = false;
   }
 }, 1000);
-
-// Only pages served from this server may drive it; blocks other sites from reaching localhost.
-// Favicons are served from this origin so the graph can read their pixels and plate the dark ones.
-const favicons = new Map<string, Promise<Response | null>>();
-async function fetchFavicon(host: string) {
-  const own = `${/^localhost(:|$)/.test(host) ? "http" : "https"}://${host}/favicon.ico`;
-  for (const src of [own, `https://www.google.com/s2/favicons?domain=${host}&sz=64`]) {
-    const res = await fetch(src, { signal: AbortSignal.timeout(5000) }).catch(() => null);
-    if (res?.ok && res.headers.get("content-type")?.startsWith("image/")) return new Response(await res.arrayBuffer(), { headers: { "content-type": res.headers.get("content-type")!, "cache-control": "max-age=86400" } });
-  }
-  return null;
-}
 
 function sameOrigin(req: Request) {
   const origin = req.headers.get("origin");
@@ -730,136 +671,8 @@ Bun.serve<WsData>({
       publish(`thread/${t.id}`, { thread: t.id, resolved });
       return Response.json(t);
     }
-    // The order of his pinned threads, as he dragged them in the sidebar: the ids, first to last.
-    if (path === "/api/pins" && req.method === "PATCH") {
-      if (!req.headers.get("user-agent")?.includes("Mozilla")) return new Response("pins are Isaac's, from the browser", { status: 403 });
-      const { order } = (await req.json().catch(() => ({}))) as { order?: string[] };
-      if (!Array.isArray(order)) return new Response("order: the pinned thread ids, first to last", { status: 400 });
-      order.forEach((id, i) => {
-        const t = threads.find((x) => x.id === id);
-        if (t?.pinned) t.pinned.order = i;
-      });
-      saveThreads();
-      publish("pins", { order });
-      return new Response(null, { status: 204 });
-    }
-    const threadPost = path.match(/^\/api\/threads\/([\w-]+)\/messages$/);
-    if (threadPost && req.method === "POST") {
-      const t = live_thread(threads.find((x) => x.id === threadPost[1]));
-      if (!t) return new Response("no such thread", { status: 404 });
-      // done: from `thread done`, which commands used; it is a plain post now.
-      const body = (await req.json().catch(() => ({}))) as { text?: string; nudge?: string; feed?: boolean; posts?: FeedPost[] };
-      const text = body.text?.trim();
-      if (!text) return new Response("text required", { status: 400 });
-      const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-      if (body.feed && from && isSentry(from)) return await feedMore(t, from, text, body.posts), Response.json(t, { status: 201 });
-      if (from && pointsAtItself(text, t))
-        return new Response(`${threadPost[1] !== t.id ? `${threadPost[1]} was merged into ${t.id}, so this would land in ${t.id}` : `This is ${t.id}`}, and a pointer to it there points at itself. Post only what is new for him, or nothing.`, { status: 409 });
-      const relay = from === undefined ? undefined : relayRefusal(t, from, text);
-      if (relay !== undefined) return new Response(relay, { status: 409 });
-      postIn(t, from, text, body.nudge === "subthread" ? "subthread" : undefined);
-      return Response.json(t, { status: 201 });
-    }
-
-    // An agent edits a card on an objective's or a task's page.
-    if (path === "/api/pages" && (req.method === "POST" || req.method === "DELETE")) {
-      const body = (await req.json().catch(() => ({}))) as { ref?: string; block?: Block; id?: string };
-      const p = pageOf(body.ref ?? "");
-      if (!p) return new Response("ref must be objective/<id> or task/<id>", { status: 404 });
-      if (req.method === "DELETE") p.page.splice(0, p.page.length, ...p.page.filter((b) => b.id !== body.id));
-      else {
-        const b = body.block;
-        if (!b?.id || !b.kind || !b.w || !b.h) return new Response("block needs id, kind, w and h", { status: 400 });
-        const i = p.page.findIndex((x) => x.id === b.id);
-        if (i >= 0) p.page[i] = b;
-        else p.page.push(b);
-      }
-      p.save();
-      publish(`page/${body.ref}`, { ref: body.ref, block: body.block?.id ?? body.id });
-      return Response.json(p.page);
-    }
-
-    if (path === "/api/chats" && req.method === "GET") {
-      const q = url.searchParams.get("q")?.toLowerCase() ?? "";
-      const limit = Number(url.searchParams.get("limit") ?? 100);
-      const open = new Map([...sessions.values()].filter((s) => s.chatId && s.exitCode === null).map((s) => [s.chatId!, s.id]));
-      const chats = (await listChats())
-        .filter((c) => !q || `${c.title} ${c.prompt} ${c.cwd} ${c.id}`.toLowerCase().includes(q))
-        .slice(0, limit)
-        .map((c) => ({ ...c, session: open.get(c.id) ?? null }));
-      return Response.json(chats);
-    }
-
-    const resume = path.match(/^\/api\/chats\/([0-9a-f-]{36})\/resume$/);
-    if (resume && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { bypass?: boolean; force?: boolean };
-      const open = [...sessions.values()].find((s) => s.chatId === resume[1] && s.exitCode === null);
-      if (open) return Response.json(describe(open));
-      const chat = await findChat(resume[1]);
-      if (!chat) return new Response("no such chat", { status: 404 });
-      if (chat.live && !body.force) return Response.json({ error: "live", chat }, { status: 409 });
-      const cmd = ["claude", "--resume", chat.id, ...(body.bypass ? ["--permission-mode", "bypassPermissions"] : [])];
-      return Response.json(describe(createSession(chat.title.slice(0, 40), cmd, chat.cwd, chat.id)), { status: 201 });
-    }
-
-    if (path === "/api/sentries/restart" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { name?: string; fresh?: boolean };
-      const s = [...sessions.values()].find((o) => o.sentry && o.name === body.name && o.exitCode === null);
-      if (!s || !(s.name in SENTRIES)) return new Response(`no running sentry ${body.name}`, { status: 404 });
-      const r = restartSentry(s, !!body.fresh);
-      return r.ok ? Response.json(r) : new Response(`respawning ${s.name} failed; see the log`, { status: 500 });
-    }
-    if (path === "/api/events" && req.method === "GET") {
-      const p = url.searchParams;
-      const after = p.get("after") === "now" ? latestSeq() : Number(p.get("after") ?? 0);
-      const events = await query(p.get("topic") ?? "**", after, Math.min(Number(p.get("wait") ?? 0), 3_600_000));
-      return Response.json(events, { headers: { "x-maxflow-seq": String(after) } });
-    }
-    if (path === "/api/events" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { topic?: string; data?: unknown };
-      if (!body.topic) return new Response("topic required", { status: 400 });
-      const ev = publish(body.topic, body.data ?? null);
-      onEvent(body.topic, body.data, sessions.get(req.headers.get("x-maxflow-from") ?? ""));
-      externalSignal(ev);
-      return Response.json(ev, { status: 201 });
-    }
-
-    if (path === "/api/favicon" && req.method === "GET") {
-      const host = url.searchParams.get("host") ?? "";
-      if (!/^[\w.-]+(:\d+)?$/.test(host)) return new Response("bad host", { status: 400 });
-      if (!favicons.has(host)) favicons.set(host, fetchFavicon(host));
-      return (await favicons.get(host))?.clone() ?? new Response("no favicon", { status: 404 });
-    }
-
-    if (path === "/api/review" && req.method === "GET") return Response.json({ board: reviewBoard(), queue: reviewQueue() });
-
-    // An agent using a sentry through the CLI (gh status, slack read, ...), drawn in the graph as it touching that sentry.
-    if (path === "/api/touch" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { sentry?: string; kind?: "read" | "write" };
-      const to = [...sessions.values()].find((o) => isSentry(o) && o.name === `sentry:${body.sentry}` && o.exitCode === null);
-      if (to) touchFrom(req, to, body.kind === "write" ? "write" : "read");
-      return new Response(null, { status: 204 });
-    }
-    // The restrictions hook, on a call a restriction that asks or blocks matches: the verdict, with the session's objective.
-    if (path === "/api/restrictions/enforce" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { tool?: string; input?: Record<string, unknown>; cwd?: string; people?: Person[] };
-      const s = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-      if (!s || !body.tool) return Response.json({ decision: "allow" });
-      return Response.json(enforce({ session: s.id, tool: body.tool, input: body.input, cwd: body.cwd, people: body.people, objective: s.role?.objective }, enforcing));
-    }
-    // `maxflow ask`: an agent's question to the user opens a thread from it, flagged as waiting on him.
-    if (path === "/api/asks" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { text?: string; re?: string; default?: string; new?: boolean };
-      const s = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-      if (!s) return new Response("ask from inside a maxflow session ($MAXFLOW_SESSION)", { status: 400 });
-      if (!body.text?.trim()) return new Response("text required", { status: 400 });
-      const t = ask(s, body.text.trim(), body.re?.trim() || undefined, body.default?.trim() || undefined, body.new);
-      if (t && "same" in t) {
-        const by = t.same.asks!.session;
-        return new Response(`${t.same.id} already asks him something close, from ${sessions.get(by)?.name ?? names[by] ?? by}: "${t.same.title}". If it's the same ask, add to it with \`${CLI} ask --re ${t.same.id} '<text>'\` and wait on thread:${t.same.id}; if it really is different, ask again with --new.`, { status: 409 });
-      }
-      return t ? Response.json(t, { status: 201 }) : new Response(`no thread ${body.re}`, { status: 404 });
-    }
+    const miscRouteAnswer = await miscRoute(req, url, path);
+    if (miscRouteAnswer) return miscRouteAnswer;
     const statsTodosRouteAnswer = await statsTodosRoute(req, url, path);
     if (statsTodosRouteAnswer) return statsTodosRouteAnswer;
     const restrictionsRouteAnswer = await restrictionsRoute(req, url, path);
