@@ -97,6 +97,10 @@ function settledObjectives(list: Call[], threads: Threads, objectives: Map<strin
   });
 }
 
+function wasReopened(size: string, thread: ThreadRow | undefined, after: number) {
+  return (size === "fyi" || size === "ignore") && (thread?.messages ?? []).some((m) => m.from === "isaac" && m.at > after);
+}
+
 function settledSizes(list: Call[], threads: Threads): Scored[] {
   const last = new Map<number, BusEvent>();
   for (const e of busLog().events) if (e.topic.startsWith("signal-size/")) last.set(Number(e.data["seq"]), e);
@@ -105,9 +109,7 @@ function settledSizes(list: Call[], threads: Threads): Scored[] {
     const size = typeof event?.data["size"] === "string" ? event.data["size"] : c.funnel;
     const threadId = typeof event?.data["thread"] === "string" ? event.data["thread"] : c.thread;
     const after = event?.at ?? c.at;
-    const thread = threadId === undefined ? undefined : threads.get(threadId);
-    const isReopened = (size === "fyi" || size === "ignore") && (thread?.messages ?? []).some((m) => m.from === "isaac" && m.at > after);
-    return { ...c, label: isReopened ? REOPENED : size, thread: threadId };
+    return { ...c, label: wasReopened(size, threadId === undefined ? undefined : threads.get(threadId), after) ? REOPENED : size, thread: threadId };
   });
 }
 
