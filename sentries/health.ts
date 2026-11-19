@@ -94,11 +94,11 @@ function stateTask({ name, problem, kept, isGating }: StateAlert) {
   return `The state file ~/.maxflow-v2/${name} was unreadable (${problem}). ${now} The health sentry started you to recover it. Find what wrote it badly (git log of the code that writes it, the sentry's log), restore the data from the kept copy if it can be repaired, and tell Isaac in one ${CLI} ask what happened and what you did. ${RULES}`;
 }
 
-async function startStateRecovery() {
+async function startStateRecovery(): Promise<ReturnType<typeof startAgent> | undefined> {
   const alerts = await stateAlerts();
   for (const alert of alerts) console.log(`${stamp()}  state: ${alert.name} unreadable (${alert.problem})${alert.isGating ? ", its sentry refuses to start" : `, kept as ${alert.kept}`}`);
   const due = alerts.find((alert) => Date.now() - (stateAgentAt.get(alert.name) ?? -MCP_AGENT_EVERY_MS) >= MCP_AGENT_EVERY_MS);
-  if (due === undefined || !canStartAgent()) return undefined;
+  if (due === undefined || !canStartAgent()) return;
   const started = startAgent(stateTask(due));
   stateAgentAt.set(due.name, started.at);
   console.log(`${stamp()}  started recovery agent for ${due.name} in ${started.tmux}`);
@@ -138,14 +138,14 @@ let lastAgentAt = -COOLDOWN_MS;
 let mcpSeq: number | null = null;
 let mcpCheckedAt = 0;
 const mcpAgentAt = new Map<string, number>();
-let stateSeq: number | null = null;
+const stateCursor: { seq: number | null } = { seq: null };
 const stateAgentAt = new Map<string, number>();
 type StateAlert = { name: string; problem: string; kept: string; isGating: boolean };
 async function stateAlerts(): Promise<StateAlert[]> {
-  const res = await fetch(`${base}/api/events?topic=health/state/**&after=${String(stateSeq ?? "now")}`, { signal: AbortSignal.timeout(5000) });
+  const res = await fetch(`${base}/api/events?topic=health/state/**&after=${String(stateCursor.seq ?? "now")}`, { signal: AbortSignal.timeout(5000) });
   const events = (await res.json()) as { seq: number; data: StateAlert }[];
-  const isFirst = stateSeq === null;
-  stateSeq = events.at(-1)?.seq ?? Number(res.headers.get("x-maxflow-seq"));
+  const isFirst = stateCursor.seq === null;
+  stateCursor.seq = events.at(-1)?.seq ?? Number(res.headers.get("x-maxflow-seq"));
   return isFirst ? [] : events.map((e) => e.data);
 }
 const canStartAgent = () => !(agent && run([...TMUX, "has-session", "-t", agent.tmux]).ok) && Date.now() - lastAgentAt >= COOLDOWN_MS;
