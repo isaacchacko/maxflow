@@ -1,15 +1,7 @@
 import { X } from "lucide-react";
 import { useState } from "react";
 import { usePersistentDraft } from "@/lib/usePersistentDraft";
-import { isRecord } from "../../../shared/guards";
-
-async function uploadKeptAsFile(file: File) {
-  const res = await fetch("/api/uploads", { method: "POST", headers: { "content-type": file.type }, body: file });
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-  const body: unknown = await res.json();
-  if (!isRecord(body) || typeof body["path"] !== "string") throw new Error("upload returned no path");
-  return body["path"];
-}
+import { uploadKeptAsFile } from "@/lib/upload";
 
 const preview = (path: string) => `/api/uploads/${path.split("/").at(-1)}`;
 
