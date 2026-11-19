@@ -338,3 +338,5 @@ export function writeStateText(name: string, text: string): string {
   renameSync(temporary, file);
   return file;
 }
+
+export const stateDisplayPath = (name: string) => stateFile(name);

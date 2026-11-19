@@ -25,8 +25,10 @@ function partsOf(node: TSESTree.Node): readonly TSESTree.Node[] {
   return [];
 }
 
+const isStateDisplayPath = (node: TSESTree.Node) => node.type === AST_NODE_TYPES.CallExpression && calleeName(node.callee) === "stateDisplayPath";
+
 function doesAnyPartReachStateDir(node: TSESTree.Node, scope: TSESLint.Scope.Scope, depth: number) {
-  return partsOf(node).some((part) => doesReachStateDir(part, scope, depth));
+  return isStateDisplayPath(node) || partsOf(node).some((part) => doesReachStateDir(part, scope, depth));
 }
 
 function doesReachStateDir(start: TSESTree.Node, scope: TSESLint.Scope.Scope, startDepth: number): boolean {

@@ -57,6 +57,7 @@ tester.run("state-writes-in-state", rule("state-writes-in-state"), {
     { code: 'const F = join(STATE_DIR, "a.json"); writeFileSync(F, "");', filename: at("sentries/gh.ts"), errors: [{ messageId: "write" }] },
     { code: "Bun.write(`${STATE_DIR}/a.json`, \"\");", filename: at("bus.ts"), errors: [{ messageId: "write" }] },
     { code: 'function save(dir = STATE_DIR) { appendFileSync(join(dir, "x"), ""); }', filename: at("bus.ts"), errors: [{ messageId: "write" }] },
+    { code: 'writeFileSync(stateDisplayPath("x.json"), "");', filename: at("bus.ts"), errors: [{ messageId: "write" }] },
   ],
 });
 
