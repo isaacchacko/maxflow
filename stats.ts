@@ -13,7 +13,7 @@ import { namesTable, threadsTable } from "./state";
 const TZ = "America/Los_Angeles";
 const DAY = 86_400_000;
 export const DEFAULT_REPO = "Dryft-AI/app";
-const CLONES: Record<string, string> = { "Dryft-AI/app": `${process.env.HOME}/app`, "isaacchacko/maxflow": DIR };
+const CLONES: Record<string, string> = { "Dryft-AI/app": `${process.env.HOME}/app`, "isaacchacko/yarn": DIR };
 const GH_CACHE = `${STATE_DIR}/stats-github.json`;
 const GH_FRESH_MS = 15 * 60_000;
 // GitHub's search index trails by a few minutes, so a week counts as final only once this long past its end.
