@@ -713,7 +713,7 @@ export function RoutingView({ snap, onSnap: go }: { snap: number; onSnap: (n: nu
       </div>
       <div onClick={e => e.stopPropagation()}>
         <SearchPalette
-        open={palette}
+        isOpen={palette}
         onOpenChange={setPalette}
         nodes={nodes}
         objectiveIds={objectives.map(o => o.id)}
