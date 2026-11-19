@@ -1,6 +1,4 @@
 #!/usr/bin/env bun
-// rename sentry: titles each session by the topic it owns, rechecked after enough new text lands on its screen.
-// A session renamed by hand is left alone from then on.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base, STATE_DIR } from "../instance";
@@ -9,24 +7,48 @@ import { takeOver } from "./singleton";
 if (import.meta.main) takeOver("rename");
 
 const STATE_FILE = join(STATE_DIR, "rename-state.json");
-const INTERVAL_MS = Number(process.env.RENAME_INTERVAL ?? 20_000);
-const FIRST_CHARS = Number(process.env.RENAME_FIRST_CHARS ?? 400);
-const EVERY_CHARS = Number(process.env.RENAME_EVERY_CHARS ?? 4000);
-const MODEL = process.env.RENAME_MODEL ?? "haiku";
-// Sent with each call that touches a session, so the graph draws this sentry doing it.
-const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
+const INTERVAL_MS = Number(process.env["RENAME_INTERVAL"] ?? 20_000);
+const FIRST_CHARS = Number(process.env["RENAME_FIRST_CHARS"] ?? 400);
+const EVERY_CHARS = Number(process.env["RENAME_EVERY_CHARS"] ?? 4000);
+const MODEL = process.env["RENAME_MODEL"] ?? "haiku";
+const API_TIMEOUT_MS = 30_000;
+const HEADERS_SO_THE_GRAPH_DRAWS_THIS_SENTRY = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
 
 const SYSTEM = `You title terminal sessions in a sidebar. Given a session's recent screen, reply with only its title: 3 to 7 words naming the topic the session owns, e.g. "PRO-6201 safety stock dismissals" or "maxflow gh sentry". Name the ticket, PR, bug or feature when the screen shows one. Write a noun phrase, not a verb phrase ("stalled CI on PRs 12194, 12192", not "Kicking stalled CI"). Never describe status, progress or the current step: no "fixing", "waiting on CI", "testing", "done". If the current title still names the right topic, reply with it unchanged. No quotes, no trailing period. If the screen shows no work yet (only a startup banner, an empty prompt, a bare shell), reply SKIP.`;
 
 type Session = { id: string; name: string; cmd: string[]; cwd: string; running: boolean; sentry: boolean };
 type Mark = { lastSet?: string; pinned?: boolean };
 
-const marks: Record<string, Mark> = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {};
-// Screen lines as of each session's last rename; new text is measured against these.
-const seen = new Map<string, Set<string>>();
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
-const screenLines = async (id: string) =>
-  ((await (await fetch(`${base}/api/sessions/${id}/screen?history=300`, { headers: caller })).json()).screen as string).split("\n").map((l) => l.trim()).filter(Boolean);
+function isMarks(value: unknown): value is Record<string, Mark> {
+  return isObject(value) && Object.values(value).every((mark) => isObject(mark));
+}
+
+function isSessionList(value: unknown): value is Session[] {
+  return Array.isArray(value) && value.every((s) => isObject(s) && typeof s["id"] === "string" && Array.isArray(s["cmd"]));
+}
+
+function readMarks() {
+  const parsed: unknown = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {};
+  return new Map(Object.entries(isMarks(parsed) ? parsed : {}));
+}
+
+const marks = readMarks();
+const linesAtLastRename = new Map<string, Set<string>>();
+
+async function screenLines(id: string) {
+  const res = await fetch(`${base}/api/sessions/${id}/screen?history=300`, { headers: HEADERS_SO_THE_GRAPH_DRAWS_THIS_SENTRY, signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+  const body: unknown = await res.json();
+  const screen = isObject(body) ? body["screen"] : undefined;
+  if (typeof screen !== "string") throw new TypeError(`session ${id}'s screen came back without text`);
+  return screen
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
 
 async function title(s: Session, lines: string[]) {
   const screen = lines.join("\n").slice(-8000);
@@ -36,39 +58,58 @@ async function title(s: Session, lines: string[]) {
     { cwd: STATE_DIR, stdin: new Blob([input]), stdout: "pipe", stderr: "pipe" },
   );
   const out = (await new Response(proc.stdout).text()).trim();
-  if ((await proc.exited) !== 0) throw new Error(`claude exited ${proc.exitCode}: ${(await new Response(proc.stderr).text()).slice(0, 200)}`);
-  return out.split("\n")[0].replace(/^["'`]+|["'`.]+$/g, "").trim().slice(0, 60);
+  if ((await proc.exited) !== 0) throw new Error(`claude exited ${String(proc.exitCode)}: ${(await new Response(proc.stderr).text()).slice(0, 200)}`);
+  return (out.split("\n", 1)[0] ?? "").replaceAll(/^["'`]+|["'`.]+$/g, "").trim().slice(0, 60);
+}
+
+async function runningSessions() {
+  const body: unknown = await (await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(API_TIMEOUT_MS) })).json();
+  if (!isSessionList(body)) throw new TypeError("/api/sessions did not return a list of sessions");
+  return body.filter((s) => s.running && !s.sentry);
+}
+
+function countOnlyTextArrivingAfterARestart(s: Session, mark: Mark, lines: string[]) {
+  if (!linesAtLastRename.has(s.id) && mark.lastSet !== undefined && mark.lastSet !== "") linesAtLastRename.set(s.id, new Set(lines));
+}
+
+function newChars(id: string, lines: string[]) {
+  const before = linesAtLastRename.get(id) ?? new Set();
+  return lines.filter((l) => !before.has(l)).reduce((n, l) => n + l.length, 0);
+}
+
+async function retitle(s: Session, mark: Mark) {
+  const hasTitled = mark.lastSet !== undefined && mark.lastSet !== "";
+  const isRenamedByHand = hasTitled && s.name !== mark.lastSet;
+  if (isRenamedByHand) mark.pinned = true;
+  if (mark.pinned === true) return;
+  const lines = await screenLines(s.id);
+  countOnlyTextArrivingAfterARestart(s, mark, lines);
+  if (newChars(s.id, lines) < (hasTitled ? EVERY_CHARS : FIRST_CHARS)) return;
+  const name = await title(s, lines);
+  linesAtLastRename.set(s.id, new Set(lines));
+  if (name === "" || name === "SKIP" || name === s.name) return;
+  await fetch(`${base}/api/sessions/${s.id}`, { method: "PATCH", headers: HEADERS_SO_THE_GRAPH_DRAWS_THIS_SENTRY, body: JSON.stringify({ name }), signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+  mark.lastSet = name;
+  console.log(`${new Date().toLocaleTimeString()}  ${s.id}  ${s.name}  ->  ${name}`);
 }
 
 async function tick() {
-  const sessions = ((await (await fetch(`${base}/api/sessions`)).json()) as Session[]).filter((s) => s.running && !s.sentry);
-  for (const id of Object.keys(marks)) if (!sessions.some((s) => s.id === id)) delete marks[id];
+  const sessions = await runningSessions();
+  for (const id of marks.keys()) if (sessions.every((s) => s.id !== id)) marks.delete(id);
   for (const s of sessions) {
-    const mark = (marks[s.id] ??= {});
-    if (mark.lastSet && s.name !== mark.lastSet) mark.pinned = true;
-    if (mark.pinned) continue;
-    const lines = await screenLines(s.id);
-    // After a sentry restart, count only text that arrives from here on.
-    if (!seen.has(s.id) && mark.lastSet) seen.set(s.id, new Set(lines));
-    const before = seen.get(s.id) ?? new Set();
-    const fresh = lines.filter((l) => !before.has(l)).reduce((n, l) => n + l.length, 0);
-    if (fresh < (mark.lastSet ? EVERY_CHARS : FIRST_CHARS)) continue;
-    const name = await title(s, lines);
-    seen.set(s.id, new Set(lines));
-    if (!name || name === "SKIP" || name === s.name) continue;
-    await fetch(`${base}/api/sessions/${s.id}`, { method: "PATCH", headers: caller, body: JSON.stringify({ name }) });
-    mark.lastSet = name;
-    console.log(`${new Date().toLocaleTimeString()}  ${s.id}  ${s.name}  ->  ${name}`);
+    const mark = marks.get(s.id) ?? {};
+    marks.set(s.id, mark);
+    await retitle(s, mark);
   }
-  writeFileSync(STATE_FILE, JSON.stringify(marks));
+  writeFileSync(STATE_FILE, JSON.stringify(Object.fromEntries(marks)));
 }
 
 console.log(`rename sentry: first title after ${FIRST_CHARS} new chars, then every ${EVERY_CHARS}, via ${MODEL}`);
 for (;;) {
   try {
     await tick();
-  } catch (e) {
-    console.error(`${new Date().toLocaleTimeString()}  tick failed:`, e);
+  } catch (error) {
+    console.error(`${new Date().toLocaleTimeString()}  tick failed:`, error);
   }
   await Bun.sleep(INTERVAL_MS);
 }
