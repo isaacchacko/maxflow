@@ -3,19 +3,24 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 type Events = WindowEventMap & DocumentEventMap;
 type ListenOptions = { target?: EventTarget | null; capture?: boolean };
 
+export function useLatest<T>(value: T) {
+  const latest = useRef(value);
+  useLayoutEffect(() => {
+    latest.current = value;
+  });
+  return latest;
+}
+
 export function useEventListener<K extends keyof Events>(type: K, handler: (e: Events[K]) => void, options?: ListenOptions): void;
 export function useEventListener(type: string, handler: (e: Event) => void, options?: ListenOptions): void;
 export function useEventListener(type: string, handler: (e: Event) => void, { target = globalThis, capture = false }: ListenOptions = {}) {
-  const latest = useRef(handler);
-  useLayoutEffect(() => {
-    latest.current = handler;
-  });
+  const latest = useLatest(handler);
   useEffect(() => {
     if (!target) return;
     const listener = (e: Event) => latest.current(e);
     target.addEventListener(type, listener, capture);
     return () => target.removeEventListener(type, listener, capture);
-  }, [type, target, capture]);
+  }, [type, target, capture, latest]);
 }
 
 export function useNow(msUntilNextTick: (now: number) => number) {
@@ -88,10 +93,7 @@ async function fetchInto(owner: Resource<unknown>) {
 }
 
 export function useResource<T>(key: string | undefined, load: () => Promise<T>) {
-  const latestLoad = useRef(load);
-  useLayoutEffect(() => {
-    latestLoad.current = load;
-  });
+  const latestLoad = useLatest(load);
   const subscribe = useCallback(
     (listener: () => void) => {
       if (key === undefined || key === "") return () => null;
@@ -111,7 +113,7 @@ export function useResource<T>(key: string | undefined, load: () => Promise<T>) 
         });
       };
     },
-    [key],
+    [key, latestLoad],
   );
   const state = useSyncExternalStore(subscribe, () => resourceAt<T>(key)?.state ?? NOTHING);
   const set = (next: (prev: T | undefined) => T) => {

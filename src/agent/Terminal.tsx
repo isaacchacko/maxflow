@@ -1,96 +1,122 @@
-import { useCallback, useRef } from "react";
+import { useCallback } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Base64, ClipboardAddon, type IClipboardProvider } from "@xterm/addon-clipboard";
+import { useLatest } from "@/lib/effects";
 
-// tmux's OSC 52 leaves the selection field empty, which the addon's default provider drops.
+const ESC = "\u{1B}";
+const DEVICE_ATTRIBUTE_REPLY = new RegExp(`${ESC}\\[[?>][\\d;]*c`, "g");
+
+// constraint: tmux's OSC 52 leaves the selection field empty, which the addon's default provider drops
 const systemClipboard: IClipboardProvider = {
-  readText: () => navigator.clipboard.readText(),
-  writeText: (_selection, text) => navigator.clipboard.writeText(text),
+  readText: async () => navigator.clipboard.readText(),
+  writeText: async (_selection, text) => navigator.clipboard.writeText(text),
 };
 
-export type TerminalHandle = { focus: () => void; fit: () => void; selection: () => string };
-
-// xterm.js only reads hex and rgb colors, and the theme's are oklch; a pixel painted in it gives the rgb back.
+// constraint: xterm.js only reads hex and rgb colours and the theme's are oklch, so a painted pixel gives the rgb back
 function rgb(color: string) {
-  const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true })!;
+  const ctx = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+  if (!ctx) return color;
   ctx.fillStyle = color;
   ctx.fillRect(0, 0, 1, 1);
   const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-// What macOS terminals send for ⌘/⌥ editing keys; xterm.js leaves these to the browser.
-function macKey(e: KeyboardEvent, term: XTerm): string | (() => void) | undefined {
-  const only = (mod: "metaKey" | "altKey" | "ctrlKey" | "shiftKey") => (["metaKey", "altKey", "ctrlKey", "shiftKey"] as const).every((m) => e[m] === (m === mod));
-  if (only("metaKey")) return ({ Backspace: "\x15", ArrowLeft: "\x01", ArrowRight: "\x05", k: () => term.clear(), a: () => term.selectAll() } as Record<string, string | (() => void)>)[e.key];
-  if (only("altKey")) return ({ Backspace: "\x1b\x7f", ArrowLeft: "\x1bb", ArrowRight: "\x1bf" } as Record<string, string>)[e.key];
-  if (only("shiftKey") && e.key === "Enter") return "\x1b\r";
+type MacEdit = string | ((term: XTerm) => void);
+const MAC_COMMAND_EDITS: Record<string, MacEdit> = { Backspace: "\u{15}", ArrowLeft: "\u{1}", ArrowRight: "\u{5}", k: term => term.clear(), a: term => term.selectAll() };
+const MAC_OPTION_EDITS: Record<string, MacEdit> = { Backspace: `${ESC}\u{7F}`, ArrowLeft: `${ESC}b`, ArrowRight: `${ESC}f` };
+const MODIFIERS = ["metaKey", "altKey", "ctrlKey", "shiftKey"] as const;
+
+function macEditingKey(e: KeyboardEvent): MacEdit | undefined {
+  const isOnly = (mod: (typeof MODIFIERS)[number]) => MODIFIERS.every(m => e[m] === (m === mod));
+  if (isOnly("metaKey")) return MAC_COMMAND_EDITS[e.key];
+  if (isOnly("altKey")) return MAC_OPTION_EDITS[e.key];
+  return isOnly("shiftKey") && e.key === "Enter" ? `${ESC}\r` : undefined;
 }
 
-export function Terminal({ id, onClose = () => {}, handle }: { id: string; onClose?: () => void; handle?: React.RefObject<TerminalHandle | null> }) {
-  const closed = useRef(onClose);
-  closed.current = onClose;
+function openTerminal(el: HTMLDivElement) {
+  const term = new XTerm({
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    fontSize: 13,
+    lineHeight: 1.15,
+    cursorBlink: true,
+    allowProposedApi: true,
+    macOptionClickForcesSelection: true,
+    theme: { background: rgb(getComputedStyle(el).backgroundColor), selectionBackground: "#6cb6ff44" },
+  });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  term.loadAddon(new WebLinksAddon());
+  term.loadAddon(new ClipboardAddon(new Base64(), systemClipboard));
+  term.open(el);
+  fit.fit();
+  return { term, fit };
+}
 
-  // Opened on its element, and opened again for another session.
-  const mount = useCallback((el: HTMLDivElement) => {
-    const term = new XTerm({
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-      fontSize: 13,
-      lineHeight: 1.15,
-      cursorBlink: true,
-      allowProposedApi: true,
-      macOptionClickForcesSelection: true,
-      theme: { background: rgb(getComputedStyle(el).backgroundColor), selectionBackground: "#6cb6ff44" },
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon());
-    term.loadAddon(new ClipboardAddon(new Base64(), systemClipboard));
-    term.open(el);
-    fit.fit();
+const stopRightClick = (e: MouseEvent) => {
+  if (e.button === 2) e.stopPropagation();
+};
 
-    const ws = new WebSocket(`ws://${location.host}/ws/${id}`);
-    ws.binaryType = "arraybuffer";
-    const send = (m: object) => ws.readyState === 1 && ws.send(JSON.stringify(m));
-    // Replayed output contains old terminal queries; xterm's answers to them must not reach the program as input.
-    let replaying = true;
-    ws.onopen = () => send({ type: "resize", cols: term.cols, rows: term.rows });
-    ws.onmessage = (e) => (typeof e.data === "string" ? term.write("", () => (replaying = false)) : term.write(new Uint8Array(e.data)));
-    ws.onclose = () => closed.current();
-    // xterm's device-attribute replies only ever answer tmux's own queries on attach (tmux answers the pane's itself), and
-    // tmux.conf names the terminal's features already. One that comes late, as when a restarting server is slow to pass it on,
-    // tmux types into the pane, and "?1;2c>0;276;0c" left in router 17656f41's prompt held its messages as a draft of his.
-    term.onData((data) => {
-      data = data.replace(/\x1b\[[?>][\d;]*c/g, "");
-      if (!replaying && data) send({ type: "input", data });
-    });
-    term.attachCustomKeyEventHandler((e) => {
-      const action = macKey(e, term);
-      if (!action) return true;
-      if (e.type === "keydown") typeof action === "string" ? send({ type: "input", data: action }) : action();
-      e.preventDefault();
-      return false;
-    });
-    term.onResize(({ cols, rows }) => send({ type: "resize", cols, rows }));
-    // Right-click belongs to maxflow's session menu, so tmux never sees the press and never opens its own in-pane menu.
-    const keepRightClick = (e: MouseEvent) => e.button === 2 && e.stopPropagation();
-    for (const type of ["mousedown", "mouseup"]) el.addEventListener(type, keepRightClick as EventListener, true);
-    const resize = new ResizeObserver(() => el.offsetParent && fit.fit());
-    resize.observe(el);
-    if (handle) handle.current = { focus: () => term.focus(), fit: () => fit.fit(), selection: () => term.getSelection() };
-    term.focus();
+function keepRightClickForSessionMenu(el: HTMLDivElement) {
+  for (const type of ["mousedown", "mouseup"] as const) el.addEventListener(type, stopRightClick, { capture: true });
+}
 
-    return () => {
-      resize.disconnect();
-      ws.onclose = null;
-      ws.close();
-      term.dispose();
-      if (handle) handle.current = null;
-    };
-  }, [id]);
+export function Terminal({ id, onClose }: { id: string; onClose?: () => void }) {
+  const latestOnClose = useLatest(onClose);
 
-  // Agents draw for a dark terminal, so it stays dark inside a light page.
+  const mount = useCallback(
+    (el: HTMLDivElement) => {
+      const { term, fit } = openTerminal(el);
+      const ws = new WebSocket(`ws://${location.host}/ws/${id}`);
+      ws.binaryType = "arraybuffer";
+      const send = (m: object) => ws.readyState === 1 && ws.send(JSON.stringify(m));
+      // constraint: replayed output holds old terminal queries, and xterm's answers to them must not reach the program as input
+      let isReplaying = true;
+      const onMessage = (e: MessageEvent<unknown>) => {
+        if (typeof e.data === "string")
+          term.write("", () => {
+            isReplaying = false;
+          });
+        else if (e.data instanceof ArrayBuffer) term.write(new Uint8Array(e.data));
+      };
+      const onSocketClose = () => latestOnClose.current?.();
+      ws.addEventListener("open", () => send({ type: "resize", cols: term.cols, rows: term.rows }));
+      ws.addEventListener("message", onMessage);
+      ws.addEventListener("close", onSocketClose);
+      // constraint: tmux answers device-attribute queries itself and types a late reply into the pane (it held router 17656f41's messages)
+      term.onData(data => {
+        const typed = data.replaceAll(DEVICE_ATTRIBUTE_REPLY, "");
+        if (!isReplaying && typed !== "") send({ type: "input", data: typed });
+      });
+      term.attachCustomKeyEventHandler(e => {
+        const edit = macEditingKey(e);
+        if (edit === undefined) return true;
+        if (e.type === "keydown") {
+          if (typeof edit === "string") send({ type: "input", data: edit });
+          else edit(term);
+        }
+        e.preventDefault();
+        return false;
+      });
+      term.onResize(({ cols, rows }) => send({ type: "resize", cols, rows }));
+      keepRightClickForSessionMenu(el);
+      const resize = new ResizeObserver(() => {
+        if (el.offsetParent) fit.fit();
+      });
+      resize.observe(el);
+      term.focus();
+
+      return () => {
+        resize.disconnect();
+        ws.removeEventListener("close", onSocketClose);
+        ws.close();
+        term.dispose();
+      };
+    },
+    [id, latestOnClose],
+  );
+
   return <div ref={mount} className="dark size-full bg-background" />;
 }
