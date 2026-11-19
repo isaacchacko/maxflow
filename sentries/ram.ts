@@ -47,6 +47,11 @@ function panes() {
   return byPid;
 }
 
+const DEPLOY = /(^|\/)cli\.ts deploy(\s|$)/;
+const underDeploy = (p: Proc, procs: Map<number, Proc>) => {
+  for (let q: Proc | undefined = p; q && q.pid > 1; q = procs.get(q.ppid)) if (DEPLOY.test(q.cmd)) return true;
+  return false;
+};
 const isCiWork = (p: Proc) => !SHELL.test(p.cmd) && !/(^|\/)claude(\s|$)/.test(p.cmd) && CI_WORK.some((re) => re.test(p.cmd));
 
 // The agent session a process runs under, found by walking up to its tmux pane.
@@ -86,7 +91,7 @@ async function tick() {
   const total = totalmem();
 
   // A job's root is its topmost CI-work ancestor, so a wrapper like `pnpm exec vitest` dies with the vitest it started.
-  const roots = [...procs.values()].filter((p) => isCiWork(p) && !(procs.get(p.ppid) && isCiWork(procs.get(p.ppid)!)));
+  const roots = [...procs.values()].filter((p) => isCiWork(p) && !(procs.get(p.ppid) && isCiWork(procs.get(p.ppid)!)) && !underDeploy(p, procs));
   for (const root of roots) {
     const id = owner(root, procs, paneOf);
     const agent = id && agents.get(id);
