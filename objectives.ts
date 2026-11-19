@@ -3,57 +3,73 @@ import { publish } from "./bus";
 import { CLI } from "./instance";
 import { setOption } from "./tmux";
 import { type Role, type Session, sessions } from "./sessions";
-import type { Objective, Thread } from "./model";
+import type { Message, Objective, Thread } from "./model";
 import { objectives, saveObjectives, saveThreads, threads } from "./stores";
 import { dispatch, setWait } from "./lifecycle";
 import { IMAGE, message } from "./threads";
 import { slackChannels } from "./routing";
+import { patch } from "./patch";
 
-const slug = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "objective";
+function slug(title: string) {
+  const dashed = title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/^-|-$/g, "").slice(0, 32);
+  return dashed === "" ? "objective" : dashed;
+}
+const isObjectiveId = (id: string) => objectives.some((o) => o.id === id);
 
 export function setRole(s: Session, role: Role) {
-  s.role = role;
+  patch(s, { role });
   setOption(s.id, "@mf-role", JSON.stringify(role));
 }
 export function newObjective(title: string, cwd: string) {
   let id = slug(title);
-  while (objectives.some((o) => o.id === id)) id = `${slug(title).slice(0, 28)}-${crypto.randomUUID().slice(0, 3)}`;
+  while (isObjectiveId(id)) id = `${slug(title).slice(0, 28)}-${crypto.randomUUID().slice(0, 3)}`;
   const o: Objective = { id, title, cwd, at: Date.now(), page: [] };
   objectives.push(o);
   saveObjectives();
   publish(`objective/${id}`, { id, title });
   return o;
 }
-// Folding a duplicate into another thread: its messages join the other's in time order, its routers, open ask and subthreads
-// move with them, waits on it follow, and it leaves the inbox.
-// An agent's note that names the thread it sits in: "tracked in th-…" left on a duplicate, then folded into that very thread.
-export const pointsAtItself = (text: string, t: Thread) => text.includes(`[[thread:${t.id}]]`) || new RegExp(`\\b${t.id}\\b`).test(text);
-export function mergeThread(from: Thread, into: Thread) {
-  into.messages = [...into.messages, ...from.messages.filter((m) => m.from === "isaac" || m.from === "feed" || !pointsAtItself(m.text, into))].sort((a, b) => a.at - b.at);
+export const pointsAtItself = (text: string, t: Thread) => text.includes(`[[thread:${t.id}]]`) || new RegExp(String.raw`\b${t.id}\b`).test(text);
+const isKeptWhenFoldedInto = (m: Message, into: Thread) => m.from === "isaac" || m.from === "feed" || !pointsAtItself(m.text, into);
+function joinMembers(from: Thread, into: Thread) {
+  const joining = [...new Set(from.members)].filter((id) => into.members?.includes(id) !== true);
+  if (joining.length === 0) return;
+  if (into.members === undefined) patch(into, { members: joining });
+  else into.members.push(...joining);
+}
+function takeOverMessagesRoutersAndAsk(from: Thread, into: Thread) {
+  patch(into, { messages: [...into.messages, ...from.messages.filter((m) => isKeptWhenFoldedInto(m, into))].toSorted((a, b) => a.at - b.at) });
   for (const id of from.routers) if (!into.routers.includes(id)) into.routers.push(id);
-  for (const id of from.members ?? []) if (!into.members?.includes(id)) (into.members ??= []).push(id);
-  if (from.asks && !into.asks) into.asks = from.asks;
+  joinMembers(from, into);
+  if (from.asks !== undefined && into.asks === undefined) patch(into, { asks: from.asks });
+}
+export function mergeThread(from: Thread, into: Thread) {
+  takeOverMessagesRoutersAndAsk(from, into);
   for (const t of threads) if (t.parent?.thread === from.id) t.parent.thread = into.id;
   for (const s of sessions.values()) if (s.wait?.kind === "thread" && s.wait.ref === from.id) setWait(s, { ...s.wait, ref: into.id });
   Object.assign(from, { mergedInto: into.id, asks: undefined, pending: undefined, ...(from.messages.some((m) => m.from === "isaac") && { moved: { at: Date.now() } }) });
   saveThreads();
   for (const t of [from, into]) publish(`thread/${t.id}`, { thread: t.id, ...(t === from && { mergedInto: into.id }) });
 }
-// A thread's title, from its first line: an agent he mentions as @name, and Slack's mentions, channels and links as Slack shows them.
+const isFilled = (text: string | undefined): text is string => text !== undefined && text !== "";
+function agentAsTyped(chip: string, id: string) {
+  const agent = sessions.get(id);
+  return agent ? `@${agent.name.replace(/^sentry:/, "")}` : chip;
+}
 export function titleOf(text: string) {
   const slack = slackNames(slackChannels);
-  const line = text
-    .replace(IMAGE, "")
-    .replace(/\[\[(?:agent|router):([\w-]+)\]\]/g, (chip, id) => (sessions.get(id) ? `@${sessions.get(id)!.name.replace(/^sentry:/, "")}` : chip))
-    .replace(/<@([UW]\w+)(?:\|([^>]*))?>/g, (_, id, name) => `@${name || slack[id] || id}`)
-    .replace(/<#(C\w+)(?:\|([^>]*))?>/g, (_, id, name) => (name ? `#${name}` : (slack[id] ?? "#channel")))
-    .replace(/<!(here|channel|everyone)(?:\|[^>]*)?>/g, "@$1")
-    .replace(/<((?:https?|mailto):[^|>]+)\|([^>]+)>/g, "$2")
-    .trim()
-    .split("\n")[0];
-  return (line || "image").slice(0, 80);
+  const line =
+    text
+      .replaceAll(IMAGE, "")
+      .replaceAll(/\[\[(?:agent|router):([\w-]+)\]\]/g, (chip, id: string) => agentAsTyped(chip, id))
+      .replaceAll(/<@([UW]\w+)(?:\|([^>]*))?>/g, (_, id: string, name: string | undefined) => `@${[name, slack[id]].find(isFilled) ?? id}`)
+      .replaceAll(/<#(C\w+)(?:\|([^>]*))?>/g, (_, id: string, name: string | undefined) => (isFilled(name) ? `#${name}` : (slack[id] ?? "#channel")))
+      .replaceAll(/<!(here|channel|everyone)(?:\|[^>]*)?>/g, "@$1")
+      .replaceAll(/<((?:https?|mailto):[^|>]+)\|([^>]+)>/g, "$2")
+      .trim()
+      .split("\n", 1)[0] ?? "";
+  return (line === "" ? "image" : line).slice(0, 80);
 }
-// The subthread under a message, made on its first reply; a top thread's first message is the thread itself.
 export function subthread(parent: Thread, messageId: string) {
   const m = parent.messages.find((x) => x.id === messageId);
   if (!m) return null;
