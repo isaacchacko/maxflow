@@ -190,10 +190,17 @@ function checkedState<T>(name: string, isValid: StateCheck<T>): StateRead<T> {
   return isValid(parsed) ? { value: parsed } : { problem: "JSON of the wrong shape" };
 }
 
+async function publishCorruptState(data: { name: string; problem: string; kept: string; isGating: boolean }) {
+  try {
+    await fetch(`${BASE}/api/events`, { method: "POST", body: JSON.stringify({ topic: `health/state/${data.name}`, data }), signal: AbortSignal.timeout(5000) });
+  } catch (error) {
+    console.error(`state: couldn't publish health/state/${data.name}:`, error);
+  }
+}
+
 function reportCorruptState(name: string, problem: string, kept: string, isGating: boolean) {
-  const data = { name, problem, kept, isGating };
   console.error(`state: ${name} is unreadable (${problem}); ${isGating ? "refusing to start empty" : `kept as ${kept}, starting empty`}`);
-  fetch(`${BASE}/api/events`, { method: "POST", body: JSON.stringify({ topic: `health/state/${name}`, data }), signal: AbortSignal.timeout(5000) }).catch(() => undefined);
+  void publishCorruptState({ name, problem, kept, isGating });
 }
 
 export function readStateJson<T>(name: string, isValid: StateCheck<T>): T | undefined {

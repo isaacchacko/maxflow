@@ -94,6 +94,18 @@ function stateTask({ name, problem, kept, isGating }: StateAlert) {
   return `The state file ~/.maxflow-v2/${name} was unreadable (${problem}). ${now} The health sentry started you to recover it. Find what wrote it badly (git log of the code that writes it, the sentry's log), restore the data from the kept copy if it can be repaired, and tell Isaac in one ${CLI} ask what happened and what you did. ${RULES}`;
 }
 
+async function startStateRecovery() {
+  const alerts = await stateAlerts();
+  for (const alert of alerts) console.log(`${stamp()}  state: ${alert.name} unreadable (${alert.problem})${alert.isGating ? ", its sentry refuses to start" : `, kept as ${alert.kept}`}`);
+  const due = alerts.find((alert) => Date.now() - (stateAgentAt.get(alert.name) ?? -MCP_AGENT_EVERY_MS) >= MCP_AGENT_EVERY_MS);
+  if (due === undefined || !canStartAgent()) return undefined;
+  const started = startAgent(stateTask(due));
+  stateAgentAt.set(due.name, started.at);
+  console.log(`${stamp()}  started recovery agent for ${due.name} in ${started.tmux}`);
+  await acceptTrust(started.tmux);
+  return started;
+}
+
 function startAgent(prompt: string) {
   const id = crypto.randomUUID().slice(0, 8);
   const meta = { name: "maxflow recovery", cmd: ["claude"], cwd: DIR, createdAt: Date.now() };
@@ -247,14 +259,9 @@ for (;;) {
               console.log(`${stamp()}  started recovery agent for ${server} in ${agent.tmux}`);
               await acceptTrust(agent.tmux);
             }
-            for (const alert of await stateAlerts()) {
-              console.log(`${stamp()}  state: ${alert.name} unreadable (${alert.problem})${alert.isGating ? ", its sentry refuses to start" : `, kept as ${alert.kept}`}`);
-              if (Date.now() - (stateAgentAt.get(alert.name) ?? -MCP_AGENT_EVERY_MS) < MCP_AGENT_EVERY_MS || !canStartAgent()) continue;
-              agent = startAgent(stateTask(alert));
-              lastAgentAt = agent.at;
-              stateAgentAt.set(alert.name, agent.at);
-              await acceptTrust(agent.tmux);
-            }
+            const recovery = await startStateRecovery();
+            agent = recovery ?? agent;
+            lastAgentAt = recovery?.at ?? lastAgentAt;
           }
         } else {
           if (!buildBrokenSince) console.log(`${stamp()}  frontend build broken`);
