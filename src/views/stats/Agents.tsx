@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { cn, hasText } from "@/lib/utils";
+import { Jev } from "./Jev";
 import { useJson } from "./load";
 import { SectionHead, Tile, short, weekday } from "./parts";
 
@@ -360,6 +361,7 @@ export function Agents({ live, days, onDays }: { live: boolean; days: number; on
           {hasNoYarnAgent && <p className="text-xs text-muted-foreground">No yarn agent ran in this range.</p>}
         </div>
       </section>
+      <Jev days={days} />
     </>
   );
 }
