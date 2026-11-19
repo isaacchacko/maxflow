@@ -1,19 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { slackAvatar, slackNames } from "./slack-meta";
-import { agents, calendar, health, stats } from "./stats";
 import { inboxesTable, slackMessagesTable, watchedStateFile, writeStateJson } from "./state";
 import { latestSeq, publish, query } from "./bus";
-import { jev } from "./stats-jev";
 import { findChat, listChats } from "./chats";
 import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR } from "./instance";
 import { enforce } from "./restrictions-enforce";
-import { type Person } from "./restrictions";
+import type { Person } from "./restrictions";
 import app from "./src/index.html";
 import { TMUX, flushOptions, paneEnv, paste, pressEnter, respawn, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
 import { type ClaudeState, type Role, type Session, type Wait, type WsData, chatOf, isAgent, isSentry, sessions } from "./sessions";
 import { candidates } from "./mentions";
-import { type Block, type Feed, type FeedPost, type Message, TODO_STATES, type Task, type TaskEdit, type Thread, type Todo } from "./model";
-import { live, names, objectives, saveObjectives, saveTasks, saveThreads, saveTodos, tasks, threads, threadsDirty, todos, writeThreads } from "./stores";
+import { type Block, type Feed, type FeedPost, type Message, type Task, type TaskEdit, type Thread } from "./model";
+import { live, names, objectives, saveObjectives, saveTasks, saveThreads, tasks, threads, threadsDirty, writeThreads } from "./stores";
 import { DEFAULT_AFTER_H, DEFAULT_AFTER_MS, VERIFIED, intro } from "./intro";
 import { SessionCap, attachViewer, createSession, derive, dispatch, editTask, endWait, funnel, live_thread, push, routersOf, screen, setArchived, setClaudeState, setWait, settleTasks, stopAgent, taskPrs, waitsOn, wake } from "./lifecycle";
 import { checkShells, declareWait, untilShell } from "./waits";
@@ -27,6 +25,7 @@ import { EXTERNAL_SEEN, ROUTER_BRIEF, acceptTrust, externalSeen, externalSignal,
 import { handOff, mergeThread, newObjective, pointsAtItself, relayRefusal, setRole, subthread, titleOf } from "./objectives";
 import { onEvent, openUserComments, recordUserComment, seedUserComments } from "./events";
 import { restrictionsRoute } from "./routes-restrictions";
+import { statsTodosRoute } from "./routes-stats";
 
 const HOST = "127.0.0.1";
 function loadInbox(id: string): Pick<Session, "inbox" | "sending"> {
@@ -381,7 +380,6 @@ function migrateQuestions() {
   }
 }
 setTimeout(migrateQuestions, 5_000);
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
 // Tasks from before the server settled columns start from what their agents settle now, so only later changes move them.
 for (const t of tasks) if (!("derived" in t)) t.derived = derive(t)?.to;
 setInterval(settleTasks, 15_000);
@@ -867,49 +865,8 @@ Bun.serve<WsData>({
       }
       return t ? Response.json(t, { status: 201 }) : new Response(`no thread ${body.re}`, { status: 404 });
     }
-
-    if (path === "/api/todos" && req.method === "GET") return Response.json(todos);
-    if (path === "/api/stats" && req.method === "GET") return Response.json(await stats(url.searchParams.get("week") ?? undefined, url.searchParams.get("repo") ?? undefined));
-    if (path === "/api/stats/calendar" && req.method === "GET") return Response.json(await calendar());
-    if (path === "/api/stats/health" && req.method === "GET") return Response.json(health([...sessions.values()].map((s) => describe(s))));
-    if (path === "/api/stats/jev" && req.method === "GET") return Response.json(jev(url.searchParams.get("days")));
-    if (path === "/api/stats/agents" && req.method === "GET")
-      return Response.json(agents(Math.min(90, Math.max(1, Number(url.searchParams.get("days")) || 7)), [...sessions.values()].map((s) => describe(s)), objectives));
-    if (path === "/api/todos" && req.method === "POST") {
-      const { text, day } = (await req.json().catch(() => ({}))) as { text?: string; day?: string };
-      if (!text?.trim() || !day || !DAY.test(day)) return new Response("text, and day as YYYY-MM-DD", { status: 400 });
-      const todo: Todo = { id: crypto.randomUUID().slice(0, 8), text: text.trim(), day, state: "todo", at: new Date().toISOString(), threadIds: [] };
-      todos.push(todo), saveTodos();
-      return Response.json(todo, { status: 201 });
-    }
-    // Tagging a thread on a todo, or untagging it; each is idempotent, and answers with the todo.
-    const todoThread = path.match(/^\/api\/todos\/([\w-]+)\/threads\/([\w-]+)$/);
-    if (todoThread && (req.method === "POST" || req.method === "DELETE")) {
-      const [, todoId, threadId] = todoThread;
-      const todo = todos.find((t) => t.id === todoId);
-      if (!todo) return new Response(`no todo ${todoId}`, { status: 404 });
-      if (req.method === "POST") {
-        if (!threads.some((t) => t.id === threadId)) return new Response(`no thread ${threadId}`, { status: 404 });
-        if (!todo.threadIds.includes(threadId!)) todo.threadIds.push(threadId!);
-      } else todo.threadIds = todo.threadIds.filter((id) => id !== threadId);
-      saveTodos();
-      return Response.json(todo);
-    }
-    const todoPath = path.match(/^\/api\/todos\/([\w-]+)$/);
-    const todo = todoPath && todos.find((t) => t.id === todoPath[1]);
-    if (todoPath && !todo) return new Response("no such todo", { status: 404 });
-    if (todo && req.method === "PATCH") {
-      const edit = (await req.json().catch(() => ({}))) as Partial<Pick<Todo, "text" | "day" | "state">>;
-      if (edit.text !== undefined && !edit.text.trim()) return new Response("text can't be empty", { status: 400 });
-      if (edit.day !== undefined && !DAY.test(edit.day)) return new Response("day as YYYY-MM-DD", { status: 400 });
-      if (edit.state !== undefined && !TODO_STATES.includes(edit.state)) return new Response(`state: one of ${TODO_STATES.join(", ")}`, { status: 400 });
-      if (edit.text !== undefined) todo.text = edit.text.trim();
-      if (edit.day !== undefined) todo.day = edit.day;
-      if (edit.state !== undefined) todo.state = edit.state;
-      saveTodos();
-      return Response.json(todo);
-    }
-    if (todo && req.method === "DELETE") return todos.splice(todos.indexOf(todo), 1), saveTodos(), new Response(null, { status: 204 });
+    const statsTodosRouteAnswer = await statsTodosRoute(req, url, path);
+    if (statsTodosRouteAnswer) return statsTodosRouteAnswer;
     const restrictionsRouteAnswer = await restrictionsRoute(req, url, path);
     if (restrictionsRouteAnswer) return restrictionsRouteAnswer;
 
