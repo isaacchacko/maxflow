@@ -1164,7 +1164,7 @@ function relayRefusal(t: Thread, from: Session, text: string): string | undefine
     .matchAll(/\[\[(?:agent|router):([\w-]+)\]\]/g)
     .map((m) => sessions.get(m[1] ?? ""))
     .find((s): s is Session => s !== undefined && s !== from && s.role?.role === "router");
-  return from.role?.role === "router" && otherRouter !== undefined && HANDS_TO_ANOTHER.test(text)
+  return otherRouter !== undefined && from.role?.role === "router" && HANDS_TO_ANOTHER.test(text)
     ? `This hands ${t.id} to ${otherRouter.id}, and maxflow shows hand-offs in the thread itself; ${otherRouter.id} answers him. Post what you found or did, without the hand-off, or nothing.`
     : undefined;
 }
