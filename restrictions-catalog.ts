@@ -35,6 +35,7 @@ type Explain = Required<Pick<Restriction, "about" | "examples" | "noun">> & { ex
 export const CATALOG_WORDS: Record<string, Explain> = {
   slack: { about: "Sending or scheduling a Slack message, to a person or a channel. A draft you send yourself isn't covered.", examples: ["An agent DMs Felix on Slack", "An agent posts an update in #arch_comms"], noun: "message", exceptions: ["people", "objective"] },
   email: { about: "Sending, replying to or forwarding an email from Gmail or Outlook. Drafts aren't covered.", examples: ["An agent replies to a supplier's email"], noun: "email", exceptions: ["people", "objective"] },
+  board: { about: "Writing on a Vercel Board: posting, replying, reacting, labelling, editing or deleting a message, working a task, or changing channels and grants. Reading and waiting aren't covered.", examples: ["An agent replies to Max's agent on the Dryft board", "An agent claims a task on the board"], noun: "write", exceptions: ["objective"] },
   teams: { about: "Sending a Teams chat or channel message, or starting a chat.", examples: ["An agent messages Christoph on Teams"], noun: "message", exceptions: ["people", "objective"] },
   "mallory-phone": { about: "A mallory message to your phone (umbrella) or to every device. Messages between your agents aren't covered.", examples: ["An agent pings your phone that a deploy finished"], noun: "message", exceptions: ["objective"] },
   calendar: { about: "Creating, changing, cancelling or answering a calendar event.", examples: ["An agent invites Felix to a review call", "An agent accepts a meeting for you"], noun: "change", exceptions: ["people", "objective"] },
@@ -64,6 +65,8 @@ export const SEED: Restriction[] = [
     "Gmail and Outlook. Drafts are not covered.", ["email", "Email {name}"]),
   builtin(["teams", "message", "Message someone on Teams", "ask"], { tools: [`${M365}teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat)`] },
     "A person is known only when the agent starts a chat with them, by their address.", ["email", "Message {name} on Teams"]),
+  builtin(["board", "message", "Write on a Vercel Board", "ask"], { bash: ["\\b(vercel(@\\S+)?\\s+board|dboard|vb|@vercel/board(@\\S+)?)\\s+(post|reply|schedule|edit|delete|react|label|typing|sync|tasks\\s+(create|claim|renew|complete|fail|release|block|assign|cancel)|grants\\s+(create|update|revoke)|channels\\s+create)\\b"] },
+    "Teammates and their agents read the board, and a synced thread reaches Slack, GitHub or Linear, in his name."),
   builtin(["mallory-phone", "message", "Mallory to your phone", "ask"], { bash: ["\\bmallory\\s+send\\b.*--to\\s+(umbrella|all)\\b"] },
     "umbrella is his phone, with no agent: he reads it. Only he is on the other end, so it is never set per person. Agent-to-agent mallory is not covered."),
   builtin(["calendar", "message", "Create or answer a calendar event", "ask"], { tools: [`${M365}outlook_(create_event|update_event|delete_event|respond_to_event)`] },
