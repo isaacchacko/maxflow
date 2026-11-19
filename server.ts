@@ -68,7 +68,6 @@ type Session = {
   role?: Role;
 };
 // merged: a router that came in with an objective merged into this one; it keeps its own threads but not the objective's routing.
-// handedTo: a router that handed its objective to a fresh router (as ae0cf88a did to dd3ae5a2) is that router's worker from then on.
 type Role = { role: "router" | "worker"; objective: string; parent?: string; scope?: string; merged?: boolean; handedTo?: string };
 // awake: a message woke it; it goes back to sleep on the same wait when that turn ends, until the awaited event itself clears it.
 // auto: a done the server set when a turn ended with no wait declared, not one the agent ran. An agent wait's ref may name several
@@ -661,16 +660,14 @@ function routersOf(objective: string): Session[] {
   const all = [...sessions.values()].filter((s) => reachable(s) && s.role?.role === "router" && s.role.objective === objective);
   const own = all.filter((s) => !s.role!.merged);
   const pool = own.length ? own : all;
-  // Two live routers on one scope is a hand-off the old one outlived: the newer owns it, so his messages don't reach both.
-  return pool.filter((s) => !newerOn(s, pool));
+  return pool.filter((s) => newerRouterOnScope(s, pool) === undefined);
 }
-const newerOn = (s: Session, pool: Session[] = routersOf(s.role!.objective)): Session | undefined => pool.find((x) => x !== s && x.role!.scope === s.role!.scope && x.createdAt > s.createdAt);
-// The one router a thread's messages from him go to: the last to join its routers that is still up, or the router that took its scope
-// over, else its parent's, else the objective's newest.
-function ownerOf(t: Thread): Session | undefined {
-  for (const x of [t, ...ancestors(t).reverse()]) {
-    const r = x.routers.map((id) => sessions.get(id)).filter(reachable).at(-1);
-    if (r) return r.role?.role === "router" ? (newerOn(r) ?? r) : r;
+const newerRouterOnScope = (s: Session, pool: Session[] = routersOf(s.role?.objective ?? "")): Session | undefined =>
+  pool.find((x) => x !== s && x.role?.scope === s.role?.scope && x.createdAt > s.createdAt);
+function threadOwner(t: Thread): Session | undefined {
+  for (const level of [t, ...ancestors(t).reverse()]) {
+    const lastJoined = level.routers.map((id) => sessions.get(id)).filter(reachable).at(-1);
+    if (lastJoined) return lastJoined.role?.role === "router" ? (newerRouterOnScope(lastJoined) ?? lastJoined) : lastJoined;
   }
   return routersOf(t.objective).at(-1);
 }
@@ -1121,8 +1118,7 @@ function postIn(t: Thread, from: Session | undefined, text: string, nudge?: "sub
   if (!from) {
     t.resolved = undefined;
     unpause(t);
-    // One owner hears it, so two routers can't both answer (th-3d23b6: ae0cf88a, handed off, and dd3ae5a2 each replied to m-9d8fa5).
-    const owner = ownerOf(t);
+    const owner = threadOwner(t);
     const to = owner ? [owner] : [];
     // Nobody left to hear it (its agents ended, and it has no objective with a router): the funnel finds it an owner.
     const front = funnel();
@@ -1143,33 +1139,34 @@ function postIn(t: Thread, from: Session | undefined, text: string, nudge?: "sub
   return m;
 }
 
-// A router handing its objective to a fresh one: the new router takes its threads, their unanswered messages and its workers, each
-// thread shows the hand-off as a line from maxflow, and the old one becomes the new one's worker, out of the threads it handed.
-function handOff(old: Session, to: Session) {
-  const o = old.role!.objective;
+function handOff(old: Session, oldRole: Role, to: Session) {
   for (const w of sessions.values()) if (w.role?.role === "worker" && w.role.parent === old.id) setRole(w, { ...w.role, parent: to.id });
-  setRole(old, { role: "worker", objective: o, parent: to.id, handedTo: to.id });
-  const handed = threads.filter((t) => !t.mergedInto && t.routers.includes(old.id));
+  setRole(old, { role: "worker", objective: oldRole.objective, parent: to.id, handedTo: to.id });
+  const handed = threads.filter((t) => t.mergedInto === undefined && t.routers.includes(old.id));
   for (const t of handed) {
     t.routers = [...t.routers.filter((id) => id !== old.id && id !== to.id), to.id];
-    if (t.pending?.routers.includes(old.id)) t.pending.routers = [...new Set(t.pending.routers.map((id) => (id === old.id ? to.id : id)))];
+    if (t.pending?.routers.includes(old.id) === true) t.pending.routers = [...t.pending.routers.filter((id) => id !== old.id && id !== to.id), to.id];
     if (t.asks?.session === old.id) t.asks.session = to.id;
     t.messages.push(message("maxflow", `Handed from [[agent:${old.id}]] to [[agent:${to.id}]], which answers here from now on.`));
     publish(`thread/${t.id}`, { thread: t.id, from: "maxflow" });
   }
   saveThreads();
-  publish(`handoff/${old.id}`, { from: old.id, to: to.id, objective: o, threads: handed.map((t) => t.id) });
-  dispatch({ to: [old], target: to.id, text: `[maxflow] You handed objective ${o} to the new router ${to.id}. Its threads${handed.length ? ` (${handed.map((t) => t.id).join(", ")})` : ""} and your workers are its now, and his messages there go to it alone; each thread shows the hand-off, so don't post there or announce it. Tell ${to.id} what it needs with \`${CLI} notify ${to.id} '<text>'\`, then end with \`${CLI} wait done\`.` });
+  publish(`handoff/${old.id}`, { from: old.id, to: to.id, objective: oldRole.objective, threads: handed.map((t) => t.id) });
+  const handedList = handed.length > 0 ? ` (${handed.map((t) => t.id).join(", ")})` : "";
+  dispatch({ to: [old], target: to.id, text: `[maxflow] You handed objective ${oldRole.objective} to the new router ${to.id}. Its threads${handedList} and your workers are its now, and his messages there go to it alone; each thread shows the hand-off, so don't post there or announce it. Tell ${to.id} what it needs with \`${CLI} notify ${to.id} '<text>'\`, then end with \`${CLI} wait done\`.` });
 }
-// A post that only says another router has it now: the hand-off already shows in the thread, and the router it names answers him.
-const RELAY = /\b(pass(?:ed|ing)?|hand(?:ed|ing)?(?: (?:it|this))?(?: off| over)?|forward(?:ed|ing)?|relay(?:ed|ing)?|routed|gave|given|giving)\b[^.\n]{0,40}\bto\b|\b(?:takes?|taking|took) over\b|\bnew router\b/i;
-function relayRefusal(t: Thread, from: Session, text: string) {
-  if (from.role?.handedTo && t.routers.includes(from.role.handedTo))
-    return `You handed ${t.id} to ${from.role.handedTo}, which answers him here. Tell it what it needs with \`${CLI} notify ${from.role.handedTo} '<text>'\` instead.`;
-  const named = [...text.matchAll(/\[\[(?:agent|router):([\w-]+)\]\]|\b([0-9a-f]{8})\b/g)].map((m) => sessions.get(m[1] ?? m[2]!)).filter((s): s is Session => !!s && s !== from && s.role?.role === "router");
-  if (named.length && RELAY.test(text))
-    return `This hands ${t.id} to ${named[0]!.id}, and maxflow shows hand-offs in the thread itself; ${named[0]!.id} answers him. Post what you found or did, without the hand-off, or nothing.`;
-  return undefined;
+const HANDS_TO_ANOTHER = /\b(pass(?:ed|ing)?|hand(?:ed|ing)?(?: (?:it|this))?(?: off| over)?|forward(?:ed|ing)?|relay(?:ed|ing)?|routed|gave|given|giving)\b[^.\n]{0,40}\bto\b|\b(?:takes?|taking|took) over\b|\bnew router\b/i;
+function relayRefusal(t: Thread, from: Session, text: string): string | undefined {
+  const handedTo = from.role?.handedTo;
+  if (handedTo !== undefined && t.routers.includes(handedTo))
+    return `You handed ${t.id} to ${handedTo}, which answers him here. Tell it what it needs with \`${CLI} notify ${handedTo} '<text>'\` instead.`;
+  const otherRouter = text
+    .matchAll(/\[\[(?:agent|router):([\w-]+)\]\]|\b([0-9a-f]{8})\b/g)
+    .map((m) => sessions.get(m[1] ?? m[2] ?? ""))
+    .find((s): s is Session => s !== undefined && s !== from && s.role?.role === "router");
+  return otherRouter !== undefined && HANDS_TO_ANOTHER.test(text)
+    ? `This hands ${t.id} to ${otherRouter.id}, and maxflow shows hand-offs in the thread itself; ${otherRouter.id} answers him. Post what you found or did, without the hand-off, or nothing.`
+    : undefined;
 }
 
 // A page (an objective's or a task's) is a grid of cards its agents keep current.
@@ -2363,17 +2360,15 @@ Bun.serve<WsData>({
       const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
       const parent = sessions.get(body.parent ?? "") ?? (from?.role?.role === "router" ? from : from?.role?.parent ? sessions.get(from.role.parent) : undefined);
       const objective = body.objective ?? parent?.role?.objective;
-      const role: Role | undefined = body.role === "router" && objective ? { role: "router", objective, scope: body.scope || "Whole objective" } : parent && objective ? { role: "worker", objective, parent: parent.id } : undefined;
+      const handingRole = body.role === "router" && from?.role?.role === "router" && from.role.objective === objective && (body.scope ?? from.role.scope) === from.role.scope ? from.role : undefined;
+      const role: Role | undefined = body.role === "router" && objective ? { role: "router", objective, scope: handingRole?.scope ?? (body.scope || "Whole objective") } : parent && objective ? { role: "worker", objective, parent: parent.id } : undefined;
       // With no command, a router or worker is a claude (a router with its brief, as startRouter starts one), never the bare shell
       // that 662ba653 and b83e405d were: a shell holding a role takes his thread replies where nothing reads them.
       const agent = ["claude", "--permission-mode", "bypassPermissions", ...(role?.role === "router" ? ["--append-system-prompt", readFileSync(ROUTER_BRIEF, "utf8")] : [])];
       const cmd = typeof body.cmd === "string" ? ["zsh", "-lc", body.cmd] : body.cmd?.length ? body.cmd : role ? agent : [process.env.SHELL ?? "zsh", "-l"];
-      // A router starting a router for its own scope is handing its objective off (Isaac: "handoff to a fresh agent"): the new one takes it whole.
-      const handing = role?.role === "router" && from?.role?.role === "router" && from.role.objective === objective && (!body.scope || body.scope === from.role.scope) ? from : undefined;
-      if (handing) role!.scope = handing.role!.scope ?? "Whole objective";
       const s = createSession(body.name || cmd.join(" ").slice(0, 40), cmd, body.cwd?.replace(/^~(?=\/|$)/, process.env.HOME!) || parent?.cwd || process.env.HOME!, undefined, role);
       if (cmd[0] === "claude") acceptTrust(s);
-      if (handing) handOff(handing, s);
+      if (handingRole && from) handOff(from, handingRole, s);
       // Spawned from the browser under a router: the router hears it has a new worker to brief.
       if (parent && !from) dispatch({ to: [parent], target: s.id, text: `[maxflow] The user started a worker for you, "${s.name}" (${s.id}). Brief it with \`${CLI} notify ${s.id} '<brief>'\`.` });
       return Response.json(describe(s), { status: 201 });
@@ -2654,8 +2649,8 @@ Bun.serve<WsData>({
       if (body.feed && from && isSentry(from)) return await feedMore(t, from, text, body.posts), Response.json(t, { status: 201 });
       if (from && pointsAtItself(text, t))
         return new Response(`${threadPost[1] !== t.id ? `${threadPost[1]} was merged into ${t.id}, so this would land in ${t.id}` : `This is ${t.id}`}, and a pointer to it there points at itself. Post only what is new for him, or nothing.`, { status: 409 });
-      const relay = from && relayRefusal(t, from, text);
-      if (relay) return new Response(relay, { status: 409 });
+      const relay = from === undefined ? undefined : relayRefusal(t, from, text);
+      if (relay !== undefined) return new Response(relay, { status: 409 });
       postIn(t, from, text, body.nudge === "subthread" ? "subthread" : undefined);
       return Response.json(t, { status: 201 });
     }
