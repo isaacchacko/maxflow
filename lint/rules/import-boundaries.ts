@@ -14,8 +14,8 @@ const TOOLING = new Set<Area>(["test", "scripts", "fixtures"]);
 
 function violation(fromPath: string, from: Area, to: Area, toPath: string): MessageId | undefined {
   if (from === "src") return to === "src" || to === "shared" ? undefined : "srcOut";
-  if (to === "src") return from === "root" && toPath.endsWith(".html") ? undefined : "intoSrc";
   if (from === "test") return undefined;
+  if (to === "src") return from === "root" && toPath.endsWith(".html") ? undefined : "intoSrc";
   return outsideSrcViolation(fromPath, from, to, toPath);
 }
 

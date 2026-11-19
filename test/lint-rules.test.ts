@@ -32,6 +32,7 @@ tester.run("import-boundaries", rule("import-boundaries"), {
     { code: 'import app from "./src/index.html";', filename: at("server.ts") },
     { code: 'import { a } from "../instance";', filename: at("sentries/gh.ts") },
     { code: 'import { a } from "../server";', filename: at("test/boot.test.ts") },
+    { code: 'const { a } = await import("../src/lib/effects");', filename: at("test/effects.test.tsx") },
   ],
   invalid: [
     { code: 'import type { R } from "../../restrictions";', filename: at("src/views/R.tsx"), errors: [{ messageId: "srcOut" }] },
