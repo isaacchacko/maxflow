@@ -69,21 +69,22 @@ function rememberLoggedSlackEvent(line: string, me: string) {
   const topic = stringField(entry, "topic") ?? "";
   const at = entry["at"];
   const event = slackEventOf(entry["data"]);
-  if ((typeof at === "number" && Date.now() - at > DAY_MS) || !event || (event.text ?? "") === "" || event.isBot || !REMEMBERED_TOPIC.test(topic)) return;
-  const mine = topic === "slack/own" || event.user === me;
-  remember(conversationKey(event.link, event.thread), { at: Number(event.ts) * 1000, who: event.from ?? "?", text: readable(event.text), mine, user: event.user, raw: event.text, link: event.link });
+  if (!event || event.isBot || (event.text ?? "") === "" || (typeof at === "number" && Date.now() - at > DAY_MS) || !REMEMBERED_TOPIC.test(topic)) return;
+  const isHis = topic === "slack/own" || event.user === me;
+  remember(conversationKey(event.link, event.thread), { at: Number(event.ts) * 1000, who: event.from ?? "?", text: readable(event.text), mine: isHis, user: event.user, raw: event.text, link: event.link });
 }
 
 function seedConversationsFromBusLog(me: string) {
   if (Object.keys(state.convo).length > 0) return;
-  for (const line of (readStateText("events.jsonl") ?? "").split("\n")) rememberLoggedSlackEvent(line, me);
+  const lines = (readStateText("events.jsonl") ?? "").split("\n");
+  for (const line of lines) rememberLoggedSlackEvent(line, me);
 }
 
 function watchReplyTasksOpenedBeforeReactions() {
   const watched = new Set(Object.values(state.open));
   for (const [key, id] of Object.entries(state.tasks)) {
     const ts = key.split("/", 2)[1];
-    if (ts !== undefined && /^[CDG]\w+\/[\d.]+$/.test(key) && !watched.has(key) && id !== 0) state.open[ts] = key;
+    if (id !== 0 && ts !== undefined && !watched.has(key) && /^[CDG]\w+\/[\d.]+$/.test(key)) state.open[ts] = key;
   }
 }
 
@@ -101,7 +102,7 @@ async function currentSeq() {
 }
 
 async function nextEvents() {
-  const wait = state.batch.length > 0 ? Math.max(1_000, state.batchAt + BATCH_DEBOUNCE_MS - Date.now()) : IDLE_POLL_MS;
+  const wait = state.batch.length > 0 ? Math.max(1000, state.batchAt + BATCH_DEBOUNCE_MS - Date.now()) : IDLE_POLL_MS;
   const res = await fetch(`${base}/api/events?topic=**&after=${state.seq}&wait=${wait}`, { signal: AbortSignal.timeout(wait + FETCH_MS) });
   const events: unknown = await res.json();
   return Array.isArray(events) ? events.filter(isBusEvent) : [];
@@ -118,7 +119,8 @@ async function runDueJobs(me: string, ghMe: string) {
 
 async function step(me: string, ghMe: string) {
   await runDueJobs(me, ghMe);
-  for (const event of await nextEvents()) {
+  const events = await nextEvents();
+  for (const event of events) {
     state.seq = event.seq;
     if (event.topic.startsWith("slack/")) await onSlack(event.topic, event.data, me);
     else if (event.topic.startsWith("gh/")) await onPrEvent(event.topic, event.data, localFiles);
@@ -135,7 +137,7 @@ loadState();
 if (import.meta.main) {
   const ghMe = run(["gh", "api", "user", "-q", ".login"]);
   const me = /User ID: (\w+)/.exec(slackOut("slack_read_user_profile", {}))?.[1] ?? "";
-  while (!(await isServerUp())) await Bun.sleep(2_000);
+  while (!(await isServerUp())) await Bun.sleep(2000);
   if (state.seq === 0) state.seq = await currentSeq();
   log(`inbox sentry as ${ghMe || "?"} / ${me || "?"}`);
   seedConversationsFromBusLog(me);
