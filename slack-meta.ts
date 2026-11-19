@@ -4,6 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { STATE_DIR } from "./instance";
+import { slackMessagesTable } from "./state";
 
 const AVATARS = join(STATE_DIR, "avatars");
 const AVATAR_INDEX = join(AVATARS, "slack.json");
@@ -16,7 +17,7 @@ export function slackNames(channels: Record<string, string> = {}) {
   if (Date.now() - names.at < 60_000) return names.map;
   const map: Record<string, string> = { ...channels };
   for (const [id, d] of Object.entries(readJson<{ dms?: Record<string, { who: string }> }>(join(STATE_DIR, "slack-state.json"), {}).dms ?? {})) map[id] = `DM with ${d.who}`;
-  const store = readJson<Record<string, { title: string; msgs: { uid: string; who: string; bot?: boolean }[] }>>(join(STATE_DIR, "slack-messages.json"), {});
+  const store = slackMessagesTable.all();
   const people: Record<string, Set<string>> = {};
   for (const [target, { title, msgs }] of Object.entries(store)) {
     if (target.startsWith("search:")) continue;

@@ -5,7 +5,7 @@ import { backgroundShells } from "./background";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
 import { slackAvatar, slackNames } from "./slack-meta";
 import { agents, calendar, health, stats } from "./stats";
-import { ghStatusTable, tasksTable, threadsTable } from "./state";
+import { ghStatusTable, slackMessagesTable, tasksTable, threadsTable } from "./state";
 import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
@@ -830,7 +830,7 @@ for (const t of threads as (Thread & { kind?: string; kindBy?: string; done?: nu
   // The hand-off text squashed each message's whitespace; the slack sentry's store has it as written, by its ts.
   const raw: Record<string, string> = {};
   try {
-    for (const { msgs } of Object.values(JSON.parse(readFileSync(`${STATE_DIR}/slack-messages.json`, "utf8")) as Record<string, { msgs: { ts: string; uid: string; who: string; text: string }[] }>))
+    for (const { msgs } of Object.values(slackMessagesTable.all()))
       for (const m of msgs) (uids[m.who] ??= m.uid), (raw[m.ts.replace(".", "")] ??= m.text.replace(/\s*No thread mess+ages\s*$/, ""));
   } catch {}
   for (const t of threads) {

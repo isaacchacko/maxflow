@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { STATE_DIR } from "./instance";
 import type { Person } from "./restrictions";
 import { shellText } from "./restrictions-shell";
-import { ghStatusTable } from "./state";
+import { ghStatusTable, slackMessagesTable } from "./state";
 import { parsePr, repoOf } from "./sentries/gh";
 
 // Who a tool call reaches or acts on, for restrictions scoped to people: a Slack DM's other member, each email recipient, a
@@ -43,7 +43,7 @@ export function peopleOf(tool: string, input: Record<string, unknown>, cwd: stri
 function slackPeople(channel: string, dir: string): Person[] {
   if (/^U/.test(channel)) return channel === ME ? [] : [{ slack: channel }];
   if (!/^D/.test(channel)) return [];
-  const msgs: { uid?: string }[] = read("slack-messages.json", dir)?.[channel]?.msgs ?? [];
+  const msgs: { uid?: string }[] = slackMessagesTable.get(channel)?.msgs ?? [];
   const uid = msgs.find((m) => m.uid && m.uid !== ME)?.uid;
   const name = read("slack-state.json", dir)?.dms?.[channel]?.who;
   return uid || name ? [{ ...(uid && { slack: uid }), ...(name && { name }) }] : [];

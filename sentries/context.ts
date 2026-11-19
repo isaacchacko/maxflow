@@ -6,13 +6,13 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base, STATE_DIR } from "../instance";
+import { slackMessagesTable } from "../state";
 import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("context");
 
 const STATE_FILE = join(STATE_DIR, "context-state.json");
 const DIGEST_FILE = join(STATE_DIR, "context-digest.md");
-const MESSAGES_FILE = join(STATE_DIR, "slack-messages.json");
 const FLUSH_MS = Number(process.env.CONTEXT_FLUSH_MS ?? 2 * 60_000);
 const SWEEP_MS = Number(process.env.CONTEXT_SWEEP_MS ?? 30 * 60_000);
 const BACKFILL_MS = 86_400_000;
@@ -57,9 +57,8 @@ function onEvent(topic: string, d: any, me: string) {
 
 // What the slack sentry read into its store since the last sweep that no event carried: chiefly his side of his DMs and threads.
 function sweep(me: string, since: number) {
-  if (!existsSync(MESSAGES_FILE)) return 0;
   const before = state.pending.length;
-  const store = JSON.parse(readFileSync(MESSAGES_FILE, "utf8")) as Record<string, { title: string; msgs: { ts: string; uid: string; who: string; text: string; link?: string; bot?: boolean }[] }>;
+  const store = slackMessagesTable.all();
   const dms = existsSync(join(STATE_DIR, "slack-state.json")) ? JSON.parse(readFileSync(join(STATE_DIR, "slack-state.json"), "utf8")).dms ?? {} : {};
   for (const [target, { title, msgs }] of Object.entries(store)) {
     // Searches repeat what the events carried, out of their conversations.

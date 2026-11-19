@@ -51,7 +51,7 @@ export function parsePr(ref: string, cwd: string) {
   return repo ? `${repo}#${bare![1]}` : null;
 }
 
-// author (a User or a Bot) and authorAssociation: whose PR it is, for restrictions scoped to people (hooks/restrictions.ts reads them from gh-status.json).
+// author (a User or a Bot) and authorAssociation: whose PR it is, for restrictions scoped to people (hooks/restrictions.ts reads them from the gh_status table).
 const FIELDS = `number url title state createdAt updatedAt mergeable reviewDecision headRefOid headRefName author { __typename login } authorAssociation
   commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
     __typename ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }

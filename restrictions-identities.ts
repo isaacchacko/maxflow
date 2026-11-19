@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { STATE_DIR } from "./instance";
 import { samePerson, type Person, type Restriction } from "./restrictions";
-import { ghStatusTable } from "./state";
+import { ghStatusTable, slackMessagesTable } from "./state";
 
 // The people his restrictions can name, one per human: each Slack user the slack sentry has heard from, joined to their GitHub
 // login when the two are clearly the same person, or when he linked them by hand. A login joins a Slack user automatically
@@ -23,7 +23,7 @@ const words = (s: string) => s.trim().split(/\s+/).length;
 
 function seen(dir: string) {
   const slack = new Map<string, string>();
-  const store = read<Record<string, { msgs: { uid: string; who: string; bot?: boolean }[] }>>(join(dir, "slack-messages.json"), {});
+  const store = slackMessagesTable.all();
   for (const { msgs } of Object.values(store)) for (const m of msgs) if (!m.bot && /^[UW]/.test(m.uid)) slack.set(m.uid, m.who);
   const github = new Map<string, string>();
   type Login = { login: string } | null | undefined;

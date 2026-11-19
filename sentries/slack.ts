@@ -9,6 +9,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base, STATE_DIR } from "../instance";
+import { slackMessagesTable } from "../state";
 import { watchNotices, type Notice } from "./slack-notify";
 import { takeOver } from "./singleton";
 
@@ -17,7 +18,6 @@ if (import.meta.main) takeOver("slack");
 const WATCH_FILE = join(STATE_DIR, "slack-watch.json");
 const STATE_FILE = join(STATE_DIR, "slack-state.json");
 // The latest messages of each target, so `maxflow slack read` can answer without asking Slack.
-const MESSAGES_FILE = join(STATE_DIR, "slack-messages.json");
 // This sentry's graph edges, one per tied session, labeled by what it watches.
 const EDGES_FILE = join(STATE_DIR, "slack-edges.json");
 const KEEP = 50;
@@ -229,7 +229,7 @@ async function fresh(target: string, state: State): Promise<{ msgs: Msg[]; title
 }
 
 type Kept = Record<string, { at: number; title: string; msgs: Msg[] }>;
-export const readMessages = () => readJson<Kept>(MESSAGES_FILE, {});
+export const readMessages = () => slackMessagesTable.all() as Kept;
 let kept: Kept | undefined;
 function keep(target: string, title: string, msgs: Msg[]) {
   kept ??= readMessages();
@@ -361,7 +361,7 @@ async function tick(me: string, state: State, only?: Set<string>) {
   state.direct = [...direct].slice(-1000);
   if (only) {
     writeFileSync(STATE_FILE, JSON.stringify(state));
-    if (kept) writeFileSync(MESSAGES_FILE, JSON.stringify(kept));
+    if (kept) slackMessagesTable.write(kept);
     return listeners.size;
   }
   const watching = new Map<string, string[]>();
@@ -378,7 +378,7 @@ async function tick(me: string, state: State, only?: Set<string>) {
   writeFileSync(STATE_FILE, JSON.stringify(state));
   if (kept) {
     for (const key of Object.keys(kept)) if (!listeners.has(key)) delete kept[key];
-    writeFileSync(MESSAGES_FILE, JSON.stringify(kept));
+    slackMessagesTable.write(kept);
   }
   return listeners.size;
 }

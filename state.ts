@@ -31,6 +31,7 @@ const MIGRATIONS: (() => void)[] = [
   () => (createList("threads"), importList("threads", `${STATE_DIR}/threads.json`)),
   () => (createList("tasks"), importList("tasks", `${STATE_DIR}/tasks.json`)),
   () => (createMap("gh_status"), importMap("gh_status", `${STATE_DIR}/gh-status.json`)),
+  () => (createMap("slack_messages"), importMap("slack_messages", `${STATE_DIR}/slack-messages.json`)),
 ];
 const version = () => (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
 if (version() < MIGRATIONS.length)
@@ -113,3 +114,7 @@ function mapTable<V>(table: string) {
 
 // The gh sentry's last whole fetch of each PR, by owner/repo#n.
 export const ghStatusTable = mapTable<{ at: number; pr: any }>("gh_status");
+
+// What the slack sentry read from each thread, channel or search it watches, by target ("C…/ts", "C…", "search:…").
+export type SlackKept = { at?: number; title: string; msgs: { ts: string; uid: string; who: string; text: string; link?: string; channel?: string; bot?: boolean }[] };
+export const slackMessagesTable = mapTable<SlackKept>("slack_messages");

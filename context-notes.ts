@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { STATE_DIR } from "./instance";
+import { slackMessagesTable } from "./state";
 
 export const CONTEXT_FILE = join(STATE_DIR, "context.md");
 const MAX = 8;
@@ -75,9 +76,7 @@ export function relatedBlock(text: string, who: string | undefined, day: SlackSa
 
 // The last day of what the slack sentry read into its store (sentries/slack.ts), which also holds what no event carried.
 export function slackStoreDay(): SlackSaid[] {
-  const file = join(STATE_DIR, "slack-messages.json");
-  if (!existsSync(file)) return [];
-  const store = JSON.parse(readFileSync(file, "utf8")) as Record<string, { title: string; msgs: { ts: string; uid: string; who: string; text: string; link?: string; bot?: boolean }[] }>;
+  const store = slackMessagesTable.all();
   // An app (Linear, a QA agent) is marked a bot on some of its messages only.
   const bots = new Set(Object.values(store).flatMap((t) => t.msgs.filter((m) => m.bot || /^(B|USLACKBOT)/.test(m.uid)).map((m) => m.uid)));
   return Object.entries(store).filter(([target]) => !target.startsWith("search:")).flatMap(([target, { title, msgs }]) => {
