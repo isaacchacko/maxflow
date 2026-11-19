@@ -158,10 +158,8 @@ export function readMessages(): Record<string, Kept> {
 export type Watch = { target: string; sessions: string[] };
 const WATCH_FILE = "slack-watch.json";
 const isWatch = (value: unknown): value is Watch => isRecord(value) && typeof value["target"] === "string" && Array.isArray(value["sessions"]);
-export const readWatches = (): Watch[] => {
-  const watches = readStateJson(WATCH_FILE);
-  return Array.isArray(watches) ? watches.filter(isWatch) : [];
-};
+const isWatchList = (value: unknown): value is Watch[] => Array.isArray(value) && value.every(isWatch);
+export const readWatches = (): Watch[] => readStateJson(WATCH_FILE, isWatchList) ?? [];
 export const writeWatches = (watches: Watch[]) => {
   writeStateJson(WATCH_FILE, watches);
 };

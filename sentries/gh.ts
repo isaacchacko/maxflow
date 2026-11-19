@@ -283,8 +283,7 @@ async function pollForever(me: string, state: Map<string, PrState>) {
 
 if (import.meta.main) {
   const me = run(["gh", "api", "user", "-q", ".login"]);
-  const saved = readStateJson("gh-state.json");
-  const state = new Map(Object.entries(isPrStates(saved) ? saved : {}));
+  const state = new Map(Object.entries(readStateJson("gh-state.json", isPrStates) ?? {}));
   console.log(`gh sentry as ${me || "?"}, every ${INTERVAL_MS / 1000}s`);
   await pollForever(me, state);
 }

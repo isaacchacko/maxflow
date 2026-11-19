@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { BASE as base } from "../instance";
 import { isRecord } from "../shared/guards";
-import { readStateJson, readStateText, writeStateJson } from "../state";
+import { peekStateJson, readGatingStateJson, readStateText, writeStateJson } from "../state";
 import { FETCH_MS, log, run, stringField } from "./inbox-board";
 import { flushBatch, remember } from "./inbox-feed";
 import { refreshPrs } from "./inbox-github";
@@ -34,8 +34,8 @@ function carryOverFeedThreadsByTask(feedThreadByTask: Record<string, unknown>) {
 }
 
 function loadState() {
-  const saved = readStateJson(STATE_FILE);
-  if (!isRecord(saved)) return;
+  const saved = readGatingStateJson(STATE_FILE, isRecord);
+  if (saved === undefined) return;
   const { fed, ...rest } = saved;
   Object.assign(state, rest);
   if (isRecord(fed)) carryOverFeedThreadsByTask(fed);
@@ -43,12 +43,12 @@ function loadState() {
 
 const localFiles: LocalFiles = {
   ownPrs: () => {
-    const queue = readStateJson("review-queue.json");
+    const queue = peekStateJson("review-queue.json");
     const prs = Array.isArray(queue) ? queue.map((q: unknown) => (isRecord(q) ? q["pr"] : undefined)).filter((pr) => typeof pr === "string") : [];
     return new Set(prs);
   },
   flakyChecks: () => {
-    const patterns = readStateJson("flaky-checks.json");
+    const patterns = peekStateJson("flaky-checks.json");
     return Array.isArray(patterns) ? patterns.filter((p) => typeof p === "string").map((p) => new RegExp(p, "i")) : [];
   },
 };

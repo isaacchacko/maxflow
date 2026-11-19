@@ -2,7 +2,7 @@
 import { BASE as base } from "../instance";
 import { type Msg, permalink, read, readWatches, replyField, short, slackCall, splitTarget, writeWatches } from "../slack-read";
 import { isRecord } from "../shared/guards";
-import { readStateJson, slackMessagesTable, writeStateJson } from "../state";
+import { readGatingStateJson, slackMessagesTable, writeStateJson } from "../state";
 import { didStartWatchingNotices, type Notice } from "./slack-notify";
 import {
   forgetUntied,
@@ -51,8 +51,8 @@ function saveKept() {
 }
 
 function loadState() {
-  const saved = readStateJson(STATE_FILE);
-  if (isRecord(saved)) Object.assign(state, saved);
+  const saved = readGatingStateJson(STATE_FILE, isRecord);
+  if (saved) Object.assign(state, saved);
 }
 
 function watchesOfLiveSessions(alive: Set<string>) {

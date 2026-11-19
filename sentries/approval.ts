@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { ciStateOf, fetchSessions, readStatus, repoOf, run, type Pr } from "../gh";
 import { BASE } from "../instance";
 import { isRecord } from "../shared/guards";
-import { appendStateText, hasState, readStateJson, stateDirectory, writeStateJson } from "../state";
+import { appendStateText, hasState, readGatingStateJson, stateDirectory, writeStateJson } from "../state";
 import { compose, isCommentingOn, post, type Posted } from "./approval-comment";
 import { config, enqueue, flush, type Note } from "./approval-notify";
 import { runReview, type Lens, type LensReview, type Reviewing } from "./approval-review";
@@ -45,8 +45,7 @@ const isQueue = (value: unknown): value is QueueRow[] => Array.isArray(value) &&
 const isPrMeta = (value: unknown): value is PrMeta => isRecord(value) && typeof value["baseRefName"] === "string";
 
 function readJson<T>(name: string, fallback: T, isWanted: (value: unknown) => value is T): T {
-  const parsed = readStateJson(name);
-  return isWanted(parsed) ? parsed : fallback;
+  return readGatingStateJson(name, isWanted) ?? fallback;
 }
 
 const state: State = { heads: {}, rounds: {}, comments: {}, ...readJson(STATE_FILE, {}, isPartialState) };

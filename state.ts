@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { STATE_DIR } from "./instance";
+import { BASE, STATE_DIR } from "./instance";
 
 // yarn's state, in one SQLite file. Stores move here from their JSON files one at a time; a moved store's JSON file is
 // imported once by its migration and then left as it was, a backup nothing reads or writes.
@@ -165,7 +165,7 @@ export function readStateText(name: string): string | undefined {
   }
 }
 
-export function readStateJson(name: string): unknown {
+export function peekStateJson(name: string): unknown {
   const text = readStateText(name);
   if (text === undefined) return undefined;
   try {
@@ -173,6 +173,45 @@ export function readStateJson(name: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+type StateCheck<T> = (value: unknown) => value is T;
+type StateRead<T> = { value: T } | { problem: string } | undefined;
+
+function checkedState<T>(name: string, isValid: StateCheck<T>): StateRead<T> {
+  const text = readStateText(name);
+  if (text === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    return { problem: `not JSON: ${String(error)}` };
+  }
+  return isValid(parsed) ? { value: parsed } : { problem: "JSON of the wrong shape" };
+}
+
+function reportCorruptState(name: string, problem: string, kept: string, isGating: boolean) {
+  const data = { name, problem, kept, isGating };
+  console.error(`state: ${name} is unreadable (${problem}); ${isGating ? "refusing to start empty" : `kept as ${kept}, starting empty`}`);
+  fetch(`${BASE}/api/events`, { method: "POST", body: JSON.stringify({ topic: `health/state/${name}`, data }), signal: AbortSignal.timeout(5000) }).catch(() => undefined);
+}
+
+export function readStateJson<T>(name: string, isValid: StateCheck<T>): T | undefined {
+  const read = checkedState(name, isValid);
+  if (read === undefined) return undefined;
+  if ("value" in read) return read.value;
+  const kept = `${name}.corrupt-${String(Date.now())}`;
+  renameSync(stateFile(name), stateFile(kept));
+  reportCorruptState(name, read.problem, kept, false);
+  return undefined;
+}
+
+export function readGatingStateJson<T>(name: string, isValid: StateCheck<T>): T | undefined {
+  const read = checkedState(name, isValid);
+  if (read === undefined) return undefined;
+  if ("value" in read) return read.value;
+  reportCorruptState(name, read.problem, name, true);
+  throw new Error(`${name} is unreadable (${read.problem}). It gates an outward action, so this sentry won't start with it empty: restore or fix ~/.maxflow-v2/${name}, then restart the sentry.`);
 }
 
 export function writeStateJson(name: string, value: unknown) {

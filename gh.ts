@@ -60,8 +60,7 @@ const isWatchList = (value: unknown): value is Watch[] =>
   Array.isArray(value) && value.every((w) => isRecord(w) && typeof w["pr"] === "string" && Array.isArray(w["sessions"]));
 
 export function readWatches(name = GH_WATCH): Watch[] {
-  const watches = readStateJson(name);
-  return isWatchList(watches) ? watches : [];
+  return readStateJson(name, isWatchList) ?? [];
 }
 
 export function writeWatches(watches: Watch[], name = GH_WATCH) {

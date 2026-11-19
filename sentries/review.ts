@@ -2,7 +2,7 @@
 import { fetchSessions, isOwnComment, links, prNumber, repoOfKey, REVIEW_WATCH, writeWatches, type Link, type Session, type Watch } from "../gh";
 import { BASE as base } from "../instance";
 import { isRecord } from "../shared/guards";
-import { readStateJson, writeStateJson } from "../state";
+import { peekStateJson, readStateJson, writeStateJson } from "../state";
 import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("review");
@@ -72,7 +72,7 @@ const isCiFailing = (ci: string) => ci === "FAILURE" || ci === "ERROR";
 const isMergeable = (pr: Pr) => pr.reviewDecision === "APPROVED" && !pr.isDraft && !NEVER_MERGE.test(pr.title) && !NEVER_MERGE.test(pr.body);
 
 function polledApprovedKeys(): string[] {
-  const polled = readStateJson("gh-state.json");
+  const polled = peekStateJson("gh-state.json");
   return isPolledStates(polled) ? Object.entries(polled).filter(([, p]) => p.state === "OPEN" && p.decision === "APPROVED").map(([key]) => key) : [];
 }
 
@@ -277,8 +277,7 @@ async function landOne(pr: Pr, ties: Link[], live: Set<string>): Promise<Landing
 function writeLandingBoard(items: LandingItem[]) {
   const sorted = items.toSorted((a, b) => Number(b.why !== "") - Number(a.why !== ""));
   const landing = sorted.length === 0 ? [] : [{ title: LANDING, items: sorted.map(({ why, ...item }) => item) }];
-  const parsed = readStateJson(BOARD_FILE);
-  const board = isRecord(parsed) ? parsed : {};
+  const board = readStateJson(BOARD_FILE, isRecord) ?? {};
   const sections: unknown = board["sections"];
   const list: unknown[] = Array.isArray(sections) ? sections : [];
   const rest = list.filter((section) => !(isRecord(section) && section["title"] === LANDING));

@@ -89,6 +89,11 @@ function mcpTask(server: string, error: string) {
   return `Sentries can't reach the MCP server ${server} through the standalone \`mcp\` CLI, even after \`mcp --refresh servers\`: "${error}". The health sentry started you to fix it. Run the /exfilmcp skill (Skill tool, "exfilmcp") to repair the CLI and its connector registry, then confirm with a real read-only \`mcp call ${server} ...\` that it works. If it needs a human reauth in /mcp or on claude.ai, say so exactly, with the steps, and stop. ${RULES}`;
 }
 
+function stateTask({ name, problem, kept, isGating }: StateAlert) {
+  const now = isGating ? `The sentry that reads it gates an outward action, so it refuses to start until the file is fixed; the file is untouched at ~/.maxflow-v2/${name}.` : `It was kept as ~/.maxflow-v2/${kept}, and its reader started with an empty ${name}, which it will save over.`;
+  return `The state file ~/.maxflow-v2/${name} was unreadable (${problem}). ${now} The health sentry started you to recover it. Find what wrote it badly (git log of the code that writes it, the sentry's log), restore the data from the kept copy if it can be repaired, and tell Isaac in one ${CLI} ask what happened and what you did. ${RULES}`;
+}
+
 function startAgent(prompt: string) {
   const id = crypto.randomUUID().slice(0, 8);
   const meta = { name: "maxflow recovery", cmd: ["claude"], cwd: DIR, createdAt: Date.now() };
@@ -121,6 +126,16 @@ let lastAgentAt = -COOLDOWN_MS;
 let mcpSeq: number | null = null;
 let mcpCheckedAt = 0;
 const mcpAgentAt = new Map<string, number>();
+let stateSeq: number | null = null;
+const stateAgentAt = new Map<string, number>();
+type StateAlert = { name: string; problem: string; kept: string; isGating: boolean };
+async function stateAlerts(): Promise<StateAlert[]> {
+  const res = await fetch(`${base}/api/events?topic=health/state/**&after=${String(stateSeq ?? "now")}`, { signal: AbortSignal.timeout(5000) });
+  const events = (await res.json()) as { seq: number; data: StateAlert }[];
+  const isFirst = stateSeq === null;
+  stateSeq = events.at(-1)?.seq ?? Number(res.headers.get("x-maxflow-seq"));
+  return isFirst ? [] : events.map((e) => e.data);
+}
 const canStartAgent = () => !(agent && run([...TMUX, "has-session", "-t", agent.tmux]).ok) && Date.now() - lastAgentAt >= COOLDOWN_MS;
 // health/mcp/<server> events since the last check; the first check only notes where the bus is, so old alerts aren't replayed.
 async function mcpAlerts(): Promise<{ server: string; error: string }[]> {
@@ -230,6 +245,14 @@ for (;;) {
               lastAgentAt = agent.at;
               mcpAgentAt.set(server, agent.at);
               console.log(`${stamp()}  started recovery agent for ${server} in ${agent.tmux}`);
+              await acceptTrust(agent.tmux);
+            }
+            for (const alert of await stateAlerts()) {
+              console.log(`${stamp()}  state: ${alert.name} unreadable (${alert.problem})${alert.isGating ? ", its sentry refuses to start" : `, kept as ${alert.kept}`}`);
+              if (Date.now() - (stateAgentAt.get(alert.name) ?? -MCP_AGENT_EVERY_MS) < MCP_AGENT_EVERY_MS || !canStartAgent()) continue;
+              agent = startAgent(stateTask(alert));
+              lastAgentAt = agent.at;
+              stateAgentAt.set(alert.name, agent.at);
               await acceptTrust(agent.tmux);
             }
           }

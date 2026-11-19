@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "../shared/guards";
-import { appendStateText, didClaimState, hasState, listState, readStateJson, removeState, stateDirectory, writeStateJson } from "../state";
+import { appendStateText, didClaimState, hasState, listState, readGatingStateJson, readStateJson, removeState, stateDirectory, writeStateJson } from "../state";
 
 const STATE_FILE = "approval-notified.json";
 const BOARD_FILE = "review-board.json";
@@ -24,8 +24,7 @@ const isPartialSent = (value: unknown): value is Partial<Sent> => isRecord(value
 const isConfig = (value: unknown): value is Config => isRecord(value);
 
 function readJson<T>(name: string, fallback: T, isWanted: (value: unknown) => value is T): T {
-  const parsed = readStateJson(name);
-  return isWanted(parsed) ? parsed : fallback;
+  return readGatingStateJson(name, isWanted) ?? fallback;
 }
 
 const sent: Sent = { queue: [], sent: {}, logged: [], failures: 0, retryAt: 0, ...readJson(STATE_FILE, {}, isPartialSent) };
@@ -93,8 +92,7 @@ function heldSection(held: Note[]) {
 }
 
 function showHeld(held: Note[]) {
-  const parsed = readStateJson(BOARD_FILE);
-  const board = isRecord(parsed) ? parsed : {};
+  const board = readStateJson(BOARD_FILE, isRecord) ?? {};
   const sections: unknown = board["sections"];
   const list: unknown[] = Array.isArray(sections) ? sections : [];
   const rest = list.filter((section) => !(isRecord(section) && section["title"] === HELD));
