@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { asOf, candidatesAt, funnelPick, jevConfig, NEW_OBJECTIVE, objectiveCriteria, ROUTE_INSTRUCTIONS, routeObjective, type ObjectiveRow } from "../jev";
+import { asOf, candidatesAt, funnelPick, jevConfig, NEW_OBJECTIVE, objectiveCriteria, ROUTE_INSTRUCTIONS, ROUTE_PROMPT, routeObjective, type ObjectiveRow } from "../jev";
 import { appendStateText, objectivesTable, readStateText, threadsTable } from "../state";
 
 const ANSWERS_FILE = "jev-eval-answers.jsonl";
@@ -11,10 +11,10 @@ type Event = { seq: number; at: number; topic: string; data: Record<string, unkn
 type Message = { from: string; at: number; text: string };
 type Thread = { id: string; objective?: string; mergedInto?: string; signal?: number; messages?: Message[] };
 type Example = { seq: number; at: number; source: string; text: string; funnel: string; label: string; labelFrom: "thread" | "route"; candidates: ObjectiveRow[] };
-type Answer = { seq: number; model: string; choice: string; confidence: number };
+type Answer = { seq: number; model: string; prompt?: string; choice: string; confidence: number };
 
 const args = process.argv.slice(2);
-const flag = (name: string) => args[args.indexOf(name) + 1];
+const flag = (name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 const run = args.includes("--run");
 const config = jevConfig();
 const sources = new Set((flag("--sources") ?? [...(config?.sources ?? ["isaac"])].join(",")).split(","));
@@ -84,15 +84,17 @@ const answers = new Map(
     .split("\n")
     .filter(Boolean)
     .map((l) => JSON.parse(l) as Answer)
-    .filter((a) => a.model === config?.model)
+    .filter((a) => a.model === config?.model && (a.prompt ?? "") === (flag("--prompt") ?? ROUTE_PROMPT))
     .map((a) => [a.seq, a]),
 );
 
 if (run) {
   if (config === undefined) throw new Error("no Jev configured: set JEV_URL (and JEV_API_KEY for hosted) in ~/.maxflow-v2/jev.env");
+  const unsent = [...sources].filter((source) => !config.sources.has(source));
+  if (unsent.length > 0) throw new Error(`JEV_SOURCES does not clear ${unsent.join(", ")} for sending; only ${[...config.sources].join(", ")} may leave the machine`);
   for (const e of examples.filter((x) => !answers.has(x.seq))) {
     const jev = await routeObjective(config, e.text, e.candidates);
-    const answer = { seq: e.seq, model: config.model, choice: jev.choice, confidence: jev.confidence };
+    const answer = { seq: e.seq, model: config.model, prompt: ROUTE_PROMPT, choice: jev.choice, confidence: jev.confidence };
     answers.set(e.seq, answer);
     appendStateText(ANSWERS_FILE, `${JSON.stringify(answer)}\n`);
   }
@@ -103,7 +105,7 @@ const scored = examples.flatMap((e) => {
   return a === undefined ? [] : [{ e, a }];
 });
 if (scored.length > 0) {
-  console.log(`\nJev (${config?.model ?? "?"}) on ${String(scored.length)} signals: agrees with the label ${pct(scored.filter(({ e, a }) => a.choice === e.label).length, scored.length)}, with the funnel ${pct(scored.filter(({ e, a }) => a.choice === e.funnel).length, scored.length)}`);
+  console.log(`\nJev (${config?.model ?? "?"}, prompt ${flag("--prompt") ?? ROUTE_PROMPT}) on ${String(scored.length)} signals: agrees with the label ${pct(scored.filter(({ e, a }) => a.choice === e.label).length, scored.length)}, with the funnel ${pct(scored.filter(({ e, a }) => a.choice === e.funnel).length, scored.length)}`);
   console.log("confidence >=  share decided  accuracy there  funnel accuracy there");
   for (const t of THRESHOLDS) {
     const kept = scored.filter(({ a }) => a.confidence >= t);

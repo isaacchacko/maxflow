@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { BASE } from "../instance";
-import { candidatesAt, funnelPick, jevConfig, routeObjective, type JevConfig, type ObjectiveRow } from "../jev";
+import { candidatesAt, funnelPick, jevConfig, ROUTE_PROMPT, routeObjective, type JevConfig, type ObjectiveRow } from "../jev";
 import { appendStateText, objectivesTable, readStateJson, writeStateJson } from "../state";
 import { takeOver } from "./singleton";
 
@@ -44,7 +44,7 @@ async function shadow(route: BusEvent) {
   const objectives = new Map((objectivesTable.read() as ObjectiveRow[]).map((o) => [o.id, o]));
   const candidates = candidatesAt(objectives, signal.at, (o) => o.closed !== true);
   const funnel = funnelPick(objectives, objective, signal.at);
-  const base = { seq: signalSeq, at: signal.at, source, funnel, routedTo: route.data["routedTo"], candidates: candidates.length, model: config.model };
+  const base = { seq: signalSeq, at: signal.at, source, funnel, routedTo: route.data["routedTo"], candidates: candidates.length, model: config.model, prompt: ROUTE_PROMPT };
   try {
     const jev = await routeObjective(config, text, candidates);
     const top = Object.entries(jev.probabilities).sort(([, a], [, b]) => b - a).slice(0, 3);

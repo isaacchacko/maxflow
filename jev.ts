@@ -54,7 +54,8 @@ export function objectiveCriteria(candidates: ObjectiveRow[]): Record<string, st
 }
 
 export const ROUTE_INSTRUCTIONS =
-  "The state is a request that reached Isaac's agent system, either typed by him or relayed from his Slack and GitHub feed. Each option is an objective his agents are already working on. Which objective does this request belong to? Pick new only when no objective covers it.";
+  "Isaac is a software engineer at Dryft, a supply-chain startup whose app (exceptions, cases, priority, Hugo, Festo and Trumpf customers) his agents work on. He also builds maxflow, also called yarn: the web app where he talks to those agents, with threads, subthreads, an inbox, a sidebar, objectives, commands, routers, sentries (slack, gh, inbox, funnel) and Chrome pages. The state is a request he sent into maxflow. Each option is an objective his agents are already working on. Which objective does this request belong to? A request about maxflow or yarn itself (its UI, threads, sidebar, agents, sentries, Slack polling) belongs to the maxflow development objective. Pick new only when the request starts work that no objective covers.";
+export const ROUTE_PROMPT = Bun.hash(ROUTE_INSTRUCTIONS).toString(36);
 
 export async function routeObjective(config: JevConfig, text: string, candidates: ObjectiveRow[]) {
   return await decideChoice(config, text.slice(0, STATE_CHARS), ROUTE_INSTRUCTIONS, objectiveCriteria(candidates));
