@@ -5,7 +5,7 @@ import { backgroundShells } from "./background";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
 import { slackAvatar, slackNames } from "./slack-meta";
 import { stats } from "./stats";
-import { threadsTable } from "./state";
+import { tasksTable, threadsTable } from "./state";
 import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
@@ -1446,9 +1446,8 @@ type Task = {
   page?: Block[];
 };
 type TaskEdit = Partial<Pick<Task, "title" | "kind" | "status" | "answer" | "objective">> & { session?: string; link?: string; event?: string; at?: number };
-const TASKS = `${STATE_DIR}/tasks.json`;
-const tasks: Task[] = (() => { try { return JSON.parse(readFileSync(TASKS, "utf8")); } catch { return []; } })();
-const saveTasks = () => writeFileSync(TASKS, JSON.stringify(tasks));
+const tasks = tasksTable.read() as Task[];
+const saveTasks = () => tasksTable.write(tasks);
 
 // His own todo list, each todo on a day (YYYY-MM-DD, his local day as the browser sends it); nothing else reads or writes it.
 // state: clicking a todo's box steps it todo → doing → done → cancelled → todo.

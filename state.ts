@@ -9,18 +9,20 @@ mkdirSync(STATE_DIR, { recursive: true });
 const db = new Database(`${STATE_DIR}/yarn.db`, { create: true, strict: true });
 db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
 
-type Row = { id: string };
+// Ids are kept as TEXT; a store whose ids are numbers (tasks) gets them back as numbers from its JSON.
+type Row = { id: string | number };
 
 const createList = (table: string) => db.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY, pos INTEGER NOT NULL, data TEXT NOT NULL)`);
 function importList(table: string, file: string) {
   if (!existsSync(file)) return;
   const insert = db.prepare(`INSERT INTO ${table} (id, pos, data) VALUES (?, ?, ?)`);
-  (JSON.parse(readFileSync(file, "utf8")) as Row[]).forEach((row, pos) => insert.run(row.id, pos, JSON.stringify(row)));
+  (JSON.parse(readFileSync(file, "utf8")) as Row[]).forEach((row, pos) => insert.run(String(row.id), pos, JSON.stringify(row)));
 }
 
 // Run once each, in order, in one transaction with the version bump; user_version counts the ones done. Append only.
 const MIGRATIONS: (() => void)[] = [
   () => (createList("threads"), importList("threads", `${STATE_DIR}/threads.json`)),
+  () => (createList("tasks"), importList("tasks", `${STATE_DIR}/tasks.json`)),
 ];
 const version = () => (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
 for (let v = version(); v < MIGRATIONS.length; v++)
@@ -44,11 +46,11 @@ function listTable<T extends Row>(table: string) {
     write: db.transaction((list: T[]) => {
       const ids = new Set<string>();
       list.forEach((row, pos) => {
-        const data = JSON.stringify(row);
-        ids.add(row.id);
-        if (stored.get(row.id) === `${pos}\n${data}`) return;
-        upsert.run(row.id, pos, data);
-        stored.set(row.id, `${pos}\n${data}`);
+        const id = String(row.id), data = JSON.stringify(row);
+        ids.add(id);
+        if (stored.get(id) === `${pos}\n${data}`) return;
+        upsert.run(id, pos, data);
+        stored.set(id, `${pos}\n${data}`);
       });
       for (const id of stored.keys()) if (!ids.has(id)) remove.run(id), stored.delete(id);
     }),
@@ -56,3 +58,4 @@ function listTable<T extends Row>(table: string) {
 }
 
 export const threadsTable = listTable<Row & { messages: unknown[] }>("threads");
+export const tasksTable = listTable<Row>("tasks");
