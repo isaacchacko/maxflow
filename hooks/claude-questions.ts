@@ -9,7 +9,6 @@ type HookInput = {
   last_assistant_message?: unknown;
   transcript_path?: unknown;
 };
-type TranscriptEntry = { type?: unknown; message?: { content?: unknown } };
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -84,6 +83,7 @@ async function logSendMessageInMaxflowsEventLog(from: string) {
 }
 
 function textOfTranscriptLine(line: string): { text: string } | undefined {
+  type TranscriptEntry = { type?: unknown; message?: { content?: unknown } };
   const entry: TranscriptEntry = asObject(JSON.parse(line));
   if (entry.type === "user" && typeof entry.message?.content === "string") return { text: "" };
   if (entry.type !== "assistant") return;
