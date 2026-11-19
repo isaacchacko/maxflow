@@ -178,7 +178,8 @@ export async function setResolved(threadId: string, resolved: boolean) {
 export async function setMovedResolved(id: string, resolved: boolean) {
   const before = movedStore.get();
   changes.n++;
-  movedStore.set(all => all.map(t => (t.id === id ? { ...t, resolved: resolved ? { at: localAt() } : undefined } : t)));
+  const open = ({ resolved: _, ...t }: Thread): Thread => t;
+  movedStore.set(all => all.map(t => (t.id !== id ? t : resolved ? { ...t, resolved: { at: localAt() } } : open(t))));
   if (!isLive()) return;
   changes.busy++;
   try {
