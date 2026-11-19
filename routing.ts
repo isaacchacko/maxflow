@@ -1,187 +1,302 @@
 import { readFileSync } from "node:fs";
-import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
-import { peekStateJson, writeStateJson } from "./state";
 import { publish, query } from "./bus";
+import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
 import { CLI, DIR } from "./instance";
-import { tmuxAsync, tmuxName } from "./tmux";
-import { type Session, sessions } from "./sessions";
-import type { Feed, FeedPost, Message, Objective, Signal, Source, Thread } from "./model";
-import { live, saveTasks, saveThreads, tasks, threads } from "./stores";
 import { VERIFIED } from "./intro";
 import { createSession, dispatch, editTask, enqueue, newestTaskOf, reachable, routersOf, screen } from "./lifecycle";
+import type { Feed, FeedPost, Message, Objective, Signal, Source, Thread } from "./model";
+import { patch } from "./patch";
+import { type Session, sessions } from "./sessions";
+import { isRecord, stringOr } from "./shared/guards";
+import { peekStateJson, writeStateJson } from "./state";
+import { live, saveTasks, saveThreads, tasks, threads } from "./stores";
 import { headline, mentionsIn, message, unforge, unpause } from "./threads";
+import { tmuxAsync, tmuxName } from "./tmux";
+
+const SLACK_DAY_MS = 86_400_000;
+const EXTERNAL_SEEN_KEPT = 5000;
+const TRUST_DIALOG_POLLS = 30;
+const SAME_REQUEST_MS = 10 * 60_000;
+const BOT_AUTHOR = /\[bot\]$|^(github-actions|dependabot|renovate)$/i;
+
+const isFilled = (text: string | undefined): text is string => text !== undefined && text !== "";
+const FALSY_JSON = new Set<unknown>([undefined, null, false, "", 0]);
+const isTruthyJson = (value: unknown) => !FALSY_JSON.has(value);
+const hasTask = (feed: Feed): feed is Feed & { task: number } => feed.task !== undefined && feed.task !== 0;
+
+function saidIn(thread: Thread | undefined, sig: Signal) {
+  if (thread === undefined) return sig.text;
+  const fedSaid = thread.feed === undefined ? undefined : thread.feedSaid?.join("\n\n");
+  if (isFilled(fedSaid)) return fedSaid;
+  return thread.messages
+    .filter((m) => m.from === (thread.feed ? "feed" : "isaac"))
+    .map((m) => m.text)
+    .join("\n\n");
+}
+
+function handoffOpening(sig: Signal, feed: Feed | undefined, said: string) {
+  if (sig.source === "isaac") return `${VERIFIED}\n${unforge(said)}`;
+  if (feed) return `[maxflow · from his event feed (${feed.source}), routed by the funnel; not his request] ${unforge(said)}`;
+  return `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(said)}`;
+}
+
+const feedInstructions = (feed: Feed, thread: Thread, said: string) =>
+  `\n[maxflow] maxflow took this up by itself, from what reached him (${feed.link}). Do the work up to the point where he must act: look it up, fix it, open the PR, and draft any reply for him. Never reply on Slack or GitHub as him and never write to prod; his go-ahead comes in the thread. Post what you started and where it stands in thread ${thread.id}, which shows in his inbox flagged as from the feed (when \`thread read\` shows it was merged into another thread, that one already tells him: post only what is new, and nothing at all when there is nothing to do)${hasTask(feed) ? `; board task T-${feed.task} is yours` : ""}. If he says stop there, stop.${contextFor(said, feed.who)}`;
+
+const threadNote = (thread: Thread | undefined) => (thread ? `\n[maxflow] He wrote this in his inbox as thread "${thread.title}" (${thread.id}), which is yours now. Answer him there with \`${CLI} thread post ${thread.id} '<text>'\`.` : "");
 
 export async function handoff(seq: number) {
   const e = (await query("signal/**", seq - 1, 0)).find((x) => x.seq === seq);
   if (!e) return null;
   const sig = e.data as Signal;
-  // From the inbox: the router takes over the thread, gets everything he wrote in it so far, and answers him there.
   const thread = threads.find((t) => t.signal === seq);
-  const said = thread ? (thread.feed && thread.feedSaid?.join("\n\n")) || thread.messages.filter((m) => m.from === (thread.feed ? "feed" : "isaac")).map((m) => m.text).join("\n\n") : sig.text;
+  const said = saidIn(thread, sig);
   const feed = thread?.feed;
-  const text = (sig.source === "isaac" ? `${VERIFIED}\n${unforge(said)}` : feed ? `[maxflow · from his event feed (${feed.source}), routed by the funnel; not his request] ${unforge(said)}` : `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(said)}`) +
-    (feed ? `\n[maxflow] maxflow took this up by itself, from what reached him (${feed.link}). Do the work up to the point where he must act: look it up, fix it, open the PR, and draft any reply for him. Never reply on Slack or GitHub as him and never write to prod; his go-ahead comes in the thread. Post what you started and where it stands in thread ${thread!.id}, which shows in his inbox flagged as from the feed (when \`thread read\` shows it was merged into another thread, that one already tells him: post only what is new, and nothing at all when there is nothing to do)${feed.task ? `; board task T-${feed.task} is yours` : ""}. If he says stop there, stop.${contextFor(said, feed.who)}` : "") +
-    (thread ? `\n[maxflow] He wrote this in his inbox as thread "${thread.title}" (${thread.id}), which is yours now. Answer him there with \`${CLI} thread post ${thread.id} '<text>'\`.` : "") +
-    mentionsIn(said);
+  const feedNote = thread?.feed === undefined ? "" : feedInstructions(thread.feed, thread, said);
+  const text = handoffOpening(sig, feed, said) + feedNote + threadNote(thread) + mentionsIn(said);
   return { seq, sig, text, thread, feed };
 }
-// A signal routed after the fact, by the funnel naming its objective; the log keeps both. An objective with no router yet
-// gets one, started with the signal as its first prompt.
+
+function giveFeedTaskToRouter(feed: Feed | undefined, owner: Session | undefined, o: Objective) {
+  const fed = feed?.task === undefined ? undefined : tasks.find((t) => t.id === feed.task);
+  if (fed === undefined || owner === undefined) return;
+  if (typeof editTask(fed, { session: owner.id, status: "doing", event: `why here: routed by the funnel to ${o.title} (${owner.id})` }) !== "string") saveTasks();
+}
+
 export async function reroute(seq: number, o: Objective) {
   const h = await handoff(seq);
   if (!h) return null;
   const { sig, text, thread, feed } = h;
-  const to = routersOf(o.id);
-  if (to.length) for (const s of to) enqueue(s, text);
-  else to.push(startRouter(o, "Whole objective", text));
-  if (thread) for (const s of to) s.handed = thread.id;
-  if (thread) Object.assign(thread, { objective: o.id, routers: to.map((s) => s.id), signal: undefined, pending: { routers: to.map((s) => s.id), since: Date.now() } });
-  // A feed item's board task goes to the agent now doing it.
-  const fed = feed?.task !== undefined && tasks.find((t) => t.id === feed.task);
-  if (fed && typeof editTask(fed, { session: to[0].id, status: "doing", event: `why here: routed by the funnel to ${o.title} (${to[0].id})` }) !== "string") saveTasks();
+  const existing = routersOf(o.id);
+  for (const s of existing) enqueue(s, text);
+  const to = existing.length > 0 ? existing : [startRouter(o, "Whole objective", text)];
+  if (thread) {
+    for (const s of to) s.handed = thread.id;
+    patch(thread, { objective: o.id, routers: to.map((s) => s.id), signal: undefined, pending: { routers: to.map((s) => s.id), since: Date.now() } });
+  }
+  giveFeedTaskToRouter(feed, to[0], o);
   publish(`signal-route/${seq}`, { seq, objective: o.id, routedTo: to.map((s) => s.id) });
   if (sig.source === "isaac") for (const s of to) requested(s, sig.text);
-  if (thread) saveThreads(), publish(`thread/${thread.id}`, { thread: thread.id, pending: true });
+  if (thread) {
+    saveThreads();
+    publish(`thread/${thread.id}`, { thread: thread.id, pending: true });
+  }
   return to;
 }
 
-// A feed thread's item goes to the funnel to route, as a signal whose route hands the thread to the objective's routers. The log has
-// each message as its own event already; the signal is the handoff, naming them.
-// A DM, or a channel's top-level posts, is one conversation that can carry several topics (Susanna's DM: the priority demo and their
-// Thursday team event), so its next message is not appended to whichever thread its last one went to: the funnel is shown the other
-// open threads holding messages from the same conversation and joins it to the one on its topic, or leaves it as its own.
-const conversationOf = (link?: string) => (link && !/[?&]thread_ts=/.test(link) ? link.match(/\/archives\/(\w+)\//)?.[1] : undefined);
+const conversationOf = (link: string | undefined) => (isFilled(link) && !/[?&]thread_ts=/.test(link) ? /\/archives\/(\w+)\//.exec(link)?.[1] : undefined);
+
 function sameConversation(t: Thread) {
-  const own = new Set(t.messages.map((m) => conversationOf(m.ext?.link)).filter(Boolean));
-  if (!own.size) return [];
-  return threads.filter((x) => x !== t && !x.mergedInto && !x.resolved && x.messages.some((m) => own.has(conversationOf(m.ext?.link))));
+  const own = new Set(t.messages.map((m) => conversationOf(m.ext?.link)).filter(isFilled));
+  if (own.size === 0) return [];
+  const isInOwnConversation = (m: Message) => {
+    const conversation = conversationOf(m.ext?.link);
+    return conversation !== undefined && own.has(conversation);
+  };
+  return threads.filter((x) => x !== t && !isFilled(x.mergedInto) && x.resolved === undefined && x.messages.some(isInOwnConversation));
 }
+
 export const sizeFirst = (seq: number) =>
   `size it first with \`${CLI} size ${seq} direct|area|fyi|ignore\` (direct: one worker on it; fyi: --note '<one line>'); only area is then routed, with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`.`;
 function ownerOf(t: Thread) {
   if (t.objective !== "") return ` (objective ${t.objective})`;
   return t.routers.length > 0 ? ` (direct worker ${t.routers.join(", ")})` : "";
 }
+
+const lastExternal = (x: Thread) => x.messages.findLast((m) => m.ext !== undefined && m.ext.context !== true) ?? x.messages.at(-1);
+
 function candidatesLine(t: Thread) {
   const open = sameConversation(t);
-  if (!open.length) return "";
-  const last = (x: Thread) => x.messages.findLast((m) => m.ext && !m.ext.context) ?? x.messages.at(-1);
-  return `\n[maxflow] The same Slack conversation has these other open threads, from its earlier bursts. If this continues one's topic, give it to that thread's owner (size it area and route it to that thread's objective, or, when a direct worker holds it, \`${CLI} notify <worker id>\` it), then fold it in with \`${CLI} thread merge ${t.id} <thread id>\`. If it is a different topic, size and route it on its own: the same person or DM is never a reason to merge:\n${open.map((x) => `- ${x.id} "${x.title}"${ownerOf(x)}, last: ${headline(last(x)?.text ?? "")}`).join("\n")}`;
+  if (open.length === 0) return "";
+  return `\n[maxflow] The same Slack conversation has these other open threads, from its earlier bursts. If this continues one's topic, give it to that thread's owner (size it area and route it to that thread's objective, or, when a direct worker holds it, \`${CLI} notify <worker id>\` it), then fold it in with \`${CLI} thread merge ${t.id} <thread id>\`. If it is a different topic, size and route it on its own: the same person or DM is never a reason to merge:\n${open.map((x) => `- ${x.id} "${x.title}"${ownerOf(x)}, last: ${headline(lastExternal(x)?.text ?? "")}`).join("\n")}`;
 }
-export async function feedToFunnel(t: Thread, from: Session, text: string, feed = t.feed!) {
-  const links = new Set(text.match(/https?:\/\/\S+/g) ?? []);
+
+export async function feedToFunnel(t: Thread, from: Session, text: string, feed = t.feed) {
+  if (feed === undefined) return;
+  const links = new Set(text.match(/https?:\/\/\S+/g));
   const refs = (await query("signal/**", 0, 0)).filter((e) => links.has(String((e.data as Signal).link))).map((e) => `s${e.seq}`);
-  const ev = dispatch({ from, target: t.title, text: `${feed.task ? `T-${feed.task}` : "An item"} from the feed, in thread ${t.id}, for the funnel to route: ${feed.who}${refs.length ? ` (${refs.join(", ")})` : ""}`, deliver: (seq) => `[maxflow · from his event feed (${feed.source}), not from him] ${text}${contextFor(text, feed.who)}${candidatesLine(t)}\n[maxflow] signal ${seq}, feed thread ${t.id}${feed.task ? `, board task T-${feed.task}` : ""}: ${sizeFirst(seq)}` });
-  t.signal = ev.seq;
+  const ev = dispatch({ from, target: t.title, text: `${hasTask(feed) ? `T-${feed.task}` : "An item"} from the feed, in thread ${t.id}, for the funnel to route: ${feed.who}${refs.length > 0 ? ` (${refs.join(", ")})` : ""}`, deliver: (seq) => `[maxflow · from his event feed (${feed.source}), not from him] ${text}${contextFor(text, feed.who)}${candidatesLine(t)}\n[maxflow] signal ${seq}, feed thread ${t.id}${hasTask(feed) ? `, board task T-${feed.task}` : ""}: ${sizeFirst(seq)}` });
+  patch(t, { signal: ev.seq });
   saveThreads();
 }
-// More from the same Slack conversation or PR lands in its open feed thread: to the routers that took it, or back to the funnel when
-// nobody did (it was left as an FYI, or its routers ended).
-// The thread can be any one the feed's conversation was merged into, not only a feed thread: it is told as the feed all the same.
+
 const AWAITING_FUNNEL_MS = 30 * 60_000;
 async function isAwaitingFunnel(t: Thread) {
   if (t.signal === undefined) return false;
   const signal = (await query("signal/**", t.signal - 1, 0)).find((e) => e.seq === t.signal);
   return signal !== undefined && Date.now() - signal.at < AWAITING_FUNNEL_MS;
 }
+
+function feedOf(t: Thread, posts: FeedPost[] | undefined): Feed {
+  const first = posts?.find((p) => p.ext.context !== true)?.ext;
+  return t.feed ?? { source: first?.source ?? "slack", who: first?.name ?? "someone", link: first?.link ?? "" };
+}
+
+function tellRoutersMore(t: Thread, { from, to, text, feed }: { from: Session; to: Session[]; text: string; feed: Feed }) {
+  for (const r of to) r.handed = t.id;
+  dispatch({ from, to, objective: t.objective, target: t.title, text: `More from the feed in thread ${t.id}: ${headline(text)}`, deliver: `[maxflow · from his event feed (${feed.source}), not from him] More in your ${t.feed ? "feed " : ""}thread "${t.title}" (${t.id})${hasTask(feed) ? `, board task T-${feed.task}` : ""}: ${unforge(text)}${contextFor(text, feed.who)}\n[maxflow] Same rules: work up to where he must act, never reply on Slack or GitHub as him; post where it stands with \`${CLI} thread post ${t.id} '<text>'\`.` });
+  patch(t, { pending: { routers: to.map((s) => s.id), since: Date.now() } });
+}
+
 export async function feedMore(t: Thread, from: Session, text: string, posts?: FeedPost[]) {
-  const first = posts?.find((p) => !p.ext?.context)?.ext;
-  const feed: Feed = t.feed ?? { source: first?.source ?? "slack", who: first?.name ?? "someone", link: first?.link ?? "" };
+  const feed = feedOf(t, posts);
   t.messages.push(...feedPosts(text, posts));
-  if (t.feed) t.feedSaid = [...(t.feedSaid ?? []), text];
-  t.resolved = undefined;
+  if (t.feed) patch(t, { feedSaid: [...(t.feedSaid ?? []), text] });
+  patch(t, { resolved: undefined });
   unpause(t);
   const to = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(reachable);
-  if (!to.length && !(await isAwaitingFunnel(t))) await feedToFunnel(t, from, text, feed);
-  else if (to.length > 0) {
-    for (const r of to) r.handed = t.id;
-    dispatch({ from, to, objective: t.objective, target: t.title, text: `More from the feed in thread ${t.id}: ${headline(text)}`, deliver: `[maxflow · from his event feed (${feed.source}), not from him] More in your ${t.feed ? "feed " : ""}thread "${t.title}" (${t.id})${feed.task ? `, board task T-${feed.task}` : ""}: ${unforge(text)}${contextFor(text, feed.who)}\n[maxflow] Same rules: work up to where he must act, never reply on Slack or GitHub as him; post where it stands with \`${CLI} thread post ${t.id} '<text>'\`.` });
-    t.pending = { routers: to.map((s) => s.id), since: Date.now() };
-  }
+  if (to.length > 0) tellRoutersMore(t, { from, to, text, feed });
+  else if (!(await isAwaitingFunnel(t))) await feedToFunnel(t, from, text, feed);
   saveThreads();
   publish(`thread/${t.id}`, { thread: t.id, from: from.id });
 }
 
-// Every message from a person outside maxflow is an event of its own in the log: Slack DMs, mentions and his own posts, and people's
-// comments and reviews on the PRs the gh sentry watches, in full, from that person, linking the original. Made as its bus event lands,
-// and once at boot for the last day's, each once by its link.
 export const EXTERNAL_SEEN = "external-seen.json";
-export const externalSeen = new Set<string>((() => { try { return (peekStateJson(EXTERNAL_SEEN) as string[] | undefined) ?? []; } catch { return []; } })());
-const slackThreadLink = (key: string) => { const [c, ts] = key.split("/"); return `https://dryftai.slack.com/archives/${c}${ts ? `/p${ts.replace(".", "")}` : ""}`; };
-// The last day of Slack messages from people, for a feed hand-off to name the ones that share its nouns.
-let slackDay: SlackSaid[] = [];
-// The channels events named, by id, for a Slack link's chip.
-export const slackChannels: Record<string, string> = {};
-// The day's messages from the bus and the slack sentry's store, one each: the store has what no event carried.
-function sameDay() {
-  slackDay = slackDay.filter((m) => Date.now() - m.at < 86_400_000);
-  const ts = (link: string) => link.match(/\/p(\d+)/)?.[1];
-  const known = new Set(slackDay.map((m) => ts(m.link)));
-  return [...slackDay, ...slackStoreDay().filter((m) => !known.has(ts(m.link)))];
+const externalSeenAtStart = peekStateJson(EXTERNAL_SEEN);
+export const externalSeen = new Set<string>(Array.isArray(externalSeenAtStart) ? externalSeenAtStart.filter((link): link is string => typeof link === "string") : []);
+function slackThreadLink(key: string) {
+  const [channel = "", ts] = key.split("/", 2);
+  return `https://dryftai.slack.com/archives/${channel}${isFilled(ts) ? `/p${ts.replace(".", "")}` : ""}`;
 }
-// A feed item's hand-off: the context sentry's notes on it and the day's Slack messages sharing its nouns.
-const contextFor = (text: string, who?: string) => contextBlock(text, who) + relatedBlock(text, who, sameDay(),
-  (link) => threads.find((t) => !t.mergedInto && t.messages.some((m) => m.text.includes(link)))?.id);
-export function externalSignal(e: { seq: number; at: number; topic: string; data: unknown }, save = true) {
-  const d = (e.data ?? {}) as Record<string, any>;
-  const slack = /^slack\/(dm|mention|own)$/.exec(e.topic)?.[1];
-  const gh = /^gh\/[^/]+\/[^/]+\/pr\/\d+\/(comment|review|thread)$/.exec(e.topic)?.[1];
-  const link = String(d.link ?? d.url ?? "");
-  if (!link || externalSeen.has(link)) return;
-  if (slack ? !d.text || (d.bot && slack !== "mention") : !gh || !d.who || /\[bot\]$|^(github-actions|dependabot|renovate)$/i.test(String(d.author ?? d.who))) return;
+const slackDay: SlackSaid[] = [];
+export const slackChannels: Record<string, string> = {};
+const slackTs = (link: string) => /\/p(\d+)/.exec(link)?.[1];
+function sameDay() {
+  const fresh = slackDay.filter((m) => Date.now() - m.at < SLACK_DAY_MS);
+  slackDay.splice(0, slackDay.length, ...fresh);
+  const known = new Set(slackDay.map((m) => slackTs(m.link)));
+  return [...slackDay, ...slackStoreDay().filter((m) => !known.has(slackTs(m.link)))];
+}
+const contextFor = (text: string, who?: string) =>
+  contextBlock(text, who) +
+  relatedBlock(text, who, sameDay(), (link) => threads.find((t) => !isFilled(t.mergedInto) && t.messages.some((m) => m.text.includes(link)))?.id);
+
+type ExternalKind = { slack: string | undefined; gh: string | undefined };
+
+function isUnwanted(d: Record<string, unknown>, { slack, gh }: ExternalKind) {
+  if (isFilled(slack)) return !isTruthyJson(d["text"]) || (isTruthyJson(d["bot"]) && slack !== "mention");
+  return !isFilled(gh) || !isTruthyJson(d["who"]) || BOT_AUTHOR.test(String(d["author"] ?? d["who"]));
+}
+
+function whereOf(d: Record<string, unknown>, slack: string | undefined) {
+  if (!isFilled(slack)) return `${String(d["pr"]).split("/", 2)[1] ?? ""}${isTruthyJson(d["path"]) ? ` ${String(d["path"])}` : ""}`;
+  return slack === "dm" || d["where"] === "a DM" ? "DM" : stringOr(d["where"], "Slack").replace(/^thread .* in /, "");
+}
+
+const slackPlainText = (text: string) =>
+  text
+    .replaceAll(/<@\w+\|([^>]+)>/g, "@$1")
+    .replaceAll(/<(https?:[^|>]+)\|([^>]+)>/g, "$2")
+    .replaceAll(/<(https?:[^>]+)>/g, "$1");
+
+function textOf(d: Record<string, unknown>, { slack, gh }: ExternalKind) {
+  if (isFilled(slack)) return slackPlainText(String(d["text"]));
+  if (gh !== "review") return stringOr(d["body"]);
+  return `${stringOr(d["state"], "reviewed").toLowerCase().replace("_", " ")}${isTruthyJson(d["body"]) ? `: ${String(d["body"])}` : ""}`;
+}
+
+function onOf(d: Record<string, unknown>, slack: string | undefined, link: string) {
+  if (!isFilled(slack)) return `https://github.com/${String(d["pr"]).replace("#", "/pull/")}`;
+  return isTruthyJson(d["thread"]) ? slackThreadLink(String(d["thread"])) : link;
+}
+
+function recordChannel(link: string, where: string) {
+  const channel = /archives\/(C\w+)/.exec(link)?.[1];
+  if (isFilled(channel) && where.startsWith("#")) slackChannels[channel] = where;
+}
+
+const kindOf = (topic: string): ExternalKind => ({
+  slack: /^slack\/(dm|mention|own)$/.exec(topic)?.[1],
+  gh: /^gh\/[^/]+\/[^/]+\/pr\/\d+\/(comment|review|thread)$/.exec(topic)?.[1],
+});
+
+const toldIds = (told: unknown) => (Array.isArray(told) ? told.filter((id): id is string => typeof id === "string") : []);
+
+function newExternalLink(d: Record<string, unknown>, kind: ExternalKind) {
+  const link = stringOr(d["link"] ?? d["url"]);
+  if (!link || externalSeen.has(link) || isUnwanted(d, kind)) return;
+  return link;
+}
+
+export function externalSignal(e: { seq: number; at: number; topic: string; data: unknown }, shouldSave = true) {
+  const d = isRecord(e.data) ? e.data : {};
+  const kind = kindOf(e.topic);
+  const link = newExternalLink(d, kind);
+  if (link === undefined) return;
   externalSeen.add(link);
-  if (save) writeStateJson(EXTERNAL_SEEN, [...externalSeen].slice(-5000));
-  const where = slack ? (slack === "dm" || d.where === "a DM" ? "DM" : String(d.where ?? "Slack").replace(/^thread .* in /, "")) : String(d.pr).split("/")[1] + (d.path ? ` ${d.path}` : "");
-  // Slack's <url|label> and <url> read as their label.
-  const text = slack ? String(d.text).replace(/<@\w+\|([^>]+)>/g, "@$1").replace(/<(https?:[^|>]+)\|([^>]+)>/g, "$2").replace(/<(https?:[^>]+)>/g, "$1")
-    : gh === "review" ? `${String(d.state ?? "reviewed").toLowerCase().replace("_", " ")}${d.body ? `: ${d.body}` : ""}` : String(d.body ?? "");
-  const on = slack ? (d.thread ? slackThreadLink(String(d.thread)) : link) : `https://github.com/${String(d.pr).replace("#", "/pull/")}`;
-  const source: Source = slack ? "slack" : "gh";
-  if (slack && !d.bot) slackDay.push({ at: e.at, who: String(d.from ?? "?"), where, text, link });
-  const channel = link.match(/archives\/(C\w+)/)?.[1];
-  if (channel && where.startsWith("#")) slackChannels[channel] = where;
-  publish(`signal/${source}`, { source, target: where, text, routedTo: Array.isArray(d.told) ? d.told : [], who: String(d.from ?? d.who), where, link, on, event: e.seq, at: e.at, ...((slack === "own" || String(d.who ?? "").startsWith("the user")) && { own: true }) } satisfies Signal);
+  if (shouldSave) writeStateJson(EXTERNAL_SEEN, [...externalSeen].slice(-EXTERNAL_SEEN_KEPT));
+  const where = whereOf(d, kind.slack);
+  const text = textOf(d, kind);
+  const isSlack = isFilled(kind.slack);
+  const source: Source = isSlack ? "slack" : "gh";
+  if (isSlack && !isTruthyJson(d["bot"])) slackDay.push({ at: e.at, who: stringOr(d["from"], "?"), where, text, link });
+  recordChannel(link, where);
+  const isOwn = kind.slack === "own" || stringOr(d["who"]).startsWith("the user");
+  publish(`signal/${source}`, {
+    source,
+    target: where,
+    text,
+    routedTo: toldIds(d["told"]),
+    who: String(d["from"] ?? d["who"]),
+    where,
+    link,
+    on: onOf(d, kind.slack, link),
+    event: e.seq,
+    at: e.at,
+    ...(isOwn && { own: true }),
+  } satisfies Signal);
 }
 
 export const ROUTER_BRIEF = `${DIR}/agents/router.md`;
 export function startRouter(o: Objective, scope: string, request?: string) {
-  const prompt = `[maxflow] You are the router for the objective "${o.title}" (${o.id}), scope: ${scope}. Read your brief, then start: decide the first pieces of work and who does them.${request ? `\n\n${request}` : ""}`;
+  const prompt = `[maxflow] You are the router for the objective "${o.title}" (${o.id}), scope: ${scope}. Read your brief, then start: decide the first pieces of work and who does them.${isFilled(request) ? `\n\n${request}` : ""}`;
   const cmd = ["claude", "--permission-mode", "bypassPermissions", "--append-system-prompt", readFileSync(ROUTER_BRIEF, "utf8"), prompt];
   const s = createSession(`router: ${o.title}`.slice(0, 80), cmd, o.cwd, undefined, { role: "router", objective: o.id, scope });
-  acceptTrust(s);
+  void acceptTrust(s);
   return s;
 }
 
-// A claude started in a folder it hasn't been told to trust opens on that dialog; the server accepts it for the agents it starts.
 export async function acceptTrust(s: Session) {
-  for (let i = 0; i < 30 && live(s); i++) {
+  for (let i = 0; i < TRUST_DIALOG_POLLS && live(s); i++) {
     await Bun.sleep(1000);
     const text = screen(s, 0);
-    // Its first option is "No, exit".
-    if (/Yes, I trust this folder/.test(text)) return void (await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Down", "Enter"));
+    // constraint: Claude Code's folder trust dialog opens on "No, exit", so Down then Enter accepts it
+    if (text.includes("Yes, I trust this folder")) {
+      await tmuxAsync("send-keys", "-t", tmuxName(s.id), "Down", "Enter");
+      return;
+    }
     if (/esc to interrupt|bypass permissions on/i.test(text)) return;
   }
 }
-export const feedPosts = (text: string, posts?: FeedPost[]): Message[] =>
-  posts?.length ? posts.filter((p) => p.text && p.ext?.name && p.ext.link).map((p) => ({ ...message("feed", p.text), ...(p.at && { at: p.at }), ext: p.ext })) : [message("feed", text)];
 
-// Isaac's request becomes a task the moment the funnel hands it to an owner; a follow-up to an owner already on a task joins it.
+const sentAt = (at: number | undefined) => (at === undefined || at === 0 ? {} : { at });
+export const feedPosts = (text: string, posts?: FeedPost[]): Message[] =>
+  posts !== undefined && posts.length > 0
+    ? posts.filter((p) => p.text && p.ext.name && p.ext.link).map((p) => ({ ...message("feed", p.text), ...sentAt(p.at), ext: p.ext }))
+    : [message("feed", text)];
+
 const openTaskOf = (id: string) => tasks.findLast((t) => t.sessions.includes(id) && t.status !== "done" && t.status !== "dropped");
-// The assistant often files his funnel prompt before the relay lands, so a task opened on the owner in the last few minutes is this request's too.
-const SAME_REQUEST_MS = 10 * 60_000;
+function taskOfThisRequest(ownerId: string) {
+  const recent = newestTaskOf(ownerId);
+  return openTaskOf(ownerId) ?? (recent && Date.now() - recent.at < SAME_REQUEST_MS ? recent : undefined);
+}
 export function requested(owner: Session, request: string, root?: string) {
   const asked = `asked: ${headline(request)}`;
-  const recent = newestTaskOf(owner.id);
-  const t = openTaskOf(owner.id) ?? (recent && Date.now() - recent.at < SAME_REQUEST_MS ? recent : undefined);
+  const t = taskOfThisRequest(owner.id);
   if (!t) {
     const made = editTask(undefined, { title: root ?? headline(request), status: "doing", session: owner.id, event: asked });
-    if (typeof made !== "string" && !root) (made.drafted = true), saveTasks();
+    if (typeof made !== "string" && !isFilled(root)) {
+      made.drafted = true;
+      saveTasks();
+    }
     return;
   }
-  if (root && t.drafted) (t.title = root), delete t.drafted;
-  editTask(t, { session: owner.id, ...(t.status === "done" && { status: "doing" }), ...(!t.timeline.some((e) => e.text === asked) && { event: asked }) });
+  if (isFilled(root) && t.drafted === true) {
+    t.title = root;
+    delete t.drafted;
+  }
+  editTask(t, { session: owner.id, ...(t.status === "done" && { status: "doing" }), ...(t.timeline.every((e) => e.text !== asked) && { event: asked }) });
 }
 
-// Bun's page bundler never sees a source file created after it started, so an import of one fails until a restart.
-// Exiting lets the service manager restart it; the tmux sessions outlive it.
+// constraint: Bun's page bundler never sees a source file created after it started, so importing one fails until a restart
 export const known = new Set<string>();
