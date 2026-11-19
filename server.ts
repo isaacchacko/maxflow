@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { inboxesTable, slackMessagesTable, writeStateJson } from "./state";
 import { publish } from "./bus";
 import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR } from "./instance";
 import app from "./src/index.html";
 import { TMUX, flushOptions, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
-import { type Role, type Session, type Wait, type WsData, isAgent, isSentry, sessions } from "./sessions";
+import { type Session, type Wait, type WsData, isAgent, isSentry, sessions } from "./sessions";
 import type { Message, Thread } from "./model";
 import { live, saveThreads, tasks, threads, threadsDirty, writeThreads } from "./stores";
 import { DEFAULT_AFTER_H, DEFAULT_AFTER_MS } from "./intro";
@@ -15,9 +15,8 @@ import { DRAFTS, deliver } from "./delivery";
 import { RESYNC_MS, resync } from "./turns";
 import { docsRoute } from "./docs-api";
 import { sizingRoute } from "./sizing";
-import { SENTRY_USES, built, describe, freshWorld, judged, openWorld, prStates, worldClients } from "./world";
-import { EXTERNAL_SEEN, ROUTER_BRIEF, acceptTrust, externalSeen, externalSignal, known } from "./routing";
-import { handOff } from "./objectives";
+import { built, judged, openWorld, prStates, worldClients } from "./world";
+import { EXTERNAL_SEEN, externalSeen, externalSignal, known } from "./routing";
 import { recordUserComment, seedUserComments } from "./events";
 import { restrictionsRoute } from "./routes-restrictions";
 import { statsTodosRoute } from "./routes-stats";
@@ -29,6 +28,8 @@ import { objectivesRoute } from "./routes-objectives";
 import { sessionRoute } from "./routes-session";
 import { signalsRoute } from "./routes-signals";
 import { threadsRoute } from "./routes-threads";
+import { sessionsWorldRoute } from "./routes-sessions";
+import { filesRoute } from "./routes-files";
 
 const HOST = "127.0.0.1";
 function loadInbox(id: string): Pick<Session, "inbox" | "sending"> {
@@ -109,7 +110,6 @@ setInterval(() => {
     publish("sentry/start", { name, why: "respawn", tries: r.tries + 1 });
   }
 }, 15_000);
-const UPLOADS = `${STATE_DIR}/uploads`;
 for (const s of sessions.values()) if (existsSync(`${DRAFTS}/${s.id}.txt`)) s.savedDraft = readFileSync(`${DRAFTS}/${s.id}.txt`, "utf8");
 // Whether each PR shown in the graph is open, closed, merged or missing; one GraphQL request per repo, off the event loop.
 const PR_URL_RE = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)$/;
@@ -253,19 +253,6 @@ if (seedUserComments)
       }
   } catch {}
 setInterval(checkShells, 2000);
-
-// An edge drawn in the graph: tell each agent end who is on the other side and how to reach it.
-function introduce(to: Session, other: Session, why?: string) {
-  if (!isAgent(to) || to.exitCode !== null) return;
-  const who = `"${other.name}" (session ${other.id}, in ${other.cwd})`;
-  const reason = why ? ` Why, in the user's words: "${why}".` : "";
-  const text = isSentry(other)
-    ? `[maxflow] The user linked you to the ${other.name.slice(7)} sentry; it might be useful to you.${reason} ${SENTRY_USES[other.name] ?? `Its source is in ${new URL("./sentries/", import.meta.url).pathname}.`}`
-    : isAgent(other)
-      ? `[maxflow] The user linked you with another agent, ${who}, and wants you two talking; it got this same note about you.${reason} Start now: message it what you're working on and what you could use from it or offer it, then answer what it sends you. Keep it going while it helps; drop it once it doesn't. Message it with \`${CLI} notify ${other.id} '<text>'\`, which goes through maxflow's event log and resumes it if it is asleep. Read its screen with \`${CLI} screen ${other.id} --history 200\`.`
-      : `[maxflow] The user linked you with the terminal session ${who}, running \`${other.cmd.join(" ")}\`; it may matter to your work.${reason} Read it with \`${CLI} screen ${other.id} --history 200\`, type into it with \`${CLI} send ${other.id} '<text>'\`.`;
-  dispatch({ to: [to], target: other.name, text });
-}
 // Questions from before threads: each open one moves into a thread of its own, once, and its asker hears where.
 function migrateQuestions() {
   type Question = { id: number; session: string; name: string; status: string; at: number; thread: { from: string; text: string; at: number }[]; default?: string };
@@ -360,35 +347,8 @@ Bun.serve<WsData>({
     if (docs) return docs;
     const sized = await sizingRoute(req, url);
     if (sized) return sized;
-    if (path === "/api/sessions" && req.method === "GET") return Response.json([...sessions.values()].map((s) => describe(s)));
-    if (path === "/api/sessions" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { name?: string; cmd?: string[] | string; cwd?: string; role?: "router" | "worker"; parent?: string; objective?: string; scope?: string };
-      // An agent a router starts is its worker; one started from a worker joins the same router.
-      const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-      const parent = sessions.get(body.parent ?? "") ?? (from?.role?.role === "router" ? from : from?.role?.parent ? sessions.get(from.role.parent) : undefined);
-      const objective = body.objective ?? parent?.role?.objective;
-      const handingRole = body.role === "router" && from?.role?.role === "router" && from.role.objective === objective && (body.scope ?? from.role.scope) === from.role.scope ? from.role : undefined;
-      const role: Role | undefined = body.role === "router" && objective ? { role: "router", objective, scope: handingRole?.scope ?? (body.scope || "Whole objective") } : parent && objective ? { role: "worker", objective, parent: parent.id } : undefined;
-      // With no command, a router or worker is a claude (a router with its brief, as startRouter starts one), never the bare shell
-      // that 662ba653 and b83e405d were: a shell holding a role takes his thread replies where nothing reads them.
-      const agent = ["claude", "--permission-mode", "bypassPermissions", ...(role?.role === "router" ? ["--append-system-prompt", readFileSync(ROUTER_BRIEF, "utf8")] : [])];
-      const cmd = typeof body.cmd === "string" ? ["zsh", "-lc", body.cmd] : body.cmd?.length ? body.cmd : role ? agent : [process.env.SHELL ?? "zsh", "-l"];
-      const s = createSession(body.name || cmd.join(" ").slice(0, 40), cmd, body.cwd?.replace(/^~(?=\/|$)/, process.env.HOME!) || parent?.cwd || process.env.HOME!, undefined, role);
-      if (cmd[0] === "claude") acceptTrust(s);
-      if (handingRole && from) handOff(from, handingRole, s);
-      // Spawned from the browser under a router: the router hears it has a new worker to brief.
-      if (parent && !from) dispatch({ to: [parent], target: s.id, text: `[maxflow] The user started a worker for you, "${s.name}" (${s.id}). Brief it with \`${CLI} notify ${s.id} '<brief>'\`.` });
-      return Response.json(describe(s), { status: 201 });
-    }
-
-    if (path === "/api/world" && req.method === "GET") {
-      const b = await freshWorld();
-      const etag = `"w${b.v}"`;
-      const headers = { etag, "x-world-v": String(b.v), "cache-control": "no-cache" };
-      if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
-      return new Response((b.json ??= JSON.stringify(b.w)), { headers: { ...headers, "content-type": "application/json" } });
-    }
-    if (path === "/api/world/ws") return server.upgrade(req, { data: { id: "", world: true } }) ? undefined : new Response("upgrade failed", { status: 400 });
+    const sessionsWorldRouteAnswer = await sessionsWorldRoute(req, url, path, server);
+    if (sessionsWorldRouteAnswer) return sessionsWorldRouteAnswer;
     const signalsRouteAnswer = await signalsRoute(req, url, path);
     if (signalsRouteAnswer) return signalsRouteAnswer;
     const objectivesRouteAnswer = await objectivesRoute(req, url, path);
@@ -403,36 +363,8 @@ Bun.serve<WsData>({
     if (restrictionsRouteAnswer) return restrictionsRouteAnswer;
     const tasksLinksRouteAnswer = await tasksLinksRoute(req, url, path);
     if (tasksLinksRouteAnswer) return tasksLinksRouteAnswer;
-
-    // yarn as an installed app: its manifest, the service worker that makes it installable (at the root, so its scope is the whole
-    // app) and the app icons. Never cached, so a change shows up on the next load.
-    const pwa = path === "/manifest.webmanifest" ? ["manifest.webmanifest", "application/manifest+json"] : path === "/sw.js" ? ["sw.js", "text/javascript"] : path.match(/^\/pwa\/([\w-]+\.(?:png|svg))$/) ? [path.slice(5), path.endsWith(".svg") ? "image/svg+xml" : "image/png"] : null;
-    if (pwa && req.method === "GET") {
-      const file = Bun.file(pwa[0] === "favicon.svg" ? new URL("src/favicon.svg", import.meta.url) : new URL(`src/pwa/${pwa[0]}`, import.meta.url));
-      return (await file.exists()) ? new Response(file, { headers: { "content-type": pwa[1], "cache-control": "no-cache" } }) : new Response("not found", { status: 404 });
-    }
-    // A pasted image is kept as a file, so the text it's pasted into carries a path the receiving agent can read.
-    if (path === "/api/uploads" && req.method === "POST") {
-      const ext = req.headers.get("content-type")?.match(/^image\/(png|jpeg|gif|webp)$/)?.[1];
-      if (!ext) return new Response("png, jpeg, gif or webp image required", { status: 415 });
-      mkdirSync(UPLOADS, { recursive: true });
-      const file = `${UPLOADS}/${new Date().toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID().slice(0, 8)}.${ext === "jpeg" ? "jpg" : ext}`;
-      await Bun.write(file, await req.arrayBuffer());
-      return Response.json({ path: file });
-    }
-    const upload = path.match(/^\/api\/uploads\/(\w[\w.-]*)$/);
-    if (upload && req.method === "GET") {
-      const file = Bun.file(`${UPLOADS}/${upload[1]}`);
-      return (await file.exists()) ? new Response(file, { headers: { "cache-control": "max-age=31536000, immutable" } }) : new Response("no such upload", { status: 404 });
-    }
-    if (path === "/api/link" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { a?: string; b?: string; why?: string };
-      const a = sessions.get(body.a ?? ""), b = sessions.get(body.b ?? "");
-      if (!a || !b || a === b) return new Response("two sessions required", { status: 400 });
-      const why = body.why?.trim();
-      introduce(a, b, why), introduce(b, a, why);
-      return Response.json([describe(a), describe(b)]);
-    }
+    const filesRouteAnswer = await filesRoute(req, url, path);
+    if (filesRouteAnswer) return filesRouteAnswer;
     const sessionRouteAnswer = await sessionRoute(req, url, path);
     if (sessionRouteAnswer) return sessionRouteAnswer;
 

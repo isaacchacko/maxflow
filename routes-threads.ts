@@ -4,7 +4,7 @@ import { CLI } from "./instance";
 import { isSentry, sessions } from "./sessions";
 import type { Feed, FeedPost, Thread } from "./model";
 import { live, objectives, saveThreads, threads } from "./stores";
-import { dispatch, funnel, live_thread, routersOf, wake } from "./lifecycle";
+import { dispatch, funnel, live_thread, routersOf } from "./lifecycle";
 import { ISAAC_IN_THREAD, ancestors, mentionsIn, message, pathTitle, postIn, schedulePause, tellMembers, unforge, unpause } from "./threads";
 import { feedPosts, feedToFunnel, sizeFirst, slackChannels } from "./routing";
 import { mergeThread, subthread, titleOf } from "./objectives";
