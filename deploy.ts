@@ -161,3 +161,4 @@ export async function deploy() {
   const stale = staleSentries(live, to, after);
   if (stale.length) await restartSentries(stale, after, to);
 }
+
