@@ -149,10 +149,9 @@ async function mergedLineCounts(data: unknown, q: WeekQuery) {
   const merged = pickArray(data, "m.nodes");
   let page = pick(data, "m.pageInfo");
   for (let n = 0; peek(page, "hasNextPage") === true && n < MAX_MERGED_PAGES; n += 1) {
-    const more = pick(
-      await retried(`query { m: search(type: ISSUE, first: 100, after: ${JSON.stringify(peek(page, "endCursor"))}, query: "is:pr author:@me repo:${q.repo} merged:${q.range}") { pageInfo { endCursor hasNextPage } nodes { ... on PullRequest { additions deletions } } } }`),
-      "m",
-    );
+    const after = JSON.stringify(peek(page, "endCursor"));
+    const reply = await retried(`query { m: search(type: ISSUE, first: 100, after: ${after}, query: "is:pr author:@me repo:${q.repo} merged:${q.range}") { pageInfo { endCursor hasNextPage } nodes { ... on PullRequest { additions deletions } } } }`);
+    const more = pick(reply, "m");
     merged.push(...pickArray(more, "nodes"));
     page = pick(more, "pageInfo");
   }

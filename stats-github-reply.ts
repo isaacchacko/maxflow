@@ -1,20 +1,19 @@
 import { isRecord } from "./shared/guards";
 
-function walk(value: unknown, path: string, onMissing: () => unknown): unknown {
+export function peek(value: unknown, path: string): unknown {
   let current = value;
   for (const key of path.split(".")) {
-    if (!isRecord(current) || !(key in current)) return onMissing();
+    if (!isRecord(current)) return undefined;
     current = current[key];
   }
   return current;
 }
 
-const missing = (path: string) => () => {
-  throw new Error(`GitHub's reply has no ${path}`);
-};
-
-export const peek = (value: unknown, path: string) => walk(value, path, () => undefined);
-export const pick = (value: unknown, path: string) => walk(value, path, missing(path));
+export function pick(value: unknown, path: string): unknown {
+  const found = peek(value, path);
+  if (found === undefined) throw new Error(`GitHub's reply has no ${path}`);
+  return found;
+}
 
 export function pickNumber(value: unknown, path: string): number {
   const found = pick(value, path);

@@ -44,13 +44,13 @@ function nameOf(yarnId: string, who: Who, f: FileUsage, parent: FileUsage | unde
   return who.live.get(yarnId)?.name ?? who.named[yarnId] ?? f.name ?? parent?.name ?? yarnId;
 }
 
-const cwdOf = (path: string, f: FileUsage, parent: FileUsage | undefined) => f.cwd ?? parent?.cwd ?? path.split("/").slice(-2, -1)[0] ?? "";
+const cwdOf = (path: string, f: FileUsage, parent: FileUsage | undefined) => f.cwd ?? parent?.cwd ?? path.split("/").at(-2) ?? "";
 
 function identityOf(path: string, f: FileUsage, files: Record<string, FileUsage>, who: Who): Identity {
   const parent = f.parent === undefined ? undefined : files[f.parent];
   const yarnId = f.yarn ?? parent?.yarn;
   const cwd = cwdOf(path, f, parent);
-  if (yarnId === undefined) return { key: `outside:${cwd}`, id: cwd, name: cwd.replace(process.env.HOME ?? "", "~"), kind: "outside", ...routingOf(undefined, f, parent) };
+  if (yarnId === undefined) return { key: `outside:${cwd}`, id: cwd, name: cwd.replace(process.env["HOME"] ?? "", "~"), kind: "outside", ...routingOf(undefined, f, parent) };
   const s = who.live.get(yarnId);
   const name = nameOf(yarnId, who, f, parent);
   return { key: yarnId, id: yarnId, name, kind: s?.sentry === true || name.startsWith("sentry:") ? "sentry" : "agent", ...routingOf(s, f, parent) };
@@ -99,7 +99,7 @@ function withDailyModels(perModel: Record<string, [number, number]>, spends: Mod
 }
 
 function withSpan(g: Group, f: FileUsage & { first: number }): Group {
-  const last = f.last ?? Number.NaN;
+  const last = f.last ?? NaN;
   return { ...g, first: Math.min(g.first ?? f.first, f.first), last: Math.max(g.last ?? last, last) };
 }
 
@@ -152,28 +152,49 @@ function creditOutcomes(groups: Map<string, Group>, { merged, resolvedAt }: Outc
     if (g) groups.set(id, { ...g, [field]: g[field] + 1 });
   };
   for (const told of merged.values()) for (const id of told) credit(id, "prs");
-  for (const t of threads) if (resolvedAt.has(t.id)) for (const id of t.routers ?? []) credit(id, "threads");
+  for (const t of threads) {
+    const routers = t.routers ?? [];
+    if (resolvedAt.has(t.id)) for (const id of routers) credit(id, "threads");
+  }
 }
 
 type ObjectiveRollup = { id: string; title: string; dollars: number; agents: number; activeMs: number; prs: Set<string>; threads: number };
+type Results = { all: Group[]; groups: Map<string, Group>; outcomes: Outcomes; threads: StatsThread[] };
 
-function objectiveRollups(all: Group[], titles: Map<string, string>, groups: Map<string, Group>, outcomes: Outcomes, threads: StatsThread[]) {
+function spendByObjective(all: Group[], titles: Map<string, string>) {
   const byObjective = new Map<string, ObjectiveRollup>();
   for (const g of all) {
     if (g.objective === undefined || g.objective === "") continue;
     const o = byObjective.get(g.objective) ?? { id: g.objective, title: titles.get(g.objective) ?? g.objective, dollars: 0, agents: 0, activeMs: 0, prs: new Set<string>(), threads: 0 };
     byObjective.set(g.objective, { ...o, dollars: o.dollars + g.dollars, agents: o.agents + 1, activeMs: o.activeMs + g.activeMs });
   }
-  for (const [pr, told] of outcomes.merged)
+  return byObjective;
+}
+
+function addMergedPrs(byObjective: Map<string, ObjectiveRollup>, groups: Map<string, Group>, merged: Map<string, string[]>) {
+  for (const [pr, told] of merged)
     for (const id of told) {
       const o = groups.get(id)?.objective;
       if (o !== undefined && o !== "") byObjective.get(o)?.prs.add(pr);
     }
+}
+
+function addResolvedThreads(byObjective: Map<string, ObjectiveRollup>, resolvedAt: Map<string, number>, threads: StatsThread[]) {
   for (const t of threads) {
     const o = t.objective === undefined ? undefined : byObjective.get(t.objective);
-    if (o && outcomes.resolvedAt.has(t.id)) byObjective.set(o.id, { ...o, threads: o.threads + 1 });
+    if (o && resolvedAt.has(t.id)) byObjective.set(o.id, { ...o, threads: o.threads + 1 });
   }
-  return [...byObjective.values()].map((o) => ({ ...o, prs: o.prs.size })).toSorted((a, b) => b.dollars - a.dollars);
+}
+
+function objectiveRollups(titles: Map<string, string>, { all, groups, outcomes, threads }: Results) {
+  const byObjective = spendByObjective(all, titles);
+  addMergedPrs(byObjective, groups, outcomes.merged);
+  addResolvedThreads(byObjective, outcomes.resolvedAt, threads);
+  return byObjective
+    .values()
+    .map((o) => ({ ...o, prs: o.prs.size }))
+    .toArray()
+    .toSorted((a, b) => b.dollars - a.dollars);
 }
 
 function totalsOf(all: Group[], outcomes: Outcomes) {
@@ -204,23 +225,28 @@ function memoizedUsage() {
 
 export function agents(windowDays: number, sessions: SessionInfo[], objectives: { id: string; title: string }[]) {
   const usage = memoizedUsage();
-  const scanning = isScanningAfterFreshening(usage.at);
+  const isScanning = isScanningAfterFreshening(usage.at);
   const days = lastDays(windowDays);
   const who: Who = { live: new Map(sessions.map((s) => [s.id, s])), named: namesTable.all() };
   const { groups, daily, byModel } = spendInWindow(usage, new Set(days), who);
-  const outcomes = outcomesSince(busLog().events, midnight(days[0] ?? dayKey(Date.now())));
+  const from = midnight(days[0] ?? dayKey(Date.now()));
+  const outcomes = outcomesSince(busLog().events, from);
   const threads = statsThreads();
   creditOutcomes(groups, outcomes, threads);
-  const all = [...groups.values()];
+  const all = groups.values().toArray();
   return {
     at: usage.at,
-    scanning,
+    scanning: isScanning,
     days,
     activeGapMin: ACTIVE_GAP_MS / 60_000,
     totals: totalsOf(all, outcomes),
     daily: days.map((d) => ({ day: d, models: daily.get(d) ?? {} })),
-    models: [...byModel].map(([model, v]) => ({ model, ...v })).toSorted((a, b) => b.dollars - a.dollars),
+    models: byModel
+      .entries()
+      .map(([model, v]) => ({ model, ...v }))
+      .toArray()
+      .toSorted((a, b) => b.dollars - a.dollars),
     groups: all.toSorted((a, b) => b.dollars - a.dollars),
-    objectives: objectiveRollups(all, new Map(objectives.map((o) => [o.id, o.title])), groups, outcomes, threads),
+    objectives: objectiveRollups(new Map(objectives.map((o) => [o.id, o.title])), { all, groups, outcomes, threads }),
   };
 }

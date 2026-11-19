@@ -12,7 +12,7 @@ function tzOffsetMs(at: number) {
 }
 
 export function midnight(day: string) {
-  const [y = Number.NaN, m = Number.NaN, d = Number.NaN] = day.split("-", 3).map(Number);
+  const [y = NaN, m = NaN, d = NaN] = day.split("-", 3).map(Number);
   const guess = Date.UTC(y, m - 1, d);
   return guess - tzOffsetMs(guess - tzOffsetMs(guess));
 }
