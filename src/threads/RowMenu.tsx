@@ -87,7 +87,7 @@ export function threadItems(t: Thread, all: Thread[], on: { open?: () => void; r
   ];
 }
 
-export const pinItem = (t: Thread): MenuItem => ({
+export const pinItem = (t: Thread): Exclude<MenuItem, "-"> => ({
   label: t.pinned ? "Unpin" : "Pin",
   icon: t.pinned ? PinOff : Pin,
   run: () => {
