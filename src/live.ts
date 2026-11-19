@@ -1,6 +1,6 @@
 import type { Agent, Objective, Sentry, SentrySession, Shell, Signal, Task, Thread } from "./mock";
 import { markResurfaced } from "./threads/seen";
-import { agentStore, changes, liveStore, objectiveStore, nameStore, prStore, type Pr, refreshed, sentryStore, shellStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
+import { agentStore, changes, liveStore, movedStore, objectiveStore, nameStore, prStore, type Pr, refreshed, sentryStore, shellStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
 
 type World = { objectives: Objective[]; agents: Agent[]; tasks: Task[]; threads: Thread[]; signals: Signal[]; sentries: SentrySession[]; shells?: Shell[]; names?: Record<string, string>; prs: Record<string, Pr> };
 
@@ -24,7 +24,8 @@ function apply(w: World) {
   objectiveStore.set(w.objectives);
   agentStore.set(w.agents);
   taskStore.set(w.tasks);
-  threadStore.set(w.threads);
+  threadStore.set(w.threads.filter(t => !t.movedTo));
+  movedStore.set(w.threads.filter(t => t.movedTo));
   markResurfaced(w.threads);
   signalStore.set(w.signals);
   sentryStore.set(w.sentries);

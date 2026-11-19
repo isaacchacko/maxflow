@@ -8,7 +8,7 @@ import { AgentLink } from "@/components/AgentLink";
 import { Elapsed } from "@/components/Working";
 import { cn } from "@/lib/utils";
 import type { Thread } from "@/mock";
-import { agentStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
+import { agentStore, movedStore, openSubthread, postToThread, setResolved, threadStore } from "@/store";
 import { Composer, quoteInto, quoted } from "./Composer";
 import { composeOnArrival, flashMessage, goToMessage, takeCompose, useLayerScroll } from "./jump";
 import { MessageRow, when } from "./MessageRow";
@@ -22,6 +22,7 @@ import { PinToggle } from "./PinToggle";
 import { paneStore } from "./pane";
 import { openRaise, raise, raisedTo } from "./Raise";
 import { HoverBar } from "./HoverBar";
+import { MovedChip } from "./Moved";
 import { openPause, pausedLabel } from "./Pause";
 
 /** Escape climbs one level: a subthread goes to its parent at the message it hangs off, a top thread to the view it came from. */
@@ -103,6 +104,7 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
   if (!paneOpen && detailWithPane) setDetailWithPane(false);
   const all = threadStore.use();
   const thread = all.find(t => t.id === id);
+  const moved = movedStore.use().find(t => t.id === id)?.movedTo;
   const agents = agentStore.use();
   const scrollRef = useRef<HTMLDivElement>(null);
   // Slack's red "New" line: above the first message he hadn't seen when he opened the thread, taken before it is marked seen,
@@ -175,6 +177,13 @@ export function ThreadPage({ id, back, embedded }: { id: string; back: string; e
     { target: document },
   );
 
+  if (!thread && moved)
+    return (
+      <div className="flex flex-col gap-1 p-6 text-sm text-muted-foreground">
+        This thread was merged into another, with its messages.
+        <MovedChip to={moved} />
+      </div>
+    );
   if (!thread) return <p className="p-6 text-muted-foreground">No thread {id}.</p>;
 
   // A subthread's root is a message in its parent; the breadcrumb climbs back up through every ancestor.

@@ -338,6 +338,7 @@ if (verb === "ls") {
   let t = all.find((x) => x.id === rest[1]);
   while (t?.mergedInto) t = all.find((x) => x.id === t!.mergedInto);
   if (!t) console.error(`no thread ${rest[1]}`), process.exit(1);
+  if (t.id !== rest[1]) console.log(`${rest[1]} was merged into ${t.id} "${t.title}"${t.objective ? ` on ${t.objective}` : ""}; its messages are there now, so that thread is below.\n`);
   const who = new Map<string, string>((await call("/api/sessions")).map((s: { id: string; name: string }) => [s.id, s.name]));
   const last = Number(flag(rest, "--last") ?? 0);
   const shown = last > 0 ? t.messages.slice(-last) : t.messages;

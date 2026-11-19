@@ -3,9 +3,11 @@ import { DropdownMenu } from "radix-ui";
 import { Fragment, useCallback, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { localAt, type Thread } from "@/mock";
-import { markAskShown, objectiveStore, setResolved, startThread, threadStore } from "@/store";
+import { markAskShown, movedStore, objectiveStore, setMovedResolved, setResolved, startThread, threadStore } from "@/store";
 import { Composer, quoteInto, quoted } from "@/threads/Composer";
 import { HoverBar } from "@/threads/HoverBar";
+import { goToMessage } from "@/threads/jump";
+import { MovedChip } from "@/threads/Moved";
 import { arrivedFrom, composeOnArrival, flash, useLayerScroll } from "@/threads/jump";
 import { MessageRow } from "@/threads/MessageRow";
 import { Replies } from "@/threads/Replies";
@@ -108,8 +110,8 @@ export function InboxView() {
   const [showResolved, setShowResolved] = useState(false);
   // Resolved or paused from this list, a row stays put until he leaves the inbox, so a second click undoes an accidental one.
   const [kept, setKept] = useState<Set<string>>(() => new Set());
-  // Subthreads live under their message, not in the inbox.
-  const tops = threads.filter(t => !t.parentId);
+  // Subthreads live under their message, not in the inbox. A thread of his merged into another stays as a stub where it was.
+  const tops = [...threads.filter(t => !t.parentId), ...movedStore.use()];
   const resolved = tops.filter(t => t.resolved).length;
   const [showPaused, setShowPaused] = useState(false);
   const paused = tops.filter(t => t.paused).length;
@@ -122,7 +124,7 @@ export function InboxView() {
   const asks = rows.filter(r => r.t.asks);
   const replied = rows.filter(r => unseenDeep(r.t, threads) > 0);
   const firstNew = rows.findIndex(r => r.first.from !== "isaac" && r.first.at > seenAt);
-  const toggle = (t: Thread) => (setKept(k => new Set(k).add(t.id)), setResolved(t.id, !t.resolved));
+  const toggle = (t: Thread) => (setKept(k => new Set(k).add(t.id)), (t.movedTo ? setMovedResolved : setResolved)(t.id, !t.resolved));
   const scrollRef = useRef<HTMLDivElement>(null);
   const lineRef = useRef<HTMLDivElement>(null);
   const open = (id: string) => (location.hash = `thread/${id}`);
@@ -188,6 +190,34 @@ export function InboxView() {
     const r = replied[step % replied.length];
     if (r) show(r.t.id), setStep(s => s + 1);
   };
+
+  // A stub: his message where the thread was, muted, with where it went; opening it opens that thread at his message.
+  const movedRow = (t: Thread, to: NonNullable<Thread["movedTo"]>, first: ReturnType<typeof openerOf>, grouped: boolean) => (
+    <div key={t.id} data-row={t.id} data-agent={`inbox-moved:${t.id}`} className={cn("group/row group/bar relative", !grouped && "mt-2.5")}>
+      <div className="opacity-60">
+        <MessageRow
+          from={first.from}
+          at={first.at}
+          text={first.text}
+          grouped={grouped}
+          className="cursor-pointer"
+          bodyClassName="max-h-36 overflow-hidden [&_img]:max-h-28"
+          onClick={e => (e.target as Element).closest("a, button") || goToMessage(to.id, to.messageId)}
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <MovedChip to={to} />
+            {t.resolved && (
+              <button data-agent={`inbox-reopen:${t.id}`} title="Reopen" onClick={() => toggle(t)} className="mt-1 flex items-center gap-1 rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-xs font-medium text-ok hover:border-ok">
+                <Check className="size-3" />
+                Resolved
+              </button>
+            )}
+          </div>
+        </MessageRow>
+      </div>
+      <HoverBar agent={t.id} actions={[{ label: t.resolved ? "Reopen" : "Resolve", icon: t.resolved ? RotateCcw : Check, run: () => toggle(t), agent: `inbox-resolve:${t.id}` }]} menu={[]} />
+    </div>
+  );
 
   const threadRow = (t: Thread, first: ReturnType<typeof openerOf>, grouped: boolean) => (
     <RowMenu key={t.id} agent={t.id} items={menu(t)}>
@@ -300,7 +330,7 @@ export function InboxView() {
                   const i = from + j;
                   const prev = rows[i - 1];
                   const isNew = i === firstNew;
-                  const grouped = j > 0 && !isNew && !t.asks && !t.feed && !t.paused && !prev?.t.asks && prev?.first.from === first.from && Date.parse(first.at) - Date.parse(prev.first.at) <= GROUP_MS;
+                  const grouped = j > 0 && !isNew && !t.asks && !t.feed && !t.paused && !t.movedTo && !prev?.t.movedTo && !prev?.t.asks && prev?.first.from === first.from && Date.parse(first.at) - Date.parse(prev.first.at) <= GROUP_MS;
                   return (
                     <Fragment key={t.id}>
                       {isNew && (
@@ -309,7 +339,7 @@ export function InboxView() {
                           New
                         </div>
                       )}
-                      {threadRow(t, first, grouped)}
+                      {t.movedTo ? movedRow(t, t.movedTo, first, grouped) : threadRow(t, first, grouped)}
                     </Fragment>
                   );
                 })}
