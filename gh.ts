@@ -23,7 +23,10 @@ export type Head = {
 };
 export type PolledPr = { at: number; pr: Pr };
 type Found<T> = { byNumber: Map<number, T>; byBranch: Map<string, T> };
-export type Session = { id: string; cwd: string; running: boolean; sentry: boolean; chatId?: string; transcript?: string };
+export type Session = {
+  id: string; name: string; cwd: string; running: boolean; sentry: boolean; chatId?: string; transcript?: string;
+  links: string[]; pending: number; status: string; blocked: object | null;
+};
 
 const SESSIONS_TIMEOUT_MS = 30_000;
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE"]);
