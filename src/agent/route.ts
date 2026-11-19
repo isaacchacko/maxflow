@@ -1,3 +1,4 @@
+import { hasText } from "@/lib/utils";
 import { addSignal, agentStore, liveStore, objectiveStore, sendChat, taskStore, type PageRef } from "@/store";
 
 function bestMatch<T extends { title: string }>(text: string, items: T[]) {
@@ -14,18 +15,20 @@ function bestMatch<T extends { title: string }>(text: string, items: T[]) {
 function pickTarget(text: string): PageRef | undefined {
   const task = bestMatch(text, taskStore.get());
   const objective = bestMatch(text, objectiveStore.get());
-  if (objective && (/\bobjective\b/.test(text) || !task || objective.score > task.score)) return `objective/${objective.item.id}`;
-  if (task) return `task/${task.item.id}`;
+  if (objective && (!task || /\bobjective\b/.test(text) || objective.score > task.score)) return `objective/${objective.item.id}`;
+  return task ? `task/${task.item.id}` : undefined;
 }
 
-/** A message typed into the event log goes to whoever owns what it mentions, else stays unrouted. */
 export function routeChat(request: string) {
-  if (liveStore.get()) return void sendChat(request);
+  if (liveStore.get()) {
+    sendChat(request);
+    return;
+  }
   const ref = pickTarget(request.toLowerCase());
-  if (!ref) return addSignal({ source: "isaac", target: "chat", text: request, routedTo: [] });
-  const [type, id] = ref.split("/");
-  const objectiveId = type === "objective" ? id : objectiveStore.get().find(o => o.taskIds.includes(id!))?.id;
+  if (ref === undefined) return addSignal({ source: "isaac", target: "chat", text: request, routedTo: [] });
+  const [type, id = ""] = ref.split("/", 2);
+  const objectiveId = type === "objective" ? id : objectiveStore.get().find(o => o.taskIds.includes(id))?.id;
   const router = agentStore.get().find(a => a.role === "router" && a.objectiveId === objectiveId);
   const worker = type === "task" ? taskStore.get().find(t => t.id === id)?.agent : undefined;
-  return addSignal({ source: "isaac", target: "chat", text: request, routedTo: [router?.id, worker].filter((a): a is string => !!a) });
+  return addSignal({ source: "isaac", target: "chat", text: request, routedTo: [router?.id, worker].filter(hasText) });
 }
