@@ -24,6 +24,13 @@ export class BrowserCap extends Error {}
 
 const profileOf = (session: string) => `browsers/${session}`;
 const portFileOf = (session: string) => `${profileOf(session)}/DevToolsActivePort`;
+const logFileOf = (session: string) => `${profileOf(session)}/chrome.log`;
+const LOG_LINES_TOLD = 8;
+
+function lastWords(session: string) {
+  const said = (readStateText(logFileOf(session)) ?? "").trim().split("\n").slice(-LOG_LINES_TOLD).join("\n");
+  return said === "" ? "" : `. Chrome's last words:\n${said}`;
+}
 
 async function devtoolsJson(port: number, path: string): Promise<unknown> {
   const res = await fetch(`http://127.0.0.1:${String(port)}${path}`, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
@@ -55,17 +62,17 @@ async function launchChrome(session: string): Promise<number> {
   if (binary === undefined) throw new BrowserCap("no Chrome or Chromium on this machine: install one, or point MAXFLOW_CHROME at its binary");
   const profile = stateDirectory(profileOf(session));
   removeState(portFileOf(session));
-  const chrome = Bun.spawn([binary, ...chromeFlags(profile), "about:blank"], { stdout: "ignore", stderr: "ignore" });
+  const chrome = Bun.spawn([binary, ...chromeFlags(profile), "about:blank"], { stdout: "ignore", stderr: Bun.file(`${profile}/chrome.log`) });
   chrome.unref();
   const end = Date.now() + LAUNCH_DEADLINE_MS;
   while (Date.now() < end) {
-    if (chrome.exitCode !== null) throw new CdpError(`Chrome exited ${String(chrome.exitCode)} before it listened`);
+    if (chrome.exitCode !== null) throw new CdpError(`Chrome exited ${String(chrome.exitCode)} before it listened${lastWords(session)}`);
     const port = writtenPort(session);
     if (port !== undefined && (await isAnswering(port))) return port;
     await Bun.sleep(100);
   }
   chrome.kill();
-  throw new CdpError(`Chrome didn't listen within ${String(LAUNCH_DEADLINE_MS)}ms`);
+  throw new CdpError(`Chrome didn't listen within ${String(LAUNCH_DEADLINE_MS)}ms${lastWords(session)}`);
 }
 
 const socketUrlOf = (target: unknown) => (isRecord(target) && typeof target["webSocketDebuggerUrl"] === "string" ? target["webSocketDebuggerUrl"] : undefined);

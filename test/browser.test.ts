@@ -1,4 +1,8 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { KEYCHAIN_UNTOUCHED } from "../browsers";
 import { chromeBinary } from "../chrome";
 import { startServerWithoutSentries, stopByPidAndSocket, throwawayInstance, waitUntilAnswering, withTimeout } from "./throwaway-instance";
 
@@ -10,6 +14,16 @@ const site = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Respon
 const instance = throwawayInstance("maxflow-browser-");
 const server = startServerWithoutSentries(instance);
 const sessionIds: string[] = [];
+
+const COLD_START_MS = 60_000;
+
+// constraint: a CI runner's first Chrome launch takes 6-15s while later ones take 0.15s, and the cold one would otherwise eat the server's 15s launch deadline
+beforeAll(async () => {
+  const binary = chromeBinary();
+  if (binary === undefined) return;
+  const chrome = Bun.spawn([binary, "--headless=new", `--user-data-dir=${mkdtempSync(join(tmpdir(), "maxflow-chrome-warm-"))}`, "--no-first-run", ...KEYCHAIN_UNTOUCHED, "--dump-dom", "about:blank"], { stdout: "ignore", stderr: "ignore", timeout: COLD_START_MS });
+  await chrome.exited;
+}, COLD_START_MS + 5000);
 
 afterAll(async () => {
   for (const id of sessionIds) await fetch(`${instance.base}/api/browsers/${id}/close`, withTimeout({ method: "POST" }));
@@ -25,6 +39,12 @@ async function newSession() {
   return id;
 }
 
+async function jsonOf(res: Response): Promise<unknown> {
+  const said = await res.text();
+  if (!res.ok) throw new Error(`${String(res.status)}: ${said}`);
+  return JSON.parse(said);
+}
+
 const browse = async (id: string, verb: string, body: unknown = {}, from = id) =>
   fetch(`${instance.base}/api/browsers/${id}/${verb}`, { method: "POST", headers: { "x-maxflow-from": from }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
 
@@ -33,7 +53,7 @@ test.skipIf(chromeBinary() === undefined)(
   async () => {
     const id = await newSession();
     expect((await browse(id, "read")).status).toBe(409);
-    expect(await (await browse(id, "open", { url: `127.0.0.1:${String(site.port)}` })).json()).toEqual({ url: `http://127.0.0.1:${String(site.port)}/`, title: "Form" });
+    expect(await jsonOf(await browse(id, "open", { url: `127.0.0.1:${String(site.port)}` }))).toEqual({ url: `http://127.0.0.1:${String(site.port)}/`, title: "Form" });
     expect(await (await browse(id, "read", { ax: true })).text()).toContain('textbox "Email"');
     expect(await (await browse(id, "type", { target: "#email", text: "ada@example.com", enter: true })).text()).toBe("typed into input, then Enter");
     expect(await (await browse(id, "eval", { code: "out.textContent" })).json()).toEqual({ value: "sent ada@example.com", type: "string" });
