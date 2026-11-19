@@ -1,0 +1,25 @@
+name: lint-report
+on:
+  push:
+    branches: ["lint/**"]
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - name: every violation left in the files this branch changed, baseline ignored
+        run: |
+          git fetch origin feat/v2
+          FILES=$(git diff --name-only --diff-filter=AM origin/feat/v2...HEAD -- '*.ts' '*.tsx')
+          echo "{}" > /tmp/no-suppressions.json
+          echo "::group::type errors"
+          bun node_modules/.bin/tsc -p . --pretty false | grep -F -f <(echo "$FILES") || true
+          echo "::endgroup::"
+          bun --bun node_modules/.bin/eslint --suppressions-location /tmp/no-suppressions.json $FILES || true
