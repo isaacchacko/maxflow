@@ -1,20 +1,20 @@
 import { AlarmClock, ArrowUpToLine, Check, Copy, ExternalLink, Link, Mail, MailOpen, MessageSquareReply, Pin, PinOff, Play, Quote, RotateCcw, type LucideIcon } from "lucide-react";
 import { ContextMenu, DropdownMenu } from "radix-ui";
+import { hasText } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { setPaused, setPinned } from "@/store";
 import { openPause } from "./Pause";
 import { repliesOf } from "./Replies";
 import { markRead, markUnread, unseenDeep } from "./seen";
 
-/** One line of a right-click menu; "-" draws a rule. */
-export type MenuItem = { label: string; icon: LucideIcon; run: () => void; agent?: string; pressed?: boolean } | "-";
+export type MenuItem = "-" | { label: string; icon: LucideIcon; run: () => void; agent?: string; pressed?: boolean };
 
-export const copy = (text: string) => void navigator.clipboard.writeText(text);
+export const copy = (text: string) => {
+  void navigator.clipboard.writeText(text);
+};
 export const threadLink = (id: string) => `${location.origin}${location.pathname}#thread/${id}`;
 
-/** A right-click menu on its one child (a row, a message, a header), which draws as hovered while the menu is open. */
-/** Only the items that apply; a rule never leads, trails or doubles up once the others are left out. */
-export const applying = (items: (MenuItem | false | undefined)[] | undefined) => (items ?? []).filter((x): x is MenuItem => !!x).filter((x, i, all) => x !== "-" || (i > 0 && i < all.length - 1 && all[i - 1] !== "-"));
+export const applying = (items: (MenuItem | false | undefined)[] | undefined) => (items ?? []).filter(x => x !== false && x !== undefined).filter((x, i, all) => x !== "-" || (i > 0 && i < all.length - 1 && all[i - 1] !== "-"));
 
 export function RowMenu({ items, agent, children }: { items: (MenuItem | false | undefined)[]; agent: string; children: React.ReactElement }) {
   const shown = applying(items);
@@ -24,8 +24,6 @@ export function RowMenu({ items, agent, children }: { items: (MenuItem | false |
         {children}
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
-        {/* Its keys are its own: Escape closes the menu without also climbing a level.
-            Closing leaves focus where the chosen item put it (the box, for Quote), not back on the row. */}
         <ContextMenu.Content data-agent={`menu:${agent}`} onEscapeKeyDown={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()} onCloseAutoFocus={e => e.preventDefault()} className="z-50 min-w-48 border bg-background p-1 text-sm shadow-lg">
           {shown.map((x, i) =>
             x === "-" ? (
@@ -48,7 +46,6 @@ export function RowMenu({ items, agent, children }: { items: (MenuItem | false |
   );
 }
 
-/** The same menu opened from a button (a header's ⋯) instead of a right-click: what the button sits on offers the same items either way. */
 export function DropMenu({ items, agent, children }: { items: (MenuItem | false | undefined)[]; agent: string; children: React.ReactElement }) {
   return (
     <DropdownMenu.Root modal={false}>
@@ -71,12 +68,7 @@ export function DropMenu({ items, agent, children }: { items: (MenuItem | false 
   );
 }
 
-/**
- * What a thread offers wherever it is drawn (an inbox row, its own header): `open` and `reply` where it isn't already open, and
- * `resolve` as the page resolves it, so the inbox keeps the row in place and the header climbs a level. Only a top thread pauses, and
- * `pause` opens its popover where the inbox has more to do first.
- */
-export function threadItems(t: Thread, all: Thread[], on: { open?(): void; reply?(): void; resolve(): void; pause?(): void }): (MenuItem | false | undefined)[] {
+export function threadItems(t: Thread, all: Thread[], on: { open?: () => void; reply?: () => void; resolve: () => void; pause?: () => void }): (MenuItem | false | undefined)[] {
   return [
     on.open && { label: "Open", icon: ExternalLink, run: on.open },
     on.reply && { label: "Reply", icon: MessageSquareReply, run: on.reply },
@@ -84,8 +76,10 @@ export function threadItems(t: Thread, all: Thread[], on: { open?(): void; reply
     unseenDeep(t, all) > 0 && { label: "Mark read", icon: MailOpen, run: () => markRead(t, all), agent: `mark-read:${t.id}` },
     unseenDeep(t, all) === 0 && repliesOf(t).length > 0 && { label: "Mark unread", icon: Mail, run: () => markUnread(t), agent: `mark-unread:${t.id}` },
     { label: t.resolved ? "Reopen" : "Resolve", icon: t.resolved ? RotateCcw : Check, run: on.resolve, agent: `menu-resolve:${t.id}` },
-    !t.parentId && { label: t.paused ? "Pause again…" : "Pause…", icon: AlarmClock, run: on.pause ?? (() => openPause(t.id)), agent: `menu-pause:${t.id}` },
-    t.paused && { label: "Unpause", icon: Play, run: () => void setPaused(t.id, null), agent: `menu-unpause:${t.id}` },
+    !hasText(t.parentId) && { label: t.paused ? "Pause again…" : "Pause…", icon: AlarmClock, run: on.pause ?? (() => openPause(t.id)), agent: `menu-pause:${t.id}` },
+    t.paused && { label: "Unpause", icon: Play, run: () => {
+        void setPaused(t.id, null);
+      }, agent: `menu-unpause:${t.id}` },
     pinItem(t),
     "-",
     { label: "Copy link", icon: Link, run: () => copy(threadLink(t.id)) },
@@ -93,11 +87,18 @@ export function threadItems(t: Thread, all: Thread[], on: { open?(): void; reply
   ];
 }
 
-/** Pin a thread to the sidebar, or unpin it: the same item in its menus and hover bars, on P. */
-export const pinItem = (t: Thread): MenuItem => ({ label: t.pinned ? "Unpin" : "Pin", icon: t.pinned ? PinOff : Pin, run: () => void setPinned(t.id, !t.pinned), agent: `pin:${t.id}`, pressed: !!t.pinned });
+export const pinItem = (t: Thread): MenuItem => ({
+  label: t.pinned ? "Unpin" : "Pin",
+  icon: t.pinned ? PinOff : Pin,
+  run: () => {
+    void setPinned(t.id, !t.pinned);
+  },
+  agent: `pin:${t.id}`,
+  pressed: Boolean(t.pinned),
+});
 
-/** What a message offers: its subthread if it has one, else a reply in thread; a quote; unread from it on; its link and text. */
-export function messageItems(text: string, on: { open?(): void; reply?(): void; quote?(): void; raise?(): void; unread?(): void; link?: string }): (MenuItem | false | undefined)[] {
+export function messageItems(text: string, on: { open?: () => void; reply?: () => void; quote?: () => void; raise?: () => void; unread?: () => void; link?: string }): (MenuItem | false | undefined)[] {
+  const link = on.link;
   return [
     on.open ? { label: "Open subthread", icon: MessageSquareReply, run: on.open } : on.reply && { label: "Reply in thread", icon: MessageSquareReply, run: on.reply },
     on.quote && { label: "Quote", icon: Quote, run: on.quote },
@@ -105,7 +106,7 @@ export function messageItems(text: string, on: { open?(): void; reply?(): void; 
     "-",
     on.unread && { label: "Mark unread from here", icon: Mail, run: on.unread },
     "-",
-    !!on.link && { label: "Copy link", icon: Link, run: () => copy(on.link!) },
+    hasText(link) && { label: "Copy link", icon: Link, run: () => copy(link) },
     { label: "Copy text", icon: Copy, run: () => copy(text) },
   ];
 }
