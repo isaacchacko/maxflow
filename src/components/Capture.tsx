@@ -19,7 +19,10 @@ function closeDialogThroughItsInput(dialog: Element | null) {
   (dialog.querySelector("input") ?? dialog).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 }
 
-const failureText = (error: unknown) => (error instanceof Event ? `a ${error.type} drawing the page` : String(error));
+function failureText(error: unknown) {
+  if (error instanceof Event) return "something on the page wouldn't load while drawing it";
+  return error instanceof Error ? error.message : String(error);
+}
 
 function useCaptureState() {
   const [mode, setMode] = useState<"off" | "picking" | "shooting" | "comment">("off");
@@ -46,12 +49,12 @@ function useCapture() {
   const overlay = useRef<HTMLDivElement>(null);
   const latestSendWhenReady = useLatest(state.isSendingWhenReady);
 
-  async function send(png = shot?.png) {
-    if (!shot || !png) return;
+  async function send(picture: Pick<Shot, "png" | "failure"> = { ...(shot?.png && { png: shot.png }), ...(shot?.failure !== undefined && { failure: shot.failure }) }) {
+    if (!shot || (!picture.png && picture.failure === undefined)) return;
     setMode("shooting");
     try {
-      const path = await uploadKeptAsFile(png);
-      await startThread([comment.trim(), `![screenshot](${path})`, shot.context].filter(Boolean).join("\n"));
+      const attached = picture.png ? `![screenshot](${await uploadKeptAsFile(picture.png)})` : `(No screenshot: ${picture.failure ?? ""}.)`;
+      await startThread([comment.trim(), attached, shot.context].filter(Boolean).join("\n"));
       reset();
     } catch (error_) {
       setError(String(error_));
@@ -83,7 +86,14 @@ function useCapture() {
       }
       closeDialogThroughItsInput(dialogInTheShot);
     } catch (error_) {
-      if (mine === takingRef.current) setError(`Couldn't capture: ${failureText(error_)}`);
+      if (mine !== takingRef.current) return;
+      const failure = failureText(error_);
+      setShot(s => s && { ...s, failure });
+      setError(`Couldn't take the picture: ${failure}. Enter sends your message without it.`);
+      if (latestSendWhenReady.current) {
+        setSendWhenReady(false);
+        void latestSend.current({ failure });
+      }
     }
   }
 
@@ -104,7 +114,7 @@ function useCapture() {
   );
 
   const sendOrWait = () => {
-    if (shot?.png) void send();
+    if (shot?.png || shot?.failure !== undefined) void send();
     else setSendWhenReady(true);
   };
   return { ...state, overlay, take, sendOrWait };

@@ -92,10 +92,13 @@ function rowIcon(kind: Kind, isCollapsed: boolean | undefined) {
 }
 
 function Row({ kind, path, depth, open = 0, isSelected = false, isCollapsed, onToggle, act }: RowProps) {
-  const Tag = kind === "doc" ? "a" : "button";
+  const Tag = kind === "doc" ? "a" : "div";
+  const toggleOnKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") onToggle?.();
+  };
   return (
     <Tag
-      {...(kind === "doc" ? { href: `#docs/${encodeURI(path)}` } : { type: "button" as const, onClick: onToggle })}
+      {...(kind === "doc" ? { href: `#docs/${encodeURI(path)}` } : { role: "button", tabIndex: 0, onClick: onToggle, onKeyDown: toggleOnKey })}
       data-agent={`docs:${kind}:${path}`}
       style={{ paddingLeft: `${String(8 + depth * 14)}px` }}
       className={cn("group flex h-7 w-full items-center gap-2 rounded-md pr-1.5 text-left text-[13px] hover:bg-black/[0.04]", isSelected && "bg-muted font-medium")}

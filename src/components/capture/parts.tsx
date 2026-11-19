@@ -64,7 +64,7 @@ export function PickOverlay({ overlayRef, onPick }: { overlayRef: React.RefObjec
   );
 }
 
-export type Shot = { rect: Rect; png?: Blob; preview?: string; context: string; target: HTMLElement };
+export type Shot = { rect: Rect; png?: Blob; preview?: string; failure?: string; context: string; target: HTMLElement };
 
 function ShotPreview({ shot, error }: { shot: Shot | null; error: string }) {
   if (shot?.preview !== undefined) return <img src={shot.preview} alt="" className="max-h-64 self-start border object-contain" />;

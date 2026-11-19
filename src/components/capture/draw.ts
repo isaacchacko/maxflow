@@ -61,7 +61,10 @@ function restorePictures(away: Blanked[]) {
   }
 }
 
-const isLeftOutOfTheShot = (node: Node) => node instanceof HTMLIFrameElement || (node instanceof HTMLElement && node.dataset["captureUi"] !== undefined);
+// constraint: html-to-image 1.11 rejects the whole shot when an <img> has no src, and CodeMirror puts src-less cm-widgetBuffer images beside every inline widget
+const isImageWithNothingToDraw = (node: Node) => node instanceof HTMLImageElement && (node.getAttribute("src") ?? "") === "";
+
+const isLeftOutOfTheShot = (node: Node) => node instanceof HTMLIFrameElement || isImageWithNothingToDraw(node) || (node instanceof HTMLElement && node.dataset["captureUi"] !== undefined);
 
 async function drawCutTo(rect: Rect, target: HTMLElement) {
   const ratio = Math.min(devicePixelRatio, 2);
@@ -80,12 +83,12 @@ async function drawCutTo(rect: Rect, target: HTMLElement) {
   out.width = Math.round(rect.w * ratio);
   out.height = Math.round(rect.h * ratio);
   const context = out.getContext("2d");
-  if (!context) throw new Error("no 2d canvas context");
+  if (!context) throw new Error("the browser wouldn't give a canvas to draw on");
   context.drawImage(page, (rect.x - box.x) * ratio, (rect.y - box.y) * ratio, out.width, out.height, 0, 0, out.width, out.height);
   return await new Promise<Blob>((resolve, reject) => {
     out.toBlob(b => {
       if (b) resolve(b);
-      else reject(new Error("empty capture"));
+      else reject(new Error("the picture came out empty"));
     }, "image/png");
   });
 }
