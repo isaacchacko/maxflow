@@ -1,15 +1,16 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { STATE_DIR } from "../instance";
 import { isRecord } from "../shared/guards";
 import { peekStateJson, readGatingStateJson, readStateJson } from "../state";
 
+const probeDir = join(process.env["HOME"] ?? "", ".maxflow-v2-statetest");
+
 const put = (name: string, text: string) => {
-  writeFileSync(join(STATE_DIR, name), text);
+  writeFileSync(join(probeDir, name), text);
 };
-const has = (name: string) => readdirSync(STATE_DIR).includes(name);
-const keptCopies = (name: string) => readdirSync(STATE_DIR).filter((f) => f.startsWith(`${name}.corrupt-`));
-const keptText = (name: string) => readFileSync(join(STATE_DIR, keptCopies(name)[0] ?? name), "utf8");
+const isListed = (name: string) => readdirSync(probeDir).includes(name);
+const keptCopies = (name: string) => readdirSync(probeDir).filter((f) => f.startsWith(`${name}.corrupt-`));
+const keptText = (name: string) => readFileSync(join(probeDir, keptCopies(name)[0] ?? name), "utf8");
 
 function gatingError(name: string) {
   try {
@@ -33,13 +34,13 @@ const observed = {
   broken: readStateJson("broken.json", isRecord) ?? "undefined",
   brokenKept: keptCopies("broken.json").length,
   brokenKeptText: keptText("broken.json"),
-  brokenStillThere: has("broken.json"),
+  brokenStillThere: isListed("broken.json"),
   shape: readStateJson("shape.json", isRecord) ?? "undefined",
   shapeKept: keptCopies("shape.json").length,
   gatingError: gatingError("gate.json"),
-  gateStillThere: has("gate.json"),
+  gateStillThere: isListed("gate.json"),
   gateKept: keptCopies("gate.json").length,
   peek: peekStateJson("theirs.json") ?? "undefined",
-  theirsStillThere: has("theirs.json"),
+  theirsStillThere: isListed("theirs.json"),
 };
 console.log(JSON.stringify(observed));
