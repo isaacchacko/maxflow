@@ -24,8 +24,8 @@ async function send(path: string, body: object, headers: Record<string, string> 
   return await fetch(`${instance.base}${path}`, withTimeout({ method: "POST", headers, body: JSON.stringify(body) }));
 }
 
-type WorldThread = { id: string; pending?: { stale: boolean; status?: string; waitingOn?: string } };
 async function pendingIn(id: string) {
+  type WorldThread = { id: string; pending?: { stale: boolean; status?: string; waitingOn?: string } };
   const world = (await (await fetch(`${instance.base}/api/world`, withTimeout())).json()) as { threads: WorldThread[] };
   return world.threads.find((t) => t.id === id)?.pending;
 }
