@@ -43,7 +43,7 @@ const usage = `usage:
   maxflow route <signal seq> <objective id> | maxflow route <signal seq> --new <title> [--cwd DIR]   the funnel routing a signal from the event log
   maxflow size <signal seq> direct|area|fyi|ignore [--cwd DIR] [--name N] [--note '<line>'] [--about <thread id>]   the funnel sizing a signal first: direct starts one worker on it, fyi notes a digest line, area is routed next
   maxflow promote <objective title...>   a direct worker whose job grew becomes the router of a new objective holding its thread
-  maxflow thread new <title...> [--objective ID] | maxflow thread new --parent <thread id>:<message id> [text...]   a subthread under that message | maxflow thread post <thread id> <text...> | maxflow thread status <thread id> <line...> | maxflow threads
+  maxflow thread new <title...> [--objective ID] | maxflow thread new --parent <thread id>:<message id> [text...]   a subthread under that message | maxflow thread post <thread id> <text...> [--as <device>/<name>, outside maxflow, where MAXFLOW_SESSION isn't set] | maxflow thread status <thread id> <line...> | maxflow threads
   maxflow thread read <thread id> [--last N]   print a thread's messages as text, e.g. one he @-mentions
                                              --image PATH on thread new/post/done and ask, repeatable: shows him that png/jpg/gif/webp inline
   maxflow thread merge <thread id> <into thread id>   fold a duplicate into another thread: messages, routers, ask and waits move, the duplicate leaves the inbox

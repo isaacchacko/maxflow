@@ -28,6 +28,14 @@ function importList(db: Database, table: string, file: string) {
   (JSON.parse(readFileSync(file, "utf8")) as Row[]).forEach((row, pos) => insert.run(String(row.id), pos, JSON.stringify(row)));
 }
 
+function relabelMessage(db: Database, { thread, message, from }: { thread: string; message: string; from: string }) {
+  const row = db.query("SELECT data FROM threads WHERE id = ?").get(thread) as { data: string } | null;
+  if (row === null) return;
+  const kept = JSON.parse(row.data) as { messages: { id: string; from: string }[] };
+  const relabeled = { ...kept, messages: kept.messages.map((m) => (m.id === message ? { ...m, from } : m)) };
+  db.query("UPDATE threads SET data = ? WHERE id = ?").run(JSON.stringify(relabeled), thread);
+}
+
 function importInboxFiles(db: Database, dir: string) {
   if (!existsSync(dir)) return;
   const insert = db.prepare("INSERT INTO inboxes (key, data) VALUES (?, ?)");
@@ -48,6 +56,7 @@ const MIGRATIONS: ((db: Database) => void)[] = [
     createMap(db, "inboxes");
     importInboxFiles(db, `${STATE_DIR}/inboxes`);
   },
+  (db) => relabelMessage(db, { thread: "th-890892", message: "m-140a9e", from: "cleopatra/yarn-browser" }),
 ];
 const version = (db: Database) => (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
 function migrate(db: Database) {

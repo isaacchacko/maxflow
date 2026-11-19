@@ -91,7 +91,8 @@ export function tellMembers(t: Thread, m: Message, heard: Session[], woke = "") 
 export const ISAAC_IN_THREAD = "[maxflow · Isaac, in thread";
 export const IMAGE = /!\[[^\]]*\]\([^)\s]+\)/g;
 
-type Post = { from?: Session | undefined; text: string; nudge?: "subthread" | undefined; isWakeMessage?: boolean };
+type Post = { from?: Session | undefined; outsideLabel?: string; text: string; nudge?: "subthread" | undefined; isWakeMessage?: boolean };
+const isHisPost = (post: Post) => post.from === undefined && post.outsideLabel === undefined;
 function tellFunnelNobodyOwns(t: Thread, m: Message, woke: string, front: Session) {
   dispatch({ source: "isaac", to: [front], target: t.title, text: m.text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(m.text)}\n[maxflow] Nobody owns this thread any more: its agents ended and it has no objective with a router. Give it one with \`${CLI} thread move ${t.id} <objective id>\`, which hands it and his unanswered messages in it to that objective's routers, so don't relay them.${woke}${mentionsIn(m.text)}` });
 }
@@ -119,26 +120,36 @@ function joinAsRouterWhereTheThreadIsItsToOwn(t: Thread, from: Session) {
   if (from.role?.role !== "router" || t.routers.includes(from.id)) return;
   if (t.objective === "" || t.objective === from.role.objective || t.routers.every((id) => !reachable(sessions.get(id)))) t.routers.push(from.id);
 }
-function postedMessage({ from, text, nudge, isWakeMessage = false }: Post): Message {
-  const isHis = from === undefined;
-  return { ...message(from?.id ?? "isaac", text), ...(nudge && isHis && { nudge }), ...(isWakeMessage && isHis && { wake: true as const }) };
+function postedMessage(post: Post): Message {
+  const { from, outsideLabel, text, nudge, isWakeMessage = false } = post;
+  const isHis = isHisPost(post);
+  return { ...message(from?.id ?? outsideLabel ?? "isaac", text), ...(nudge && isHis && { nudge }), ...(isWakeMessage && isHis && { wake: true as const }) };
 }
 function postMessage(t: Thread, post: Post) {
   const { from } = post;
   const m = postedMessage(post);
   const woke = m.wake ? "\n[maxflow] He wrote this when he paused the thread; it was sent now, as the pause ended." : "";
   t.messages.push(m);
-  if (from && t.feed) patch(t, { signal: undefined });
+  if (!isHisPost(post) && t.feed) patch(t, { signal: undefined });
   if (from) joinAsRouterWhereTheThreadIsItsToOwn(t, from);
-  if (from) {
+  if (isHisPost(post)) handHisPost(t, m, woke);
+  else {
     patch(t, { pending: undefined });
     if (t.paused) patch(t.paused, { posts: (t.paused.posts ?? 0) + 1 });
-  } else handHisPost(t, m, woke);
+  }
   saveThreads();
-  publish(`thread/${t.id}`, { thread: t.id, from: from?.id ?? "isaac" });
+  publish(`thread/${t.id}`, { thread: t.id, from: m.from });
   return m;
 }
-export const postIn = (t: Thread, from: Session | undefined, text: string, nudge?: "subthread") => postMessage(t, { from, text, nudge });
+export const postIn = (t: Thread, from: Session | string | undefined, text: string, nudge?: "subthread") =>
+  postMessage(t, typeof from === "string" ? { outsideLabel: from, text, nudge } : { from, text, nudge });
+export function sessionless(req: Request, as: string | undefined): { label: string } | { isaac: true } | { refusal: string } {
+  if (as !== undefined) return /^[\w.-]+\/[\w.-]+$/.test(as) ? { label: as } : { refusal: `--as takes <device>/<name>, like cleopatra/yarn-browser, not "${as}"` };
+  const claimed = req.headers.get("x-maxflow-from") ?? "";
+  if (claimed === "" && req.headers.get("sec-fetch-site") === "same-origin") return { isaac: true };
+  const unknown = claimed === "" ? "No MAXFLOW_SESSION came with this post" : `MAXFLOW_SESSION=${claimed} is no live session`;
+  return { refusal: `${unknown}, and only Isaac's browser posts as him. Set MAXFLOW_SESSION to your maxflow session id, or post as --as <device>/<name>.` };
+}
 const STOPWORDS = new Set("the and for you that this with are not can but its once has have will what from was any into just your all".split(" "));
 const wordsOf = (text: string) => new Set((text.slice(0, 400).toLowerCase().match(/[a-z0-9]{3,}/g) ?? []).filter((w) => !STOPWORDS.has(w)));
 function sameAsk(objective: string, text: string) {

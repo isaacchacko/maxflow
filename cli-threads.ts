@@ -7,8 +7,8 @@ async function listThreads() {
 
 async function newSubthread(args: string[]) {
   const [thread, message] = (flag(args, "--parent") ?? "").split(":", 2);
-  const text = await withImages(positional(args.slice(1), ["--parent", "--image"]).join(" "), args);
-  const t = replyOf(await post("/api/threads", { parent: { thread, message }, text }));
+  const text = await withImages(positional(args.slice(1), ["--parent", "--image", "--as"]).join(" "), args);
+  const t = replyOf(await post("/api/threads", { parent: { thread, message }, text, as: flag(args, "--as") }));
   console.log(t["id"]);
 }
 
@@ -52,8 +52,8 @@ async function readThread(args: string[]) {
 }
 
 async function postToThread(args: string[]) {
-  const words = withoutImages(args.slice(2)).join(" ");
-  await post(`/api/threads/${argAt(args, 1)}/messages`, { text: await withImages(words, args) });
+  const words = withoutImages(args.slice(2)).filter((a, i, all) => a !== "--as" && all[i - 1] !== "--as").join(" ");
+  await post(`/api/threads/${argAt(args, 1)}/messages`, { text: await withImages(words, args), as: flag(args, "--as") });
 }
 
 async function mergeThread(args: string[]) {

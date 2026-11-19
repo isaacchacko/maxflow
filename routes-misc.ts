@@ -7,7 +7,7 @@ import { isSentry, sessions } from "./sessions";
 import type { Block, FeedPost } from "./model";
 import { names, saveThreads, threads } from "./stores";
 import { createSession, live_thread } from "./lifecycle";
-import { ask, enforcing, postIn } from "./threads";
+import { ask, enforcing, postIn, sessionless } from "./threads";
 import { describe } from "./world";
 import { externalSignal, feedMore } from "./routing";
 import { pointsAtItself, relayRefusal } from "./objectives";
@@ -36,16 +36,18 @@ export async function miscRoute(req: Request, url: URL, path: string): Promise<R
     const t = live_thread(threads.find((x) => x.id === threadPost[1]));
     if (!t) return new Response("no such thread", { status: 404 });
     // done: from `thread done`, which commands used; it is a plain post now.
-    const body = (await req.json().catch(() => ({}))) as { text?: string; nudge?: string; feed?: boolean; posts?: FeedPost[] };
+    const body = (await req.json().catch(() => ({}))) as { text?: string; nudge?: string; feed?: boolean; posts?: FeedPost[]; as?: string };
     const text = body.text?.trim();
     if (!text) return new Response("text required", { status: 400 });
     const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
+    const outside = from ? undefined : sessionless(req, body.as);
+    if (outside && "refusal" in outside) return new Response(outside.refusal, { status: 403 });
     if (body.feed && from && isSentry(from)) return await feedMore(t, from, text, body.posts), Response.json(t, { status: 201 });
     if (from && pointsAtItself(text, t))
       return new Response(`${threadPost[1] !== t.id ? `${threadPost[1]} was merged into ${t.id}, so this would land in ${t.id}` : `This is ${t.id}`}, and a pointer to it there points at itself. Post only what is new for him, or nothing.`, { status: 409 });
     const relay = from === undefined ? undefined : relayRefusal(t, from, text);
     if (relay !== undefined) return new Response(relay, { status: 409 });
-    postIn(t, from, text, body.nudge === "subthread" ? "subthread" : undefined);
+    postIn(t, outside && "label" in outside ? outside.label : from, text, body.nudge === "subthread" ? "subthread" : undefined);
     return Response.json(t, { status: 201 });
   }
 
