@@ -7,6 +7,8 @@ import { captureRegion } from "./capture/draw";
 import { CommentPopover, PickOverlay, type Shot } from "./capture/parts";
 import { captureTarget, type Rect } from "./capture/region";
 
+type Picture = { png?: Blob | undefined; failure?: string | undefined };
+
 const isCaptureShortcut = (e: KeyboardEvent) => e.key.toLowerCase() === "s" && (e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey;
 
 const untilTheOverlayIsGone = async () =>
@@ -49,7 +51,8 @@ function useCapture() {
   const overlay = useRef<HTMLDivElement>(null);
   const latestSendWhenReady = useLatest(state.isSendingWhenReady);
 
-  async function send(picture: Pick<Shot, "png" | "failure"> = { ...(shot?.png && { png: shot.png }), ...(shot?.failure !== undefined && { failure: shot.failure }) }) {
+  async function send(given?: Picture) {
+    const picture = given ?? { png: shot?.png, failure: shot?.failure };
     if (!shot || (!picture.png && picture.failure === undefined)) return;
     setMode("shooting");
     try {
@@ -62,6 +65,14 @@ function useCapture() {
     }
   }
   const latestSend = useLatest(send);
+
+  function sendWithoutThePicture(failure: string) {
+    setShot(s => s && { ...s, failure });
+    setError(`Couldn't take the picture: ${failure}. Enter sends your message without it.`);
+    if (!latestSendWhenReady.current) return;
+    setSendWhenReady(false);
+    void latestSend.current({ failure });
+  }
 
   async function take(rect: Rect, picked?: Element) {
     if (rect.w < 2 || rect.h < 2) {
@@ -86,14 +97,7 @@ function useCapture() {
       }
       closeDialogThroughItsInput(dialogInTheShot);
     } catch (error_) {
-      if (mine !== takingRef.current) return;
-      const failure = failureText(error_);
-      setShot(s => s && { ...s, failure });
-      setError(`Couldn't take the picture: ${failure}. Enter sends your message without it.`);
-      if (latestSendWhenReady.current) {
-        setSendWhenReady(false);
-        void latestSend.current({ failure });
-      }
+      if (mine === takingRef.current) sendWithoutThePicture(failureText(error_));
     }
   }
 
