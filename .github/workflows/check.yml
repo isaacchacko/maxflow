@@ -18,3 +18,5 @@ jobs:
       - run: command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
       - run: bun install --frozen-lockfile
       - run: bun run check:full
+        env:
+          BASELINE_BASE: ${{ github.event.before }}

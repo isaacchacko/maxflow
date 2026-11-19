@@ -12,7 +12,10 @@ type Counts = Record<string, number>;
 
 const head = git("rev-parse", "HEAD");
 const mergeBase = git("merge-base", "HEAD", "origin/feat/v2");
-const base = mergeBase === undefined || mergeBase === head ? git("rev-parse", "HEAD~1") : mergeBase;
+const pushedOnto = process.env["BASELINE_BASE"];
+const isKnownCommit = (sha: string | undefined) => sha !== undefined && /^[0-9a-f]{40}$/.test(sha) && !/^0+$/.test(sha) && git("cat-file", "-e", sha) !== undefined;
+const fallbackBase = mergeBase === undefined || mergeBase === head ? git("rev-parse", "HEAD~1") : mergeBase;
+const base = isKnownCommit(pushedOnto) ? pushedOnto : fallbackBase;
 
 const FUNCTION_SIZE_RULES = new Set(["complexity", "max-statements", "max-lines-per-function", "max-lines", "max-depth", "max-params", "max-nested-callbacks"]);
 const existedAtBase = (path: string) => base !== undefined && git("cat-file", "-e", `${base}:${path}`) !== undefined;
