@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useNow } from "@/lib/effects";
 import { cn } from "@/lib/utils";
 
 // The marks of an agent at work. Which goes where: the ring beside a title (sidebar pins, rows), the dots before a working line's
@@ -62,11 +62,7 @@ const span = (s: number) => (s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)
 /** How long it has been at it, counting: seconds, then minutes and seconds, then hours and minutes (once a minute). */
 export function Elapsed({ since, className }: { since: string; className?: string }) {
   const start = Date.parse(since);
-  const [now, setNow] = useState(Date.now);
-  const s = Math.max(0, Math.floor((now - start) / 1000));
-  useEffect(() => {
-    const id = setTimeout(() => setNow(Date.now()), s < 3600 ? 1000 - ((Date.now() - start) % 1000) : 60_000);
-    return () => clearTimeout(id);
-  }, [now, start, s]);
+  const seconds = (now: number) => Math.max(0, Math.floor((now - start) / 1000));
+  const s = seconds(useNow(now => (seconds(now) < 3600 ? 1000 - ((now - start) % 1000) : 60_000)));
   return <span className={cn("shrink-0 font-mono text-[0.95em] whitespace-nowrap text-muted-foreground tabular-nums", className)}>{Number.isFinite(start) ? span(s) : ""}</span>;
 }

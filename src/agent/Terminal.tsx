@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -30,11 +30,11 @@ function macKey(e: KeyboardEvent, term: XTerm): string | (() => void) | undefine
 }
 
 export function Terminal({ id, onClose = () => {}, handle }: { id: string; onClose?: () => void; handle?: React.RefObject<TerminalHandle | null> }) {
-  const el = useRef<HTMLDivElement>(null);
   const closed = useRef(onClose);
   closed.current = onClose;
 
-  useEffect(() => {
+  // Opened on its element, and opened again for another session.
+  const mount = useCallback((el: HTMLDivElement) => {
     const term = new XTerm({
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 13,
@@ -42,13 +42,13 @@ export function Terminal({ id, onClose = () => {}, handle }: { id: string; onClo
       cursorBlink: true,
       allowProposedApi: true,
       macOptionClickForcesSelection: true,
-      theme: { background: rgb(getComputedStyle(el.current!).backgroundColor), selectionBackground: "#6cb6ff44" },
+      theme: { background: rgb(getComputedStyle(el).backgroundColor), selectionBackground: "#6cb6ff44" },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon());
     term.loadAddon(new ClipboardAddon(new Base64(), systemClipboard));
-    term.open(el.current!);
+    term.open(el);
     fit.fit();
 
     const ws = new WebSocket(`ws://${location.host}/ws/${id}`);
@@ -70,9 +70,9 @@ export function Terminal({ id, onClose = () => {}, handle }: { id: string; onClo
     term.onResize(({ cols, rows }) => send({ type: "resize", cols, rows }));
     // Right-click belongs to maxflow's session menu, so tmux never sees the press and never opens its own in-pane menu.
     const keepRightClick = (e: MouseEvent) => e.button === 2 && e.stopPropagation();
-    for (const type of ["mousedown", "mouseup"]) el.current!.addEventListener(type, keepRightClick as EventListener, true);
-    const resize = new ResizeObserver(() => el.current?.offsetParent && fit.fit());
-    resize.observe(el.current!);
+    for (const type of ["mousedown", "mouseup"]) el.addEventListener(type, keepRightClick as EventListener, true);
+    const resize = new ResizeObserver(() => el.offsetParent && fit.fit());
+    resize.observe(el);
     if (handle) handle.current = { focus: () => term.focus(), fit: () => fit.fit(), selection: () => term.getSelection() };
     term.focus();
 
@@ -86,5 +86,5 @@ export function Terminal({ id, onClose = () => {}, handle }: { id: string; onClo
   }, [id]);
 
   // Agents draw for a dark terminal, so it stays dark inside a light page.
-  return <div ref={el} className="dark size-full bg-background" />;
+  return <div ref={mount} className="dark size-full bg-background" />;
 }
