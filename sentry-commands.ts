@@ -4,30 +4,44 @@ import { paneEnv, respawn } from "./tmux";
 import { type Session, chatOf } from "./sessions";
 import { writeStateText } from "./state";
 import { LIVE_ONLY_SENTRIES, PLAIN_SENTRIES } from "./sentry-names";
+import { isFilled, isRecord } from "./shared/guards";
 
-// Sentries are ordinary sessions, started once and kept by tmux across server restarts.
 export const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  PLAIN_SENTRIES.filter((n) => LIVE || !LIVE_ONLY_SENTRIES.has(n)).map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
+  PLAIN_SENTRIES.filter((n) => LIVE || !LIVE_ONLY_SENTRIES.has(n)).map((n) => [`sentry:${n}`, [process.execPath, new URL(`sentries/${n}.ts`, import.meta.url).pathname]]),
 );
-// A deploy restarts a sentry whose code changed in its own pane, so it keeps its session. A claude sentry resumes its chat, unless
-// its brief changed: then it starts a fresh chat, handed the last things its old one said.
-export function restartSentry(s: Session, fresh: boolean) {
-  let cmd = SENTRIES[s.name];
-  // claude writes a chat's transcript at its first turn, and resuming one that never had a turn exits at once.
-  const chat = s.transcript && existsSync(s.transcript) ? chatOf(s) : undefined;
-  const claude = cmd[0] === "sh" && cmd[2].includes("exec claude ");
-  if (claude && chat && !fresh) cmd = ["sh", "-c", cmd[2].replace("exec claude ", `exec claude --resume ${chat} `)];
-  if (claude && chat && fresh && s.transcript) {
-    const said = readFileSync(s.transcript, "utf8").split("\n").flatMap((line) => {
-      try {
-        const m = JSON.parse(line);
-        return m.type === "assistant" ? m.message.content.filter((c: any) => c.type === "text").map((c: any) => c.text.trim().slice(0, 300)) : [];
-      } catch {
-        return [];
-      }
-    });
-    const digest = writeStateText(`${s.name.slice(7)}-restart-digest.txt`, `[maxflow] Your brief (sentries/${s.name.slice(7)}.md) changed, so a deploy restarted you in a fresh chat. Your previous chat was ${chat} (transcript ${s.transcript}, if you need more of it). The last things you said there:\n${said.slice(-6).map((t) => `- ${t}`).join("\n")}`);
-    cmd = ["sh", "-c", `${cmd[2]} "$(cat '${digest}')"`];
+
+function assistantTextsOf(line: string): string[] {
+  try {
+    const entry: unknown = JSON.parse(line);
+    if (!isRecord(entry) || entry["type"] !== "assistant") return [];
+    const content = isRecord(entry["message"]) ? entry["message"]["content"] : undefined;
+    if (!Array.isArray(content)) return [];
+    return content.flatMap((part) => (isRecord(part) && part["type"] === "text" && typeof part["text"] === "string" ? [part["text"].trim().slice(0, 300)] : []));
+  } catch {
+    return [];
   }
-  return { ok: respawn(s.id, "-c", DIR, ...paneEnv(s.id), "--", ...cmd), resumed: claude && chat && !fresh ? chat : undefined, fresh: claude && (fresh || !chat) };
+}
+
+function freshChatHandedTheOldOnesLastWords(s: Session, script: string, chat: string, transcript: string): string[] {
+  const said = readFileSync(transcript, "utf8").split("\n").flatMap(assistantTextsOf);
+  const name = s.name.slice(7);
+  const digest = writeStateText(`${name}-restart-digest.txt`, `[maxflow] Your brief (sentries/${name}.md) changed, so a deploy restarted you in a fresh chat. Your previous chat was ${chat} (transcript ${transcript}, if you need more of it). The last things you said there:\n${said.slice(-6).map((t) => `- ${t}`).join("\n")}`);
+  return ["sh", "-c", `${script} "$(cat '${digest}')"`];
+}
+
+function restartCommand(s: Session, command: string[], chat: string | undefined, hasBriefChanged: boolean): string[] {
+  const [program, , script = ""] = command;
+  if (program !== "sh" || !script.includes("exec claude ") || !isFilled(chat)) return command;
+  if (!hasBriefChanged) return ["sh", "-c", script.replace("exec claude ", () => `exec claude --resume ${chat} `)];
+  return isFilled(s.transcript) ? freshChatHandedTheOldOnesLastWords(s, script, chat, s.transcript) : command;
+}
+
+export function restartSentry(s: Session, hasBriefChanged: boolean) {
+  const command = SENTRIES[s.name] ?? [];
+  // constraint: claude writes a chat's transcript at its first turn, and resuming a chat that never had a turn exits at once
+  const chat = isFilled(s.transcript) && existsSync(s.transcript) ? chatOf(s) : undefined;
+  const isClaude = command[0] === "sh" && (command[2] ?? "").includes("exec claude ");
+  const isResuming = isClaude && isFilled(chat) && !hasBriefChanged;
+  const ok = respawn(s.id, "-c", DIR, ...paneEnv(s.id), "--", ...restartCommand(s, command, chat, hasBriefChanged));
+  return { ok, resumed: isResuming ? chat : undefined, fresh: isClaude && (hasBriefChanged || !isFilled(chat)) };
 }
