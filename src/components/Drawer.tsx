@@ -35,7 +35,7 @@ function useCloseOnEscapeOrClickOutside(isOpen: boolean, onClose: () => void, pa
   useEventListener("click", closeOnClickOutsideBeforeThePageHandlesIt, { target: document, capture: true });
 }
 
-export function Drawer({ open, onClose, contentKey, children, className, ...rest }: { open: boolean; onClose: () => void; contentKey?: string; children: React.ReactNode; className?: string; "data-agent"?: string }) {
+export function Drawer({ open, onClose, contentKey, children, className, ...rest }: { open: boolean; onClose: () => void; contentKey?: string | undefined; children: React.ReactNode; className?: string; "data-agent"?: string }) {
   const { mounted, shown } = usePresence(open, isMotionReduced() ? 0 : OUT_MS);
   const drawn = useContentKeptWhileClosing(open, mounted, children, contentKey);
   const panel = useRef<HTMLElement>(null);
