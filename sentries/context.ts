@@ -1,147 +1,193 @@
 #!/usr/bin/env bun
-// context sentry's feed: runs beside the context agent (sentries/context.md) in its pane. It hands the agent every Slack message the
-// sentries publish (DMs to the user, mentions of him, his own posts, replies in threads and posts in channels someone watches), grouped
-// by conversation, within FLUSH_MS of the first, and every SWEEP_MS what the slack sentry read into its store that no event carried (both
-// sides of his DMs, the threads he posts in). Its first notice reaches back a day. Exits with the agent.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BASE as base, STATE_DIR } from "../instance";
+import { BASE as base } from "../instance";
 import { mcpSync } from "../mcp";
-import { slackMessagesTable } from "../state";
+import { isRecord, stringOr } from "../shared/guards";
+import { dmPartnersByChannel } from "../slack-meta";
+import { readStateJson, readStateText, slackMessagesTable, stateDirectory, writeStateJson } from "../state";
+import { isStillTheFeed, replaceOlderFeed, waitForServer } from "./feed-process";
 import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("context");
 
-const STATE_FILE = join(STATE_DIR, "context-state.json");
-const DIGEST_FILE = join(STATE_DIR, "context-digest.md");
-const FLUSH_MS = Number(process.env.CONTEXT_FLUSH_MS ?? 2 * 60_000);
-const SWEEP_MS = Number(process.env.CONTEXT_SWEEP_MS ?? 30 * 60_000);
+const STATE_FILE = "context-state.json";
+const DIGEST_FILE = join(stateDirectory("."), "context-digest.md");
+const FLUSH_MS = Number(process.env["CONTEXT_FLUSH_MS"] ?? 2 * 60_000);
+const SWEEP_MS = Number(process.env["CONTEXT_SWEEP_MS"] ?? 30 * 60_000);
 const BACKFILL_MS = 86_400_000;
-const NOTIFY_CHARS = 8_000;
+const SWEEP_OVERLAP_MS = 5 * 60_000;
+const NOTIFY_CHARS = 8000;
+const SEEN_KEPT = 5000;
+const FETCH_MS = 30_000;
+const IDLE_WAIT_MS = 60_000;
+const MIN_WAIT_MS = 1000;
+const AGENT_STARTUP_MS = 20_000;
+const RETRY_MS = 10_000;
+const SLACK_TOPICS = /^slack\/(dm|mention|own|search|\w+\/message|\w+\/[\d.]+\/reply)$/;
 
 type Item = { key: string; where: string; link: string; at: number; who: string; mine: boolean; text: string; swept?: boolean };
 type State = { seq: number; seen: string[]; pending: Item[]; firstAt: number; sweptAt: number; started?: boolean };
-const state: State = { seq: 0, seen: [], pending: [], firstAt: 0, sweptAt: 0, ...(existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {}) };
-const save = () => writeFileSync(STATE_FILE, JSON.stringify(state));
-const caller = { "x-maxflow-from": process.env.MAXFLOW_SESSION ?? "" };
-const log = (line: string) => console.log(`${new Date().toLocaleTimeString()}  ${line}`);
-const notify = (text: string) =>
-  fetch(`${base}/api/sessions/${process.env.MAXFLOW_SESSION}/notify`, { method: "POST", headers: caller, body: JSON.stringify({ text: `[maxflow context] ${text}` }) });
-const short = (text: string, n: number) => { const t = text.replace(/\s+/g, " ").trim(); return t.length <= n ? t : `${t.slice(0, n)}…`; };
-// Slack's markup as a reader sees it.
-const readable = (text: unknown) => String(text ?? "")
-  .replace(/<@\w+\|([^>]*)>/g, "@$1")
-  .replace(/<#\w+(?:\|([^>]*))?>/g, (_, name) => `#${name ?? "channel"}`)
-  .replace(/<([^|>]+)\|([^>]*)>/g, "$2")
-  .replace(/<([^>]+)>/g, "$1")
-  .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-// A DM is one conversation, keyed by its channel; anything else by its thread, or its channel for a top-level post.
-function keyOf(link: string) {
-  const m = link.match(/archives\/(\w+)\/p(\d{10})(\d{6})(\?thread_ts=([\d.]+))?/);
-  if (!m) return link;
-  return m[1].startsWith("D") && !m[4] ? m[1] : `${m[1]}/${m[5] ?? `${m[2]}.${m[3]}`}`;
+type BusEvent = { seq: number; topic: string; data: unknown };
+const isPartialState = (value: unknown): value is Partial<State> => isRecord(value);
+const isBusEvent = (value: unknown): value is BusEvent => isRecord(value) && typeof value["seq"] === "number" && typeof value["topic"] === "string";
+
+const kept = readStateJson(STATE_FILE, isPartialState);
+const state: State = { seq: 0, seen: [], pending: [], firstAt: 0, sweptAt: 0, ...kept };
+const save = () => {
+  writeStateJson(STATE_FILE, state);
+};
+const caller = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
+const log = (line: string) => {
+  console.log(`${new Date().toLocaleTimeString()}  ${line}`);
+};
+const notify = async (text: string) =>
+  fetch(`${base}/api/sessions/${String(process.env["MAXFLOW_SESSION"])}/notify`, {
+    method: "POST",
+    headers: caller,
+    body: JSON.stringify({ text: `[maxflow context] ${text}` }),
+    signal: AbortSignal.timeout(FETCH_MS),
+  });
+const short = (text: string, n: number) => {
+  const t = text.replaceAll(/\s+/g, " ").trim();
+  return t.length <= n ? t : `${t.slice(0, n)}…`;
+};
+const slackMarkupAsReaderSeesIt = (text: unknown) =>
+  stringOr(text)
+    .replaceAll(/<@\w+\|([^>]*)>/g, "@$1")
+    .replaceAll(/<#\w+(?:\|([^>]*))?>/g, (_match, name = "channel") => `#${String(name)}`)
+    .replaceAll(/<([^|>]+)\|([^>]*)>/g, "$2")
+    .replaceAll(/<([^>]+)>/g, "$1")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+
+function dmByChannelElseThreadElseChannel(link: string) {
+  const m = /archives\/(\w+)\/p(\d{10})(\d{6})(\?thread_ts=([\d.]+))?/.exec(link);
+  if (m === null) return link;
+  const [, channel = "", seconds = "", micros = "", threadQuery, thread] = m;
+  return threadQuery === undefined && channel.startsWith("D") ? channel : `${channel}/${thread ?? `${seconds}.${micros}`}`;
 }
-const SLACK_TOPICS = /^slack\/(dm|mention|own|search|\w+\/message|\w+\/[\d.]+\/reply)$/;
 
 function add(i: Item, ts: string) {
-  if (state.seen.includes(ts) || !i.text.trim()) return;
-  state.seen = [...state.seen, ts].slice(-5_000);
+  if (i.text.trim() === "" || state.seen.includes(ts)) return;
+  state.seen = [...state.seen, ts].slice(-SEEN_KEPT);
   state.pending.push(i);
-  state.firstAt ||= Date.now();
+  if (state.firstAt === 0) state.firstAt = Date.now();
 }
 
-function onEvent(topic: string, d: any, me: string) {
-  if (!SLACK_TOPICS.test(topic) || !d?.link || !d.ts || d.bot) return;
-  const where = topic === "slack/dm" ? `DM with ${d.from}` : String(d.where ?? "Slack");
-  add({ key: keyOf(d.link), where, link: d.link, at: Number(d.ts) * 1000, who: d.from ?? "?", mine: topic === "slack/own" || d.user === me, text: readable(d.text) }, d.ts);
+function onEvent(topic: string, data: unknown, me: string) {
+  const d = isRecord(data) ? data : {};
+  const link = stringOr(d["link"]);
+  const ts = stringOr(d["ts"]);
+  if (link === "" || ts === "" || !SLACK_TOPICS.test(topic) || Boolean(d["bot"])) return;
+  const where = topic === "slack/dm" ? `DM with ${String(d["from"])}` : stringOr(d["where"], "Slack");
+  const who = stringOr(d["from"], "?");
+  add({ key: dmByChannelElseThreadElseChannel(link), where, link, at: Number(ts) * 1000, who, mine: topic === "slack/own" || d["user"] === me, text: slackMarkupAsReaderSeesIt(d["text"]) }, ts);
 }
 
-// What the slack sentry read into its store since the last sweep that no event carried: chiefly his side of his DMs and threads.
-function sweep(me: string, since: number) {
+function sweepWhatNoEventCarried(me: string, since: number) {
   const before = state.pending.length;
-  const store = slackMessagesTable.all();
-  const dms = existsSync(join(STATE_DIR, "slack-state.json")) ? JSON.parse(readFileSync(join(STATE_DIR, "slack-state.json"), "utf8")).dms ?? {} : {};
-  for (const [target, { title, msgs }] of Object.entries(store)) {
-    // Searches repeat what the events carried, out of their conversations.
-    if (target.startsWith("search:")) continue;
-    for (const m of msgs) {
-      if (m.bot || Number(m.ts) * 1000 < since) continue;
-      const [channel, thread] = target.split("/");
-      const link = m.link ?? `https://dryftai.slack.com/archives/${channel}/p${m.ts.replace(".", "")}${thread ? `?thread_ts=${thread}&cid=${channel}` : ""}`;
-      const where = channel.startsWith("D") && !thread ? `DM with ${dms[channel]?.who ?? channel}` : title;
-      add({ key: target, where, link, at: Number(m.ts) * 1000, who: m.who, mine: m.uid === me, text: readable(m.text), swept: true }, m.ts);
+  const dms = dmPartnersByChannel();
+  const conversations = Object.entries(slackMessagesTable.all()).filter(([target]) => !target.startsWith("search:"));
+  for (const [target, { title, msgs }] of conversations) {
+    const [channel = "", thread = ""] = target.split("/", 2);
+    const recent = msgs.filter((msg) => msg.bot !== true && Number(msg.ts) * 1000 >= since);
+    for (const m of recent) {
+      const link = m.link ?? `https://dryftai.slack.com/archives/${channel}/p${m.ts.replace(".", "")}${thread === "" ? "" : `?thread_ts=${thread}&cid=${channel}`}`;
+      const where = thread === "" && channel.startsWith("D") ? `DM with ${stringOr(dms[channel], channel)}` : title;
+      add({ key: target, where, link, at: Number(m.ts) * 1000, who: m.who, mine: m.uid === me, text: slackMarkupAsReaderSeesIt(m.text), swept: true }, m.ts);
     }
   }
   return state.pending.length - before;
 }
 
-async function flush(first: boolean) {
-  const groups = new Map<string, Item[]>();
-  for (const i of state.pending.toSorted((a, b) => a.at - b.at)) groups.set(i.key, [...(groups.get(i.key) ?? []), i]);
-  const body = [...groups.values()].map((items) => {
-    const lines = items.map((i) => `- ${new Date(i.at).toISOString().slice(5, 16).replace("T", " ")}Z ${i.mine ? "Isaac (him)" : i.who}: ${short(i.text, 600)}${i.swept ? " (read by the slack sentry)" : ""}`);
-    return `### ${items[0].where} (${items[0].key}) ${items[0].link}\n${lines.join("\n")}`;
-  }).join("\n\n");
-  const head = first
-    ? `First notice: the last day of his Slack, ${state.pending.length} messages. Build $MAXFLOW_STATE/context.md from it.`
-    : `${state.pending.length} new Slack message${state.pending.length > 1 ? "s" : ""}. Update $MAXFLOW_STATE/context.md.`;
+function digestBody() {
+  const groups = Map.groupBy(state.pending.toSorted((a, b) => a.at - b.at), (i) => i.key);
+  const sections = groups.values().map((items) => {
+    const lines = items.map((i) => `- ${new Date(i.at).toISOString().slice(5, 16).replace("T", " ")}Z ${i.mine ? "Isaac (him)" : i.who}: ${short(i.text, 600)}${i.swept === true ? " (read by the slack sentry)" : ""}`);
+    const [first] = items;
+    return first === undefined ? "" : `### ${first.where} (${first.key}) ${first.link}\n${lines.join("\n")}`;
+  }).toArray();
+  return { body: sections.join("\n\n"), conversations: groups.size };
+}
+
+async function flush(isFirst: boolean) {
+  const { body, conversations } = digestBody();
+  const count = state.pending.length;
+  const head = isFirst
+    ? `First notice: the last day of his Slack, ${count} messages. Build $MAXFLOW_STATE/context.md from it.`
+    : `${count} new Slack message${count > 1 ? "s" : ""}. Update $MAXFLOW_STATE/context.md.`;
   writeFileSync(DIGEST_FILE, `${head}\n\n${body}\n`);
   const text = body.length > NOTIFY_CHARS ? `${head} The whole digest is in ${DIGEST_FILE}; it starts:\n\n${body.slice(0, NOTIFY_CHARS)}…` : `${head}\n\n${body}`;
   const res = await notify(text);
-  if (!res.ok) return log(`notify failed: ${await res.text()}`);
-  log(`handed ${state.pending.length} messages in ${groups.size} conversations`);
+  if (!res.ok) {
+    log(`notify failed: ${await res.text()}`);
+    return;
+  }
+  log(`handed ${count} messages in ${conversations} conversations`);
   state.pending = [];
   state.firstAt = 0;
 }
 
-if (import.meta.main) {
-  const PID_FILE = join(STATE_DIR, "context-feed.pid");
-  try {
-    const old = readFileSync(PID_FILE, "utf8").trim();
-    if (Bun.spawnSync(["ps", "-p", old, "-o", "command="]).stdout.toString().includes("sentries/context.ts")) process.kill(Number(old));
-  } catch {}
-  writeFileSync(PID_FILE, String(process.pid));
-  const profile = mcpSync("claude.ai/slack", "slack_read_user_profile", {}).out;
-  const me = profile.match(/User ID: (\w+)/)?.[1] ?? "";
-  while (!(await fetch(`${base}/api/sessions`).then((r) => r.ok, () => false))) await Bun.sleep(2_000);
-  log(`context feed as ${me || "?"}`);
-  const first = !state.started;
-  if (first) {
-    // The first notice reaches back a day: the bus log's Slack events, then the slack sentry's store.
-    state.seq = Number((await fetch(`${base}/api/events?topic=none&after=now`)).headers.get("x-maxflow-seq") ?? 0);
-    const events = join(STATE_DIR, "events.jsonl");
-    for (const line of (existsSync(events) ? readFileSync(events, "utf8") : "").split("\n")) {
-      if (!line.includes('"topic":"slack/')) continue;
-      try {
-        const e = JSON.parse(line);
-        if (Date.now() - e.at < BACKFILL_MS) onEvent(e.topic, e.data, me);
-      } catch {}
-    }
-    sweep(me, Date.now() - BACKFILL_MS);
-    state.sweptAt = Date.now();
-    // The agent beside it needs a moment to come up before its first prompt.
-    await Bun.sleep(20_000);
-    await flush(true);
-    state.started = true;
-    save();
-  }
-  for (;;) {
+function replaySlackEventsOfLastDay(me: string) {
+  const lines = (readStateText("events.jsonl") ?? "").split("\n").filter((line) => line.includes('"topic":"slack/'));
+  for (const line of lines) {
     try {
-      const wait = state.pending.length ? Math.max(1_000, state.firstAt + FLUSH_MS - Date.now()) : 60_000;
-      const events = (await (await fetch(`${base}/api/events?topic=slack/**&after=${state.seq}&wait=${wait}`)).json()) as { seq: number; topic: string; data: any }[];
-      for (const e of events) (state.seq = e.seq), onEvent(e.topic, e.data, me);
-      if (Date.now() - state.sweptAt >= SWEEP_MS) {
-        const n = sweep(me, state.sweptAt - 5 * 60_000);
-        if (n) log(`sweep found ${n} messages no event carried`);
-        state.sweptAt = Date.now();
-      }
-      if (state.pending.length && Date.now() - state.firstAt >= FLUSH_MS) await flush(false);
-      save();
-    } catch (e) {
-      log(`tick failed: ${e}`);
-      await Bun.sleep(10_000);
+      const e: unknown = JSON.parse(line);
+      if (isRecord(e) && Date.now() - Number(e["at"]) < BACKFILL_MS) onEvent(stringOr(e["topic"]), e["data"], me);
+    } catch {
+      continue;
     }
-    // Exits with the agent's pane, or once a newer feed took over.
-    if (process.ppid === 1 || readFileSync(PID_FILE, "utf8") !== String(process.pid)) process.exit(0);
   }
 }
+
+async function firstNoticeReachingBackADay(me: string) {
+  const res = await fetch(`${base}/api/events?topic=none&after=now`, { signal: AbortSignal.timeout(FETCH_MS) });
+  state.seq = Number(res.headers.get("x-maxflow-seq") ?? 0);
+  replaySlackEventsOfLastDay(me);
+  sweepWhatNoEventCarried(me, Date.now() - BACKFILL_MS);
+  state.sweptAt = Date.now();
+  await Bun.sleep(AGENT_STARTUP_MS);
+  await flush(true);
+  state.started = true;
+  save();
+}
+
+async function tickFeed(me: string) {
+  const wait = state.pending.length > 0 ? Math.max(MIN_WAIT_MS, state.firstAt + FLUSH_MS - Date.now()) : IDLE_WAIT_MS;
+  const res = await fetch(`${base}/api/events?topic=slack/**&after=${state.seq}&wait=${wait}`, { signal: AbortSignal.timeout(wait + FETCH_MS) });
+  const events: unknown = await res.json();
+  const busEvents = Array.isArray(events) ? events.filter(isBusEvent) : [];
+  for (const e of busEvents) {
+    state.seq = e.seq;
+    onEvent(e.topic, e.data, me);
+  }
+  if (Date.now() - state.sweptAt >= SWEEP_MS) {
+    const n = sweepWhatNoEventCarried(me, state.sweptAt - SWEEP_OVERLAP_MS);
+    if (n > 0) log(`sweep found ${n} messages no event carried`);
+    state.sweptAt = Date.now();
+  }
+  if (state.pending.length > 0 && Date.now() - state.firstAt >= FLUSH_MS) await flush(false);
+  save();
+}
+
+async function runFeed() {
+  replaceOlderFeed("context");
+  const profile = mcpSync("claude.ai/slack", "slack_read_user_profile", {}).out;
+  const me = /User ID: (\w+)/.exec(profile)?.[1] ?? "";
+  await waitForServer();
+  log(`context feed as ${me === "" ? "?" : me}`);
+  if (state.started !== true) await firstNoticeReachingBackADay(me);
+  for (;;) {
+    try {
+      await tickFeed(me);
+    } catch (error) {
+      log(`tick failed: ${String(error)}`);
+      await Bun.sleep(RETRY_MS);
+    }
+    if (!isStillTheFeed("context")) process.exit(0);
+  }
+}
+
+if (import.meta.main) await runFeed();
