@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useEventListener } from "@/lib/effects";
+import { hasText } from "@/lib/utils";
 import { AgentPage } from "@/agent/AgentPage";
 import { Capture } from "@/components/Capture";
 import { QuickSwitcher } from "@/components/QuickSwitcher";
@@ -33,12 +34,10 @@ export const views = [
   { id: "restrictions", label: "Restrictions" },
   { id: "stats", label: "Stats" },
 ] as const;
-/** Views of one routing canvas, in snap order; the rest are pages of their own. */
-const ROUTING: readonly string[] = ["events", "objectives", "agents", "threads"];
+const ROUTING_CANVAS_IN_SNAP_ORDER: readonly string[] = ["events", "objectives", "agents", "threads"];
 
 type ViewId = (typeof views)[number]["id"];
 type Detail = { kind: "page"; ref: PageRef } | { kind: "agent" | "thread"; id: string };
-// sub: the part after the view, as the Stats tab in #stats/agents.
 type Route = { view: ViewId; detail?: Detail; sub?: string };
 
 function lastView(): ViewId {
@@ -51,70 +50,98 @@ function lastView(): ViewId {
 }
 
 function routeFromHash(): Route {
-  const [first, id] = location.hash.slice(1).split("/");
-  if ((first === "task" || first === "objective") && id) return { view: lastView(), detail: { kind: "page", ref: `${first}/${id}` as PageRef } };
-  if ((first === "agent" || first === "thread") && id) return { view: lastView(), detail: { kind: first, id } };
+  const [first, id] = location.hash.slice(1).split("/", 2);
+  if (hasText(id) && (first === "task" || first === "objective")) return { view: lastView(), detail: { kind: "page", ref: `${first}/${id}` as PageRef } };
+  if (hasText(id) && (first === "agent" || first === "thread")) return { view: lastView(), detail: { kind: first, id } };
   const view = views.find(v => v.id === first)?.id ?? lastView();
   try {
     sessionStorage.setItem("view", view);
-  } catch {}
-  return { view, ...(view === first && id && { sub: id }) };
+  } catch {
+    // constraint: sessionStorage throws in a private window; the view is then not remembered across reloads
+  }
+  return { view, ...(view === first && hasText(id) && { sub: id }) };
 }
 
-/**
- * The thread a click in the page lands on: a link to one, an inbox or Todo row, a mention or a card on the canvas. A button, a box, or
- * a link to anything else inside a row is that control's, and the thread page's own way up (← and the breadcrumb) climbs as before.
- */
+const CONTROLS_THAT_KEEP_THEIR_CLICK = "button, input, textarea, [role=menuitem], [data-agent=back], [data-agent^='thread-up:'], [data-agent^='agent-link:']";
+
+function threadLinkedFrom(el: Element) {
+  const link = el.closest("a");
+  if (link) return /^#thread\/(.+)$/.exec(link.getAttribute("href") ?? "")?.[1];
+  const card = el.closest<HTMLElement>("[data-node^='thread:']")?.dataset["node"]?.slice(7);
+  if (hasText(card)) return card;
+  const row = el.closest<HTMLElement>("[data-row]")?.dataset["row"];
+  if (row?.startsWith("th-") === true) return row;
+  return /^thread\/(.+)$/.exec(row ?? "")?.[1];
+}
+
 function threadAt(target: EventTarget | null) {
   const el = target instanceof Element ? target : null;
-  if (!el?.closest("[data-region=main]") || el.closest("button, input, textarea, [role=menuitem], [data-agent=back], [data-agent^='thread-up:'], [data-agent^='agent-link:']")) return;
-  const link = el.closest("a");
-  if (link) return link.getAttribute("href")?.match(/^#thread\/(.+)$/)?.[1];
-  const card = el.closest<HTMLElement>("[data-node^='thread:']")?.dataset.node?.slice(7);
-  if (card) return card;
-  const row = el.closest<HTMLElement>("[data-row]")?.dataset.row;
-  return row?.startsWith("th-") ? row : row?.match(/^thread\/(.+)$/)?.[1];
+  if (!el?.closest("[data-region=main]") || el.closest(CONTROLS_THAT_KEEP_THEIR_CLICK)) return;
+  return threadLinkedFrom(el);
 }
-// As in Slack, a click on a thread opens it beside the page and ⇧-click opens it as the page (Enter and ⌘K do too). The press of a
-// ⇧-click would otherwise select the text between it and the cursor.
-const onThreadClick = (e: MouseEvent) => {
+
+const openThreadBesideOrShiftAsPage = (e: MouseEvent) => {
   if (e.metaKey || e.ctrlKey || e.altKey || e.button !== 0) return;
   const id = threadAt(e.target);
-  if (!id) return;
+  if (!hasText(id)) return;
   e.preventDefault();
   e.stopPropagation();
   if (e.shiftKey) location.hash = `thread/${id}`;
   else openPane(id);
 };
-const onShiftDown = (e: MouseEvent) => e.shiftKey && e.button === 0 && threadAt(e.target) && e.preventDefault();
+const keepShiftClickFromSelectingText = (e: MouseEvent) => {
+  if (e.shiftKey && e.button === 0 && hasText(threadAt(e.target))) e.preventDefault();
+};
+
+const routingViewAt = (n: number) => ROUTING_CANVAS_IN_SNAP_ORDER[Math.max(0, Math.min(ROUTING_CANVAS_IN_SNAP_ORDER.length - 1, n))] ?? "events";
+
+function DetailView({ detail, back }: { detail: Detail; back: ViewId }) {
+  if (detail.kind === "page") return <Page key={detail.ref} pageRef={detail.ref} back={back} />;
+  if (detail.kind === "agent") return <AgentPage key={detail.id} id={detail.id} back={back} />;
+  return <ThreadPage key={detail.id} id={detail.id} back={back} />;
+}
+
+function MainView({ route }: { route: Route }) {
+  if (route.detail) return <DetailView detail={route.detail} back={route.view} />;
+  if (route.view === "inbox") return <InboxView />;
+  if (route.view === "todo") return <TodoView />;
+  if (route.view === "restrictions") return <RestrictionsView />;
+  if (route.view === "stats") return route.sub === undefined ? <StatsView /> : <StatsView tab={route.sub} />;
+  if (route.view === "sentries") return <SentriesView />;
+  const snap = ROUTING_CANVAS_IN_SNAP_ORDER.indexOf(route.view);
+  return (
+    <RoutingView
+      snap={snap}
+      onSnap={n => {
+        location.hash = routingViewAt(n);
+      }}
+    />
+  );
+}
 
 export function App() {
   const [route, setRoute] = useState(routeFromHash);
   const current = useRef(route);
 
-  // Each route change tells the pages how he got there: up out of a thread, by Back/Forward, or fresh.
   useEventListener("hashchange", () => {
     const prev = current.current;
     const next = (current.current = routeFromHash());
     arrive(prev.detail?.kind === "thread" ? prev.detail.id : undefined, { thread: next.detail?.kind === "thread" ? next.detail.id : undefined, view: !next.detail });
-    // Each page brings back its own side pane: opening a thread in full leaves this page's pane behind (the pane's own thread
-    // included, as ↗ does), and coming back here opens it again.
     restorePane();
     setRoute(next);
   });
   useEventListener("keydown", e => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-    // In the side pane, Escape closes it and the page underneath stays as it was.
-    if (e.key === "Escape" && paneStore.get() && activeRegion() === "pane") return closePane();
+    if (e.key === "Escape" && hasText(paneStore.get()) && activeRegion() === "pane") {
+      closePane();
+      return;
+    }
     const { detail } = routeFromHash();
     if (e.key === "Escape" && detail?.kind === "thread") threadUp(detail.id, route.view);
-    else if (e.key === "Escape" && detail) location.hash = route.view;
+    else if (detail && e.key === "Escape") location.hash = route.view;
   });
-  useEventListener("click", onThreadClick, { capture: true });
-  useEventListener("mousedown", onShiftDown, { capture: true });
-
-  const snap = ROUTING.indexOf(route.view);
-  const { detail } = route;
+  useEventListener("click", openThreadBesideOrShiftAsPage, { capture: true });
+  useEventListener("mousedown", keepShiftClickFromSelectingText, { capture: true });
 
   return (
     <TooltipProvider>
@@ -123,33 +150,11 @@ export function App() {
       <Viewer />
       <PauseDialog />
       <RaiseDialog />
-      {/* Linear's frame: the sidebar sits on the window tint, and each view is one white panel, top to bottom, inset from the edges. */}
-      {/* Installed as an app, the tint around the panel drags the window, and the panel starts below the overlaid title bar. */}
-      {/* The sidebar runs the window's full height, edge to edge; the panel keeps its margin, below the title bar's strip when
-          installed with its window controls overlaid. */}
       <div className="flex h-dvh bg-window [app-region:drag]">
         <Sidebar view={route.view} />
         <main style={{ marginTop: "max(0.5rem, env(titlebar-area-height, 0px))" }} className="mr-2 mb-2 flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-card [app-region:no-drag]">
         <div data-region="main" className="min-h-0 min-w-0 flex-1">
-          {detail?.kind === "agent" ? (
-            <AgentPage key={detail.id} id={detail.id} back={route.view} />
-          ) : detail?.kind === "thread" ? (
-            <ThreadPage key={detail.id} id={detail.id} back={route.view} />
-          ) : detail?.kind === "page" ? (
-            <Page key={detail.ref} pageRef={detail.ref} back={route.view} />
-          ) : route.view === "inbox" ? (
-            <InboxView />
-          ) : route.view === "todo" ? (
-            <TodoView />
-          ) : route.view === "restrictions" ? (
-            <RestrictionsView />
-          ) : route.view === "stats" ? (
-            <StatsView tab={route.sub} />
-          ) : route.view === "sentries" ? (
-            <SentriesView />
-          ) : (
-            <RoutingView snap={snap} onSnap={n => (location.hash = ROUTING[Math.max(0, Math.min(ROUTING.length - 1, n))]!)} />
-          )}
+          <MainView route={route} />
         </div>
         <ThreadPane />
         </main>

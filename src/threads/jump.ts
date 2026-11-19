@@ -20,7 +20,7 @@ let arrival: { restore: boolean; from?: string } = { restore: !!history.state?.s
 history.replaceState({ ...history.state, seen: true }, "");
 
 /** The route changed: from the thread he was in, if any, to a thread or a view (anything else is neither). */
-export function arrive(from: string | undefined, to: { thread?: string; view?: boolean }) {
+export function arrive(from: string | undefined, to: { thread?: string | undefined; view?: boolean }) {
   const traversal = !!history.state?.seen;
   history.replaceState({ ...history.state, seen: true }, "");
   const t = from ? threadStore.get().find(x => x.id === from) : undefined;
