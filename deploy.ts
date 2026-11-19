@@ -21,16 +21,17 @@ async function sessions(): Promise<Session[] | undefined> {
 }
 const sentries = (list: Session[]) => list.filter((s) => s.name.startsWith("sentry:") && s.running).map((s) => s.name);
 
-type CiRun = { status: string; conclusion: string };
 const CI_WAIT_MS = 15 * 60_000;
 async function awaitGreenCi(live: string, commit: string) {
+  type CiRun = { status: string; conclusion: string };
   const short = commit.slice(0, 7);
-  for (const deadline = Date.now() + CI_WAIT_MS; Date.now() < deadline; await Bun.sleep(10_000)) {
+  const deadline = Date.now() + CI_WAIT_MS;
+  while (Date.now() < deadline) {
     const listed = run(["timeout", "-s", "KILL", "30", "gh", "run", "list", "--commit", commit, "--workflow", "check", "--json", "status,conclusion"], live);
     const latest = listed.ok ? (JSON.parse(listed.out) as CiRun[]).at(0) : undefined;
-    if (latest?.status !== "completed") continue;
-    if (latest.conclusion === "success") return;
-    fail(`CI's check is ${latest.conclusion} on ${short}, so live stays where it is: gh run list --commit ${commit}`);
+    if (latest?.status === "completed" && latest.conclusion === "success") return;
+    if (latest?.status === "completed") fail(`CI's check is ${latest.conclusion} on ${short}, so live stays where it is: gh run list --commit ${commit}`);
+    await Bun.sleep(10_000);
   }
   fail(`CI's check hasn't passed on ${short} after ${CI_WAIT_MS / 60_000} minutes, so live stays where it is`);
 }
