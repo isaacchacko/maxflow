@@ -12,7 +12,7 @@ const run = (cmd: string[], cwd?: string) => {
 };
 const fail = (why: string): never => (console.error(`deploy: ${why}`), process.exit(1));
 
-type Session = { id: string; name: string; running: boolean };
+type Session = { id: string; name: string; running: boolean; createdAt: number };
 async function sessions(): Promise<Session[] | undefined> {
   try {
     const res = await fetch(`${BASE}/api/sessions`, { signal: AbortSignal.timeout(5_000) });
@@ -55,14 +55,28 @@ function closure(dir: string, file: string, seen = new Set<string>()) {
   return seen;
 }
 
-// tmux keeps a sentry across a restart, and the new server adopts it still running the old code, so a sentry whose
-// script, prompt (sentries/<name>.md) or anything they import changed between the two commits has to be restarted.
-export function staleSentries(dir: string, from: string, to: string, names: string[]) {
-  const changed = new Set(run(["git", "diff", "--name-only", from, to], dir).out.split("\n"));
-  return names.filter((name) => {
-    const own = [`sentries/${name.slice(7)}.ts`, `sentries/${name.slice(7)}.md`].filter((f) => existsSync(join(dir, f)));
-    return own.some((f) => [...closure(dir, f)].some((dep) => changed.has(dep)));
-  });
+// The commit the live checkout held at a time: the newest entry in its HEAD reflog from before then.
+function headAt(dir: string, ms: number) {
+  for (const line of run(["git", "log", "-g", "--date=unix", "--format=%H %gd", "HEAD"], dir).out.split("\n")) {
+    const [sha, ref] = line.split(" ");
+    if (Number(ref?.match(/\{(\d+)\}/)?.[1]) * 1000 <= ms) return sha;
+  }
+}
+
+// tmux keeps a sentry across a restart, and the new server adopts it still running the code it started with, so a sentry
+// whose script, prompt (sentries/<name>.md) or anything they import differs between the commit live held when it started
+// and the one deployed has to be restarted. Measuring from its start, not from this deploy's old commit, also catches one a
+// kickstart or an older deploy left behind. A sentry older than the reflog counts as stale.
+export function staleSentries(dir: string, to: string, list: Session[]) {
+  const diffs = new Map<string, Set<string>>();
+  const changed = (from: string) =>
+    diffs.get(from) ?? diffs.set(from, new Set(run(["git", "diff", "--name-only", from, to], dir).out.split("\n"))).get(from)!;
+  return list.filter((s) => s.name.startsWith("sentry:") && s.running).filter((s) => {
+    const from = headAt(dir, s.createdAt);
+    if (!from) return true;
+    const own = [`sentries/${s.name.slice(7)}.ts`, `sentries/${s.name.slice(7)}.md`].filter((f) => existsSync(join(dir, f)));
+    return own.some((f) => [...closure(dir, f)].some((dep) => changed(from).has(dep)));
+  }).map((s) => s.name);
 }
 
 // Stops each sentry named; the server's respawn check (every 15s) starts it again from the code now on disk.
@@ -108,6 +122,6 @@ export async function deploy() {
   console.log(`${after.length} sessions (${before ? `${before.length} before` : "the server was down before"}), ${sentries(after).length} sentries running`);
   if (lost.length || missing.length)
     fail(`after the restart ${[lost.length && `these sessions are gone: ${lost.map((s) => `${s.id} ${s.name}`).join(", ")}`, missing.length && `these sentries aren't running: ${missing.join(", ")}`].filter(Boolean).join("; ")}. See ${LOG}.`);
-  const stale = from === to ? [] : staleSentries(live, from, to, sentries(after));
+  const stale = staleSentries(live, to, after);
   if (stale.length) await restartSentries(stale, after);
 }
