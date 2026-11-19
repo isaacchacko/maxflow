@@ -222,11 +222,11 @@ function createSession(name: string, cmd: string[], cwd: string, chatId?: string
 // messages already delivered, and each restart in a run of deploys delivered them again (258121 four times on 2026-11-19).
 function saveInbox(s: Session) {
   if (s.inbox.length === 0 && s.sending === undefined) inboxesTable.delete(s.id);
-  else inboxesTable.put(s.id, { inbox: s.inbox, sending: s.sending && { count: s.sending.count, at: s.sending.at } });
+  else inboxesTable.put(s.id, { inbox: s.inbox, ...(s.sending && { sending: { count: s.sending.count, at: s.sending.at } }) });
 }
 function loadInbox(id: string): Pick<Session, "inbox" | "sending"> {
   const { inbox, sending } = inboxesTable.get(id) ?? { inbox: [] };
-  return { inbox, sending: sending && { ...sending, text: inbox.slice(0, sending.count).join("\n") } };
+  return { inbox, ...(sending && { sending: { ...sending, text: inbox.slice(0, sending.count).join("\n") } }) };
 }
 
 // Pick up sessions that outlived a previous server, seeding scrollback from tmux's history.
