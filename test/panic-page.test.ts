@@ -31,7 +31,11 @@ function answer(path: string): Response {
   if (path === "/__panic/state") return new Response("not found", { status: 404 });
   return new Response("<html></html>", { headers: { "content-type": "text/html" } });
 }
-const fakeFetch = async (input: string | URL | Request) => answer(new URL(urlOf(input), "http://localhost:4949/").pathname);
+const NETWORK_MS = 1;
+const fakeFetch = async (input: string | URL | Request) => {
+  await Bun.sleep(NETWORK_MS);
+  return answer(new URL(urlOf(input), "http://localhost:4949/").pathname);
+};
 
 const text = (id: string) => document.querySelector(`#${id}`)?.textContent ?? "";
 
