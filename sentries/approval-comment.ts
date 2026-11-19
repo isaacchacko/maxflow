@@ -38,7 +38,8 @@ export function clean(text: string, shas: string[]) {
     if (BANNED_PROSE.some((re) => re.test(prose)) || BANNED_ANYWHERE.some((re) => re.test(line))) return false;
     return (line.match(/\b[0-9a-f]{7,40}\b/gi) ?? []).filter((t) => /\d/.test(t) && /[a-f]/i.test(t)).every(known);
   });
-  const body = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  // A bold label whose lines were all dropped goes too.
+  const body = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim().replace(/^\*\*[^*\n]+:\*\*\s*(?=\n\s*\*\*|$(?![\s\S]))/gm, "").trim();
   return /checked/i.test(body) ? body : null;
 }
 
