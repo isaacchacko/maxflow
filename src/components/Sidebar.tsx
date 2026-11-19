@@ -2,7 +2,7 @@ import { CircleCheckBig, MessagesSquare, ShieldCheck, X, type LucideIcon } from 
 import { AgentFace, type Expression } from "@/components/AgentFace";
 import { Dots } from "@/components/Working";
 import type { Thread } from "@/mock";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Mark } from "@/components/Mark";
 import { cn } from "@/lib/utils";
 import { setPinned, setPinOrder, taskStore, threadStore } from "@/store";
@@ -31,6 +31,18 @@ const reorder = (ids: string[], dragged: string, onto: string) => {
   const rest = ids.filter(id => id !== dragged);
   rest.splice(rest.indexOf(onto) + (ids.indexOf(dragged) < ids.indexOf(onto) ? 1 : 0), 0, dragged);
   return rest;
+};
+
+// The yarn mark toggles Stats: clicked there, it goes back to wherever he opened Stats from, or the inbox when he landed on it.
+let beforeStats = "#inbox";
+addEventListener("hashchange", e => {
+  const old = new URL(e.oldURL).hash;
+  if (location.hash === "#stats" && old && old !== "#stats") beforeStats = old;
+});
+const toggleStats = (e: MouseEvent) => {
+  if (location.hash !== "#stats") return;
+  e.preventDefault();
+  location.hash = beforeStats;
 };
 
 function Entry({ view, label, icon: Icon, count, warn, active, open }: { view: string; label: string; icon: LucideIcon; count: number; warn?: boolean; active: boolean; open: boolean }) {
@@ -158,7 +170,7 @@ export function Sidebar({ view }: { view: string }) {
         {/* The row the traffic lights sit in: nothing of ours, and it drags the window. */}
         <div style={{ height: "env(titlebar-area-height, 0.5rem)" }} className="shrink-0 [app-region:drag]" />
         <div className="mb-1 flex h-10 shrink-0 items-center gap-1.5 px-1.5">
-          <a href="#stats" data-agent="sidebar:stats" title="Stats" className="rounded-md [app-region:no-drag]">
+          <a href="#stats" onClick={toggleStats} data-agent="sidebar:stats" title="Stats" className="rounded-md [app-region:no-drag]">
             <Mark compact={!open} />
           </a>
         </div>
