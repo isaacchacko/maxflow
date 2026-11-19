@@ -657,14 +657,14 @@ const live = (s?: Session): s is Session => !!s && s.exitCode === null;
 // 662ba653) would queue his messages where nothing reads them, so it doesn't count as a thread's owner and his reply goes on.
 const reachable = (s?: Session): s is Session => live(s) && isAgent(s);
 const funnel = () => [...sessions.values()].find((s) => s.name === "sentry:funnel" && isSentry(s) && live(s));
-function routersOf(objective: string) {
+function routersOf(objective: string): Session[] {
   const all = [...sessions.values()].filter((s) => reachable(s) && s.role?.role === "router" && s.role.objective === objective);
   const own = all.filter((s) => !s.role!.merged);
   const pool = own.length ? own : all;
   // Two live routers on one scope is a hand-off the old one outlived: the newer owns it, so his messages don't reach both.
   return pool.filter((s) => !newerOn(s, pool));
 }
-const newerOn = (s: Session, pool = routersOf(s.role!.objective)) => pool.find((x) => x !== s && x.role!.scope === s.role!.scope && x.createdAt > s.createdAt);
+const newerOn = (s: Session, pool: Session[] = routersOf(s.role!.objective)): Session | undefined => pool.find((x) => x !== s && x.role!.scope === s.role!.scope && x.createdAt > s.createdAt);
 // The one router a thread's messages from him go to: the last to join its routers that is still up, or the router that took its scope
 // over, else its parent's, else the objective's newest.
 function ownerOf(t: Thread): Session | undefined {
@@ -1169,6 +1169,7 @@ function relayRefusal(t: Thread, from: Session, text: string) {
   const named = [...text.matchAll(/\[\[(?:agent|router):([\w-]+)\]\]|\b([0-9a-f]{8})\b/g)].map((m) => sessions.get(m[1] ?? m[2]!)).filter((s): s is Session => !!s && s !== from && s.role?.role === "router");
   if (named.length && RELAY.test(text))
     return `This hands ${t.id} to ${named[0]!.id}, and maxflow shows hand-offs in the thread itself; ${named[0]!.id} answers him. Post what you found or did, without the hand-off, or nothing.`;
+  return undefined;
 }
 
 // A page (an objective's or a task's) is a grid of cards its agents keep current.
@@ -2369,7 +2370,7 @@ Bun.serve<WsData>({
       const cmd = typeof body.cmd === "string" ? ["zsh", "-lc", body.cmd] : body.cmd?.length ? body.cmd : role ? agent : [process.env.SHELL ?? "zsh", "-l"];
       // A router starting a router for its own scope is handing its objective off (Isaac: "handoff to a fresh agent"): the new one takes it whole.
       const handing = role?.role === "router" && from?.role?.role === "router" && from.role.objective === objective && (!body.scope || body.scope === from.role.scope) ? from : undefined;
-      if (handing) role!.scope = handing.role!.scope;
+      if (handing) role!.scope = handing.role!.scope ?? "Whole objective";
       const s = createSession(body.name || cmd.join(" ").slice(0, 40), cmd, body.cwd?.replace(/^~(?=\/|$)/, process.env.HOME!) || parent?.cwd || process.env.HOME!, undefined, role);
       if (cmd[0] === "claude") acceptTrust(s);
       if (handing) handOff(handing, s);
