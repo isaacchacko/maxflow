@@ -52,7 +52,8 @@ async function readThread(args: string[]) {
 }
 
 async function postToThread(args: string[]) {
-  await post(`/api/threads/${argAt(args, 1)}/messages`, { text: await withImages(withoutImages(args.slice(2)).join(" "), args) });
+  const words = withoutImages(args.slice(2)).join(" ");
+  await post(`/api/threads/${argAt(args, 1)}/messages`, { text: await withImages(words, args) });
 }
 
 async function mergeThread(args: string[]) {
