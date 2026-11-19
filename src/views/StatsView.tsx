@@ -1,38 +1,53 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { FitLabel, FitRow } from "@/components/Fit";
+import { useNow } from "@/lib/effects";
 import { liveStore } from "@/store";
-import { cn } from "@/lib/utils";
+import { cn, hasText } from "@/lib/utils";
 import { Agents } from "./stats/Agents";
 import { useJson } from "./stats/load";
 import { Overview } from "./stats/Overview";
 import { addDays, short, type Stats } from "./stats/parts";
 import { Performance } from "./stats/Performance";
 
-// yarn's statistics, opened from the mark at the top of the sidebar, in three tabs kept in the URL (#stats/overview,
-// #stats/performance, #stats/agents): how productive he has been, how fast and steady yarn runs, and what his agents cost.
-// The server counts everything (stats.ts, usage.ts); GitHub's numbers and the transcripts' sums are cached there.
-
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "performance", label: "Performance", short: "Perf" },
   { id: "agents", label: "Agents" },
 ] as const;
-type Tab = (typeof TABS)[number]["id"];
 
-// The repo and the Agents range he picked last are kept in this browser; no repo means the server's default, Dryft-AI/app.
-const saved = (key: string) => {
+const HOUR_MS = 3_600_000;
+const DEFAULT_DAYS = 7;
+
+function savedInThisBrowser(key: string) {
   try {
-    return localStorage.getItem(key) ?? undefined;
+    return localStorage.getItem(key);
   } catch {
-    return undefined;
+    return null;
   }
-};
-const save = (key: string, value: string) => {
+}
+
+function saveInThisBrowser(key: string, value: string) {
   try {
     localStorage.setItem(key, value);
-  } catch {}
-};
+  } catch {
+    // constraint: localStorage throws in a private window or on a full quota; the pick then lasts only this page load
+  }
+}
+
+function savedDays() {
+  const days = Number(savedInThisBrowser("stats-days"));
+  return days === 0 || Number.isNaN(days) ? DEFAULT_DAYS : days;
+}
+
+function statsQuery(weekKey: string | undefined, repo: string | undefined) {
+  const query = new URLSearchParams();
+  if (hasText(weekKey)) query.set("week", weekKey);
+  if (hasText(repo)) query.set("repo", repo);
+  return query;
+}
+
+const isTrendStillFilling = (s: Stats) => s.gh.trend.pending;
 
 function WeekRange({ from }: { from: string }) {
   const range = `${short(from)} – ${short(addDays(from, 6))}`;
@@ -43,28 +58,74 @@ function WeekRange({ from }: { from: string }) {
   );
 }
 
+function WeekNav({ weekKey, isThisWeek, onWeekKey }: { weekKey: string | undefined; isThisWeek: boolean; onWeekKey: (key: string | undefined) => void }) {
+  const step = (n: number) => {
+    if (hasText(weekKey)) onWeekKey(addDays(weekKey, 7 * n));
+  };
+  return (
+    <div className="ml-auto flex shrink-0 items-center gap-1">
+      {!isThisWeek && (
+        <button onClick={() => onWeekKey(undefined)} title="Back to this week" className="mr-1 text-xs text-muted-foreground hover:text-foreground">
+          <FitLabel full="This week" short="Now" />
+        </button>
+      )}
+      <button onClick={() => step(-1)} disabled={!hasText(weekKey)} title="Week before" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
+        <ChevronLeft className="size-4" />
+      </button>
+      <span className="text-center text-sm whitespace-nowrap tabular-nums group-data-[fit=full]/fit:min-w-36 group-data-[fit=short]/fit:min-w-36">{hasText(weekKey) ? <WeekRange from={weekKey} /> : "This week"}</span>
+      <button onClick={() => step(1)} disabled={!hasText(weekKey) || isThisWeek} title="Week after" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
+        <ChevronRight className="size-4" />
+      </button>
+    </div>
+  );
+}
+
+type WeekBodyProps = {
+  tab: string;
+  stats: Stats | undefined;
+  error: string | undefined;
+  isLive: boolean;
+  repo: string | undefined;
+  onRepo: (r: string) => void;
+  onWeek: (day: string) => void;
+};
+
+function WeekBody({ tab, stats, error, isLive, repo, onRepo, onWeek }: WeekBodyProps) {
+  if (!stats && hasText(error)) return <p className="text-sm text-rose-600 dark:text-rose-400">Couldn't load stats: {error}</p>;
+  if (!stats) return <p className="text-sm text-muted-foreground">Counting…</p>;
+  if (tab === "performance") return <Performance stats={stats} live={isLive} />;
+  return <Overview stats={stats} picked={repo} onRepo={onRepo} onWeek={onWeek} live={isLive} />;
+}
+
+function useWeekStats(isWeekTab: boolean, isLive: boolean, query: URLSearchParams) {
+  const week = useJson<Stats>(isLive && isWeekTab ? `/api/stats?${query}` : undefined, isTrendStillFilling);
+  const [lastShown, setLastShown] = useState<Stats>();
+  if (week.value !== undefined && week.value !== lastShown) setLastShown(week.value);
+  const stats = week.value ?? lastShown;
+  const isDimmedUntilNewNumbers = isWeekTab && week.value === undefined && stats !== undefined;
+  return { stats, error: week.error, isDimmedUntilNewNumbers };
+}
+
 export function StatsView({ tab: wanted }: { tab?: string }) {
-  const tab: Tab = TABS.find(t => t.id === wanted)?.id ?? "overview";
+  const tab = TABS.find(t => t.id === wanted)?.id ?? "overview";
   const [weekKey, setWeekKey] = useState<string>();
-  const [repo, setRepo] = useState(() => saved("stats-repo"));
-  const [days, setDays] = useState(() => Number(saved("stats-days")) || 7);
-  const live = liveStore.use();
-  const query = new URLSearchParams({ ...(weekKey && { week: weekKey }), ...(repo && { repo }) });
-  // Earlier weeks of the GitHub trend fill in on the server one at a time; look again until they're all there.
-  const week = useJson<Stats>(live && tab !== "agents" ? `/api/stats?${query}` : undefined, s => s.gh.trend.pending);
-  // A new week or repo keeps the last one on screen, dimmed, until its numbers come in.
-  const last = useRef<Stats>(undefined);
-  if (week.value) last.current = week.value;
-  const stats = week.value ?? last.current;
-  const stale = tab !== "agents" && !week.value && !!stats;
+  const [repo, setRepo] = useState(() => savedInThisBrowser("stats-repo") ?? undefined);
+  const [days, setDays] = useState(savedDays);
+  const isLive = liveStore.use();
+  const { stats, error, isDimmedUntilNewNumbers } = useWeekStats(tab !== "agents", isLive, statsQuery(weekKey, repo));
+  const now = useNow(at => (stats && stats.week.to > at ? Math.min(HOUR_MS, stats.week.to - at) : HOUR_MS));
 
   const key = stats?.week.key ?? weekKey;
-  const thisWeek = !weekKey || (!!stats && stats.week.to > Date.now());
-  const step = (n: number) => key && setWeekKey(addDays(key, 7 * n));
-  const pickRepo = (r: string) => (setRepo(r), save("stats-repo", r));
-  const pickDays = (n: number) => (setDays(n), save("stats-days", String(n)));
-  // The week a day falls in is keyed by any of its days.
-  const goWeek = (day: string) => setWeekKey(day);
+  const isThisWeek = !hasText(weekKey) || (stats !== undefined && stats.week.to > now);
+  const pickRepo = (r: string) => {
+    setRepo(r);
+    saveInThisBrowser("stats-repo", r);
+  };
+  const pickDays = (n: number) => {
+    setDays(n);
+    saveInThisBrowser("stats-days", String(n));
+  };
+  const goToWeekContaining = (day: string) => setWeekKey(day);
 
   return (
     <div className="viz flex h-full flex-col">
@@ -77,35 +138,14 @@ export function StatsView({ tab: wanted }: { tab?: string }) {
             </a>
           ))}
         </nav>
-        {tab !== "agents" && (
-          <div className="ml-auto flex shrink-0 items-center gap-1">
-            {!thisWeek && (
-              <button onClick={() => setWeekKey(undefined)} title="Back to this week" className="mr-1 text-xs text-muted-foreground hover:text-foreground">
-                <FitLabel full="This week" short="Now" />
-              </button>
-            )}
-            <button onClick={() => step(-1)} disabled={!key} title="Week before" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
-              <ChevronLeft className="size-4" />
-            </button>
-            <span className="text-center text-sm whitespace-nowrap tabular-nums group-data-[fit=full]/fit:min-w-36 group-data-[fit=short]/fit:min-w-36">{key ? <WeekRange from={key} /> : "This week"}</span>
-            <button onClick={() => step(1)} disabled={!key || thisWeek} title="Week after" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
-              <ChevronRight className="size-4" />
-            </button>
-          </div>
-        )}
+        {tab !== "agents" && <WeekNav weekKey={key} isThisWeek={isThisWeek} onWeekKey={setWeekKey} />}
       </FitRow>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className={cn("mx-auto flex max-w-6xl flex-col gap-8 px-5 py-5", stale && "opacity-60 transition-opacity")}>
+        <div className={cn("mx-auto flex max-w-6xl flex-col gap-8 px-5 py-5", isDimmedUntilNewNumbers && "opacity-60 transition-opacity")}>
           {tab === "agents" ? (
-            <Agents live={live} days={days} onDays={pickDays} />
-          ) : week.error && !stats ? (
-            <p className="text-sm text-rose-600 dark:text-rose-400">Couldn't load stats: {week.error}</p>
-          ) : !stats ? (
-            <p className="text-sm text-muted-foreground">Counting…</p>
-          ) : tab === "performance" ? (
-            <Performance stats={stats} live={live} />
+            <Agents live={isLive} days={days} onDays={pickDays} />
           ) : (
-            <Overview stats={stats} picked={repo} onRepo={pickRepo} onWeek={goWeek} live={live} />
+            <WeekBody tab={tab} stats={stats} error={error} isLive={isLive} repo={repo} onRepo={pickRepo} onWeek={goToWeekContaining} />
           )}
         </div>
       </div>
