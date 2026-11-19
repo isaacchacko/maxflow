@@ -316,6 +316,7 @@ function startQueued() {
 const note = (key: string, h: Head): Note => ({
   pr: key, sha: h.sha, title: h.title, url: h.url, tier: h.tier ?? 0,
   summary: (h.reviews ?? []).map((r) => r.summary).join(" ").slice(0, 600),
+  ...(h.signals ? { owned: h.signals.owned } : {}),
 });
 
 function actOnReviewed(live: Map<string, string>) {
