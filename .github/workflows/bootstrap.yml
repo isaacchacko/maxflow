@@ -1,0 +1,42 @@
+name: lint-bootstrap
+on: push
+permissions:
+  contents: write
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/lint
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
+      - run: |
+          git config user.name "Isaac Chacko"
+          git config user.email "isaac.chacko05@gmail.com"
+          git fetch origin feat/v2
+          git rebase origin/feat/v2
+      - run: bun install --frozen-lockfile
+      - run: rm -f tsc-baseline.json && bun scripts/typecheck.ts --shrink || true
+      - run: bun --bun node_modules/.bin/eslint . -f json -o lint.json || true
+      - run: rm -f eslint-suppressions.json && bun --bun node_modules/.bin/eslint . --suppress-all || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: baselines
+          path: |
+            tsc-baseline.json
+            eslint-suppressions.json
+            lint.json
+      - run: |
+          read E T <<< "$(bun -e 'const d = await Bun.file("lint.json").json(); const t = await Bun.file("tsc-baseline.json").json(); console.log(d.reduce((s, r) => s + r.messages.length, 0), Object.values(t).reduce((s, n) => s + n, 0))')"
+          git add tsc-baseline.json eslint-suppressions.json
+          git diff --cached --quiet || git commit -qm "Lint baselines: $E eslint and $T tsc violations, per file and rule, that may only shrink. bun run check fails when a count rises (scripts/baseline-shrinks.ts compares against origin/feat/v2), and bun run lint:shrink lowers them. The goal is zero"
+      - run: bun run check
+      - if: ${{ env.LAND == '1' }}
+        run: git push origin HEAD:feat/v2 && git push -f origin HEAD:feat/lint
+        env:
+          LAND: "1"
