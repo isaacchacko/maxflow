@@ -44,7 +44,7 @@ export function week(key?: string): Week {
 // ---- GitHub
 
 type Counts = { commits: number; opened: number; merged: number; closed: number; reviews: number; requested: number; added: number; deleted: number };
-export type GhWeek = { at: number; final: boolean; counts?: Counts; error?: string };
+export type GhWeek = { at: number; final: boolean; counts?: Counts; commitTimes?: number[]; error?: string };
 
 const loadCache = (): Record<string, GhWeek> => {
   try {
@@ -59,7 +59,8 @@ const inflight = new Map<string, Promise<GhWeek>>();
 function cloneCommits(clone: string, w: Week) {
   const r = Bun.spawnSync(["git", "-C", clone, "log", "--all", "--no-merges", "--author=Isaac Chacko", `--since=${new Date(w.from).toISOString()}`, `--until=${new Date(w.to).toISOString()}`, "--format=%at %s"], { stderr: "pipe" });
   // A rebased or cherry-picked commit keeps its author time and subject under a new hash, so those count once.
-  return r.exitCode === 0 ? new Set(r.stdout.toString().split("\n").filter(Boolean)).size : 0;
+  const unique = r.exitCode === 0 ? new Set(r.stdout.toString().split("\n").filter(Boolean)) : new Set<string>();
+  return [...unique].map(line => Number(line.slice(0, line.indexOf(" "))) * 1000).sort((a, b) => a - b);
 }
 
 async function graphql(query: string) {
@@ -130,8 +131,9 @@ async function fetchGh(repo: string, w: Week): Promise<GhWeek> {
     merged.push(...more.nodes);
     page = more.pageInfo;
   }
+  const commitTimes = clone ? cloneCommits(clone, w) : undefined;
   const counts: Counts = {
-    commits: clone ? cloneCommits(clone, w) : (data.h?.defaultBranchRef?.target?.history?.totalCount ?? 0),
+    commits: commitTimes ? commitTimes.length : (data.h?.defaultBranchRef?.target?.history?.totalCount ?? 0),
     opened: data.o.issueCount,
     merged: data.m.issueCount,
     closed: data.c.issueCount,
@@ -140,7 +142,7 @@ async function fetchGh(repo: string, w: Week): Promise<GhWeek> {
     added: merged.reduce((n, p) => n + p.additions, 0),
     deleted: merged.reduce((n, p) => n + p.deletions, 0),
   };
-  return { at: Date.now(), final: Date.now() > w.to + SETTLED_MS, counts };
+  return { at: Date.now(), final: Date.now() > w.to + SETTLED_MS, counts, commitTimes };
 }
 
 export function gh(repo: string, w: Week): Promise<GhWeek> {
@@ -171,7 +173,7 @@ export function gh(repo: string, w: Week): Promise<GhWeek> {
 
 type Sample = { at: number; ms: number };
 export type Latency = { id: string; samples: Sample[] };
-export type Count = { id: string; days: number[] };
+export type Count = { id: string; days: number[]; at: number[] };
 export type YarnWeek = { since: number; latencies: Latency[]; counts: Count[] };
 
 type Ev = { seq: number; at: number; topic: string; data: Record<string, unknown> };
@@ -212,7 +214,11 @@ export function yarn(w: Week): YarnWeek {
   const lat = (id: string): Latency => ({ id, samples: [] });
   const route = lat("route"), reply = lat("reply"), slack = lat("slack"), ask = lat("ask");
   const dayOf = (at: number) => w.days.indexOf(dayKey(at));
-  const count = (id: string): Count => ({ id, days: Array(7).fill(0) });
+  const count = (id: string): Count => ({ id, days: Array(7).fill(0), at: [] });
+  const tally = (c: Count, at: number) => {
+    c.days[dayOf(at)]!++;
+    c.at.push(at);
+  };
   const said = count("said"), started = count("started"), opened = count("opened"), resolved = count("resolved"), prsOpened = count("prsOpened"), prsMerged = count("prsMerged");
 
   // His message → the funnel routing it: the server notes the routing as signal-route/<seq of the signal>.
@@ -225,7 +231,7 @@ export function yarn(w: Week): YarnWeek {
     const t = e.topic;
     if (t === "signal/isaac") {
       bySeq.set(e.seq, e);
-      if (inWeek(e.at)) said.days[dayOf(e.at)]!++;
+      if (inWeek(e.at)) tally(said, e.at);
     } else if (t.startsWith("signal-route/")) {
       const s = bySeq.get(e.data.seq as number);
       if (s && inWeek(s.at)) route.samples.push({ at: s.at, ms: e.at - s.at });
@@ -250,16 +256,16 @@ export function yarn(w: Week): YarnWeek {
     if (inWeek(sent) && at >= sent) slack.samples.push({ at: sent, ms: at - sent });
   }
   // Sessions alive when the log began weren't started then.
-  for (const at of firstWait.values()) if (inWeek(at) && at > since + 10 * 60_000) started.days[dayOf(at)]!++;
-  for (const at of resolvedAt.values()) if (inWeek(at)) resolved.days[dayOf(at)]!++;
-  for (const at of prs.opened.values()) if (inWeek(at)) prsOpened.days[dayOf(at)]!++;
-  for (const at of prs.merged.values()) if (inWeek(at)) prsMerged.days[dayOf(at)]!++;
+  for (const at of firstWait.values()) if (inWeek(at) && at > since + 10 * 60_000) tally(started, at);
+  for (const at of resolvedAt.values()) if (inWeek(at)) tally(resolved, at);
+  for (const at of prs.opened.values()) if (inWeek(at)) tally(prsOpened, at);
+  for (const at of prs.merged.values()) if (inWeek(at)) tally(prsMerged, at);
 
   // His message → the first agent reply in its thread, timed from the first of his messages since the last reply.
   const byThread = new Map(threads.map(t => [t.id, t]));
   for (const t of threads) {
     const first = t.messages[0];
-    if (first && inWeek(first.at)) opened.days[dayOf(first.at)]!++;
+    if (first && inWeek(first.at)) tally(opened, first.at);
     let waiting: number | undefined;
     for (const m of t.messages) {
       if (m.from === "isaac") waiting ??= m.at;
@@ -283,11 +289,22 @@ export function yarn(w: Week): YarnWeek {
   return value;
 }
 
+const TREND_WEEKS = 12;
+let trendQueue = Promise.resolve();
+/** The repo's counts for the weeks up to `w`, from the cache only. Weeks not cached yet are fetched one at a time in the background, so the
+ * page doesn't wait on a dozen GitHub calls; `pending` tells it to look again shortly. */
+function trend(repo: string, w: Week) {
+  const weeks = Array.from({ length: TREND_WEEKS }, (_, i) => week(addDays(w.key, -7 * (TREND_WEEKS - 1 - i))));
+  const missing = weeks.filter(x => !ghCache[`${repo} ${x.key}`]?.counts && !inflight.has(`${repo} ${x.key}`));
+  for (const x of missing) trendQueue = trendQueue.then(() => gh(repo, x).then(() => {}));
+  return { pending: missing.length > 0 || weeks.some(x => inflight.has(`${repo} ${x.key}`)), weeks: weeks.map(x => ({ key: x.key, counts: ghCache[`${repo} ${x.key}`]?.counts })) };
+}
+
 export async function stats(key?: string, repo?: string) {
   const w = week(key);
   const prev = week(addDays(w.key, -7));
   // Only an owner/name is put into a search query.
   const r = repo && /^[\w.-]+\/[\w.-]+$/.test(repo) ? repo : DEFAULT_REPO;
   const [now, before, list] = await Promise.all([gh(r, w), gh(r, prev), repos()]);
-  return { week: w, gh: { repo: r, repos: list.includes(r) ? list : [...list, r], now, before }, yarn: yarn(w), yarnBefore: yarn(prev) };
+  return { week: w, gh: { repo: r, repos: list.includes(r) ? list : [...list, r], now, before, trend: trend(r, w) }, yarn: yarn(w), yarnBefore: yarn(prev) };
 }

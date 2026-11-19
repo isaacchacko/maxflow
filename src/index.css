@@ -229,3 +229,7 @@
 /* While the image viewer is open nothing under its scrim moves: a turning ring repaints the page beneath every frame, and with it
    re-rasters the inbox's full-size image previews, which made zooming crawl. */
 :root[data-viewing] #root *, :root[data-viewing] #root *::before, :root[data-viewing] #root *::after { animation-play-state: paused !important; }
+
+/* The Stats page's charts: one accent (validated against both surfaces) drawn over a neutral track, as BoardUI's chart cards do. */
+.viz { --viz: #2a78d6; --viz-track: color-mix(in oklab, var(--muted-foreground) 13%, var(--card)); --viz-tile: color-mix(in oklab, var(--muted) 55%, var(--card)); }
+.dark .viz { --viz: #3987e5; --viz-track: color-mix(in oklab, var(--muted-foreground) 16%, var(--card)); --viz-tile: color-mix(in oklab, var(--muted) 60%, var(--card)); }
