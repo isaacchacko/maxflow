@@ -8,41 +8,42 @@ export function when(at: string) {
     : new Date(at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-/**
- * One message as Slack draws it: picture, bold name and time, then the body. Grouped under the sender's previous message,
- * it drops the picture and name and shows its time in the gutter on hover. `meta` sits after the time, `children` under the body.
- * A message the feed posted for someone on Slack or
- * GitHub (`ext`) is theirs: their picture and name, where it was said, and Slack's mrkdwn drawn as Slack draws it; one from before
- * the new ones in its conversation is muted and labelled context.
- */
-export function MessageRow({ from, at, text, ext, where = true, grouped, meta, children, className, bodyClassName, onClick }: { from: string; at: string; text: string; ext?: External; where?: boolean; grouped?: boolean; meta?: React.ReactNode; children?: React.ReactNode; className?: string; bodyClassName?: string; onClick?: (e: React.MouseEvent) => void }) {
-  if (from === "maxflow")
-    return (
-      <article data-from={from} data-at={at} className={cn("-mx-5 flex items-baseline gap-2 px-5 py-1 text-xs text-muted-foreground", className)}>
-        <span className="w-9 shrink-0 text-right text-[10px] tabular-nums">{at.slice(11, 16)}</span>
-        <Markdown text={text} className="min-w-0 flex-1 text-xs" />
-      </article>
-    );
+function MaxflowNote({ at, text, className }: { at: string; text: string; className?: string | undefined }) {
   return (
-    <article onClick={onClick} data-from={from} data-at={at} data-context={ext?.context || undefined} className={cn("group -mx-5 flex gap-2 px-5 py-2 hover:bg-muted/50", ext?.context && "opacity-60", className)}>
-      {grouped ? (
-        <span className="invisible w-9 shrink-0 pt-0.5 text-right text-[10px] text-muted-foreground tabular-nums group-hover:visible">{at.slice(11, 16)}</span>
-      ) : ext ? (
-        <ExtAvatar ext={ext} />
-      ) : (
-        <Avatar from={from} />
-      )}
+    <article data-from="maxflow" data-at={at} className={cn("-mx-5 flex items-baseline gap-2 px-5 py-1 text-xs text-muted-foreground", className)}>
+      <span className="w-9 shrink-0 text-right text-[10px] tabular-nums">{at.slice(11, 16)}</span>
+      <Markdown text={text} className="min-w-0 flex-1 text-xs" />
+    </article>
+  );
+}
+
+function Gutter({ from, at, ext, grouped }: { from: string; at: string; ext: External | undefined; grouped: boolean }) {
+  if (grouped) return <span className="invisible w-9 shrink-0 pt-0.5 text-right text-[10px] text-muted-foreground tabular-nums group-hover:visible">{at.slice(11, 16)}</span>;
+  return ext ? <ExtAvatar ext={ext} /> : <Avatar from={from} />;
+}
+
+function Header({ from, at, ext, where, meta }: { from: string; at: string; ext: External | undefined; where: boolean; meta: React.ReactNode }) {
+  const hasMeta = Boolean(meta);
+  const isSlackChipShown = ext !== undefined && where && !hasMeta && ext.source === "slack";
+  return (
+    <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap group-hover/bar:pr-[calc(var(--bar-w,0px)_-_1.25rem)]">
+      {ext ? <ExtAuthor ext={ext} className="min-w-0 truncate" /> : <Author from={from} className="min-w-0 truncate" />}
+      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{when(at)}</span>
+      {ext?.context === true && <span className="shrink-0 rounded border px-1 text-[10px] text-muted-foreground uppercase">context</span>}
+      {isSlackChipShown && <span className="min-w-0 text-xs"><SlackChip href={ext.link} /></span>}
+      {hasMeta && <span className="flex min-w-0 flex-1 basis-0 items-baseline [&>*]:min-w-0">{meta}</span>}
+    </div>
+  );
+}
+
+export function MessageRow({ from, at, text, ext, where = true, grouped = false, meta, children, className, bodyClassName, onClick }: { from: string; at: string; text: string; ext?: External; where?: boolean; grouped?: boolean; meta?: React.ReactNode; children?: React.ReactNode; className?: string; bodyClassName?: string; onClick?: (e: React.MouseEvent) => void }) {
+  if (from === "maxflow") return <MaxflowNote at={at} text={text} className={className} />;
+  const isContext = ext?.context === true;
+  return (
+    <article onClick={onClick} data-from={from} data-at={at} data-context={isContext ? true : undefined} className={cn("group -mx-5 flex gap-2 px-5 py-2 hover:bg-muted/50", isContext && "opacity-60", className)}>
+      <Gutter from={from} at={at} ext={ext} grouped={grouped} />
       <div className="min-w-0 flex-1">
-        {!grouped && (
-          // One line: the name ends in an ellipsis only once what follows the time has given all it can, and the time never breaks.
-          <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap group-hover/bar:pr-[calc(var(--bar-w,0px)_-_1.25rem)]">
-            {ext ? <ExtAuthor ext={ext} className="min-w-0 truncate" /> : <Author from={from} className="min-w-0 truncate" />}
-            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{when(at)}</span>
-            {ext?.context && <span className="shrink-0 rounded border px-1 text-[10px] text-muted-foreground uppercase">context</span>}
-            {ext && where && !meta && ext.source === "slack" && <span className="min-w-0 text-xs"><SlackChip href={ext.link} /></span>}
-            {meta && <span className="flex min-w-0 flex-1 basis-0 items-baseline [&>*]:min-w-0">{meta}</span>}
-          </div>
-        )}
+        {!grouped && <Header from={from} at={at} ext={ext} where={where} meta={meta} />}
         <Markdown text={text} slack={ext?.source === "slack"} className={cn("text-sm leading-relaxed", bodyClassName)} />
         {children}
       </div>
