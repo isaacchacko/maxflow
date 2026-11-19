@@ -67,6 +67,7 @@ export type Thread = {
   /** An agent asked him here with `maxflow ask` and sleeps until he replies. */
   asks?: { sessionId: string; since: string; shown: boolean };
   movedTo?: { id: string; title: string; objectiveId: string; messageId: string; at: string };
+  taskId?: string;
   /** A subthread's root is this message in its parent thread; its own messages are that message's replies. */
   parentId?: string;
   parentMessageId?: string;
