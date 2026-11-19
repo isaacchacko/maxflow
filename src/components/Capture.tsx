@@ -82,7 +82,7 @@ function useCapture() {
       setShot(s => s && { ...s, png, preview: URL.createObjectURL(png) });
       if (latestSendWhenReady.current) {
         setSendWhenReady(false);
-        void latestSend.current(png);
+        void latestSend.current({ png });
       }
       closeDialogThroughItsInput(dialogInTheShot);
     } catch (error_) {
