@@ -73,7 +73,7 @@ adoptSessions();
 
 // Sentries are ordinary sessions, started once and kept by tmux across server restarts.
 const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  ["gh", "slack", "rename", ...(LIVE ? ["health"] : []), "graph", "ram", "inbox", "approval", "docs"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
+  ["gh", "slack", "rename", ...(LIVE ? ["health"] : []), "graph", "ram", "inbox", "approval", "docs", "jev"].map((n) => [`sentry:${n}`, [process.execPath, new URL(`./sentries/${n}.ts`, import.meta.url).pathname]]),
 );
 // The review sentry is a claude agent; its feed runs beside it, logging out of the way of its screen.
 const reviewSource = (f: string) => new URL(`./sentries/${f}`, import.meta.url).pathname;
