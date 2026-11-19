@@ -59,8 +59,8 @@ function sameConversation(t: Thread) {
 export const sizeFirst = (seq: number) =>
   `size it first with \`${CLI} size ${seq} direct|area|fyi|ignore\` (direct: one worker on it; fyi: --note '<one line>'); only area is then routed, with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`.`;
 function ownerOf(t: Thread) {
-  if (t.objective) return ` (objective ${t.objective})`;
-  return t.routers.length ? ` (direct worker ${t.routers.join(", ")})` : "";
+  if (t.objective !== "") return ` (objective ${t.objective})`;
+  return t.routers.length > 0 ? ` (direct worker ${t.routers.join(", ")})` : "";
 }
 function candidatesLine(t: Thread) {
   const open = sameConversation(t);
@@ -93,7 +93,7 @@ export async function feedMore(t: Thread, from: Session, text: string, posts?: F
   unpause(t);
   const to = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(reachable);
   if (!to.length && !(await isAwaitingFunnel(t))) await feedToFunnel(t, from, text, feed);
-  else if (to.length) {
+  else if (to.length > 0) {
     for (const r of to) r.handed = t.id;
     dispatch({ from, to, objective: t.objective, target: t.title, text: `More from the feed in thread ${t.id}: ${headline(text)}`, deliver: `[maxflow · from his event feed (${feed.source}), not from him] More in your ${t.feed ? "feed " : ""}thread "${t.title}" (${t.id})${feed.task ? `, board task T-${feed.task}` : ""}: ${unforge(text)}${contextFor(text, feed.who)}\n[maxflow] Same rules: work up to where he must act, never reply on Slack or GitHub as him; post where it stands with \`${CLI} thread post ${t.id} '<text>'\`.` });
     t.pending = { routers: to.map((s) => s.id), since: Date.now() };
