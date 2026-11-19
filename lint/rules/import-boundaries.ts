@@ -4,22 +4,26 @@ import { type Area, areaOf, createRule, repoPath } from "../rule";
 
 type MessageId = "srcOut" | "intoSrc" | "server" | "intoSentries" | "intoTooling" | "lint";
 
-function target(fromFile: string, specifier: string) {
+function target(fromFile: string, specifier: string): string | undefined {
   if (specifier.startsWith("@/")) return `src/${specifier.slice(2)}`;
-  if (!specifier.startsWith(".")) return undefined;
-  return normalize(join(dirname(fromFile), specifier)).split("\\").join("/");
+  if (!specifier.startsWith(".")) return;
+  return normalize(join(dirname(fromFile), specifier)).replaceAll("\\", "/");
 }
 
 const TOOLING = new Set<Area>(["test", "scripts", "fixtures"]);
 
 function violation(fromPath: string, from: Area, to: Area, toPath: string): MessageId | undefined {
   if (from === "src") return to === "src" || to === "shared" ? undefined : "srcOut";
-  if (to === "src") return toPath.endsWith(".html") && from === "root" ? undefined : "intoSrc";
+  if (to === "src") return from === "root" && toPath.endsWith(".html") ? undefined : "intoSrc";
   if (from === "test") return undefined;
+  return outsideSrcViolation(fromPath, from, to, toPath);
+}
+
+function outsideSrcViolation(fromPath: string, from: Area, to: Area, toPath: string): MessageId | undefined {
   if (/^server(\.ts)?$/.test(toPath)) return "server";
   if (to === "sentries" && from !== "sentries") return "intoSentries";
-  if (TOOLING.has(to) && from !== to && from !== "scripts") return "intoTooling";
-  if ((to === "lint") !== (from === "lint") && fromPath !== "eslint.config.ts") return "lint";
+  if (from !== "scripts" && from !== to && TOOLING.has(to)) return "intoTooling";
+  if (fromPath !== "eslint.config.ts" && (to === "lint") !== (from === "lint")) return "lint";
   return undefined;
 }
 
