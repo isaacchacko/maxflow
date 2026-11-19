@@ -1,32 +1,26 @@
 import { ArrowUpToLine } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { useRef, useState } from "react";
+import { hasText } from "@/lib/utils";
 import type { Thread } from "@/mock";
 import { createStore, startThread } from "@/store";
 import { quoted } from "./Composer";
 import { Markdown } from "./Rich";
 
-// Slack's "Share message" to a channel, for the Threads channel (Isaac: "give me the ability to raise a given message to the top of
-// threads (by quoting it) and then messaging about it"): the message quoted, his words above it, sent as a new thread of its own,
-// which the funnel routes as it does anything he writes there. The quote's chip links the new thread back to the message, and the
-// message shows where it was raised to.
-
 type Raising = { thread: string; message: string; text: string };
 const raising = createStore<Raising | undefined>(undefined);
 
-/** Opens the box to raise a message: from its menus, its hover bar, or R. */
 export const openRaise = (thread: string, message: string, text: string) => raising.set({ thread, message, text });
 
-/** A raised message's new thread: his words, then the quote. */
 export const raisedText = (comment: string, quote: string) => [comment.trim(), quote].filter(Boolean).join("\n\n");
 
-/** Sends a raise: a new top thread, titled by its first line. */
-export const raise = (text: string) => startThread(text);
+export const raise = async (text: string) => {
+  await startThread(text);
+};
 
-/** The top threads a message was raised to: those whose first message quotes it. */
 export const raisedTo = (threads: Thread[], thread: string, message: string) => {
   const chip = `[[msg:${thread}/${message}]]`;
-  return threads.filter(t => !t.parentId && t.id !== thread && t.messages[0]?.text.includes(chip));
+  return threads.filter(t => !hasText(t.parentId) && t.id !== thread && t.messages[0]?.text.includes(chip) === true);
 };
 
 export function RaiseDialog() {
@@ -34,9 +28,12 @@ export function RaiseDialog() {
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
-  // Each quote raised starts with an empty box.
-  const [boxFor, setBoxFor] = useState(r);
-  if (boxFor !== r) setBoxFor(r), setComment(""), setSending(false);
+  const [emptyBoxFor, setEmptyBoxFor] = useState(r);
+  if (emptyBoxFor !== r) {
+    setEmptyBoxFor(r);
+    setComment("");
+    setSending(false);
+  }
   const close = () => raising.set(undefined);
   const quote = r ? quoted(r.text, r.thread, r.message) : "";
   const send = async () => {
@@ -46,16 +43,18 @@ export function RaiseDialog() {
     close();
   };
   return (
-    <Dialog.Root open={!!r} onOpenChange={o => o || close()}>
+    <Dialog.Root open={Boolean(r)} onOpenChange={o => o || close()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/20" />
         <Dialog.Content
           data-agent="raise"
           aria-describedby={undefined}
-          // Its keys are its own: the digits don't switch views, and Escape only closes it.
           onKeyDown={e => e.stopPropagation()}
           onEscapeKeyDown={e => e.stopPropagation()}
-          onOpenAutoFocus={e => (e.preventDefault(), box.current?.focus())}
+          onOpenAutoFocus={e => {
+            e.preventDefault();
+            box.current?.focus();
+          }}
           onCloseAutoFocus={e => e.preventDefault()}
           className="fixed top-[18%] left-1/2 z-50 flex w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 flex-col gap-3 rounded-2xl border bg-card p-4 shadow-raised outline-none"
         >
@@ -64,7 +63,10 @@ export function RaiseDialog() {
             Raise to Threads
           </Dialog.Title>
           <form
-            onSubmit={e => (e.preventDefault(), void send())}
+            onSubmit={e => {
+              e.preventDefault();
+              void send();
+            }}
             className="flex flex-col gap-3"
           >
             <textarea
@@ -72,8 +74,11 @@ export function RaiseDialog() {
               data-agent="raise-input"
               value={comment}
               onChange={e => setComment(e.target.value)}
-              // Enter sends, as the composer's does; ⇧Enter is a new line.
-              onKeyDown={e => e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (e.preventDefault(), void send())}
+              onKeyDown={e => {
+                if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+                e.preventDefault();
+                void send();
+              }}
               rows={3}
               placeholder="Say something about it…"
               className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-ring"
