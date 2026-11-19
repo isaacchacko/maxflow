@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { backgroundShells } from "./background";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
 import { slackAvatar, slackNames } from "./slack-meta";
+import { stats } from "./stats";
 import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { markRead, ownComment, repoOf } from "./sentries/gh";
@@ -2506,6 +2507,7 @@ Bun.serve<WsData>({
     }
 
     if (path === "/api/todos" && req.method === "GET") return Response.json(todos);
+    if (path === "/api/stats" && req.method === "GET") return Response.json(await stats(url.searchParams.get("week") ?? undefined));
     if (path === "/api/todos" && req.method === "POST") {
       const { text, day } = (await req.json().catch(() => ({}))) as { text?: string; day?: string };
       if (!text?.trim() || !day || !DAY.test(day)) return new Response("text, and day as YYYY-MM-DD", { status: 400 });
