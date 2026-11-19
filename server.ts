@@ -350,11 +350,6 @@ const isAgent = (s: Session) => !!s.claude || !!s.chatId || !!s.asleep || s.cmd[
 const chatOf = (s: Session) => s.chatId ?? s.transcript?.match(/([0-9a-f-]{36})\.jsonl$/)?.[1];
 // Agents stopAgent is reading the box of, so two callers don't stop one twice.
 const stopping = new Set<string>();
-// An archived agent with messages queued wakes to take them; the rest stay stopped.
-for (const s of sessions.values()) {
-  if (s.inbox.length && (s.archived || s.asleep) && !isSentry(s)) wake(s);
-  else if (s.archived) stopAgent(s);
-}
 // Drafts cleared out of the way before a restart still go back once their turn ends.
 const DRAFTS = `${STATE_DIR}/drafts`;
 const UPLOADS = `${STATE_DIR}/uploads`;
@@ -1555,6 +1550,11 @@ function settleTasks() {
 // Tasks from before the server settled columns start from what their agents settle now, so only later changes move them.
 for (const t of tasks) if (!("derived" in t)) t.derived = derive(t)?.to;
 setInterval(settleTasks, 15_000);
+// After the tasks store loads, since waking settles tasks: an archived agent with messages queued wakes to take them; the rest stay stopped.
+for (const s of sessions.values()) {
+  if (s.inbox.length && (s.archived || s.asleep) && !isSentry(s)) wake(s);
+  else if (s.archived) stopAgent(s);
+}
 
 // An unanswered ask with a default for a reversible step stops holding its agent after DEFAULT_AFTER_MS.
 setInterval(() => {
