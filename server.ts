@@ -996,8 +996,9 @@ const pointsAtItself = (text: string, t: Thread) => text.includes(`[[thread:${t.
 function movedStubs() {
   const stubs = [];
   for (const t of threads) {
+    if (t.moved === undefined || t.parent !== undefined) continue;
     const his = t.messages.find((m) => m.from === "isaac");
-    if (t.moved === undefined || t.parent !== undefined || his === undefined) continue;
+    if (his === undefined) continue;
     const into = threads.find((x) => x.mergedInto === undefined && x.messages.some((m) => m.id === his.id)) ?? live_thread(t);
     if (into === undefined) continue;
     stubs.push({ id: t.id, title: t.title, objectiveId: into.objective, routerIds: [], ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), movedTo: { id: into.id, title: into.title, objectiveId: into.objective, messageId: his.id, at: iso(t.moved.at) }, messages: [{ id: his.id, from: his.from, at: iso(his.at), text: his.text }] });

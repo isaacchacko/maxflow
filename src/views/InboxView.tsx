@@ -123,7 +123,10 @@ export function InboxView() {
   const asks = rows.filter(r => r.t.asks);
   const replied = rows.filter(r => unseenDeep(r.t, threads) > 0);
   const firstNew = rows.findIndex(r => r.first.from !== "isaac" && r.first.at > seenAt);
-  const toggle = (t: Thread) => (setKept(k => new Set(k).add(t.id)), setResolved(t.id, !t.resolved));
+  const toggle = (t: Thread) => {
+    setKept(k => new Set(k).add(t.id));
+    setResolved(t.id, !t.resolved).catch(() => {});
+  };
   const scrollRef = useRef<HTMLDivElement>(null);
   const lineRef = useRef<HTMLDivElement>(null);
   const open = (id: string) => (location.hash = `thread/${id}`);
@@ -207,7 +210,7 @@ export function InboxView() {
           <div className="flex flex-wrap items-center gap-2">
             <MovedChip to={to} />
             {t.resolved && (
-              <button data-agent={`inbox-reopen:${t.id}`} title="Reopen" onClick={() => void toggle(t)} className="mt-1 flex items-center gap-1 rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-xs font-medium text-ok hover:border-ok">
+              <button data-agent={`inbox-reopen:${t.id}`} title="Reopen" onClick={() => toggle(t)} className="mt-1 flex items-center gap-1 rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-xs font-medium text-ok hover:border-ok">
                 <Check className="size-3" />
                 Resolved
               </button>
@@ -215,7 +218,7 @@ export function InboxView() {
           </div>
         </MessageRow>
       </div>
-      <HoverBar agent={t.id} actions={[{ label: t.resolved ? "Reopen" : "Resolve", icon: t.resolved ? RotateCcw : Check, run: () => void toggle(t), agent: `inbox-resolve:${t.id}` }]} menu={[]} />
+      <HoverBar agent={t.id} actions={[{ label: t.resolved ? "Reopen" : "Resolve", icon: t.resolved ? RotateCcw : Check, run: () => toggle(t), agent: `inbox-resolve:${t.id}` }]} menu={[]} />
     </div>
   );
 
