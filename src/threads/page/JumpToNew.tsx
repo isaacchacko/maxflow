@@ -19,7 +19,7 @@ function useNewSpots(threadId: string, newKeys: string[], scrollRef: React.RefOb
           setSpots(prev => {
             const of = { ...prev.of };
             for (const e of entries) {
-              const key = (e.target as HTMLElement).dataset.row ?? "";
+              const key = (e.target as HTMLElement).dataset["row"] ?? "";
               if (of[key] === "met") continue;
               if (e.isIntersecting) of[key] = "met";
               else of[key] = e.boundingClientRect.top < (e.rootBounds?.top ?? 0) ? "above" : "below";
