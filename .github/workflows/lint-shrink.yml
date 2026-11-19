@@ -1,0 +1,22 @@
+name: lint-shrink
+on:
+  push:
+    branches: ["lint/shrink**"]
+jobs:
+  shrink:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - name: lower each baseline count to what the code has now; a count never rises here
+        run: bun run lint:shrink || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: baselines
+          path: |
+            tsc-baseline.json
+            eslint-suppressions.json

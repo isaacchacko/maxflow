@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { STATE_DIR } from "./instance";
 
@@ -213,3 +213,26 @@ export const deployLock = {
     if (lockHolder() === pid) rmSync(DEPLOY_LOCK, { force: true });
   },
 };
+
+export const stateExists = (name: string) => existsSync(stateFile(name));
+
+export function listState(directory: string): { name: string; modifiedAt: number }[] {
+  const path = stateFile(directory);
+  if (!existsSync(path)) return [];
+  return readdirSync(path).map((name) => ({ name, modifiedAt: statSync(join(path, name)).mtimeMs }));
+}
+
+export function claimState(name: string): boolean {
+  try {
+    closeSync(openSync(stateFile(name), "wx"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function stateDirectory(name: string): string {
+  const path = stateFile(name);
+  mkdirSync(path, { recursive: true });
+  return path;
+}
