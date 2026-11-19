@@ -75,7 +75,7 @@ function projectTranscripts(dir: string) {
   } catch {
     return [];
   }
-  return entries.flatMap((e) => (e.endsWith(".jsonl") ? [join(dir, e)] : subagentTranscripts(join(dir, e))));
+  return entries.flatMap((e) => (e.endsWith(".jsonl") ? join(dir, e) : subagentTranscripts(join(dir, e))));
 }
 
 function isModifiedSince(path: string, since: number) {
@@ -119,9 +119,10 @@ function parseJson(line: string): unknown {
   }
 }
 
+const mayCarryUsage = (line: string) => line.includes('"usage"') && line.includes('"type":"assistant"');
+
 function assistantMessage(line: string): AssistantMessage | undefined {
-  if (!line.includes('"usage"') || !line.includes('"type":"assistant"')) return undefined;
-  const d = parseJson(line);
+  const d = mayCarryUsage(line) ? parseJson(line) : undefined;
   const message = isRecord(d) ? d["message"] : undefined;
   if (!isRecord(d) || !isRecord(message) || !isRecord(message["usage"])) return undefined;
   const model = optionalString(message["model"]) ?? "";
@@ -170,7 +171,7 @@ function spanAfter(f: FileUsage, m: AssistantMessage, ts: number): Partial<FileU
     lastTs: Math.max(f.lastTs ?? 0, ts),
     first: Math.min(f.first ?? ts, ts),
     last: Math.max(f.last ?? ts, ts),
-    ...(f.cwd === undefined && m.cwd !== undefined ? { cwd: m.cwd } : {}),
+    ...(f.cwd === undefined && m.cwd !== undefined && { cwd: m.cwd }),
   };
 }
 
@@ -209,7 +210,7 @@ function scannedFile(path: string, kept: FileUsage | undefined): FileUsage {
     console.error(`usage: ${path}: ${error instanceof Error ? error.message : String(error)}`);
   }
   const sub = SUBAGENT_PATH.exec(path);
-  return { ...read, size: st.size, mtime: st.mtimeMs, ...(sub ? { parent: `${sub[1] ?? ""}/${sub[2] ?? ""}.jsonl` } : {}) };
+  return { ...read, size: st.size, mtime: st.mtimeMs, ...(sub && { parent: `${sub[1] ?? ""}/${sub[2] ?? ""}.jsonl` }) };
 }
 
 export function scanNewTranscriptLines() {
