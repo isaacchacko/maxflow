@@ -1,9 +1,10 @@
 import type { Block } from "./model";
 import { objectives, saveObjectives, saveTasks, tasks } from "./stores";
 
-// A page (an objective's or a task's) is a grid of cards its agents keep current.
-export function pageOf(ref: string): { page: Block[]; save: () => void } | null {
-  const [type, id] = ref.split("/");
+type CardGridOfAnObjectiveOrTask = { page: Block[]; save: () => void };
+
+export function pageOf(ref: string): CardGridOfAnObjectiveOrTask | null {
+  const [type, id = ""] = ref.split("/", 2);
   if (type === "objective") {
     const o = objectives.find((x) => x.id === id);
     return o ? { page: o.page, save: saveObjectives } : null;
