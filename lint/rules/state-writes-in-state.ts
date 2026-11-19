@@ -39,7 +39,7 @@ export default createRule({
     docs: { description: "Files under ~/.maxflow-v2 are written only by state.ts" },
     messages: {
       write:
-        "Write state through state.ts, not with {{call}} here: a direct write is a non-atomic full rewrite that races every other writer of the file. Use the store's function in state.ts (threadsTable.write, ...), or add one there.",
+        "Write state through state.ts, not with {{call}} here: a direct write is a non-atomic full rewrite that races every other writer of the file. Use state.ts: the store's table (threadsTable.write, ...), or writeStateJson (atomic: temp file, then rename), appendStateText or removeState for a file that stays a file.",
     },
     schema: [],
     defaultOptions: [],
