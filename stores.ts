@@ -1,6 +1,6 @@
 import { namesTable, objectivesTable, tasksTable, threadsTable, todosTable } from "./state";
 import { type Session, sessions } from "./sessions";
-import { type Objective, type Task, type Thread, type Todo } from "./model";
+import type { Objective, Task, Thread, Todo } from "./model";
 
 export const live = (s?: Session): s is Session => !!s && s.exitCode === null;
 export const objectives = objectivesTable.read() as Objective[];

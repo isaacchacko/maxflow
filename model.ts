@@ -1,5 +1,3 @@
-
-
 // One chokepoint for every message: Isaac's chats, GitHub and Slack notices, the server's own, and one agent writing another
 // all become a signal on the bus, then go to the sessions named, else to the routers of the objective, else to the funnel.
 export type Source = "isaac" | "gh" | "slack" | "agent" | "sentry" | "maxflow";

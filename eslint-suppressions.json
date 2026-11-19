@@ -142,6 +142,29 @@
       "count": 10
     }
   },
+  "intro.ts": {
+    "@typescript-eslint/strict-boolean-expressions": {
+      "count": 5
+    },
+    "unicorn/explicit-length-check": {
+      "count": 3
+    },
+    "unicorn/no-computed-property-existence-check": {
+      "count": 1
+    },
+    "unicorn/no-negated-array-predicate": {
+      "count": 1
+    },
+    "unicorn/no-unnecessary-array-flat-map": {
+      "count": 1
+    },
+    "unicorn/prefer-iterator-to-array": {
+      "count": 2
+    },
+    "yarn/no-comments": {
+      "count": 9
+    }
+  },
   "mcp.ts": {
     "@typescript-eslint/no-empty-function": {
       "count": 1
@@ -246,6 +269,11 @@
     },
     "yarn/no-comments": {
       "count": 7
+    }
+  },
+  "model.ts": {
+    "yarn/no-comments": {
+      "count": 42
     }
   },
   "restrictions-enforce.ts": {
@@ -573,7 +601,7 @@
   },
   "server.ts": {
     "@typescript-eslint/no-confusing-void-expression": {
-      "count": 18
+      "count": 17
     },
     "@typescript-eslint/no-empty-function": {
       "count": 1
@@ -600,7 +628,7 @@
       "count": 16
     },
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 8
+      "count": 6
     },
     "@typescript-eslint/no-unnecessary-type-assertion": {
       "count": 2
@@ -621,10 +649,10 @@
       "count": 77
     },
     "@typescript-eslint/no-unsafe-return": {
-      "count": 9
+      "count": 8
     },
     "@typescript-eslint/no-unused-expressions": {
-      "count": 23
+      "count": 22
     },
     "@typescript-eslint/prefer-includes": {
       "count": 2
@@ -648,7 +676,7 @@
       "count": 1
     },
     "@typescript-eslint/strict-boolean-expressions": {
-      "count": 350
+      "count": 343
     },
     "@typescript-eslint/use-unknown-in-catch-callback-variable": {
       "count": 3
@@ -678,7 +706,7 @@
       "count": 7
     },
     "no-implicit-coercion": {
-      "count": 23
+      "count": 22
     },
     "no-nested-ternary": {
       "count": 34
@@ -687,13 +715,13 @@
       "count": 68
     },
     "no-restricted-syntax": {
-      "count": 37
+      "count": 35
     },
     "no-useless-assignment": {
       "count": 1
     },
     "no-void": {
-      "count": 16
+      "count": 15
     },
     "prefer-template": {
       "count": 1
@@ -702,7 +730,7 @@
       "count": 5
     },
     "unicorn/consistent-boolean-name": {
-      "count": 38
+      "count": 36
     },
     "unicorn/consistent-existence-index-check": {
       "count": 5
@@ -714,7 +742,7 @@
       "count": 10
     },
     "unicorn/explicit-length-check": {
-      "count": 45
+      "count": 42
     },
     "unicorn/max-nested-calls": {
       "count": 6
@@ -726,7 +754,7 @@
       "count": 3
     },
     "unicorn/no-computed-property-existence-check": {
-      "count": 4
+      "count": 3
     },
     "unicorn/no-declarations-before-early-exit": {
       "count": 1
@@ -741,7 +769,7 @@
       "count": 1
     },
     "unicorn/no-negated-array-predicate": {
-      "count": 8
+      "count": 7
     },
     "unicorn/no-negated-condition": {
       "count": 8
@@ -753,10 +781,10 @@
       "count": 6
     },
     "unicorn/no-top-level-assignment-in-function": {
-      "count": 15
+      "count": 13
     },
     "unicorn/no-unnecessary-array-flat-map": {
-      "count": 3
+      "count": 2
     },
     "unicorn/no-unnecessary-parameters": {
       "count": 3
@@ -786,7 +814,7 @@
       "count": 6
     },
     "unicorn/prefer-iterator-to-array": {
-      "count": 26
+      "count": 24
     },
     "unicorn/prefer-minimal-ternary": {
       "count": 3
@@ -828,7 +856,7 @@
       "count": 2
     },
     "yarn/no-comments": {
-      "count": 371
+      "count": 316
     },
     "yarn/no-sync-spawn-in-server": {
       "count": 3
@@ -953,6 +981,38 @@
     },
     "yarn/no-comments": {
       "count": 16
+    }
+  },
+  "stores.ts": {
+    "@typescript-eslint/no-confusing-void-expression": {
+      "count": 1
+    },
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    },
+    "@typescript-eslint/no-unused-expressions": {
+      "count": 1
+    },
+    "@typescript-eslint/strict-boolean-expressions": {
+      "count": 2
+    },
+    "no-implicit-coercion": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 2
+    },
+    "no-void": {
+      "count": 1
+    },
+    "unicorn/consistent-boolean-name": {
+      "count": 2
+    },
+    "unicorn/no-top-level-assignment-in-function": {
+      "count": 2
+    },
+    "yarn/no-comments": {
+      "count": 4
     }
   },
   "test/restrictions.test.ts": {
