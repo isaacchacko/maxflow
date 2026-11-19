@@ -6,6 +6,9 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base, STATE_DIR } from "../instance";
+import { takeOver } from "./singleton";
+
+if (import.meta.main) takeOver("context");
 
 const STATE_FILE = join(STATE_DIR, "context-state.json");
 const DIGEST_FILE = join(STATE_DIR, "context-digest.md");

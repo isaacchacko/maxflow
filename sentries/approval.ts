@@ -12,6 +12,9 @@ import { dirname, join } from "node:path";
 import { repoOf } from "./gh";
 import { BASE, STATE_DIR } from "../instance";
 import { enqueue, flush, config, type Note } from "./approval-notify";
+import { takeOver } from "./singleton";
+
+if (import.meta.main) takeOver("approval");
 
 const STATE_FILE = join(STATE_DIR, "approval-state.json");
 const STATUS_FILE = join(STATE_DIR, "gh-status.json");

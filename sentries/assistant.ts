@@ -7,6 +7,9 @@
 import { existsSync, openSync, readSync, closeSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base, STATE_DIR } from "../instance";
+import { takeOver } from "./singleton";
+
+if (import.meta.main) takeOver("assistant");
 
 const STATE_FILE = join(STATE_DIR, "assistant-state.json");
 const DIGEST_FILE = join(STATE_DIR, "assistant-digest.json");

@@ -8,6 +8,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { INBOX_WATCH_FILE, repoOf, type Watch } from "./gh";
 import { BASE as base, STATE_DIR } from "../instance";
+import { takeOver } from "./singleton";
+
+if (import.meta.main) takeOver("inbox");
 
 const STATE_FILE = join(STATE_DIR, "inbox-state.json");
 const QUEUE_FILE = join(STATE_DIR, "review-queue.json");

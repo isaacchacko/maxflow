@@ -4,6 +4,9 @@
 import { totalmem } from "node:os";
 import { join } from "node:path";
 import { BASE as base, TMUX_SOCKET } from "../instance";
+import { takeOver } from "./singleton";
+
+if (import.meta.main) takeOver("ram");
 
 const INTERVAL_MS = Number(process.env.RAM_INTERVAL ?? 15_000);
 const MAX_PCT = Number(process.env.RAM_MAX_PCT ?? 1.5);
