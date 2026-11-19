@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { repoOf } from "./gh";
+import { repoOf } from "../gh";
 import { BASE, STATE_DIR } from "../instance";
 import { enqueue, flush, config, type Note } from "./approval-notify";
 import { ghStatusTable } from "../state";

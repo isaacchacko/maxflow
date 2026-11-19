@@ -6,7 +6,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { INBOX_WATCH_FILE, repoOf, type Watch } from "./gh";
+import { repoOf, type Watch } from "../gh";
+import { INBOX_WATCH_FILE } from "./gh";
 import { BASE as base, STATE_DIR } from "../instance";
 import { mcpSync } from "../mcp";
 import { takeOver } from "./singleton";

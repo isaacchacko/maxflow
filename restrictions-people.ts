@@ -4,7 +4,7 @@ import { STATE_DIR } from "./instance";
 import type { Person } from "./restrictions";
 import { shellText } from "./restrictions-shell";
 import { ghStatusTable, slackMessagesTable } from "./state";
-import { parsePr, repoOf } from "./sentries/gh";
+import { parsePr, repoOf } from "./gh";
 
 // Who a tool call reaches or acts on, for restrictions scoped to people: a Slack DM's other member, each email recipient, a
 // Teams chat's members, the author of the PR a gh command reviews or merges, a mallory target. Read from what the sentries

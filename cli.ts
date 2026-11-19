@@ -44,7 +44,8 @@ const usage = `usage:
                                              fast-forwards, restarts, checks every session and sentry came back,
                                              and restarts the sentries whose code changed
   maxflow install                            run this checkout as the login service and add its hooks to ~/.claude/settings.json`;
-import { fetchPrs, links, parsePr, readStatus, readWatches, render, writeWatches } from "./sentries/gh";
+import { fetchPrs, parsePr, readStatus, render } from "./gh";
+import { links, readWatches, writeWatches } from "./sentries/gh";
 import * as slackRead from "./slack-read";
 import { loadRestrictions, resolve, type Restriction } from "./restrictions";
 const flag = (args: string[], k: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);

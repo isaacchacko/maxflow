@@ -4,7 +4,8 @@
 // reaches no session. Exits with the agent.
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Link, links, ownComment, REVIEW_WATCH_FILE, type Watch } from "./gh";
+import { isOwnComment as ownComment, type Link, type Watch } from "../gh";
+import { links, REVIEW_WATCH_FILE } from "./gh";
 import { BASE as base, STATE_DIR } from "../instance";
 import { takeOver } from "./singleton";
 

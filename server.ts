@@ -8,7 +8,7 @@ import { agents, calendar, health, stats } from "./stats";
 import { ghStatusTable, inboxesTable, namesTable, objectivesTable, slackMessagesTable, tasksTable, threadsTable, todosTable } from "./state";
 import { latestSeq, onPublish, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
-import { markRead, ownComment, repoOf } from "./sentries/gh";
+import { isOwnComment as ownComment, markRead, repoOf } from "./gh";
 import { BASE, CLI, DIR, INERT_AGENTS, INERT_CWD, INSTANCE, LIVE, MAX_SESSIONS, PORT, STATE_DIR, TMUX_SCOPE, TMUX_SOCKET } from "./instance";
 import { enforce, onReply } from "./restrictions-enforce";
 import { invalid, loadRestrictions, resolve, saveRestrictions, type Person, type Restriction } from "./restrictions";
