@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "bun --hot server.ts",
-    "check": "bun scripts/check.ts && bun scripts/typecheck.ts && bun --bun eslint --max-warnings 0 --pass-on-unpruned-suppressions . && bun scripts/baseline-shrinks.ts && bun test",
+    "check": "bun scripts/check.ts && bun test",
+    "check:full": "bun scripts/check.ts && bun scripts/typecheck.ts && bun --bun eslint --max-warnings 0 --pass-on-unpruned-suppressions . && bun scripts/baseline-shrinks.ts && bun test",
     "typecheck": "bun scripts/typecheck.ts",
     "lint": "bun --bun eslint --max-warnings 0 --pass-on-unpruned-suppressions .",
     "lint:shrink": "bun --bun eslint --prune-suppressions . ; bun scripts/typecheck.ts --shrink"
