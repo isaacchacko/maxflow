@@ -1,124 +1,146 @@
 # yarn cleanup plan: make yarn development agent-friendly
 
-Isaac's ask (th-7d528b): "want to clean up yarn codebase. north star: make yarn development extremely agent friendly." This is phase 1: a survey and a ranked plan. No code has changed yet.
+Isaac's ask (th-7d528b): "want to clean up yarn codebase. north star: make yarn development extremely agent friendly." This is the second draft, the planning doc he asked for. He then said "eh ignore the plan first, implement whenever", so it is committed as it stood, unpolished, and the SQLite move (piece 3) is being built now.
 
-The plan holds to north star 3 (smallest thing that does the job): no rewrite, and every piece removes a failure we have seen. Most of them make the tooling enforce a rule that agents currently have to remember.
+**Reference.** "All Code Is Slop (Except Mine)", Lauren Tan, AI Engineer 2026 (https://youtu.be/O_zcc6Xl12g). These notes come from ai.engineer's write-up of the talk; the verbatim transcript would not load. Its central idea is the **inverse trust pyramid**. The most trust goes to decisions made once in code, an API that can't express the mistake. Next come checks (lint, types, tests), then runtime verification. Prose rules are a thin layer kept for judgment calls, and human review is the expensive tip. Agents copy whatever patterns the codebase already has, so its quality compounds in either direction. When an agent repeats a mistake, the order is **rule, then cleanup, then verify**, and only then automation. Pieces marked **[talk]** apply one of these practices.
 
-## What makes changing yarn hard today (evidence)
+## Status of the first plan
 
-1. **The live service runs from the tree everyone edits.** launchd runs `bun server.ts` with `WorkingDirectory` set to `~/Worktrees/maxflow-v2` (`service.ts` `install()`, `DIR = import.meta.dir`). Every agent edits that same checkout on `feat/v2`. Right now 15 files there hold other agents' uncommitted hunks (`git status`: 13 sentries, `server.ts` and an untracked `sentries/singleton.ts`). The consequences, all from the last three days of `git log`:
-   - **Swept-in work.** Commits picked up another agent's half-finished hunks and had to be taken back: `ee73120` (a health.html→panic.html rename swept in by `4eb7b70`), `46b57e1` (`c8df144` imported an uncommitted file, so HEAD didn't build), `a1d69cd` (`1745f7d` carried another agent's feed migration and dropped its own hunk), `314ecb7`, and `2d7dbff` (`de6d58a` committed a stale copy of server.ts that reverted `c9c5565`).
-   - **Hand-built commits.** To avoid sweeping, agents build commits from `HEAD` plus their own edits (`git hash-object`, `update-index`). That process has its own failures: `c23d14e` (HEAD's server.ts didn't parse, while the live server ran a tree another agent had already fixed), and `58472b6` (a hand-built blob committed `cli.ts` as 644). The memories [commit-only-paths] and [parse-check-staged-blob] spend about 30 lines on how to do this safely.
-   - **Deploys ship other people's work.** A `launchctl kickstart` restarts whatever the tree holds right now, other agents' unfinished edits included, and on 2026-11-16 a `pkill -f "bun server.ts"` took live down ([live-watch-and-pkill]).
-   - **The UI rebuilds on every save.** server.ts serves `src/index.html` through Bun's dev server with HMR (`development: { hmr: true }`). Any agent's half-written save in `src/` reaches Isaac's open tabs at once. `sentries/health.ts` even starts a recovery agent when "a frontend build stays broken for 60s", because a few broken seconds are routine.
-2. **There are no tests and no CI.** The repo has no `*.test.ts` and no `.github/workflows`, and `package.json` defines only `dev`. A wrong edit is found when it breaks live. Isaac's global rule is that checks run in CI rather than locally, but there is no CI for yarn to run them in.
-3. **Trying a change is slow and can hurt live.** `./dev.sh` gives an instance its own port, socket and state dir (`instance.ts`), and it starts empty: there is no seed data, so you can't see a flow without building the state by hand. Nothing limits how many sessions an instance starts. Every instance shares the machine's process table with live, and the 16:16 crash (`ca3633f`) followed a dev instance that had spawned 60+ sessions: a failed fork left a pane at pid -1, and respawning it segfaulted the live tmux server, which killed about 95 agents. `~/.maxflow-v2-*` holds 13 leftover instance dirs, and two of them still hold a `server.pid`.
-4. **server.ts is 2836 lines in one file.** It holds tmux control, session adoption, sentry startup, every agent's intro prose, threads, waits, tasks, todos, restrictions, PR state, the world builder and the whole HTTP router (a single `fetch` with an `if (path === ...)` chain). Because so many agents edit this one file, the stale-copy revert in `2d7dbff` happened there, and agents run into each other's hunks there most often. It is also why reading "how waits work" means paging through unrelated code.
-5. **Agents keep relearning the same gotchas.** The gotchas live in per-user Claude memory (`~/.claude/projects/-Users-isaac-Programs-maxflow/memory/`, 21 files) and in a 15KB SessionStart intro. No file in the repo tells a new agent how to change yarn: there is no `CLAUDE.md` or `AGENTS.md`, and `docs/reference.md` describes usage, not development. Some of the rules are workarounds for item 1 (commit-only-paths, parse-check-staged-blob, never kickstart without checking), and they disappear once item 1 is fixed.
-6. **Guardrails misfire.** The restrictions hook (`restrictions.ts:90`, `\bpkill\b`) blocked this survey's `sed` of a memory file named `live-watch-and-pkill.md`, because `-` is a word boundary. A guard that blocks reads teaches agents to route around guards.
+| Piece | Status |
+|---|---|
+| Live runs only committed code; `cli.ts deploy` is the one way it changes | Live (e6d5fb4). The edit-live restriction denies Edit and Write in the live checkout. |
+| `bun run check` plus CI on every push | Shipped (ad49bb9). |
+| Dev instances capped, seeded, inert by default | Shipped (0764d7f). |
+| Restrictions match where a command starts | Shipped (038671e). |
+| Repo `CLAUDE.md` | Dropped (Isaac: "want the code to be self defining"). Piece 2 replaces it. |
+| Split server.ts | Kept as piece 7. |
 
-## The plan, ranked
+## The new plan, ranked
 
-| # | Piece | Size | Parallel? |
-|---|-------|------|-----------|
-| 1 | Live runs only committed code; agents work in their own worktrees | S–M | first; others build on it |
-| 2 | A check script plus CI on push | M | yes, with 3, 5, 6 |
-| 3 | Dev instances are capped, seeded and one command | S | yes |
-| 4 | Split server.ts along the seams it already has | M | after 1 and 2 |
-| 5 | A repo `CLAUDE.md` replaces the scattered gotchas | S | yes; finish after 1 |
-| 6 | Restrictions match commands, not substrings | S | yes |
+| # | Piece | Cost | Buys agents |
+|---|---|---|---|
+| 1 | Lint layer with guiding diagnostics, and enforced boundaries **[talk]** | S–M | Every later rule becomes a check instead of prose |
+| 2 | Self-defining code: each recurring gotcha becomes an API or a check **[talk]** | M | Agents stop relearning the same lessons |
+| 3 | State moves from 45 JSON files to SQLite | L | Atomic writes, enforced uniqueness, cheap queries, one place for schema changes |
+| 4 | useEffect banned outside a small framework layer **[talk]** | M | Removes the React bug class agents get wrong most |
+| 5 | Delete dead workarounds and the comments that justify them **[talk]** | S–M | Agents stop copying workarounds as patterns |
+| 6 | Runtime verification: a packaged dev driver that returns screenshot evidence **[talk]** | M | "It works" becomes a picture instead of a claim |
+| 7 | Split server.ts into modules the boundary rules check **[talk]** | M | Small files with one job; fewer collisions |
+| 8 | Feature map, generated and checked **[talk]** | S | Shared names for requests and the code that serves them |
 
-### 1. Live runs only committed code; agents work in their own worktrees (do this first)
+### 1. Lint layer and enforced boundaries [talk]
 
-**Change.** Treat `~/Worktrees/maxflow-v2` as the live deploy checkout and nothing else: no agent edits it. Every change happens in the agent's own worktree on its own branch (`git worktree add ~/Worktrees/maxflow-<topic> -b <branch> origin/feat/v2`), and lands by rebasing onto `feat/v2` and pushing (or through a PR, auto-merged, per [maxflow-merge-no-approval]). A new `cli.ts deploy` command is the only way live changes. It refuses if the live checkout is dirty, runs `git pull --ff-only`, parse-checks (`bun build --no-bundle` on server.ts, cli.ts and sentries), kickstarts the service, and then checks that the session count matches and that every sentry is running, which the memory says to do by hand today. A new restrictions builtin, "Edit the live yarn checkout", makes the hook deny Edit and Write to paths under the live `DIR` from any session but `deploy`. The hook already exists, so this is one catalog entry.
+yarn has no linter. Its layers depend on each other only by convention:
+- `src/` imports a server module directly (`../../restrictions`).
+- `slack-messages.json` is read by 7 modules and `gh-status.json` by 5, with no type behind either.
+- `STATE_DIR` is imported by 23 files.
 
-The live path stays the same, so the CLI path in every pane's environment and intro still works. A one-time cutover comes first: whoever owns the 15 dirty files commits their work or moves it to a branch, so the tree starts clean.
+Add Biome to `bun run check`. Its `noRestrictedImports` rule takes a custom message per path, so the diagnostic carries the guidance.
 
-**Why it helps agents.** It closes failure 1 at its source. Commits become an ordinary `git add -A && git commit` in a tree that is the agent's alone. Sweeping and stale copies become impossible, so the hand-built-blob procedure and two memory files can go. A deploy ships exactly the commits on `feat/v2`, and Isaac's UI stops hot-reloading half-saved files. The health sentry's broken-build recovery becomes a rare event instead of routine.
+Rules:
+- `src/` imports only `shared/`.
+- Sentries never import `server.ts`.
+- Only the state module touches `STATE_DIR`.
 
-**Size.** S–M: about 40 lines in `cli.ts`, one builtin in `restrictions.ts`, and a doc change. The cutover is mostly coordination.
+Start with today's violations as a frozen baseline that may only shrink. ESLint with `eslint-plugin-boundaries` would also work, but it is a heavier toolchain.
 
-**Touches.** `cli.ts`, `restrictions.ts`, `docs/`, and the agents with dirty hunks today.
+### 2. Self-defining code [talk]
 
-**Parallel.** Do it first. The others don't depend on it to start, but each is easier to land after it.
+| Gotcha | Evidence | Becomes |
+|---|---|---|
+| Commits sweep in others' hunks | ee73120, 46b57e1, a1d69cd, 314ecb7, 2d7dbff | **API**: worktrees plus deploy (live) |
+| Parse-check hand-built commits | c23d14e, 1745f7d | **Obsolete** with worktrees; CI check |
+| cli.ts committed as 644 | 58472b6 | **Check**: executable bits in `check` |
+| Push after every commit | memory | **API**: deploy refuses commits origin lacks |
+| Deploy = kickstart + count sessions | memory | **API**: `cli.ts deploy` |
+| Never pkill by pattern | 2026-11-16 outage | **Check**: restrictions hook (exists) |
+| Inert test-agent text | memory, 2026-11-17 | **API**: dev instance default (shipped) |
+| notify vs SendMessage | memory contradicts the intro at `server.ts:312` | **Decide one path**; the hook denies the other with guidance |
+| Repeated CLI flags keep only the first | memory task-cli-one-flag | **API**: the parser accepts repeats or errors |
+| Check for a task before creating one | memory | **API**: idempotent task create |
+| Never self-archive | a69af8b | **Already code**; delete the memory |
+| Sentries only respawn at boot | memory | **Stale**; delete |
+| Two sentry copies double-send | ad28221, bb67d2a | **API**: singleton, then a DB unique claim |
+| Sync tmux blocks the event loop | `server.ts:94` | **API**: tmux.ts exports only async to handlers |
+| `await` in a non-async arrow | c23d14e | **Check**: `tsc --noEmit` in CI |
+| Read-path migrations | 11 sites in server.ts | Piece 3 and piece 5 |
+| Funnel routing rules | 5 memories | **Stay prose**: judgment |
 
-### 2. A check script plus CI on push
+### 3. State in SQLite
 
-**Change.** Add a `bun run check` script that parse-checks every entry point, bundles `src/index.html` once with `bun build`, and runs `bun test`. Seed the tests with a few cheap unit tests for pure helpers that have broken or misfired before: `shellText` and the restriction matchers, `candidatesIn` (PR and URL extraction), `titleOf`, and wait parsing. Add a smoke test that boots a throwaway instance (`MAXFLOW_INSTANCE=ci`, `MAXFLOW_SENTRIES=0`, a random port), checks that `/api/world` and `/api/sessions` answer, and stops it. A GitHub Actions workflow runs `check` on every push to `feat/v2` and on every PR. `cli.ts deploy` (piece 1) refuses a commit whose CI is red.
+**Inventory of `~/.maxflow-v2`** (2026-11-18 17:46; writes counted by sampling mtimes every 2s for 2 minutes; the cost columns are measured on copies):
 
-**Why it helps agents.** Today the first signal that an edit is wrong is that live breaks. This gives a signal within minutes, and it runs in CI, which matches Isaac's checks-in-CI rule. Every test is also a written example of how the code is meant to behave.
+| File | Size | Writer | Readers | Writes / 2 min | Write ms | Read ms |
+|---|---|---|---|---|---|---|
+| events.jsonl | 43 MB | server (append) | server boot replays it all, stats.ts | append | | |
+| threads.json | 1.19 MB (276 threads, 2,113 messages) | server, full rewrite, 200ms debounce | server, stats.ts | 5 | 8.1 | 10.4 |
+| gh-status.json | 963 KB | gh sentry, full rewrite | server, approval, restrictions hook | 3 | 16.7 | 12.5 |
+| tasks.json | 816 KB (440 tasks) | server, sync full rewrite | server | 4 | 5.1 | 12.6 |
+| approval-state.json | 734 KB | approval sentry | approval | 1 | 3.5 | 1.8 |
+| inbox-state.json | 375 KB | inbox sentry | inbox | 29 | 1.8 | 2.2 |
+| slack-messages.json | 243 KB | slack sentry | 7 modules incl. the hook | 6 | | |
+| restrictions.json and -seeded | 13 KB | **every hook process on every tool call** (`loadRestrictions` writes as it loads), and the server | hook, server, cli | **47 each** | | |
+| todo-state.json | 3 KB | todo feed | todo | 28 | | |
+| 36 more | 62B–92KB | sentries and server | | 0–6 | | |
 
-**Size.** M. Most of the effort goes into making the boot path start cleanly with no tmux sessions and no sentries.
+**Findings.**
+- Only 3 of 85 `writeFileSync` calls write a temp file and rename it.
+- `sentryFile()` swallows parse errors.
+- Every agent's tool call rewrites `restrictions.json`, so a hook that loaded just before Isaac's edit can write the old list back (a lost update, not observed yet).
+- A torn read was **not** reproduced: 31,604 reads during 55,074 rewrites of the 13KB file, on APFS. The one proven race is the approval double-send (ad28221), which claim files and a singleton fixed.
+- No store is slow at today's sizes. threads.json grows with every message.
 
-**Touches.** `package.json`, a new `test/` directory, `.github/workflows/check.yml`, and possibly small export changes so helpers can be imported without booting the server. Piece 4 makes those exports cleaner.
+**Options.** Atomic JSON fixes torn writes only. bun:sqlite in WAL mode adds `UNIQUE`, row-level writes, indexed hook reads and versioned migrations, with no new dependency. Postgres is overkill for one machine. **Choose bun:sqlite**, at `~/.maxflow-v2/yarn.db`.
 
-**Parallel.** Yes.
+**Schema (first pass).** Columns for filters, plus a `data` JSON column:
+- `threads`, `messages(thread_id, seq)`
+- `tasks`, `task_links UNIQUE(task_id, url)`
+- `objectives`, `todos`, `names`, `decisions`
+- `prs(url)`, `slack_messages(channel, ts)`, `approval_claims PK(pr, head)`
+- `sentry_state(sentry, key)`
+- events stays JSONL.
 
-### 3. Dev instances are capped, seeded and one command
+**Migration, per store.** Schema, then a one-time import (the JSON stays as a backup), then readers and writers switched, then verification on `./dev.sh --seed`, then deploy.
 
-**Change.** Three small additions to `dev.sh` and `createSession`:
-- When `!LIVE`, a dev instance refuses to start more than `MAXFLOW_MAX_SESSIONS` sessions (default 10), so it can't exhaust the process table that live shares.
-- `./dev.sh --seed` copies a small fixture state (a few threads, objectives and tasks, built from what `src/mock.ts` already describes) into the instance's state dir, so a UI flow can be tried at once.
-- `./dev.sh gc` removes `~/.maxflow-v2-*` instance dirs whose pid is dead.
+### 4. useEffect ban [talk]
 
-The [inert-test-agent-text] rule becomes the default: a dev instance starts `claude` with `--model haiku` in an empty cwd unless told otherwise.
+There are 64 effects in `src/`:
+- **A. Reset state on input change (13)**: derive during render, use a `key`, or set it in the handler.
+- **B. Window or DOM event subscriptions (16)**: framework hooks (`useHotkey`, `useOutsideClick`, `useWindowEvent`, `useElementSize`), plus stores read with `useSyncExternalStore`.
+- **C. Fetch on mount (8)**: a resource store, or put the data in `/api/world`.
+- **D. Debounced queries (2)**: `useDebouncedQuery`.
+- **E. Imperative DOM sync (18)**: ref callbacks, `useScrollAnchor`, `useAutosize`, CSS; xterm and AgentFace stay as framework widgets.
+- **F. Persist or side-write (7)**: write in the setter or the handler; one shared clock store.
 
-**Why it helps agents.** "Try it on dev" becomes cheap and safe, so agents stop testing on live, and a runaway instance can no longer take 95 agents down.
+Effects are allowed only in `src/framework/`. Enforced by Biome `noRestrictedImports` with a guiding message, starting from a baseline that may only shrink.
 
-**Size.** S.
+### 5. Delete dead workarounds [talk]
 
-**Touches.** `dev.sh`, `createSession` in server.ts (one guard), and a fixture directory.
+Delete, once each is proven dead:
+- the 11 read-path shims in server.ts
+- health's `/__down/` routes and the `x-maxflow-down` header
+- the v1 backup directory
+- the stale dev state dirs
+- obsolete memories
 
-**Parallel.** Yes.
+Comments go only when a check or a rename replaces them. Comments are 8% of lines (1,577 of 18,821).
 
-### 4. Split server.ts along the seams it already has
+### 6. Runtime verification [talk]
 
-**Change.** A pure move, with no behavior change, one module per commit, done after piece 2 so the smoke test guards each step. The seams are already visible in the function list:
-- `tmux.ts`: `tmux`, `respawn`, `scoped`, `paste`, `push`, `attachViewer`, `createSession`, `adoptSessions`.
-- `intro.ts`: `intro`, `roleIntro`, `standingDecisions`, `metaLessons`, the sentry blurbs. This is the prose agents edit most often, and it has no logic.
-- `waits.ts`: `wake`, `endWait`, `declareWait`, `tellWaiters`, `tellDone`, `alreadyDone`, `prWaitEnds`.
-- `threads.ts`: `postIn`, `subthread`, `titleOf`, mentions, `ask`, `answered`.
-- `world.ts`: `derive`, `rebuildWorld`, `world`.
-- Routes stay in `server.ts`, which ends up holding state, boot and the router.
+`./dev.sh shot <route>`: headless Chrome over CDP against a seeded instance, posting PNGs with `thread post --image`.
 
-**Why it helps agents.** An agent fixing waits reads a 200-line file, not 2836 lines. Concurrent edits stop landing in the same file, and the pieces can be imported by tests.
+### 7. Split server.ts [talk]
 
-**Size.** M, but mechanical. Each move is its own revertable commit.
+Into tmux.ts, intro.ts, waits.ts, threads.ts and world.ts, after piece 3. Each move is pure and checked by piece 1's rules.
 
-**Touches.** server.ts and the new modules.
+### 8. Feature map [talk]
 
-**Parallel.** No. It needs piece 1 (clean merges) and piece 2 (a safety net), and it should be announced, since it conflicts with any in-flight server.ts work.
+Generated from App.tsx's routes, cli.ts's verbs and the sentry list. `check` fails when one has no entry.
 
-### 5. A repo `CLAUDE.md` replaces the scattered gotchas
+## Order
 
-**Change.** Write `CLAUDE.md` at the repo root (Claude Code loads it automatically), kept to about 40 lines. It covers how to change yarn: worktree, branch, `bun run check`, push, `cli.ts deploy`; how to try a change with `./dev.sh --seed`; where things live; and the handful of rules that remain true after pieces 1–3, such as never pkill by pattern, inert test-agent text and the CLI path. Then delete the memory files that piece 1 makes obsolete, and trim the SessionStart intro's development notes down to a pointer to this file.
-
-**Why it helps agents.** One place, in the repo, versioned with the code, read by every agent on its first turn. Today a gotcha reaches only the agent whose user-level memory happened to save it.
-
-**Size.** S.
-
-**Touches.** `CLAUDE.md`, `docs/reference.md` (link), the memory directory, and `intro()`.
-
-**Parallel.** Yes. Write it now and update it as 1–3 land.
-
-### 6. Restrictions match commands, not substrings
-
-**Change.** Run the Bash matchers only against command words (argv[0] of each pipeline segment, with `shellText` already blanking quoted data), not the whole text. Add the false positive from this survey as a test case in piece 2.
-
-**Why it helps agents.** A guard that blocks `sed` on a file called `…pkill.md` teaches agents that blocks are noise. A precise guard is one they trust and obey.
-
-**Size.** S.
-
-**Touches.** `restrictions-shell.ts`, `restrictions.ts`.
-
-**Parallel.** Yes.
-
-## Reference: "All Code Is Slop (Except Mine)", Lauren Tan
-
-Isaac added this talk (https://youtu.be/O_zcc6Xl12g) as a reference. Its transcript couldn't be fetched: YouTube answered 429 to `yt-dlp --write-auto-subs` three times, twice from victoria four minutes apart and once from cleopatra, which uses the same egress. **No piece above comes from it yet.** Once the transcript is in hand, its concrete practices get folded in here, each one marked with the piece it changes or adds. Nothing in this plan paraphrases the talk from memory.
+1 first; then 2, 3 and 4 in parallel, each as rule, then cleanup, then verify; 5 behind each; 6 any time; 7 after 3; 8 any time; automation last.
 
 ## Left out on purpose
 
-- **No frontend restructure.** `src/` is about 10k lines in reasonably sized files, and nothing in the history shows it slowing agents down beyond the shared-tree problem that piece 1 fixes.
-- **No framework for the HTTP router.** The `if (path === ...)` chain is ugly but easy to read. Piece 4 can move groups of routes next to their module if that helps, and nothing more.
-- **Commit message length.** The long story-style subjects are Isaac's convention, so they are not changed here.
+No frontend rewrite, no router framework, no formal methods.
