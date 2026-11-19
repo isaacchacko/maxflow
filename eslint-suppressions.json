@@ -1,56 +1,4 @@
 {
-  "background.ts": {
-    "@typescript-eslint/prefer-regexp-exec": {
-      "count": 1
-    },
-    "unicorn/prefer-await": {
-      "count": 1
-    },
-    "yarn/no-comments": {
-      "count": 3
-    }
-  },
-  "bus.ts": {
-    "@typescript-eslint/no-confusing-void-expression": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unsafe-assignment": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 1
-    },
-    "@typescript-eslint/strict-boolean-expressions": {
-      "count": 1
-    },
-    "no-plusplus": {
-      "count": 1
-    },
-    "no-restricted-syntax": {
-      "count": 1
-    },
-    "prefer-template": {
-      "count": 1
-    },
-    "unicorn/consistent-boolean-name": {
-      "count": 1
-    },
-    "unicorn/explicit-length-check": {
-      "count": 1
-    },
-    "unicorn/no-top-level-assignment-in-function": {
-      "count": 1
-    },
-    "yarn/no-comments": {
-      "count": 3
-    },
-    "yarn/state-dir-in-state": {
-      "count": 1
-    },
-    "yarn/state-writes-in-state": {
-      "count": 1
-    }
-  },
   "delivery.ts": {
     "@typescript-eslint/no-confusing-void-expression": {
       "count": 3
@@ -273,43 +221,8 @@
     }
   },
   "instance.ts": {
-    "@typescript-eslint/no-non-null-assertion": {
-      "count": 1
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 2
-    },
-    "@typescript-eslint/strict-boolean-expressions": {
-      "count": 3
-    },
     "unicorn/consistent-boolean-name": {
       "count": 2
-    },
-    "yarn/no-comments": {
-      "count": 10
-    }
-  },
-  "intro.ts": {
-    "@typescript-eslint/strict-boolean-expressions": {
-      "count": 5
-    },
-    "unicorn/explicit-length-check": {
-      "count": 3
-    },
-    "unicorn/no-computed-property-existence-check": {
-      "count": 1
-    },
-    "unicorn/no-negated-array-predicate": {
-      "count": 1
-    },
-    "unicorn/no-unnecessary-array-flat-map": {
-      "count": 1
-    },
-    "unicorn/prefer-iterator-to-array": {
-      "count": 2
-    },
-    "yarn/no-comments": {
-      "count": 9
     }
   },
   "lifecycle.ts": {
@@ -413,32 +326,6 @@
       "count": 36
     }
   },
-  "mcp.ts": {
-    "@typescript-eslint/no-empty-function": {
-      "count": 1
-    },
-    "@typescript-eslint/prefer-includes": {
-      "count": 1
-    },
-    "unicorn/consistent-boolean-name": {
-      "count": 2
-    },
-    "unicorn/prefer-await": {
-      "count": 1
-    },
-    "yarn/fetch-needs-timeout": {
-      "count": 1
-    },
-    "yarn/no-comments": {
-      "count": 6
-    },
-    "yarn/state-dir-in-state": {
-      "count": 1
-    },
-    "yarn/state-writes-in-state": {
-      "count": 1
-    }
-  },
   "mentions.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
@@ -525,50 +412,8 @@
     }
   },
   "objectives.ts": {
-    "@typescript-eslint/no-loop-func": {
-      "count": 1
-    },
-    "@typescript-eslint/no-non-null-assertion": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unsafe-argument": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 2
-    },
-    "@typescript-eslint/prefer-nullish-coalescing": {
-      "count": 3
-    },
-    "@typescript-eslint/strict-boolean-expressions": {
-      "count": 5
-    },
-    "complexity": {
-      "count": 1
-    },
-    "no-param-reassign": {
-      "count": 4
-    },
     "unicorn/consistent-boolean-name": {
       "count": 1
-    },
-    "unicorn/no-array-sort": {
-      "count": 1
-    },
-    "unicorn/no-unreadable-for-of-expression": {
-      "count": 1
-    },
-    "unicorn/prefer-split-limit": {
-      "count": 1
-    },
-    "unicorn/prefer-string-raw": {
-      "count": 1
-    },
-    "unicorn/prefer-string-replace-all": {
-      "count": 7
-    },
-    "yarn/no-comments": {
-      "count": 5
     }
   },
   "pages.ts": {
@@ -604,9 +449,6 @@
     }
   },
   "routes-misc.ts": {
-    "@typescript-eslint/consistent-type-imports": {
-      "count": 2
-    },
     "@typescript-eslint/no-non-null-assertion": {
       "count": 2
     },
@@ -754,9 +596,6 @@
     }
   },
   "routes-tasks.ts": {
-    "@typescript-eslint/consistent-type-imports": {
-      "count": 1
-    },
     "@typescript-eslint/no-unused-expressions": {
       "count": 1
     },
@@ -869,6 +708,11 @@
     },
     "yarn/no-comments": {
       "count": 26
+    }
+  },
+  "scripts/baseline-shrinks.ts": {
+    "unicorn/consistent-boolean-name": {
+      "count": 1
     }
   },
   "sentries/health.ts": {
@@ -991,12 +835,6 @@
     },
     "yarn/no-comments": {
       "count": 4
-    },
-    "yarn/state-dir-in-state": {
-      "count": 1
-    },
-    "yarn/state-writes-in-state": {
-      "count": 1
     }
   },
   "sentry-files.ts": {
@@ -1226,26 +1064,8 @@
     }
   },
   "service.ts": {
-    "@typescript-eslint/no-non-null-assertion": {
-      "count": 8
-    },
-    "@typescript-eslint/prefer-regexp-exec": {
-      "count": 2
-    },
-    "@typescript-eslint/strict-boolean-expressions": {
-      "count": 2
-    },
-    "unicorn/consistent-boolean-name": {
-      "count": 2
-    },
     "unicorn/prefer-https": {
       "count": 1
-    },
-    "unicorn/prefer-string-raw": {
-      "count": 1
-    },
-    "yarn/no-comments": {
-      "count": 8
     }
   },
   "sessions.ts": {
@@ -1257,41 +1077,6 @@
     },
     "yarn/no-comments": {
       "count": 22
-    }
-  },
-  "sleeper.ts": {
-    "@typescript-eslint/no-confusing-void-expression": {
-      "count": 2
-    },
-    "@typescript-eslint/no-misused-promises": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unused-expressions": {
-      "count": 1
-    },
-    "@typescript-eslint/strict-boolean-expressions": {
-      "count": 2
-    },
-    "no-restricted-syntax": {
-      "count": 1
-    },
-    "unicorn/escape-case": {
-      "count": 4
-    },
-    "unicorn/no-top-level-assignment-in-function": {
-      "count": 2
-    },
-    "unicorn/prefer-await": {
-      "count": 1
-    },
-    "unicorn/prefer-unicode-code-point-escapes": {
-      "count": 4
-    },
-    "yarn/fetch-needs-timeout": {
-      "count": 1
-    },
-    "yarn/no-comments": {
-      "count": 3
     }
   },
   "src/pwa/sw.js": {
@@ -1341,35 +1126,11 @@
     }
   },
   "stores.ts": {
-    "@typescript-eslint/no-confusing-void-expression": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
-    },
-    "@typescript-eslint/no-unused-expressions": {
-      "count": 1
-    },
-    "@typescript-eslint/strict-boolean-expressions": {
-      "count": 2
-    },
-    "no-implicit-coercion": {
-      "count": 1
-    },
-    "no-restricted-syntax": {
-      "count": 2
-    },
-    "no-void": {
-      "count": 1
-    },
     "unicorn/consistent-boolean-name": {
-      "count": 2
+      "count": 1
     },
     "unicorn/no-top-level-assignment-in-function": {
       "count": 2
-    },
-    "yarn/no-comments": {
-      "count": 4
     }
   },
   "task-prs.ts": {
@@ -1534,26 +1295,6 @@
     },
     "yarn/no-comments": {
       "count": 22
-    }
-  },
-  "unsent.ts": {
-    "@typescript-eslint/prefer-regexp-exec": {
-      "count": 1
-    },
-    "@typescript-eslint/strict-boolean-expressions": {
-      "count": 1
-    },
-    "unicorn/consistent-function-scoping": {
-      "count": 1
-    },
-    "unicorn/explicit-length-check": {
-      "count": 1
-    },
-    "unicorn/prefer-string-replace-all": {
-      "count": 1
-    },
-    "yarn/no-comments": {
-      "count": 7
     }
   },
   "waits.ts": {

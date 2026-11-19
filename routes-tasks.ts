@@ -1,7 +1,7 @@
 import { writeStateJson } from "./state";
 import { isSentry, sessions } from "./sessions";
 import { candidates } from "./mentions";
-import { TaskEdit } from "./model";
+import type { TaskEdit } from "./model";
 import { tasks } from "./stores";
 import { editTask } from "./lifecycle";
 import { ARCHIVED_LINKS, archivedLinks } from "./world";

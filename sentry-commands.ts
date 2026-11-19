@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { DIR, LIVE, STATE_DIR } from "./instance";
+import { existsSync, readFileSync } from "node:fs";
+import { DIR, LIVE } from "./instance";
 import { paneEnv, respawn } from "./tmux";
 import { type Session, chatOf } from "./sessions";
+import { writeStateText } from "./state";
 
 // Sentries are ordinary sessions, started once and kept by tmux across server restarts.
 export const SENTRIES: Record<string, string[]> = Object.fromEntries(
@@ -24,8 +25,7 @@ export function restartSentry(s: Session, fresh: boolean) {
         return [];
       }
     });
-    const digest = `${STATE_DIR}/${s.name.slice(7)}-restart-digest.txt`;
-    writeFileSync(digest, `[maxflow] Your brief (sentries/${s.name.slice(7)}.md) changed, so a deploy restarted you in a fresh chat. Your previous chat was ${chat} (transcript ${s.transcript}, if you need more of it). The last things you said there:\n${said.slice(-6).map((t) => `- ${t}`).join("\n")}`);
+    const digest = writeStateText(`${s.name.slice(7)}-restart-digest.txt`, `[maxflow] Your brief (sentries/${s.name.slice(7)}.md) changed, so a deploy restarted you in a fresh chat. Your previous chat was ${chat} (transcript ${s.transcript}, if you need more of it). The last things you said there:\n${said.slice(-6).map((t) => `- ${t}`).join("\n")}`);
     cmd = ["sh", "-c", `${cmd[2]} "$(cat '${digest}')"`];
   }
   return { ok: respawn(s.id, "-c", DIR, ...paneEnv(s.id), "--", ...cmd), resumed: claude && chat && !fresh ? chat : undefined, fresh: claude && (fresh || !chat) };
