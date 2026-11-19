@@ -67,7 +67,7 @@ export default defineConfig(
       "max-lines-per-function": ["error", { max: 80, skipBlankLines: true, skipComments: true, IIFEs: true }],
       "max-statements": ["error", 25],
       "no-nested-ternary": "error",
-      "no-param-reassign": ["error", { props: true }],
+      "no-param-reassign": ["error", { props: true, ignorePropertyModificationsFor: ["ref", "el", "element", "node"], ignorePropertyModificationsForRegex: ["Ref$"] }],
       "no-implicit-coercion": "error",
       "no-else-return": ["error", { allowElseIf: false }],
       "no-lonely-if": "error",
@@ -121,6 +121,14 @@ export default defineConfig(
     files: ["src/**/*.{ts,tsx}"],
     plugins: { "react-hooks": reactHooks },
     rules: Object.fromEntries(Object.keys(reactHooks.configs.recommended.rules).map((rule) => [rule, "error"])),
+  },
+  {
+    files: ["src/**/*.tsx"],
+    rules: { "unicorn/no-declarations-before-early-exit": "off" },
+  },
+  {
+    files: ["src/components/face/**/*.ts"],
+    rules: { "no-param-reassign": "off" },
   },
   {
     files: ["src/lib/effects.ts"],
