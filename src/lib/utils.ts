@@ -6,3 +6,5 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export const scrollIntoReach = (row: Element | null) => row?.scrollIntoView({ block: "nearest" });
+
+export const hasText = (text: string | null | undefined): text is string => text !== undefined && text !== null && text !== "";

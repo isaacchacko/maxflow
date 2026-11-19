@@ -1,37 +1,49 @@
 import { useCallback, useSyncExternalStore } from "react";
 
-// Held here as well as in localStorage, so typing still works where localStorage throws (a private window, a full quota).
-const drafts = new Map<string, string>();
+const draftsInMemory = new Map<string, string>();
 const listeners = new Map<string, Set<() => void>>();
 
-function read(storageKey: string) {
-  if (!drafts.has(storageKey)) {
-    let saved = "";
-    try {
-      saved = localStorage.getItem(storageKey) ?? "";
-    } catch {}
-    drafts.set(storageKey, saved);
+function readStored(storageKey: string) {
+  try {
+    return localStorage.getItem(storageKey) ?? "";
+  } catch {
+    return "";
   }
-  return drafts.get(storageKey)!;
 }
 
-function write(storageKey: string, draft: string) {
-  drafts.set(storageKey, draft);
+function read(storageKey: string) {
+  const held = draftsInMemory.get(storageKey);
+  if (held !== undefined) return held;
+  const saved = readStored(storageKey);
+  draftsInMemory.set(storageKey, saved);
+  return saved;
+}
+
+function store(storageKey: string, draft: string) {
   try {
     if (draft) localStorage.setItem(storageKey, draft);
     else localStorage.removeItem(storageKey);
-  } catch {}
-  listeners.get(storageKey)?.forEach(l => l());
+  } catch {
+    // constraint: localStorage throws in a private window or on a full quota; the draft is still held in memory
+  }
 }
 
-/** Typed-but-unsent text, kept in localStorage under `draft:<key>` so a reload or rebuild doesn't lose it; setting "" clears it. */
+function write(storageKey: string, draft: string) {
+  draftsInMemory.set(storageKey, draft);
+  store(storageKey, draft);
+  const subscribed = listeners.get(storageKey) ?? [];
+  for (const notify of subscribed) notify();
+}
+
 export function usePersistentDraft(key: string) {
   const storageKey = `draft:${key}`;
   const subscribe = useCallback(
     (listener: () => void) => {
       const mine = listeners.get(storageKey) ?? new Set();
       listeners.set(storageKey, mine.add(listener));
-      return () => void mine.delete(listener);
+      return () => {
+        mine.delete(listener);
+      };
     },
     [storageKey],
   );
