@@ -3,7 +3,6 @@ import type { Thread } from "@/mock";
 import { objectiveStore } from "@/store";
 import { goToMessage } from "./jump";
 
-/** Where a stub's thread went: the thread it merged into and its objective; a click opens it at his first moved message. */
 export function MovedChip({ to }: { to: NonNullable<Thread["movedTo"]> }) {
   const objective = objectiveStore.use().find(o => o.id === to.objectiveId)?.title;
   return (
@@ -11,7 +10,7 @@ export function MovedChip({ to }: { to: NonNullable<Thread["movedTo"]> }) {
       <CornerDownRight className="size-3 shrink-0 text-muted-foreground" />
       <span className="shrink-0 text-muted-foreground">Moved to</span>
       <span className="min-w-0 truncate font-semibold text-link">{to.title}</span>
-      {objective && <span className="min-w-0 shrink truncate text-muted-foreground">on {objective}</span>}
+      {objective !== undefined && <span className="min-w-0 shrink truncate text-muted-foreground">on {objective}</span>}
     </button>
   );
 }

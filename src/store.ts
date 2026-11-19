@@ -23,7 +23,6 @@ export const objectiveStore = createStore(seedObjectives);
 export const agentStore = createStore(seedAgents);
 export const signalStore = createStore(seedSignals);
 export const threadStore = createStore(seedThreads);
-/** Stubs of his threads merged into others (Thread.movedTo), kept apart so nothing else takes them for threads. */
 export const movedStore = createStore<Thread[]>([]);
 export const editedStore = createStore<Record<string, number>>({});
 export const sourceStore = createStore(seedSources);
@@ -60,16 +59,17 @@ export const changes = { n: 0, busy: 0 };
  * A change the server refuses is put back.
  */
 async function optimistic(threadId: string, change: (t: Thread) => Thread, path: string, body: unknown) {
-  const before = threadStore.get().find(t => t.id === threadId);
+  const store = movedStore.get().some(t => t.id === threadId) ? movedStore : threadStore;
+  const before = store.get().find(t => t.id === threadId);
   changes.n++;
-  threadStore.set(all => all.map(t => (t.id === threadId ? change(t) : t)));
+  store.set(all => all.map(t => (t.id === threadId ? change(t) : t)));
   if (!isLive()) return;
   changes.busy++;
   try {
     const res = await fetch(path, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   } catch (e) {
-    if (before) threadStore.set(all => all.map(t => (t.id === threadId ? before : t)));
+    if (before) store.set(all => all.map(t => (t.id === threadId ? before : t)));
     throw e;
   } finally {
     changes.n++;
@@ -172,27 +172,6 @@ export async function openSubthread(threadId: string, messageId: string, open = 
 /** Isaac marks a thread done, or reopens it; it stays readable and postable either way. */
 export async function setResolved(threadId: string, resolved: boolean) {
   await optimistic(threadId, t => ({ ...t, resolved: resolved ? { at: localAt() } : undefined }), `/api/threads/${threadId}`, { resolved });
-}
-
-/** Resolving a stub hides it as resolving a thread does; it shows at once, and comes back if the server refuses. */
-export async function setMovedResolved(id: string, resolved: boolean) {
-  const before = movedStore.get();
-  changes.n++;
-  const open = ({ resolved: _, ...t }: Thread): Thread => t;
-  movedStore.set(all => all.map(t => (t.id !== id ? t : resolved ? { ...t, resolved: { at: localAt() } } : open(t))));
-  if (!isLive()) return;
-  changes.busy++;
-  try {
-    const res = await fetch(`/api/threads/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ resolved }) });
-    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-  } catch (e) {
-    movedStore.set(before);
-    throw e;
-  } finally {
-    changes.n++;
-    changes.busy--;
-    void refreshed.current?.();
-  }
 }
 
 /** Isaac pins a thread to his sidebar, at the end of his pins, or unpins it. */

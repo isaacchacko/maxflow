@@ -872,11 +872,11 @@ type Message = { id: string; from: string; at: number; text: string; nudge?: "su
 // members: agents he @-mentioned in it, who hear his later replies there as its routers do.
 type Thread = { id: string; title: string; objective: string; routers: string[]; members?: string[]; messages: Message[]; parent?: { thread: string; message: string }; signal?: number; pending?: Pending; task?: number; resolved?: { at: number }; paused?: Paused; pinned?: { at: number; order: number }; resurfaced?: { at: number; from: number }; asks?: Ask; q?: number; mergedInto?: string; moved?: { at: number }; feed?: Feed; feedSaid?: string[] };
 const threads = threadsTable.read() as Thread[];
-// moved: merged away while it held his messages, so his inbox keeps a stub where it was, pointing at where they went, until he
-// resolves it. Merges of his threads on the day stubs came in (from midnight his time) get theirs, dated by their last message.
-const STUBS_SINCE = Date.parse("2026-11-18T08:00:00Z");
-for (const t of threads)
-  if (t.mergedInto && !t.moved && t.messages.some((m) => m.from === "isaac") && Math.max(...t.messages.map((m) => m.at)) >= STUBS_SINCE) t.moved = { at: Math.max(...t.messages.map((m) => m.at)) };
+const STUBS_SINCE_HIS_MIDNIGHT = Date.parse("2026-11-18T08:00:00Z");
+for (const t of threads) {
+  const lastAt = Math.max(...t.messages.map((m) => m.at));
+  if (t.mergedInto !== undefined && t.moved === undefined && t.messages.some((m) => m.from === "isaac") && lastAt >= STUBS_SINCE_HIS_MIDNIGHT) t.moved = { at: lastAt };
+}
 // Commands are retired: every thread is a plain thread, and a router's result on his message is an ordinary reply.
 for (const t of threads as (Thread & { kind?: string; kindBy?: string; done?: number })[]) {
   delete t.kind, delete t.kindBy, delete t.done;
@@ -993,6 +993,17 @@ const live_thread = (t?: Thread): Thread | undefined => (t?.mergedInto ? live_th
 // move with them, waits on it follow, and it leaves the inbox.
 // An agent's note that names the thread it sits in: "tracked in th-…" left on a duplicate, then folded into that very thread.
 const pointsAtItself = (text: string, t: Thread) => text.includes(`[[thread:${t.id}]]`) || new RegExp(`\\b${t.id}\\b`).test(text);
+function movedStubs() {
+  const stubs = [];
+  for (const t of threads) {
+    const his = t.messages.find((m) => m.from === "isaac");
+    if (t.moved === undefined || t.parent !== undefined || his === undefined) continue;
+    const into = threads.find((x) => x.mergedInto === undefined && x.messages.some((m) => m.id === his.id)) ?? live_thread(t);
+    if (into === undefined) continue;
+    stubs.push({ id: t.id, title: t.title, objectiveId: into.objective, routerIds: [], ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), movedTo: { id: into.id, title: into.title, objectiveId: into.objective, messageId: his.id, at: iso(t.moved.at) }, messages: [{ id: his.id, from: his.from, at: iso(his.at), text: his.text }] });
+  }
+  return stubs;
+}
 function mergeThread(from: Thread, into: Thread) {
   into.messages = [...into.messages, ...from.messages.filter((m) => m.from === "isaac" || m.from === "feed" || !pointsAtItself(m.text, into))].sort((a, b) => a.at - b.at);
   for (const id of from.routers) if (!into.routers.includes(id)) into.routers.push(id);
@@ -1945,14 +1956,7 @@ async function world() {
     })),
     threads: [
       ...threads.filter((t) => !t.mergedInto).map((t) => ({ id: t.id, title: t.title, objectiveId: t.objective, ...(t.parent && { parentId: t.parent.thread, parentMessageId: t.parent.message }), routerIds: t.routers, pending: pendingOf(t.pending), ...(t.asks && !t.paused && !t.resolved && { asks: { sessionId: t.asks.session, since: iso(t.asks.since), shown: !!t.asks.shown } }), taskId: t.task && taskRef(t.task), ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), ...(t.paused && { paused: { until: iso(t.paused.until), at: iso(t.paused.at), said: t.paused.said, posts: t.paused.posts ?? 0, ...(t.paused.wake && { wake: t.paused.wake }) } }), ...(t.resurfaced && { resurfaced: { at: iso(t.resurfaced.at), from: t.resurfaced.from } }), ...(t.pinned && { pinned: { at: iso(t.pinned.at), order: t.pinned.order } }), ...(t.feed && { feed: { source: t.feed.source, who: t.feed.who, link: t.feed.link } }), messages: t.messages.map((m) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, ...(m.nudge && { nudge: m.nudge }), ...(m.wake && { wake: true }), ...(m.ext && { ext: m.ext }) })) })),
-      // A thread of his merged away, as its stub: his first message there, and the thread it went to, open at that message.
-      ...threads.flatMap((t) => {
-        const his = t.moved && t.messages.find((m) => m.from === "isaac");
-        // Where his message is now: the thread it merged into, unless it has moved on since (merged again, or split off).
-        const into = his && (threads.find((x) => !x.mergedInto && x.messages.some((m) => m.id === his.id)) ?? live_thread(t));
-        if (!into || !his || t.parent) return [];
-        return [{ id: t.id, title: t.title, objectiveId: into.objective, routerIds: [], ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }), movedTo: { id: into.id, title: into.title, objectiveId: into.objective, messageId: his.id, at: iso(t.moved!.at) }, messages: [{ id: his.id, from: his.from, at: iso(his.at), text: his.text }] }];
-      }),
+      ...movedStubs(),
     ],
     signals,
     sentries: [...sessions.values()].filter(isSentry).map((s) => ({

@@ -66,7 +66,6 @@ export type Thread = {
   feed?: { source: string; who: string; link: string };
   /** An agent asked him here with `maxflow ask` and sleeps until he replies. */
   asks?: { sessionId: string; since: string; shown: boolean };
-  /** Merged into another thread while it held his messages: a stub where it was, holding his first message, until he resolves it. */
   movedTo?: { id: string; title: string; objectiveId: string; messageId: string; at: string };
   /** A subthread's root is this message in its parent thread; its own messages are that message's replies. */
   parentId?: string;
