@@ -8,7 +8,6 @@ import {
   makeFolder,
   moveDoc,
   moveFolder,
-  obsidianUrl,
   ownerOf,
   readDoc,
   removeDoc,
@@ -38,7 +37,7 @@ async function changeOf(req: Request): Promise<Change> {
 function shown(path: string) {
   if (!isMarkdown(path)) return new Response(Bun.file(join(DOCS_DIR, path)));
   const text = readDoc(path);
-  return Response.json({ path, text, version: versionOf(text), owner: ownerOf(text), comments: commentsIn(text), obsidian: obsidianUrl(path) });
+  return Response.json({ path, text, version: versionOf(text), owner: ownerOf(text), comments: commentsIn(text) });
 }
 
 function conflict(path: string) {

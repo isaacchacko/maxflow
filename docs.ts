@@ -17,8 +17,6 @@ export type DocSummary = { path: string; owner?: string; open: number };
 export type Vault = { docs: DocSummary[]; folders: string[]; files: string[] };
 export const ATTACHMENTS = "attachments";
 
-export const obsidianUrl = (path: string) => `obsidian://open?path=${encodeURIComponent(join(DOCS_DIR, path))}`;
-
 function git(args: string[], env: Record<string, string> = {}) {
   const run = Bun.spawnSync(["git", ...args], { cwd: DOCS_DIR, env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" });
   if (run.exitCode !== 0) throw new Error(`git ${args[0] ?? ""}: ${run.stderr.toString().trim()}`);
