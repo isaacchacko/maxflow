@@ -7,7 +7,7 @@ import { candidates } from "./mentions";
 import type { GhPr, Pending, Signal, Source, Task } from "./model";
 import { live, names, objectives, rememberNames, tasks, threads } from "./stores";
 import { VERIFIED } from "./intro";
-import { funnel, live_thread, reachable, waitLabel } from "./lifecycle";
+import { funnel, live_thread, isReachable, waitLabel } from "./lifecycle";
 import { shells } from "./waits";
 import { BLOCKED_SHOWN_MS, activeAt } from "./delivery";
 import { DOCS_DIR } from "./docs";
@@ -80,8 +80,8 @@ function movedStubs() {
 // A pending thread goes stale once no router it waits on is working or has the message still queued, past a grace for delivery.
 const PENDING_GRACE_MS = 30_000;
 // A shell can't be on it, however many messages wait in its inbox, so its thread goes stale instead of thinking for hours.
-const onIt = (s?: Session) => reachable(s) && (s.inbox.length > 0 || agentState(s) === "working");
-const hasDeclaredWait = (s?: Session): s is Session => reachable(s) && s.wait !== undefined && s.wait.kind !== "done";
+const onIt = (s?: Session) => isReachable(s) && (s.inbox.length > 0 || agentState(s) === "working");
+const hasDeclaredWait = (s?: Session): s is Session => isReachable(s) && s.wait !== undefined && s.wait.kind !== "done";
 function pendingOf(p?: Pending) {
   if (!p) return;
   const routers = p.routers.map((id) => sessions.get(id));

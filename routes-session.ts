@@ -4,7 +4,7 @@ import { CLI } from "./instance";
 import { paste, pressEnter, setOption, tmux, tmuxAsync, tmuxName } from "./tmux";
 import { type ClaudeState, isAgent, sessions } from "./sessions";
 import { intro } from "./intro";
-import { dispatch, endWait, screen, setArchived, waitsOn, wake } from "./lifecycle";
+import { dispatch, endWait, screen, setArchived, isWaitingOn, wake } from "./lifecycle";
 import { declareWait, sayWhyInThreadsHeWaitsIn, untilShell } from "./waits";
 import { claudeStateChanged } from "./turns";
 import { SENTRY_USES, describe } from "./world";
@@ -57,7 +57,7 @@ export async function sessionRoute(req: Request, url: URL, path: string): Promis
       const asleep = !!(s.archived || s.asleep) && s.exitCode === null;
       const stamped = stamp(req, body.text.trim());
       dispatch({ from, to: [s], text: body.text.trim(), deliver: "error" in stamped ? body.text.trim() : stamped.text, typed: !asleep });
-      if (waitsOn(s, from.id)) endWait(s);
+      if (isWaitingOn(s, from.id)) endWait(s);
       touch("write");
       return Response.json({ queued: asleep });
     }
@@ -70,7 +70,7 @@ export async function sessionRoute(req: Request, url: URL, path: string): Promis
       const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
       dispatch({ from, source: body.isaac ? "isaac" : undefined, to: [s], text: body.text.trim(), deliver: stamped.text });
       // The awaited agent's message ends the wait on it.
-      if (waitsOn(s, req.headers.get("x-maxflow-from"))) endWait(s);
+      if (isWaitingOn(s, req.headers.get("x-maxflow-from"))) endWait(s);
       touch("write");
       return Response.json(describe(s), { status: 202 });
     }

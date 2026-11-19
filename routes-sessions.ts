@@ -22,7 +22,7 @@ export async function sessionsWorldRoute(req: Request, _url: URL, path: string, 
     // that 662ba653 and b83e405d were: a shell holding a role takes his thread replies where nothing reads them.
     const agent = ["claude", "--permission-mode", "bypassPermissions", ...(role?.role === "router" ? ["--append-system-prompt", readFileSync(ROUTER_BRIEF, "utf8")] : [])];
     const cmd = typeof body.cmd === "string" ? ["zsh", "-lc", body.cmd] : body.cmd?.length ? body.cmd : role ? agent : [process.env.SHELL ?? "zsh", "-l"];
-    const s = createSession(body.name || cmd.join(" ").slice(0, 40), cmd, body.cwd?.replace(/^~(?=\/|$)/, process.env.HOME!) || parent?.cwd || process.env.HOME!, undefined, role);
+    const s = createSession(body.name || cmd.join(" ").slice(0, 40), cmd, body.cwd?.replace(/^~(?=\/|$)/, process.env.HOME!) || parent?.cwd || process.env.HOME!, { role });
     if (cmd[0] === "claude") acceptTrust(s);
     if (handingRole && from) handOff(from, handingRole, s);
     // Spawned from the browser under a router: the router hears it has a new worker to brief.

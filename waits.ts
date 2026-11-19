@@ -5,7 +5,7 @@ import { scoped, tmuxName } from "./tmux";
 import { type Session, type Wait, sessions } from "./sessions";
 import type { Shell } from "./model";
 import { live, saveThreads, threads } from "./stores";
-import { createSession, endWait, screen, setArchived, setWait, tellWaiters, threadOf, waitLabel, waitsOn } from "./lifecycle";
+import { createSession, endWait, screen, setArchived, setWait, tellWaiters, threadOf, waitLabel, isWaitingOn } from "./lifecycle";
 import { isFilled, isRecord } from "./shared/guards";
 
 const finishToldByWaiterAndAgent = new Map<string, number>();
@@ -13,7 +13,7 @@ const isAtRest = (s: Session) => s.claude?.state !== "working" && s.claude?.stat
 export function tellDone(on: Session) {
   const finish = on.wait?.at;
   for (const w of sessions.values()) {
-    if (w === on || !waitsOn(w, on.id) || w.exitCode !== null || finishToldByWaiterAndAgent.get(`${w.id}>${on.id}`) === finish) continue;
+    if (w === on || !isWaitingOn(w, on.id) || w.exitCode !== null || finishToldByWaiterAndAgent.get(`${w.id}>${on.id}`) === finish) continue;
     if (finish === undefined) return;
     finishToldByWaiterAndAgent.set(`${w.id}>${on.id}`, finish);
     endWait(w, `"${on.name}" (session ${on.id}) is now done`);

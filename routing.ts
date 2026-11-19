@@ -3,7 +3,7 @@ import { publish, query } from "./bus";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
 import { CLI, DIR } from "./instance";
 import { VERIFIED } from "./intro";
-import { createSession, dispatch, editTask, enqueue, newestTaskOf, reachable, routersOf, screen } from "./lifecycle";
+import { createSession, dispatch, editTask, enqueue, newestTaskOf, isReachable, routersOf, screen } from "./lifecycle";
 import type { Feed, FeedPost, Message, Objective, Signal, Source, Thread } from "./model";
 import { patch } from "./patch";
 import { type Session, sessions } from "./sessions";
@@ -144,7 +144,7 @@ export async function feedMore(t: Thread, from: Session, text: string, posts?: F
   if (t.feed) patch(t, { feedSaid: [...(t.feedSaid ?? []), text] });
   patch(t, { resolved: undefined });
   unpause(t);
-  const to = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(reachable);
+  const to = t.routers.flatMap((id) => sessions.get(id) ?? []).filter(isReachable);
   if (to.length > 0) tellRoutersMore(t, { from, to, text, feed });
   else if (!(await isAwaitingFunnel(t))) await feedToFunnel(t, from, text, feed);
   saveThreads();
@@ -251,7 +251,7 @@ export const ROUTER_BRIEF = `${DIR}/agents/router.md`;
 export function startRouter(o: Objective, scope: string, request?: string) {
   const prompt = `[maxflow] You are the router for the objective "${o.title}" (${o.id}), scope: ${scope}. Read your brief, then start: decide the first pieces of work and who does them.${isFilled(request) ? `\n\n${request}` : ""}`;
   const cmd = ["claude", "--permission-mode", "bypassPermissions", "--append-system-prompt", readFileSync(ROUTER_BRIEF, "utf8"), prompt];
-  const s = createSession(`router: ${o.title}`.slice(0, 80), cmd, o.cwd, undefined, { role: "router", objective: o.id, scope });
+  const s = createSession(`router: ${o.title}`.slice(0, 80), cmd, o.cwd, { role: { role: "router", objective: o.id, scope } });
   void acceptTrust(s);
   return s;
 }

@@ -89,7 +89,7 @@ export async function miscRoute(req: Request, url: URL, path: string): Promise<R
     if (!chat) return new Response("no such chat", { status: 404 });
     if (chat.live && !body.force) return Response.json({ error: "live", chat }, { status: 409 });
     const cmd = ["claude", "--resume", chat.id, ...(body.bypass ? ["--permission-mode", "bypassPermissions"] : [])];
-    return Response.json(describe(createSession(chat.title.slice(0, 40), cmd, chat.cwd, chat.id)), { status: 201 });
+    return Response.json(describe(createSession(chat.title.slice(0, 40), cmd, chat.cwd, { chatId: chat.id })), { status: 201 });
   }
 
   if (path === "/api/sentries/restart" && req.method === "POST") {

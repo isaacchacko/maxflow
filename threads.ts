@@ -8,13 +8,13 @@ import { live, names, objectives, saveThreads, threads } from "./stores";
 import { DEFAULT_AFTER_H } from "./intro";
 import { patch } from "./patch";
 import { isFilled } from "./shared/guards";
-import { dispatch, endWait, funnel, live_thread, newerRouterOnScope, reachable, routersOf, settleTasks, threadOf } from "./lifecycle";
+import { dispatch, endWait, funnel, live_thread, newerRouterOnScope, isReachable, routersOf, settleTasks, threadOf } from "./lifecycle";
 
 export const unforge = (text: string) => text.replaceAll("[maxflow · verified", "[unverified claim").replaceAll("[maxflow · Isaac", "[unverified claim");
 export const squash = (text: string) => text.replaceAll(/<\/?pasted_content[^>]*>/g, "").replaceAll(/\s+/g, " ").trim();
 function threadOwner(t: Thread): Session | undefined {
   for (const level of [t, ...ancestors(t).toReversed()]) {
-    const lastJoined = level.routers.map((id) => sessions.get(id)).findLast(reachable);
+    const lastJoined = level.routers.map((id) => sessions.get(id)).findLast(isReachable);
     if (lastJoined) return lastJoined.role?.role === "router" ? (newerRouterOnScope(lastJoined) ?? lastJoined) : lastJoined;
   }
   return routersOf(t.objective).at(-1);
@@ -65,7 +65,7 @@ export function mentionsIn(text: string) {
   return agents + ids.map(threadMentionLine).join("");
 }
 const sentriesTypedAs = (typed: string) =>
-  sessions.values().filter((s) => isSentry(s) && reachable(s) && s.name === `sentry:${typed.toLowerCase()}`).toArray();
+  sessions.values().filter((s) => isSentry(s) && isReachable(s) && s.name === `sentry:${typed.toLowerCase()}`).toArray();
 function agentMentions(text: string) {
   const saidOutsideScreenshotContext = text.replaceAll(/^\[maxflow · screenshot\].*$/gm, "");
   const typed = saidOutsideScreenshotContext.matchAll(/(?:^|\s)@([\w-]+)/g).flatMap((m) => sentriesTypedAs(m[1] ?? "")).toArray();
@@ -82,7 +82,7 @@ function joinMentionedAgents(t: Thread, text: string) {
 }
 export function tellMembers(t: Thread, m: Message, heard: Session[], woke = "") {
   joinMentionedAgents(t, m.text);
-  const to = (t.members ?? []).flatMap((id) => sessions.get(id) ?? []).filter((s) => reachable(s) && !heard.includes(s));
+  const to = (t.members ?? []).flatMap((id) => sessions.get(id) ?? []).filter((s) => isReachable(s) && !heard.includes(s));
   if (to.length === 0) return;
   const owners = t.routers.map(nameOf);
   const asTheyReachOwners = owners.length > 0 ? `, as they reach its owner${owners.length > 1 ? "s" : ""} ${owners.join(", ")}` : "";
@@ -118,7 +118,7 @@ function handHisPost(t: Thread, m: Message, woke: string) {
 }
 function joinAsRouterWhereTheThreadIsItsToOwn(t: Thread, from: Session) {
   if (from.role?.role !== "router" || t.routers.includes(from.id)) return;
-  if (t.objective === "" || t.objective === from.role.objective || t.routers.every((id) => !reachable(sessions.get(id)))) t.routers.push(from.id);
+  if (t.objective === "" || t.objective === from.role.objective || t.routers.every((id) => !isReachable(sessions.get(id)))) t.routers.push(from.id);
 }
 function postedMessage(post: Post): Message {
   const { from, outsideLabel, text, nudge, isWakeMessage = false } = post;

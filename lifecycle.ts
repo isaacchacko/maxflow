@@ -50,7 +50,8 @@ export function attachViewer(session: Session, cols = 120, rows = 34) {
 
 export class SessionCap extends Error {}
 const isNewInertClaude = (cmd: string[]) => ARE_AGENTS_INERT && cmd[0] === "claude" && !cmd.includes("--resume");
-export function createSession(name: string, cmd: string[], cwd: string, chatId?: string, role?: Role, cols = 120, rows = 34): Session {
+type PaneOptions = { chatId?: string | undefined; role?: Role | undefined; cols?: number; rows?: number };
+export function createSession(name: string, cmd: string[], cwd: string, { chatId, role, cols = 120, rows = 34 }: PaneOptions = {}): Session {
   const running = sessions.values().filter((s) => s.exitCode === null && s.sentry !== true).toArray().length;
   if (running >= MAX_SESSIONS && !name.startsWith("sentry:"))
     throw new SessionCap(`dev instance "${INSTANCE}" already runs ${running} sessions, its cap; end some, or raise MAXFLOW_MAX_SESSIONS`);
@@ -99,10 +100,10 @@ function targetOf(source: Source, text: string, from?: Session) {
   if (from) return from.name.replace(/^sentry:/, "");
   return source === "isaac" ? "chat" : "maxflow";
 }
-export const reachable = (s?: Session): s is Session => live(s) && isAgent(s);
+export const isReachable = (s?: Session): s is Session => live(s) && isAgent(s);
 export const funnel = () => sessions.values().find((s) => s.name === "sentry:funnel" && isSentry(s) && live(s));
 export function routersOf(objective: string): Session[] {
-  const all = sessions.values().filter((s) => reachable(s) && s.role?.role === "router" && s.role.objective === objective).toArray();
+  const all = sessions.values().filter((s) => isReachable(s) && s.role?.role === "router" && s.role.objective === objective).toArray();
   const own = all.filter((s) => s.role?.merged !== true);
   const pool = own.length > 0 ? own : all;
   return pool.filter((s) => newerRouterOnScope(s, pool) === undefined);
@@ -190,9 +191,9 @@ export function endWait(s: Session, why?: string) {
 
 export function tellWaiters(on: Session, what: string) {
   for (const w of sessions.values())
-    if (w !== on && waitsOn(w, on.id) && w.exitCode === null) endWait(w, `"${on.name}" (session ${on.id}) ${what}`);
+    if (w !== on && isWaitingOn(w, on.id) && w.exitCode === null) endWait(w, `"${on.name}" (session ${on.id}) ${what}`);
 }
-export const waitsOn = (w: Session, id?: string | null) => w.wait?.kind === "agent" && typeof id === "string" && id !== "" && w.wait.ref.split(",").includes(id);
+export const isWaitingOn = (w: Session, id?: string | null) => w.wait?.kind === "agent" && typeof id === "string" && id !== "" && w.wait.ref.split(",").includes(id);
 export function waitLabel(w: Wait) {
   if (w.kind === "done") return "done";
   return w.kind === "until" ? `until "${w.desc}"` : `${w.kind}:${w.ref}`;
