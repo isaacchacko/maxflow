@@ -1,5 +1,5 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, jest, test } from "bun:test";
 import type { Root } from "react-dom/client";
 
 // A DOM for these tests only: registered globally it would replace fetch and friends for the other test files.
@@ -21,6 +21,12 @@ afterEach(async () => {
   root = undefined;
 });
 // One act per few ms: updates queued inside one act flush only when it ends.
+// The clock-driven hooks run on fake timers, moved on by hand, so a loaded machine can't change what they see.
+const tick = (ms: number) => act(async () => void jest.advanceTimersByTime(ms));
+const fakeClock = () => {
+  jest.useFakeTimers();
+  return { [Symbol.dispose]: () => jest.useRealTimers() };
+};
 const wait = async (ms: number) => {
   for (const end = Date.now() + ms; Date.now() < end; ) await act(() => new Promise(r => setTimeout(r, 5)));
   await act(async () => {});
@@ -55,34 +61,41 @@ test("useEventListener listens on the target it is given", async () => {
 });
 
 test("useNow draws again after the wait it is given", async () => {
+  using _ = fakeClock();
   const draws: number[] = [];
   function Clock() {
     draws.push(useNow(() => 20));
     return null;
   }
   await render(h(Clock));
-  await wait(250);
-  expect(draws.length).toBeGreaterThanOrEqual(3);
-  expect(draws.at(-1)!).toBeGreaterThan(draws[0]!);
+  await tick(19);
+  expect(draws.length).toBe(1);
+  await tick(1);
+  await tick(20);
+  expect(draws.length).toBe(3);
+  expect(draws[2]! - draws[0]!).toBe(40);
 });
 
 test("useSettled follows its value only once it holds still", async () => {
   const draws: string[] = [];
   function Search({ q }: { q: string }) {
-    draws.push(useSettled(q, 300));
+    draws.push(useSettled(q, 30));
     return null;
   }
-  // Typed faster than it settles: it holds the first value until the last has held still.
+  using _ = fakeClock();
   await render(h(Search, { q: "a" }));
   await render(h(Search, { q: "ab" }));
+  await tick(29);
   await render(h(Search, { q: "abc" }));
+  await tick(29);
   expect(draws.at(-1)).toBe("a");
-  await wait(500);
+  await tick(1);
   expect(draws.at(-1)).toBe("abc");
   expect(draws).not.toContain("ab");
 });
 
 test("usePresence stays mounted for the way out, and shows only after it mounts", async () => {
+  using _ = fakeClock();
   const states: { mounted: boolean; shown: boolean }[] = [];
   function Panel({ open }: { open: boolean }) {
     states.push(usePresence(open, 30));
@@ -92,11 +105,13 @@ test("usePresence stays mounted for the way out, and shows only after it mounts"
   expect(states.at(-1)).toEqual({ mounted: false, shown: false });
   await render(h(Panel, { open: true }));
   expect(states.at(-1)).toEqual({ mounted: true, shown: false });
-  await wait(250);
+  await tick(100);
   expect(states.at(-1)).toEqual({ mounted: true, shown: true });
   await render(h(Panel, { open: false }));
   expect(states.at(-1)).toEqual({ mounted: true, shown: false });
-  await wait(250);
+  await tick(29);
+  expect(states.at(-1)).toEqual({ mounted: true, shown: false });
+  await tick(1);
   expect(states.at(-1)).toEqual({ mounted: false, shown: false });
 });
 
