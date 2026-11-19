@@ -81,7 +81,14 @@ function movedStubs() {
 const PENDING_GRACE_MS = 30_000;
 // A shell can't be on it, however many messages wait in its inbox, so its thread goes stale instead of thinking for hours.
 const onIt = (s?: Session) => reachable(s) && (s.inbox.length > 0 || agentState(s) === "working");
-const pendingOf = (p?: Pending) => p && { routerIds: p.routers, since: iso(p.since), status: p.status, stale: Date.now() - p.since > PENDING_GRACE_MS && !p.routers.some((id) => onIt(sessions.get(id))) };
+const hasDeclaredWait = (s?: Session): s is Session => reachable(s) && s.wait !== undefined && s.wait.kind !== "done";
+function pendingOf(p?: Pending) {
+  if (!p) return;
+  const routers = p.routers.map((id) => sessions.get(id));
+  const isUnattended = Date.now() - p.since > PENDING_GRACE_MS && !routers.some((s) => onIt(s));
+  const waiter = isUnattended ? routers.find((s) => hasDeclaredWait(s)) : undefined;
+  return { routerIds: p.routers, since: iso(p.since), status: p.status, stale: isUnattended && !waiter, ...(waiter && { waitingOn: waiter.id }) };
+}
 export const ghStatus = () => ghStatusTable.fresh() as Record<string, { pr: GhPr }>;
 
 export const describe = (s: Session, shown = links(s)) => ({

@@ -5,7 +5,7 @@ import { paste, pressEnter, setOption, tmux, tmuxAsync, tmuxName } from "./tmux"
 import { type ClaudeState, isAgent, sessions } from "./sessions";
 import { intro } from "./intro";
 import { dispatch, endWait, screen, setArchived, waitsOn, wake } from "./lifecycle";
-import { declareWait, untilShell } from "./waits";
+import { declareWait, sayWhyInThreadsHeWaitsIn, untilShell } from "./waits";
 import { claudeStateChanged } from "./turns";
 import { SENTRY_USES, describe } from "./world";
 import { requested } from "./routing";
@@ -82,7 +82,9 @@ export async function sessionRoute(req: Request, url: URL, path: string): Promis
       return Response.json(describe(s));
     }
     if (act[2] === "await" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as { kind?: string; ref?: string } & Parameters<typeof untilShell>[1];
+      const body = (await req.json().catch(() => ({}))) as { kind?: string; ref?: string; why?: string } & Parameters<typeof untilShell>[1];
+      const unsaid = sayWhyInThreadsHeWaitsIn(s, body.kind ?? "", body.why?.trim());
+      if (unsaid !== null) return new Response(unsaid, { status: 409 });
       // until starts (or finds) the shell first, and waits on it by its id.
       const shell = body.kind === "until" && !body.ref ? untilShell(s, body) : undefined;
       if (typeof shell === "string") return new Response(shell, { status: 409 });

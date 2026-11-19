@@ -1,4 +1,4 @@
-import { GitPullRequest, MessagesSquare, Search, SquareTerminal } from "lucide-react";
+import { GitCommitHorizontal, GitPullRequest, MessagesSquare, Search, SquareTerminal } from "lucide-react";
 import { SlackGlyph, slackLabel, slackNameStore, loadSlackNames } from "@/lib/slack";
 import { useNow } from "@/lib/effects";
 import { cn, hasText } from "@/lib/utils";
@@ -87,6 +87,18 @@ function PrChip({ pr }: { pr: string }) {
   );
 }
 
+function CommitChip({ commit }: { commit: string }) {
+  const [repo = "", sha = ""] = commit.split("@", 2);
+  return (
+    <Chip href={`https://github.com/${repo}/commit/${sha}`} title={commit} icon={<GitCommitHorizontal className="size-3 text-ok" />}>
+      {repo === "dryft-ai/app" ? "" : `${repo}@`}
+      {sha.slice(0, 7)}
+    </Chip>
+  );
+}
+
+const CiTarget = ({ target }: { target: string }) => (target.includes("@") ? <CommitChip commit={target} /> : <PrChip pr={target} />);
+
 function SlackTarget({ target }: { target: string }) {
   const names = slackNameStore.use();
   loadSlackNames();
@@ -159,7 +171,7 @@ function WaitSentence({ wait }: { wait: Wait }) {
       return <>until <PrChip pr={wait.ref} /> is approved</>;
     }
     case "ci": {
-      return <>until CI finishes on <PrChip pr={wait.ref} /></>;
+      return <>until CI finishes on <CiTarget target={wait.ref} /></>;
     }
     case "slack": {
       return <>until someone posts in <SlackTarget target={wait.ref} /></>;

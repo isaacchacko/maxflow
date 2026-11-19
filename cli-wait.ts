@@ -19,10 +19,10 @@ async function waitUntil(args: string[]) {
   const cmd = dash === -1 ? undefined : args.slice(dash + 1).join(" ");
   const pid = flag(head, "--pid");
   const pane = flag(head, "--pane");
-  const desc = positional(head, ["--pid", "--pane"]).join(" ");
+  const desc = positional(head, ["--pid", "--pane", "--why"]).join(" ");
   if (DEFAULT_RUN_WATCH.test(cmd ?? "")) fail(`gh run watch asks GitHub every 3s and drains the budget every agent shares; wait on CI with \`maxflow wait ci:<pr | branch | sha>\` instead, or pass --interval 30`);
-  if (desc === "" || (isBlank(cmd) && isBlank(pid) && isBlank(pane))) fail("usage: maxflow wait until '<what you wait for>' -- <command...> | --pane <session> | --pid <pid>");
-  const until = { kind: "until", desc, cmd, cwd: process.cwd(), path: process.env["PATH"], pane, pid: isBlank(pid) ? undefined : Number(pid) };
+  if (desc === "" || (isBlank(cmd) && isBlank(pid) && isBlank(pane))) fail("usage: maxflow wait until '<what you wait for>' [--why '<line>'] -- <command...> | --pane <session> | --pid <pid>");
+  const until = { kind: "until", desc, why: flag(head, "--why"), cmd, cwd: process.cwd(), path: process.env["PATH"], pane, pid: isBlank(pid) ? undefined : Number(pid) };
   const wait = replyOf(await post(`/api/sessions/${me}/await`, until))["wait"];
   console.log(
     isTruthy(wait)
@@ -85,13 +85,16 @@ function waitAnswer(kind: string, target: string, wait: unknown) {
   return `waiting on ${str(replyOf(wait), "kind")}:${str(replyOf(wait), "ref")}. End your turn now; you sleep until a message wakes you.`;
 }
 
+const withoutWhy = (args: string[]) => args.filter((a, i) => a !== "--why" && args[i - 1] !== "--why");
+
 async function waitOn(args: string[]) {
   const me = sessionOrFail();
+  const why = flag(args, "--why");
   const what = argAt(args, 0);
   const colon = what.indexOf(":");
   const kind = colon === -1 ? what : what.slice(0, colon);
-  const target = await waitTarget(kind, colon === -1 ? "" : what.slice(colon + 1), args, me);
-  const wait = replyOf(await post(`/api/sessions/${me}/await`, { kind, ref: target }))["wait"];
+  const target = await waitTarget(kind, colon === -1 ? "" : what.slice(colon + 1), withoutWhy(args), me);
+  const wait = replyOf(await post(`/api/sessions/${me}/await`, { kind, ref: target, why }))["wait"];
   console.log(waitAnswer(kind, target, wait));
 }
 

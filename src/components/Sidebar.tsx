@@ -76,6 +76,7 @@ function Entry({ view, label, icon: Icon, count, warn, active, open }: { view: s
 function pinExpression(t: Thread): Expression {
   if (t.resolved) return "done";
   if (t.paused) return "asleep";
+  if (t.pending?.waitingOn !== undefined) return "waiting";
   if (t.pending) return t.pending.stale ? "error" : "working";
   return t.asks ? "waiting" : "idle";
 }
@@ -92,7 +93,7 @@ function openPinned(e: React.MouseEvent, threadId: string) {
 }
 
 function PinnedEntry({ t, open, unread, onDrop }: { t: Thread; open: boolean; unread: number; onDrop: (dragged: string) => void }) {
-  const isWorking = Boolean(t.pending) && t.pending?.stale !== true;
+  const isWorking = Boolean(t.pending) && t.pending?.stale !== true && t.pending?.waitingOn === undefined;
   const [over, setOver] = useState(false);
   return (
     <a

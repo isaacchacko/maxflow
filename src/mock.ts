@@ -45,7 +45,7 @@ export type Thread = {
   title: string;
   objectiveId: string;
   routerIds: string[];
-  pending?: { routerIds: string[]; since: string; status?: string; stale: boolean };
+  pending?: { routerIds: string[]; since: string; status?: string; stale: boolean; waitingOn?: string };
   resolved?: { at: string } | undefined;
   pinned?: { at: string; order: number } | undefined;
   paused?: { until: string; at: string; said: string; posts: number; wake?: string | undefined } | undefined;

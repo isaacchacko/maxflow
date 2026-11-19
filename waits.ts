@@ -4,7 +4,7 @@ import { publish } from "./bus";
 import { scoped, tmuxName } from "./tmux";
 import { type Session, type Wait, sessions } from "./sessions";
 import type { Shell } from "./model";
-import { live, threads } from "./stores";
+import { live, saveThreads, threads } from "./stores";
 import { createSession, endWait, screen, setArchived, setWait, tellWaiters, threadOf, waitLabel, waitsOn } from "./lifecycle";
 import { isFilled, isRecord } from "./shared/guards";
 
@@ -198,5 +198,22 @@ export function declareWait(s: Session, kind: string, ref: string, desc?: string
   if (named.kind === "agent" && didEndOnAgentAlreadyDone(s)) return null;
   if (didEndOnShellAlreadyOver(s, named.shell)) return null;
   sleepNowIfDeclaredBetweenTurns(s, named.kind);
+  return null;
+}
+
+const threadsAwaitingAnswerFrom = (s: Session) => threads.filter((t) => t.mergedInto === undefined && t.pending?.routers.includes(s.id) === true);
+export function sayWhyInThreadsHeWaitsIn(s: Session, kind: string, why: string | undefined): string | null {
+  if (kind === "done") return null;
+  const waiting = threadsAwaitingAnswerFrom(s);
+  if (waiting.length === 0) return null;
+  if (!isFilled(why)) {
+    const where = waiting.map((t) => `${t.id} ("${t.title}")`).join(", ");
+    return `he is waiting on your answer in ${where}; add --why '<one line saying what you wait for and what you do once it lands>', which he reads in the thread while you sleep`;
+  }
+  for (const t of waiting) {
+    if (t.pending) t.pending.status = why;
+    publish(`thread/${t.id}`, { thread: t.id, status: why });
+  }
+  saveThreads();
   return null;
 }
