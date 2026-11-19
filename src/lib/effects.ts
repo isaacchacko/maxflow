@@ -34,6 +34,16 @@ export function useNow(next: (now: number) => number) {
   return now;
 }
 
+/** `value` once it has held still for `ms`: what a search or preview asks for while he is still typing. */
+export function useSettled<T>(value: T, ms: number) {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return settled;
+}
+
 /**
  * For something that slides in and out: `mounted` while open and for `outMs` after it closes, so the way out can play;
  * `shown` turns true two frames after it mounts, so the way in starts from where it rests closed.
@@ -68,23 +78,23 @@ function settle<T>(key: string, r: Resource<T>, state: Loaded<T>) {
 
 function fetchInto<T>(key: string, r: Resource<T>) {
   const generation = ++r.generation;
-  r.load().then(
-    value => generation === r.generation && settle(key, r, { value }),
-    (error: Error) => generation === r.generation && settle(key, r, { ...r.state, error }),
+  return r.load().then(
+    value => void (generation === r.generation && settle(key, r, { value })),
+    (error: Error) => void (generation === r.generation && settle(key, r, { ...r.state, error })),
   );
 }
 
 /**
  * What `load` resolves to, fetched when the first component reading `key` mounts and dropped a moment after the last one
  * unmounts, so coming back fetches it fresh. With no key nothing is fetched. `set` changes the value in place (an edit
- * shown before the server has it), and `reload` fetches it again.
+ * shown before the server has it), and `reload` fetches it again, resolving once it is in.
  */
 export function useResource<T>(key: string | undefined, load: () => Promise<T>) {
   const subscribe = useCallback(
     (listener: () => void) => {
       if (!key) return () => {};
       let r = resources.get(key) as Resource<T> | undefined;
-      if (!r) resources.set(key, (r = { state: NOTHING, listeners: new Set(), load, generation: 0 })), fetchInto(key, r);
+      if (!r) resources.set(key, (r = { state: NOTHING, listeners: new Set(), load, generation: 0 })), void fetchInto(key, r);
       const mine = r;
       mine.listeners.add(listener);
       return () => {
@@ -100,9 +110,9 @@ export function useResource<T>(key: string | undefined, load: () => Promise<T>) 
     const r = key && (resources.get(key) as Resource<T> | undefined);
     if (r) settle(key, r, { value: next(r.state.value) });
   };
-  const reload = () => {
+  const reload = async () => {
     const r = key && (resources.get(key) as Resource<T> | undefined);
-    if (r) fetchInto(key, r);
+    if (r) await fetchInto(key, r);
   };
   return { ...state, set, reload };
 }
