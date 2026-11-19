@@ -119,10 +119,10 @@ function parseJson(line: string): unknown {
   }
 }
 
-const mayCarryUsage = (line: string) => line.includes('"usage"') && line.includes('"type":"assistant"');
+const canCarryUsage = (line: string) => line.includes('"usage"') && line.includes('"type":"assistant"');
 
 function assistantMessage(line: string): AssistantMessage | undefined {
-  const d = mayCarryUsage(line) ? parseJson(line) : undefined;
+  const d = canCarryUsage(line) ? parseJson(line) : undefined;
   const message = isRecord(d) ? d["message"] : undefined;
   if (!isRecord(d) || !isRecord(message) || !isRecord(message["usage"])) return undefined;
   const model = optionalString(message["model"]) ?? "";
