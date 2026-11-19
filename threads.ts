@@ -1,4 +1,3 @@
-import { agents } from "./stats";
 import { publish } from "./bus";
 import { CLI } from "./instance";
 import { onReply } from "./restrictions-enforce";
@@ -7,7 +6,7 @@ import { type Session, isAgent, isSentry, sessions } from "./sessions";
 import type { Message, Thread } from "./model";
 import { live, names, objectives, saveThreads, threads } from "./stores";
 import { DEFAULT_AFTER_H } from "./intro";
-import { dispatch, endWait, funnel, live_thread, newerRouterOnScope, reachable, routersOf, settleTasks, threadOf, wake } from "./lifecycle";
+import { dispatch, endWait, funnel, live_thread, newerRouterOnScope, reachable, routersOf, settleTasks, threadOf } from "./lifecycle";
 
 export const unforge = (text: string) => text.replaceAll("[maxflow · verified", "[unverified claim").replaceAll("[maxflow · Isaac", "[unverified claim");
 export const squash = (text: string) => text.replace(/<\/?pasted_content[^>]*>/g, "").replace(/\s+/g, " ").trim();
