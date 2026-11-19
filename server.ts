@@ -121,25 +121,27 @@ async function tmuxAsync(...args: string[]) {
   return { ok: code === 0, out };
 }
 const pendingOptions = new Map<string, string[]>();
-let drainingOptions = false;
+const optionQueue = { isDraining: false };
 function setOption(id: string, key: string, value: string) {
   pendingOptions.set(`${id} ${key}`, ["set-option", "-t", tmuxName(id), key, value]);
-  if (!drainingOptions) void drainOptions();
+  if (!optionQueue.isDraining) void drainOptions();
 }
-const chained = (writes: string[][]) => writes.flatMap((w, i) => (i ? [";", ...w] : w));
+const chained = (writes: string[][]) => writes.flatMap((w, i) => (i === 0 ? w : [";", ...w]));
 function takeOptions() {
   const batch = [...pendingOptions].slice(0, 100);
   for (const [key] of batch) pendingOptions.delete(key);
   return batch.map(([, write]) => write);
 }
 async function drainOptions() {
-  drainingOptions = true;
-  for (let writes = takeOptions(); writes.length; writes = takeOptions())
-    if (!(await tmuxAsync(...chained(writes))).ok) for (const w of writes) await tmuxAsync(...w);
-  drainingOptions = false;
+  optionQueue.isDraining = true;
+  for (let writes = takeOptions(); writes.length > 0; writes = takeOptions()) {
+    const batch = await tmuxAsync(...chained(writes));
+    if (!batch.ok) for (const w of writes) await tmuxAsync(...w);
+  }
+  optionQueue.isDraining = false;
 }
 function flushOptions() {
-  for (let writes = takeOptions(); writes.length; writes = takeOptions())
+  for (let writes = takeOptions(); writes.length > 0; writes = takeOptions())
     if (!tmux(...chained(writes)).ok) for (const w of writes) tmux(...w);
 }
 // A pane scrolled back in the browser is in tmux's copy mode, which takes keys for itself: Enter there never reaches claude, so a
@@ -944,7 +946,10 @@ let threadsDirty: ReturnType<typeof setTimeout> | undefined;
 const writeThreads = () => (clearTimeout(threadsDirty), (threadsDirty = undefined), threadsTable.write(threads));
 const saveThreads = () => void (threadsDirty ??= setTimeout(writeThreads, 200));
 process.on("exit", () => threadsDirty && writeThreads());
-for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => (flushOptions(), process.exit(0)));
+for (const sig of ["SIGTERM", "SIGINT"] as const) process.on(sig, () => {
+    flushOptions();
+    process.exit(0);
+  });
 // A paused thread comes back at its time: a timer for the ones due within a day, rebuilt at boot, and a sweep each minute for the
 // rest (and for a timer lost to sleep). Coming back, it is unread from where it was paused, so his inbox puts it up top.
 const PAUSE_TIMER_MS = 86_400_000;

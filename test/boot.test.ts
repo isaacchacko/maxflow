@@ -19,11 +19,11 @@ const start = () =>
     stdout: "pipe",
     stderr: "pipe",
   });
-let server = start();
+const instanceServer = { process: start() };
 
 afterAll(async () => {
-  server.kill();
-  await server.exited;
+  instanceServer.process.kill();
+  await instanceServer.process.exited;
   // kill-server leaves the socket file behind.
   const socketPath = Bun.spawnSync(["tmux", "-L", socket, "display-message", "-p", "#{socket_path}"]).stdout.toString().trim();
   Bun.spawnSync(["tmux", "-L", socket, "kill-server"]);
@@ -33,7 +33,7 @@ afterAll(async () => {
 
 async function up() {
   for (const end = Date.now() + 20_000; Date.now() < end; await Bun.sleep(200)) {
-    if (server.exitCode !== null) throw new Error(`server exited ${server.exitCode}: ${await new Response(server.stderr).text()}`);
+    if (instanceServer.process.exitCode !== null) throw new Error(`server exited ${instanceServer.process.exitCode}: ${await new Response(instanceServer.process.stderr).text()}`);
     if (await fetch(`${base}/api/sessions`).then((r) => r.ok, () => false)) return;
   }
   throw new Error("server didn't answer in 20s");
@@ -58,14 +58,17 @@ test("it starts a session in tmux and lists it", async () => {
 }, 30_000);
 
 test("a session made or renamed just before a restart comes back with its name", async () => {
-  const made = (await (await fetch(`${base}/api/sessions`, { method: "POST", body: JSON.stringify({ name: "made-before-restart", cmd: ["sh", "-c", "sleep 60"], cwd: home }) })).json()) as { id: string };
-  const renamed = (await (await fetch(`${base}/api/sessions`, { method: "POST", body: JSON.stringify({ name: "old-name", cmd: ["sh", "-c", "sleep 60"], cwd: home }) })).json()) as { id: string };
-  await fetch(`${base}/api/sessions/${renamed.id}`, { method: "PATCH", body: JSON.stringify({ name: "renamed-before-restart" }) });
-  server.kill("SIGTERM");
-  await server.exited;
-  server = start();
+  const signal = () => AbortSignal.timeout(10_000);
+  const make = async (name: string) =>
+    (await (await fetch(`${base}/api/sessions`, { method: "POST", body: JSON.stringify({ name, cmd: ["sh", "-c", "sleep 60"], cwd: home }), signal: signal() })).json()) as { id: string };
+  const made = await make("made-before-restart");
+  const renamed = await make("old-name");
+  await fetch(`${base}/api/sessions/${renamed.id}`, { method: "PATCH", body: JSON.stringify({ name: "renamed-before-restart" }), signal: signal() });
+  instanceServer.process.kill("SIGTERM");
+  await instanceServer.process.exited;
+  instanceServer.process = start();
   await up();
-  const listed = (await (await fetch(`${base}/api/sessions`)).json()) as { id: string; name: string }[];
+  const listed = (await (await fetch(`${base}/api/sessions`, { signal: signal() })).json()) as { id: string; name: string }[];
   expect(listed.find((s) => s.id === made.id)?.name).toBe("made-before-restart");
   expect(listed.find((s) => s.id === renamed.id)?.name).toBe("renamed-before-restart");
 }, 60_000);
