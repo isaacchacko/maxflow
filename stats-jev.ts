@@ -1,5 +1,6 @@
 import { NEW_OBJECTIVE, settledLabel, type ObjectiveRow, type ThreadRow } from "./jev";
 import { objectivesTable, readStateText, threadsTable } from "./state";
+import { busLog, type BusEvent } from "./stats-sources";
 import { DAY_MS, dayKey, lastDays } from "./stats-week";
 
 const LOG_FILE = "jev-shadow.jsonl";
@@ -80,15 +81,37 @@ function usage(list: Call[], days: string[]) {
   };
 }
 
-function quality(list: Call[]) {
-  const objectives = new Map((objectivesTable.read() as ObjectiveRow[]).map((o) => [o.id, o]));
-  const threads = new Map((threadsTable.read() as ThreadRow[]).map((t) => [t.id, t]));
-  const titleOf = (id: string) => ({ id, title: id === NEW_OBJECTIVE ? "new objective" : (objectives.get(id)?.title ?? id) });
-  const scored = list.map((c) => {
+type Scored = Call & { label: string; thread?: string | undefined };
+type Named = (id: string) => { id: string; title: string };
+type Threads = Map<string, ThreadRow & { title?: string }>;
+
+const REOPENED = "reopened";
+const SIZE_NAMES: Record<string, string> = { direct: "direct worker", area: "area router", fyi: "FYI", ignore: "ignore", [REOPENED]: "reopened by Isaac" };
+const sizeName: Named = (id) => ({ id, title: SIZE_NAMES[id] ?? id });
+
+function settledObjectives(list: Call[], threads: Threads, objectives: Map<string, ObjectiveRow>): Scored[] {
+  return list.map((c) => {
     const signal = { seq: c.seq, at: c.at, text: c.thread === undefined ? "" : `as thread ${c.thread}` };
     const settled = settledLabel(signal, c.funnel, objectives, threads);
     return { ...c, label: settled.label, thread: c.thread ?? settled.thread };
   });
+}
+
+function settledSizes(list: Call[], threads: Threads): Scored[] {
+  const last = new Map<number, BusEvent>();
+  for (const e of busLog().events) if (e.topic.startsWith("signal-size/")) last.set(Number(e.data["seq"]), e);
+  return list.map((c) => {
+    const event = last.get(c.seq);
+    const size = typeof event?.data["size"] === "string" ? event.data["size"] : c.funnel;
+    const threadId = typeof event?.data["thread"] === "string" ? event.data["thread"] : c.thread;
+    const after = event?.at ?? c.at;
+    const thread = threadId === undefined ? undefined : threads.get(threadId);
+    const isReopened = (size === "fyi" || size === "ignore") && (thread?.messages ?? []).some((m) => m.from === "isaac" && m.at > after);
+    return { ...c, label: isReopened ? REOPENED : size, thread: threadId };
+  });
+}
+
+function quality(scored: Scored[], threads: Threads, nameOf: Named) {
   const confident = scored.filter((c) => (c.confidence ?? 0) >= CONFIDENT);
   const disagreements = scored
     .filter((c) => c.jev !== c.label)
@@ -99,10 +122,10 @@ function quality(list: Call[]) {
       return {
         seq: c.seq,
         at: calledAt(c),
-        thread: thread === undefined ? undefined : { id: thread.id, title: (thread as ThreadRow & { title?: string }).title ?? thread.id },
-        jev: titleOf(c.jev ?? NEW_OBJECTIVE),
-        settled: titleOf(c.label),
-        funnel: titleOf(c.funnel),
+        thread: thread === undefined ? undefined : { id: thread.id, title: thread.title ?? thread.id },
+        jev: nameOf(c.jev ?? ""),
+        settled: nameOf(c.label),
+        funnel: nameOf(c.funnel),
         confidence: c.confidence ?? 0,
       };
     });
@@ -119,6 +142,13 @@ function quality(list: Call[]) {
   };
 }
 
+const questionOf = (c: Call) => c.question ?? "objective";
+
+function latestAnswered(all: Call[], inRange: Call[], question: string) {
+  const prompt = all.findLast((c) => questionOf(c) === question && c.prompt !== undefined)?.prompt;
+  return { prompt, list: inRange.filter((c) => questionOf(c) === question && isAnswered(c) && c.prompt === prompt) };
+}
+
 const DEFAULT_DAYS = 7;
 const MOST_DAYS = 90;
 
@@ -129,18 +159,21 @@ export function jev(asked: string | null) {
   const all = calls();
   const since = Date.now() - dayCount * DAY_MS;
   const inRange = all.filter((c) => calledAt(c) >= since);
-  const prompt = all.findLast((c) => (c.question ?? "objective") === "objective" && c.prompt !== undefined)?.prompt;
-  const routed = inRange.filter((c) => (c.question ?? "objective") === "objective" && isAnswered(c) && c.prompt === prompt);
+  const objectives = new Map((objectivesTable.read() as ObjectiveRow[]).map((o) => [o.id, o]));
+  const threads: Threads = new Map((threadsTable.read() as ThreadRow[]).map((t) => [t.id, t]));
+  const objectiveName: Named = (id) => ({ id, title: id === NEW_OBJECTIVE ? "new objective" : (objectives.get(id)?.title ?? id) });
+  const routed = latestAnswered(all, inRange, "objective");
+  const sized = latestAnswered(all, inRange, "size");
   const first = all[0];
   return {
     at: Date.now(),
     days,
     since: first === undefined ? undefined : calledAt(first),
     model: all.at(-1)?.model,
-    prompt,
     pricePerInputMtok: DOLLARS_PER_INPUT_MTOK,
     confidentAt: CONFIDENT,
     ...usage(inRange, days),
-    ...quality(routed),
+    objective: { prompt: routed.prompt, ...quality(settledObjectives(routed.list, threads, objectives), threads, objectiveName) },
+    size: { prompt: sized.prompt, ...quality(settledSizes(sized.list, threads), threads, sizeName) },
   };
 }
