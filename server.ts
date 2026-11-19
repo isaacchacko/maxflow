@@ -7,9 +7,7 @@ import { jev } from "./stats-jev";
 import { findChat, listChats } from "./chats";
 import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR } from "./instance";
 import { enforce } from "./restrictions-enforce";
-import { invalid, resolve, saveRestrictions, type Person, type Restriction } from "./restrictions";
-import { backfill, link, people as restrictionPeople } from "./restrictions-identities";
-import { preview } from "./restrictions-recent";
+import { type Person } from "./restrictions";
 import app from "./src/index.html";
 import { TMUX, flushOptions, paneEnv, paste, pressEnter, respawn, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
 import { type ClaudeState, type Role, type Session, type Wait, type WsData, chatOf, isAgent, isSentry, sessions } from "./sessions";
@@ -19,7 +17,7 @@ import { live, names, objectives, saveObjectives, saveTasks, saveThreads, saveTo
 import { DEFAULT_AFTER_H, DEFAULT_AFTER_MS, VERIFIED, intro } from "./intro";
 import { SessionCap, attachViewer, createSession, derive, dispatch, editTask, endWait, funnel, live_thread, push, routersOf, screen, setArchived, setClaudeState, setWait, settleTasks, stopAgent, taskPrs, waitsOn, wake } from "./lifecycle";
 import { checkShells, declareWait, untilShell } from "./waits";
-import { ISAAC_IN_THREAD, ancestors, answered, ask, enforcing, headline, mentionsIn, message, pathTitle, pauseTimers, postIn, restrictions, resurface, schedulePause, squash, tellMembers, unforge, unpause } from "./threads";
+import { ISAAC_IN_THREAD, ancestors, answered, ask, enforcing, headline, mentionsIn, message, pathTitle, pauseTimers, postIn, resurface, schedulePause, squash, tellMembers, unforge, unpause } from "./threads";
 import { DRAFTS, deliver } from "./delivery";
 import { RESYNC_MS, claudeStateChanged, resync } from "./turns";
 import { docsRoute } from "./docs-api";
@@ -28,6 +26,7 @@ import { ARCHIVED_LINKS, SENTRY_USES, archivedLinks, built, describe, freshWorld
 import { EXTERNAL_SEEN, ROUTER_BRIEF, acceptTrust, externalSeen, externalSignal, feedMore, feedPosts, feedToFunnel, known, requested, reroute, slackChannels, startRouter } from "./routing";
 import { handOff, mergeThread, newObjective, pointsAtItself, relayRefusal, setRole, subthread, titleOf } from "./objectives";
 import { onEvent, openUserComments, recordUserComment, seedUserComments } from "./events";
+import { restrictionsRoute } from "./routes-restrictions";
 
 const HOST = "127.0.0.1";
 function loadInbox(id: string): Pick<Session, "inbox" | "sending"> {
@@ -383,16 +382,6 @@ function migrateQuestions() {
 }
 setTimeout(migrateQuestions, 5_000);
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
-const gitRoots = new Map<string, string | null>();
-function restrictionRepos() {
-  const roots = new Set<string>();
-  for (const s of sessions.values()) {
-    if (!gitRoots.has(s.cwd)) gitRoots.set(s.cwd, Bun.spawnSync(["git", "-C", s.cwd, "rev-parse", "--show-toplevel"], { stderr: "ignore" }).stdout.toString().trim() || null);
-    const root = gitRoots.get(s.cwd);
-    if (root) roots.add(root);
-  }
-  return [...roots].sort().map((path) => ({ path: path.replace(process.env.HOME!, "~"), name: path.split("/").at(-1)! }));
-}
 // Tasks from before the server settled columns start from what their agents settle now, so only later changes move them.
 for (const t of tasks) if (!("derived" in t)) t.derived = derive(t)?.to;
 setInterval(settleTasks, 15_000);
@@ -921,60 +910,8 @@ Bun.serve<WsData>({
       return Response.json(todo);
     }
     if (todo && req.method === "DELETE") return todos.splice(todos.indexOf(todo), 1), saveTodos(), new Response(null, { status: 204 });
-
-    if (path === "/api/restrictions" && req.method === "GET") return Response.json(restrictions);
-    if (path === "/api/restrictions" && req.method === "POST") {
-      const body = (await req.json().catch(() => ({}))) as Partial<Restriction>;
-      // An override is named after what it overrides unless he names it.
-      const parent = body.parent ? restrictions.find((r) => r.id === body.parent) : undefined;
-      const draft = { ...body, label: body.label?.trim() || parent?.label, action: body.action?.trim() || parent?.action, match: body.match ?? {} };
-      const bad = invalid(draft, restrictions);
-      if (bad) return new Response(bad, { status: 400 });
-      const r: Restriction = { id: crypto.randomUUID().slice(0, 8), action: draft.action!, label: draft.label!.trim(), mode: draft.mode!, match: parent ? {} : draft.match, scope: draft.scope, parent: parent?.id, note: draft.note, ...(!parent && draft.reaches && { reaches: draft.reaches }), ...(!parent && draft.about && { about: draft.about }) };
-      restrictions.push(r), saveRestrictions(restrictions);
-      return Response.json(r, { status: 201 });
-    }
-    // The mode that applies to a tool call, for `maxflow restrictions check`.
-    if (path === "/api/restrictions/check" && req.method === "POST") return Response.json(resolve(restrictions, await req.json().catch(() => ({ tool: "" }))));
-    // The people the page offers for a restriction's scope, one a human (restrictions-identities.ts): everyone the slack sentry
-    // has heard from, joined to their GitHub login from the PRs the gh sentry polls. Email addresses he types. A listing also
-    // gives restrictions naming one account of a linked person the other.
-    if (path === "/api/restrictions/people" && req.method === "GET") {
-      if (backfill(restrictions)) saveRestrictions(restrictions);
-      return Response.json(restrictionPeople());
-    }
-    // What a custom rule's matchers would have caught among the tool calls agents made lately (restrictions-recent.ts).
-    if (path === "/api/restrictions/preview" && req.method === "POST") {
-      const { match } = (await req.json().catch(() => ({}))) as { match?: Restriction["match"] };
-      const bad = invalid({ label: "x", action: "x", mode: "ask", match: match ?? {} });
-      return bad ? new Response(bad, { status: 400 }) : Response.json(preview(match!));
-    }
-    // The repositories his agents work in, for an exception that holds inside one: each live session's folder, as its git root.
-    if (path === "/api/restrictions/repos" && req.method === "GET") return Response.json(restrictionRepos());
-    // He links a Slack user to a GitHub login, or unlinks a pair yarn matched or he linked.
-    if (path === "/api/restrictions/people/link" && (req.method === "POST" || req.method === "DELETE")) {
-      const pair = (await req.json().catch(() => ({}))) as { slack?: string; github?: string };
-      if (!pair.slack || !pair.github) return new Response("slack and github required", { status: 400 });
-      link({ slack: pair.slack, github: pair.github }, req.method === "POST");
-      if (backfill(restrictions, req.method === "DELETE" ? { slack: pair.slack, github: pair.github } : undefined)) saveRestrictions(restrictions);
-      return Response.json(restrictionPeople());
-    }
-    const restrictionPath = path.match(/^\/api\/restrictions\/([\w-]+)$/);
-    const restriction = restrictionPath && restrictions.find((r) => r.id === restrictionPath[1]);
-    if (restrictionPath && !restriction && (req.method === "PATCH" || req.method === "DELETE")) return new Response("no such restriction", { status: 404 });
-    if (restriction && req.method === "PATCH") {
-      const edit = (await req.json().catch(() => ({}))) as Partial<Restriction>;
-      const next = { ...restriction, ...edit, id: restriction.id, builtin: restriction.builtin, parent: restriction.parent };
-      const bad = invalid(next, restrictions);
-      if (bad) return new Response(bad, { status: 400 });
-      Object.assign(restriction, next), saveRestrictions(restrictions);
-      return Response.json(restriction);
-    }
-    // Its overrides go with it.
-    if (restriction && req.method === "DELETE") {
-      restrictions.splice(0, restrictions.length, ...restrictions.filter((r) => r.id !== restriction.id && r.parent !== restriction.id));
-      return saveRestrictions(restrictions), new Response(null, { status: 204 });
-    }
+    const restrictionsRouteAnswer = await restrictionsRoute(req, url, path);
+    if (restrictionsRouteAnswer) return restrictionsRouteAnswer;
 
     if (path === "/api/tasks" && req.method === "GET") return Response.json(tasks.map((t) => ({ ...t, prs: prProgress(t) })));
     if (path === "/api/comments" && req.method === "GET") return Response.json(openUserComments());
