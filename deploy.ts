@@ -1,8 +1,8 @@
 // `cli.ts deploy`: the one way the live yarn changes. The live checkout holds only commits from origin, so a restart ships
 // exactly what is on its branch there, never someone's half-saved edit. Changes are made in a worktree and pushed first.
-import { mkdtempSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, normalize } from "node:path";
 import { BASE, LIVE } from "./instance";
 import { LOG, checkout, restartCommand } from "./service";
 
@@ -40,6 +40,44 @@ function check(live: string, commit: string) {
   if (!r.ok) fail(`${commit.slice(0, 7)} doesn't build, so live stays where it is:\n${output}`);
 }
 
+// The files under dir that file pulls in through relative imports, itself included.
+const transpiler = new Bun.Transpiler({ loader: "ts" });
+function closure(dir: string, file: string, seen = new Set<string>()) {
+  if (seen.has(file)) return seen;
+  seen.add(file);
+  if (!file.endsWith(".ts")) return seen;
+  for (const { path } of transpiler.scanImports(readFileSync(join(dir, file), "utf8").replace(/^#!.*/, ""))) {
+    if (!path.startsWith(".")) continue;
+    const base = normalize(join(dirname(file), path));
+    const hit = [base, `${base}.ts`, join(base, "index.ts")].find((f) => existsSync(join(dir, f)) && statSync(join(dir, f)).isFile());
+    if (hit) closure(dir, hit, seen);
+  }
+  return seen;
+}
+
+// tmux keeps a sentry across a restart, and the new server adopts it still running the old code, so a sentry whose
+// script, prompt (sentries/<name>.md) or anything they import changed between the two commits has to be restarted.
+export function staleSentries(dir: string, from: string, to: string, names: string[]) {
+  const changed = new Set(run(["git", "diff", "--name-only", from, to], dir).out.split("\n"));
+  return names.filter((name) => {
+    const own = [`sentries/${name.slice(7)}.ts`, `sentries/${name.slice(7)}.md`].filter((f) => existsSync(join(dir, f)));
+    return own.some((f) => [...closure(dir, f)].some((dep) => changed.has(dep)));
+  });
+}
+
+// Stops each sentry named; the server's respawn check (every 15s) starts it again from the code now on disk.
+export async function restartSentries(names: string[], list: Session[]) {
+  const old = new Set(list.filter((s) => names.includes(s.name)).map((s) => s.id));
+  for (const id of old) await fetch(`${BASE}/api/sessions/${id}`, { method: "DELETE" });
+  const back = (now?: Session[]) => names.filter((n) => now?.some((s) => s.name === n && s.running && !old.has(s.id)));
+  const deadline = Date.now() + 90_000;
+  let now: Session[] | undefined;
+  while (Date.now() < deadline && back((now = await sessions())).length < names.length) await Bun.sleep(2_000);
+  const missing = names.filter((n) => !back(now).includes(n));
+  if (missing.length) fail(`restarted ${names.join(", ")}, and these haven't come back after 90s: ${missing.join(", ")}. See ${LOG}.`);
+  console.log(`restarted ${names.join(", ")}, whose code changed`);
+}
+
 export async function deploy() {
   if (!LIVE) fail("a dev instance runs from its own checkout; deploy ships the live yarn");
   const live = checkout() ?? fail("no service is installed; run cli.ts install from the live checkout");
@@ -70,4 +108,6 @@ export async function deploy() {
   console.log(`${after.length} sessions (${before ? `${before.length} before` : "the server was down before"}), ${sentries(after).length} sentries running`);
   if (lost.length || missing.length)
     fail(`after the restart ${[lost.length && `these sessions are gone: ${lost.map((s) => `${s.id} ${s.name}`).join(", ")}`, missing.length && `these sentries aren't running: ${missing.join(", ")}`].filter(Boolean).join("; ")}. See ${LOG}.`);
+  const stale = from === to ? [] : staleSentries(live, from, to, sentries(after));
+  if (stale.length) await restartSentries(stale, after);
 }

@@ -41,7 +41,8 @@ const usage = `usage:
   maxflow thread move <thread id> <objective id>   re-home a thread and its subthreads onto that objective and its routers
   maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
   maxflow deploy                             ship origin's feat/v2 to the live yarn: refuses a dirty live checkout or a commit that doesn't build,
-                                             fast-forwards, restarts, and checks every session and sentry came back
+                                             fast-forwards, restarts, checks every session and sentry came back,
+                                             and restarts the sentries whose code changed
   maxflow install                            run this checkout as the login service and add its hooks to ~/.claude/settings.json`;
 import { fetchPrs, links, parsePr, readStatus, readWatches, render, writeWatches } from "./sentries/gh";
 import * as slack from "./sentries/slack";
