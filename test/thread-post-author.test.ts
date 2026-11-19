@@ -23,8 +23,9 @@ async function saidIn(id: string) {
 describe("m-140a9e: a `thread post` run over ssh with no MAXFLOW_SESSION showed an agent's words under Isaac's name", () => {
   test("only the browser posts as Isaac; an outside agent posts under its --as label, and anything else is refused", async () => {
     await waitUntilAnswering(instance, server);
-    const sessionless = await send("/api/threads/none/messages", { text: "agent words" });
-    expect(sessionless.status).toBe(404);
+    const inboxThreadWithoutSession = await send("/api/threads", { text: "agent words" });
+    expect(inboxThreadWithoutSession.status).toBe(403);
+    expect((await send("/api/threads", { text: "agent words", as: "cleopatra/yarn-browser" })).status).toBe(400);
 
     const opened = await send("/api/threads", { title: "author test", objective: "none" });
     expect(opened.status).toBe(201);
@@ -40,6 +41,9 @@ describe("m-140a9e: a `thread post` run over ssh with no MAXFLOW_SESSION showed 
     expect((await send(posts, { text: "agent words", as: "isaac" }, theBrowsersMarker)).status).toBe(403);
     expect((await send(posts, { text: "outside words", as: "cleopatra/yarn-browser" })).status).toBe(201);
     expect((await send(posts, { text: "his words" }, theBrowsersMarker)).status).toBe(201);
+
+    const sub = await send("/api/threads", { parent: { thread: id, message: "nonexistent" }, text: "agent words" });
+    expect(sub.status).toBe(403);
 
     expect(await saidIn(id)).toEqual([
       ["cleopatra/yarn-browser", "outside words"],

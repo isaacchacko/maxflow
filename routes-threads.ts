@@ -5,7 +5,7 @@ import { isSentry, sessions } from "./sessions";
 import type { Feed, FeedPost, Thread } from "./model";
 import { live, objectives, saveThreads, threads } from "./stores";
 import { dispatch, funnel, live_thread, routersOf } from "./lifecycle";
-import { ISAAC_IN_THREAD, ancestors, mentionsIn, message, pathTitle, postIn, schedulePause, tellMembers, unforge, unpause } from "./threads";
+import { ISAAC_IN_THREAD, ancestors, mentionsIn, message, pathTitle, postIn, schedulePause, sessionless, tellMembers, unforge, unpause } from "./threads";
 import { feedPosts, feedToFunnel, sizeFirst, slackChannels } from "./routing";
 import { mergeThread, subthread, titleOf } from "./objectives";
 
@@ -19,13 +19,15 @@ export async function threadsRoute(req: Request, url: URL, path: string): Promis
   }
   if (path === "/api/threads" && req.method === "POST") {
     const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-    const body = (await req.json().catch(() => ({}))) as { title?: string; objective?: string; text?: string; parent?: { thread?: string; message?: string } };
+    const body = (await req.json().catch(() => ({}))) as { title?: string; objective?: string; text?: string; parent?: { thread?: string; message?: string }; as?: string };
+    const outside = from === undefined && (body.text?.trim() ?? "") !== "" ? sessionless(req, body.as) : undefined;
+    if (outside !== undefined && "refusal" in outside) return new Response(outside.refusal, { status: 403 });
     // A subthread: got or made under a message, and the first reply in it posted like any other.
     if (body.parent) {
       const parent = threads.find((x) => x.id === body.parent!.thread);
       const t = parent && subthread(parent, body.parent.message ?? "");
       if (!t) return new Response("parent: {thread, message} naming a message in that thread", { status: 404 });
-      if (body.text?.trim()) postIn(t, from, body.text.trim());
+      if (body.text?.trim()) postIn(t, outside !== undefined && "label" in outside ? outside.label : from, body.text.trim());
       return Response.json(t, { status: 201 });
     }
     // An item from his event feed that no agent owns: a thread in his inbox flagged as from the feed, routed by the funnel like
@@ -39,7 +41,7 @@ export async function threadsRoute(req: Request, url: URL, path: string): Promis
       return Response.json(t, { status: 201 });
     }
     // Isaac's inbox: each message starts a thread, and the funnel picks the router that owns it.
-    if (!from && body.text?.trim()) {
+    if (outside !== undefined && "isaac" in outside && body.text?.trim()) {
       const text = body.text.trim();
       const t: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: titleOf(text), objective: "", routers: [], messages: [message("isaac", text)] };
       const ev = dispatch({ source: "isaac", target: t.title, text, deliver: (seq) => `${text}\n[maxflow] signal ${seq}, his inbox thread ${t.id}: ${sizeFirst(seq)} His own inbox message is never fyi or ignore, small talk included: whoever takes it, a direct worker or a router, answers him in the thread.` });
