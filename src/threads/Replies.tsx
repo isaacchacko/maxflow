@@ -1,6 +1,7 @@
 import type { Thread } from "@/mock";
 import { agentStore, threadStore } from "@/store";
 import { hasText } from "@/lib/utils";
+import { NewCount } from "./NewCount";
 import { Avatar } from "./Rich";
 import { unseenDeep, useSeen } from "./seen";
 import { Pending } from "./ThreadPage";
@@ -33,7 +34,7 @@ export function Replies({ t }: { t: Thread }) {
         </span>
       )}
       {replies.length > 0 ? <span className="shrink-0 font-semibold text-link">{replies.length === 1 ? "1 reply" : `${replies.length} replies`}</span> : !t.pending && <span className="text-muted-foreground">No replies yet</span>}
-      {fresh > 0 && <span className="shrink-0 rounded-full bg-new-soft px-1.5 font-medium text-new">{fresh} new</span>}
+      {fresh > 0 && <NewCount count={fresh} />}
       {t.pending ? (
         <Pending inline pending={t.pending} names={t.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />
       ) : (

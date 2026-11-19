@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useCallback, useState } from "react";
 import { highlight } from "../jump";
+import { NewCount } from "../NewCount";
 
 const rowIn = (scroller: HTMLElement, key: string) => scroller.querySelector<HTMLElement>(`[data-row="${CSS.escape(key)}"]`);
 
@@ -48,7 +49,6 @@ export function JumpToNew({ threadId, newKeys, scrollRef }: { threadId: string; 
     row.scrollIntoView({ block: "center" });
     highlight(row);
   };
-  const Chevron = isUp ? ChevronUp : ChevronDown;
   return (
     <div ref={watch} className={isUp ? "absolute top-2 right-3" : "absolute right-3 bottom-2"}>
       {first !== undefined && (
@@ -57,10 +57,9 @@ export function JumpToNew({ threadId, newKeys, scrollRef }: { threadId: string; 
           data-agent="jump-to-new"
           title={isUp ? "Jump up to the first new message" : "Jump down to the first new message"}
           onClick={jump}
-          className="flex items-center gap-1 rounded-full border bg-background px-2.5 py-1 text-xs font-semibold text-destructive shadow-sm hover:bg-muted"
+          className="flex rounded-full bg-background text-xs shadow-sm hover:brightness-95"
         >
-          {unmet.length} new
-          <Chevron className="size-3.5" />
+          <NewCount count={unmet.length} arrow={isUp ? ChevronUp : ChevronDown} />
         </button>
       )}
     </div>
