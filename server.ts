@@ -666,7 +666,7 @@ const newerRouterOnScope = (s: Session, pool: Session[] = routersOf(s.role?.obje
   pool.find((x) => x !== s && x.role?.scope === s.role?.scope && x.createdAt > s.createdAt);
 function threadOwner(t: Thread): Session | undefined {
   for (const level of [t, ...ancestors(t).reverse()]) {
-    const lastJoined = level.routers.map((id) => sessions.get(id)).filter(reachable).at(-1);
+    const lastJoined = level.routers.map((id) => sessions.get(id)).findLast(reachable);
     if (lastJoined) return lastJoined.role?.role === "router" ? (newerRouterOnScope(lastJoined) ?? lastJoined) : lastJoined;
   }
   return routersOf(t.objective).at(-1);
