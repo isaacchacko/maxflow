@@ -1,57 +1,38 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isRecord } from "../shared/guards";
 
 const home = mkdtempSync(join(tmpdir(), "maxflow-state-"));
-process.env["HOME"] = home;
-process.env["MAXFLOW_INSTANCE"] = "statetest";
-process.env["MAXFLOW_PORT"] = "1";
-const dir = join(home, ".maxflow-v2-statetest");
-mkdirSync(dir, { recursive: true });
-const { peekStateJson, readGatingStateJson, readStateJson } = await import("../state");
-
-const put = (name: string, text: string) => {
-  writeFileSync(join(dir, name), text);
-};
-const keptCopies = (name: string) => readdirSync(dir).filter((f) => f.startsWith(`${name}.corrupt-`));
+mkdirSync(join(home, ".maxflow-v2-statetest"), { recursive: true });
 
 afterAll(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-test("a valid file reads back, and a missing one reads as undefined", () => {
-  put("ok.json", JSON.stringify({ a: 1 }));
-  expect(readStateJson("ok.json", isRecord)).toEqual({ a: 1 });
-  expect(readStateJson("missing.json", isRecord)).toBeUndefined();
-  expect(readGatingStateJson("missing.json", isRecord)).toBeUndefined();
-});
-
-test("a file that isn't JSON is kept under a .corrupt- name before its reader starts empty", () => {
-  put("broken.json", "{oops");
-  expect(readStateJson("broken.json", isRecord)).toBeUndefined();
-  const kept = keptCopies("broken.json");
-  expect(kept).toHaveLength(1);
-  expect(readFileSync(join(dir, kept[0] ?? ""), "utf8")).toBe("{oops");
-  expect(readdirSync(dir)).not.toContain("broken.json");
-});
-
-test("JSON of the wrong shape is kept the same way", () => {
-  put("shape.json", "[1, 2]");
-  expect(readStateJson("shape.json", isRecord)).toBeUndefined();
-  expect(keptCopies("shape.json")).toHaveLength(1);
-});
-
-test("a gating read of a bad file refuses to start and leaves the file where it is", () => {
-  put("gate.json", "{oops");
-  expect(() => readGatingStateJson("gate.json", isRecord)).toThrow(/won't start with it empty/);
-  expect(readFileSync(join(dir, "gate.json"), "utf8")).toBe("{oops");
-  expect(keptCopies("gate.json")).toHaveLength(0);
-});
-
-test("peeking at another component's bad file changes nothing", () => {
-  put("theirs.json", "{oops");
-  expect(peekStateJson("theirs.json")).toBeUndefined();
-  expect(readFileSync(join(dir, "theirs.json"), "utf8")).toBe("{oops");
+test("state files: a bad file is kept and reported, a gating read refuses, and a peek changes nothing", () => {
+  const probe = Bun.spawnSync(["bun", join(import.meta.dir, "state-probe.ts")], {
+    env: { ...process.env, HOME: home, MAXFLOW_INSTANCE: "statetest", MAXFLOW_PORT: "1" },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(probe.exitCode).toBe(0);
+  const lines = probe.stdout.toString().trim().split("\n");
+  const observed: unknown = JSON.parse(lines.at(-1) ?? "{}");
+  expect(observed).toMatchObject({
+    valid: { a: 1 },
+    missing: "undefined",
+    gatingMissing: "undefined",
+    broken: "undefined",
+    brokenKept: 1,
+    brokenKeptText: "{oops",
+    brokenStillThere: false,
+    shape: "undefined",
+    shapeKept: 1,
+    gateStillThere: true,
+    gateKept: 0,
+    peek: "undefined",
+    theirsStillThere: true,
+  });
+  expect(observed).toHaveProperty("gatingError", expect.stringContaining("won't start with it empty"));
 });
