@@ -1,13 +1,12 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { FitLabel, FitRow } from "@/components/Fit";
-import { useNow } from "@/lib/effects";
 import { liveStore } from "@/store";
 import { cn, hasText } from "@/lib/utils";
 import { Agents } from "./stats/Agents";
 import { useJson } from "./stats/load";
 import { Overview } from "./stats/Overview";
-import { addDays, short, type Stats } from "./stats/parts";
+import { addDays, short, useIsStillBefore, type Stats } from "./stats/parts";
 import { Performance } from "./stats/Performance";
 
 const TABS = [
@@ -16,7 +15,6 @@ const TABS = [
   { id: "agents", label: "Agents" },
 ] as const;
 
-const HOUR_MS = 3_600_000;
 const DEFAULT_DAYS = 7;
 
 function savedInThisBrowser(key: string) {
@@ -113,10 +111,10 @@ export function StatsView({ tab: wanted }: { tab?: string }) {
   const [days, setDays] = useState(savedDays);
   const isLive = liveStore.use();
   const { stats, error, isDimmedUntilNewNumbers } = useWeekStats(tab !== "agents", isLive, statsQuery(weekKey, repo));
-  const now = useNow(at => (stats && stats.week.to > at ? Math.min(HOUR_MS, stats.week.to - at) : HOUR_MS));
+  const isWeekRunning = useIsStillBefore(stats?.week.to);
 
   const key = stats?.week.key ?? weekKey;
-  const isThisWeek = !hasText(weekKey) || (stats !== undefined && stats.week.to > now);
+  const isThisWeek = !hasText(weekKey) || isWeekRunning;
   const pickRepo = (r: string) => {
     setRepo(r);
     saveInThisBrowser("stats-repo", r);

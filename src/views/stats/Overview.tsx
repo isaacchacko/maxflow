@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { cn, hasText } from "@/lib/utils";
 import { useJson } from "./load";
-import { CountTiles, GhNote, GhTrendTiles, RepoPicker, RhythmTile, SectionHead, ThroughputTile, Tile, YarnNote, short, type Peek, type Stats } from "./parts";
+import { SectionHead, Tile, short, type Peek, type Stats } from "./parts";
+import { CountTiles, GhNote, GhTrendTiles, RepoPicker, RhythmTile, ThroughputTile, YarnNote } from "./sections";
 
 type Calendar = { at: number; total: number; days: { date: string; count: number }[]; error?: string };
 type Day = Calendar["days"][number];

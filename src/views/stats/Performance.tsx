@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { cn, hasText } from "@/lib/utils";
 import { useJson } from "./load";
-import { Columns, Distributions, LatencyTiles, SectionHead, Tile, YarnNote, duration, short, sum, weekday, type Peek, type Stats } from "./parts";
+import { Distributions } from "./charts";
+import { Columns, SectionHead, Tile, duration, short, sum, weekday, type Peek, type Stats } from "./parts";
+import { LatencyTiles, YarnNote } from "./sections";
 
 type Health = {
   days: string[];
