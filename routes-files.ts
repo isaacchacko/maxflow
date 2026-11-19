@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { sessions } from "./sessions";
-import { describe } from "./world";
+import { describe } from "./world-session";
 import { introduce } from "./introduce";
 import { UPLOADS } from "./uploads";
 

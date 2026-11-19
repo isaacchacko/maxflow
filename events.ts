@@ -4,7 +4,7 @@ import { type Session, type Wait, isSentry, sessions } from "./sessions";
 import type { UserComment } from "./model";
 import { dispatch, endWait, funnel } from "./lifecycle";
 import { unforge } from "./threads";
-import { ghStatus } from "./world";
+import { ghStatus } from "./world-session";
 import { requested } from "./routing";
 import { isRecord, stringOr } from "./shared/guards";
 

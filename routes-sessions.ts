@@ -4,7 +4,8 @@ import { readFileSync } from "node:fs";
 import { CLI } from "./instance";
 import { type Role, sessions } from "./sessions";
 import { createSession, dispatch } from "./lifecycle";
-import { describe, freshWorld } from "./world";
+import { freshWorld } from "./world";
+import { describe } from "./world-session";
 import { ROUTER_BRIEF, acceptTrust } from "./routing";
 import { handOff } from "./objectives";
 

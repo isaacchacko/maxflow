@@ -3,7 +3,7 @@ import { jev } from "./stats-jev";
 import { sessions } from "./sessions";
 import { TODO_STATES, type Todo } from "./model";
 import { objectives, saveTodos, threads, todos } from "./stores";
-import { describe } from "./world";
+import { describe } from "./world-session";
 import { DAY } from "./dates";
 
 export async function statsTodosRoute(req: Request, url: URL, path: string): Promise<Response | undefined> {

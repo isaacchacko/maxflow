@@ -8,7 +8,7 @@ import type { Block, FeedPost } from "./model";
 import { names, saveThreads, threads } from "./stores";
 import { createSession, live_thread } from "./lifecycle";
 import { ask, enforcing, postIn, sessionless } from "./threads";
-import { describe } from "./world";
+import { describe } from "./world-session";
 import { externalSignal, feedMore } from "./routing";
 import { doesPointAtItself, relayRefusal } from "./objectives";
 import { onEvent } from "./events";

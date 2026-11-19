@@ -4,7 +4,7 @@ import { candidates } from "./mentions";
 import type { TaskEdit } from "./model";
 import { tasks } from "./stores";
 import { editTask } from "./lifecycle";
-import { ARCHIVED_LINKS, archivedLinks } from "./world";
+import { ARCHIVED_LINKS, archivedLinks } from "./world-session";
 import { openUserComments } from "./events";
 import { prProgress } from "./task-prs";
 

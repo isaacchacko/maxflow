@@ -2,7 +2,7 @@ import { publish } from "./bus";
 import { sessions } from "./sessions";
 import { objectives, saveObjectives, saveTasks, saveThreads, tasks, threads } from "./stores";
 import { dispatch, routersOf } from "./lifecycle";
-import { describe } from "./world";
+import { describe } from "./world-session";
 import { startRouter } from "./routing";
 import { newObjective, setRole } from "./objectives";
 

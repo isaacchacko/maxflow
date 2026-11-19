@@ -1,7 +1,7 @@
 import { CLI } from "./instance";
 import { type Session, isAgent, isSentry } from "./sessions";
 import { dispatch } from "./lifecycle";
-import { SENTRY_USES } from "./world";
+import { SENTRY_USES } from "./sentry-uses";
 
 // An edge drawn in the graph: tell each agent end who is on the other side and how to reach it.
 export function introduce(to: Session, other: Session, why?: string) {
