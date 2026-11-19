@@ -2,13 +2,15 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { DIR, STATE_DIR } from "./instance";
 import { commandStarts, shellText } from "./restrictions-shell";
+import type { Call, Exception, Mode, Person, Reach, Restriction } from "./shared/restrictions-types";
+
+export type { Call, Exception, Mode, Person, Reach, Restriction } from "./shared/restrictions-types";
 
 // His autonomy restrictions: what his agents may do on their own (allow), must ask him first (ask), or may never do (deny).
 // The server serves and edits them (/api/restrictions), the Restrictions page shows them, and the enforcement hook
 // (hooks/restrictions.ts) runs resolve() on every tool call. This module reads and writes no server state, so the hook
 // and the CLI can import it alone.
 export const MODES = ["allow", "ask", "deny"] as const;
-export type Mode = (typeof MODES)[number];
 // match.tools: regexes on the whole Claude Code tool_name; match.bash: regexes matched where a command
 // in a Bash command starts (commandStarts), so a file named pkill.md isn't pkill; match.paths: regexes on the file a
 // matched tool writes (file_path or notebook_path), which a tools match then also needs.
@@ -17,33 +19,12 @@ export type Mode = (typeof MODES)[number];
 // reaches: the account the person on the other end of the call is known by (a Slack message's recipient, an email's, a PR's
 // author); only a restriction that reaches someone can be set per person. forPerson: its label said of one person, {name}
 // standing for their name and {name's} for its possessive ("Approve {name's} PRs").
-export type Reach = "slack" | "email" | "github";
 // people: some people or Teammates/Outsiders; objective: one objective's agents; repo: calls made inside one repository.
-export type Exception = "people" | "objective" | "repo";
-export type Restriction = {
-  id: string;
-  action: string;
-  label: string;
-  mode: Mode;
-  match: { tools?: string[]; bash?: string[]; paths?: string[] };
-  scope?: { objective?: string; cwd?: string; people?: Person[] };
-  parent?: string;
-  reaches?: Reach;
-  forPerson?: string;
-  // The catalog's own words for a builtin: what it covers, examples of it, what one of it is called ("message"), and the
-  // exceptions he can carve out of it. His own rules carry about (his description) and nothing else.
-  about?: string;
-  examples?: string[];
-  noun?: string;
-  exceptions?: Exception[];
-  note?: string;
-  builtin?: boolean;
-};
+// The catalog's own words for a builtin: what it covers, examples of it, what one of it is called ("message"), and the
+// exceptions he can carve out of it. His own rules carry about (his description) and nothing else.
 // Someone a call reaches: a message's recipient, a PR's author. Any shared id is the same person; in a restriction's scope,
 // {team: true} stands for every teammate and {team: false} for everyone known not to be one (an outsider).
-export type Person = { name?: string; slack?: string; email?: string; github?: string; team?: boolean };
 // people: who the call reaches, as the hook reads them from its input; none for a call that reaches no one in particular.
-export type Call = { tool: string; input?: Record<string, unknown>; cwd?: string; objective?: string; people?: Person[] };
 
 const SLACK = "mcp__claude_ai_Slack__";
 const GMAIL = "mcp__claude_ai_Gmail__";

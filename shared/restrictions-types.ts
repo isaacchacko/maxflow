@@ -1,0 +1,22 @@
+export type Mode = "allow" | "ask" | "deny";
+export type Reach = "slack" | "email" | "github";
+export type Exception = "people" | "objective" | "repo";
+export type Person = { name?: string; slack?: string; email?: string; github?: string; team?: boolean };
+export type Restriction = {
+  id: string;
+  action: string;
+  label: string;
+  mode: Mode;
+  match: { tools?: string[]; bash?: string[]; paths?: string[] };
+  scope?: { objective?: string; cwd?: string; people?: Person[] } | undefined;
+  parent?: string;
+  reaches?: Reach;
+  forPerson?: string;
+  about?: string | undefined;
+  examples?: string[];
+  noun?: string;
+  exceptions?: Exception[];
+  note?: string;
+  builtin?: boolean;
+};
+export type Call = { tool: string; input?: Record<string, unknown>; cwd?: string; objective?: string; people?: Person[] };
