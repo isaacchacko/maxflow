@@ -81,19 +81,23 @@ function rememberComment(key: string, event: PrEvent, who: string) {
   remember(key, { at: Date.now(), who: isHis ? "Isaac" : who, text: shortened(event.body ?? "", 600), mine: isHis, user: event.author, raw: event.body, link: event.url });
 }
 
-const isAckOnly = (kind: string, reviewState: string, body: string) => (body.trim() === "" ? kind === "review" && reviewState !== "changes requested" : isBareAck(body));
-const noteAck = async (key: string, what: string, body: string, link: string) => noteFyi(`${what}${body.trim() === "" ? "" : `: "${body.trim()}"`} on ${repoAndNumber(key)}`, link);
+const reviewStateOf = (event: PrEvent) => String(event.state).toLowerCase().replace("_", " ");
+const isAckOnly = (kind: string, event: PrEvent) => {
+  const body = (event.body ?? "").trim();
+  return body === "" ? kind === "review" && reviewStateOf(event) !== "changes requested" : isBareAck(body);
+};
+async function noteAck(kind: string, event: PrEvent, who: string, url: string) {
+  const body = (event.body ?? "").trim();
+  const what = kind === "review" ? `${who} reviewed (${reviewStateOf(event)})` : `${who} commented`;
+  await noteFyi(`${what}${body === "" ? "" : `: "${body}"`} on ${repoAndNumber(event.pr)}`, event.url ?? url);
+}
 
 async function notePersonEvent(key: string, person: PersonEvent) {
   const { kind, event, who, url, isMine } = person;
-  const reviewState = String(event.state).toLowerCase().replace("_", " ");
+  const reviewState = reviewStateOf(event);
   const path = event.path ?? "";
   const body = event.body ?? "";
   const what = kind === "review" ? `${who} reviewed (${reviewState})` : `${who} commented${path === "" ? "" : ` on ${path}`}`;
-  if (isAckOnly(kind, reviewState, body)) {
-    await noteAck(key, what, body, event.url ?? url);
-    return;
-  }
   const task = await onBoard(key, url, `${what}: "${shortened(body, 120)}"`, { title: `${what} on ${repoAndNumber(key)}`, ...(!isMine && { status: "you" }) });
   if (task === null) return;
   const verdict = kind === "review" ? `**${reviewState}**${body === "" ? "" : "\n\n"}` : "";
@@ -109,7 +113,7 @@ async function onPersonActivity(kind: string, event: PrEvent, url: string, isMin
   if (who === "" || !PERSON_KINDS.has(kind) || isFromBot(event)) return;
   if ((event.body ?? "") !== "") rememberComment(event.pr, event, who);
   if (event.isToldToSession || who.startsWith("the user")) return;
-  await notePersonEvent(event.pr, { kind, event, who, url, isMine });
+  await (isAckOnly(kind, event) ? noteAck(kind, event, who, url) : notePersonEvent(event.pr, { kind, event, who, url, isMine }));
 }
 
 type PrContext = { files: LocalFiles; url: string; isMine: boolean; isReviewing: boolean };

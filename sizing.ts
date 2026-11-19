@@ -16,7 +16,7 @@ type Handoff = NonNullable<Awaited<ReturnType<typeof handoff>>>;
 const home = process.env["HOME"] ?? "/";
 
 function startAgent(name: string, cwd: string, prompt: string) {
-  const agent = createSession(name, ["claude", "--permission-mode", "bypassPermissions", prompt], cwd.replace(/^~(?=\/|$)/, home));
+  const agent = createSession(name, ["claude", "--permission-mode", "bypassPermissions", prompt], /^~(?=\/|$)/.test(cwd) ? `${home}${cwd.slice(1)}` : cwd);
   void acceptTrust(agent);
   return agent;
 }
@@ -155,7 +155,7 @@ function promote(s: Session, title: string | undefined) {
 async function bodyOf<T extends object>(req: Request): Promise<Partial<T>> {
   try {
     const parsed: unknown = await req.json();
-    return typeof parsed === "object" && parsed !== null ? (parsed as Partial<T>) : {};
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
     return {};
   }
@@ -165,7 +165,8 @@ async function noteSentryFyi(req: Request, from: Session | undefined) {
   if (!from || !isSentry(from)) return new Response("only a sentry notes FYIs", { status: 403 });
   const { text, link, about } = await bodyOf<{ text: string; link: string; about: string }>(req);
   if (isBlank(text)) return new Response("text required", { status: 400 });
-  return Response.json({ thread: noteFyi(withLink(text.trim(), link), about).id }, { status: 201 });
+  const noted = noteFyi(withLink(text.trim(), link), about);
+  return Response.json({ thread: noted.id }, { status: 201 });
 }
 
 async function promoteCaller(req: Request, from: Session | undefined) {
