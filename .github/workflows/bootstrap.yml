@@ -36,7 +36,16 @@ jobs:
           git add tsc-baseline.json eslint-suppressions.json
           git diff --cached --quiet || git commit -qm "Lint baselines: $E eslint and $T tsc violations, per file and rule, that may only shrink. bun run check fails when a count rises (scripts/baseline-shrinks.ts compares against origin/feat/v2), and bun run lint:shrink lowers them. The goal is zero"
       - run: bun run check
-      - if: ${{ env.LAND == '1' }}
-        run: git push origin HEAD:feat/v2 && git push -f origin HEAD:feat/lint
-        env:
-          LAND: "1"
+      - run: |
+          for attempt in 1 2 3 4 5 6; do
+            git push origin HEAD:feat/v2 && git push -f origin HEAD:feat/lint && exit 0
+            git reset -q --hard HEAD~1
+            git fetch origin feat/v2 && git rebase origin/feat/v2
+            bun install --frozen-lockfile
+            rm -f tsc-baseline.json eslint-suppressions.json
+            bun scripts/typecheck.ts --shrink || true
+            bun --bun node_modules/.bin/eslint . --suppress-all > /dev/null || true
+            git add tsc-baseline.json eslint-suppressions.json
+            git commit -qm "Lint baselines, generated on this exact tree: every eslint and tsc violation per file and rule, which may only shrink. bun run check fails when a count rises (scripts/baseline-shrinks.ts compares against origin/feat/v2), and bun run lint:shrink lowers them. The goal is zero"
+          done
+          exit 1
