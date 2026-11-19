@@ -2517,7 +2517,7 @@ Bun.serve<WsData>({
     }
 
     if (path === "/api/todos" && req.method === "GET") return Response.json(todos);
-    if (path === "/api/stats" && req.method === "GET") return Response.json(await stats(url.searchParams.get("week") ?? undefined));
+    if (path === "/api/stats" && req.method === "GET") return Response.json(await stats(url.searchParams.get("week") ?? undefined, url.searchParams.get("repo") ?? undefined));
     if (path === "/api/todos" && req.method === "POST") {
       const { text, day } = (await req.json().catch(() => ({}))) as { text?: string; day?: string };
       if (!text?.trim() || !day || !DAY.test(day)) return new Response("text, and day as YYYY-MM-DD", { status: 400 });

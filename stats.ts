@@ -2,18 +2,17 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { DIR, STATE_DIR } from "./instance";
 
 // The Stats page's numbers, one week at a time (Monday to Sunday in his time zone).
-// GitHub: one GraphQL call per week (a 502 is tried once more), cached in stats-gh.json; a finished week is never fetched again and the current one at most
-// every 15 minutes, since the token is shared with the sentries. Commits are counted from the local clones, which costs no API call
-// and sees every branch (maxflow's work lives on feat/v2, which GitHub's contribution count leaves out).
+// GitHub: one repo at a time (Dryft-AI/app unless he picks another), one GraphQL call per repo and week (a 502 is tried twice more), cached in
+// stats-github.json; a finished week is never fetched again and the current one at most every 15 minutes, since the token is shared with
+// the sentries. Commits in a repo cloned here are counted from the clone, which costs no API call and sees every branch (maxflow's work
+// lives on feat/v2, which GitHub's own count leaves out); elsewhere from the default branch's history.
 // yarn: read from events.jsonl and threads.json, which only go back to when v2 started.
 
 const TZ = "America/Los_Angeles";
 const DAY = 86_400_000;
-const REPOS = [
-  { name: "Dryft-AI/app", clone: `${process.env.HOME}/app` },
-  { name: "isaacchacko/maxflow", clone: DIR },
-];
-const GH_CACHE = `${STATE_DIR}/stats-gh.json`;
+export const DEFAULT_REPO = "Dryft-AI/app";
+const CLONES: Record<string, string> = { "Dryft-AI/app": `${process.env.HOME}/app`, "isaacchacko/maxflow": DIR };
+const GH_CACHE = `${STATE_DIR}/stats-github.json`;
 const GH_FRESH_MS = 15 * 60_000;
 // GitHub's search index trails by a few minutes, so a week counts as final only once this long past its end.
 const SETTLED_MS = 60 * 60_000;
@@ -44,8 +43,8 @@ export function week(key?: string): Week {
 
 // ---- GitHub
 
-type RepoCounts = { commits: number; opened: number; merged: number; closed: number; reviews: number; requested: number; added: number; deleted: number };
-export type GhWeek = { at: number; final: boolean; repos: Record<string, RepoCounts>; error?: string };
+type Counts = { commits: number; opened: number; merged: number; closed: number; reviews: number; requested: number; added: number; deleted: number };
+export type GhWeek = { at: number; final: boolean; counts?: Counts; error?: string };
 
 const loadCache = (): Record<string, GhWeek> => {
   try {
@@ -57,7 +56,7 @@ const loadCache = (): Record<string, GhWeek> => {
 const ghCache = loadCache();
 const inflight = new Map<string, Promise<GhWeek>>();
 
-function commits(clone: string, w: Week) {
+function cloneCommits(clone: string, w: Week) {
   const r = Bun.spawnSync(["git", "-C", clone, "log", "--all", "--no-merges", "--author=Isaac Chacko", `--since=${new Date(w.from).toISOString()}`, `--until=${new Date(w.to).toISOString()}`, "--format=%at %s"], { stderr: "pipe" });
   // A rebased or cherry-picked commit keeps its author time and subject under a new hash, so those count once.
   return r.exitCode === 0 ? new Set(r.stdout.toString().split("\n").filter(Boolean)).size : 0;
@@ -71,78 +70,100 @@ async function graphql(query: string) {
   if (code !== 0) throw new Error(err.trim().slice(0, 300) || `gh exited ${code}`);
   return JSON.parse(out).data;
 }
-
-let me: Promise<string> | undefined;
-const login = () => (me ??= graphql("query { viewer { login } }").then(d => d.viewer.login as string).catch(e => ((me = undefined), Promise.reject(e))));
-
-async function fetchGh(w: Week): Promise<GhWeek> {
-  const user = await login();
-  const range = `${new Date(w.from).toISOString().slice(0, 19)}Z..${new Date(w.to - 1000).toISOString().slice(0, 19)}Z`;
-  // One count per repo and metric, all in the one call; merged PRs bring their line counts along.
-  const searches = REPOS.flatMap((r, i) => [
-    `o${i}: search(type: ISSUE, query: "is:pr author:@me repo:${r.name} created:${range}") { issueCount }`,
-    `m${i}: search(type: ISSUE, first: 100, query: "is:pr author:@me repo:${r.name} merged:${range}") { issueCount pageInfo { endCursor hasNextPage } nodes { ... on PullRequest { additions deletions } } }`,
-    `c${i}: search(type: ISSUE, query: "is:pr author:@me repo:${r.name} is:unmerged closed:${range}") { issueCount }`,
-    `p${i}: search(type: ISSUE, query: "is:pr review-requested:@me repo:${r.name} created:${range}") { issueCount }`,
-    `d${i}: search(type: ISSUE, query: "is:pr reviewed-by:@me -author:@me repo:${r.name} created:${range}") { issueCount }`,
-    // The contributions API hides the org's private repos from this token, so reviews are counted off the PRs he reviewed.
-    `r${i}: search(type: ISSUE, first: 100, query: "is:pr reviewed-by:@me -author:@me repo:${r.name} updated:${range}") { nodes { ... on PullRequest { reviews(first: 100, author: "${user}") { nodes { submittedAt } } } } }`,
-  ]);
-  const q = `query {
-    ${searches.join("\n    ")}
-  }`;
-  // GitHub answers a busy search with a 502 now and then; a couple more tries are usually enough.
-  const data = await graphql(q)
+// GitHub answers a busy search with a 502 now and then; a couple more tries are usually enough.
+const retried = (q: string) =>
+  graphql(q)
     .catch(() => Bun.sleep(3000).then(() => graphql(q)))
     .catch(() => Bun.sleep(10_000).then(() => graphql(q)));
-  type Review = { submittedAt: string | null };
-  const reviews = (i: number) =>
-    (data[`r${i}`].nodes as { reviews: { nodes: Review[] } }[])
-      .flatMap(p => p.reviews.nodes)
-      .filter(r => r.submittedAt && Date.parse(r.submittedAt) >= w.from && Date.parse(r.submittedAt) < w.to).length;
-  const repos: Record<string, RepoCounts> = {};
-  for (const [i, r] of REPOS.entries()) {
-    const merged = data[`m${i}`].nodes as { additions: number; deletions: number }[];
-    // Over 100 merged PRs in a week, the line counts need the rest of the pages.
-    for (let page = data[`m${i}`].pageInfo, n = 0; page.hasNextPage && n < 5; n++) {
-      const more = (await graphql(`query { m: search(type: ISSUE, first: 100, after: ${JSON.stringify(page.endCursor)}, query: "is:pr author:@me repo:${r.name} merged:${range}") { pageInfo { endCursor hasNextPage } nodes { ... on PullRequest { additions deletions } } } }`)).m;
-      merged.push(...more.nodes);
-      page = more.pageInfo;
-    }
-    repos[r.name] = {
-      commits: commits(r.clone, w),
-      opened: data[`o${i}`].issueCount,
-      merged: data[`m${i}`].issueCount,
-      closed: data[`c${i}`].issueCount,
-      reviews: reviews(i),
-      requested: data[`p${i}`].issueCount + data[`d${i}`].issueCount,
-      added: merged.reduce((n, p) => n + p.additions, 0),
-      deleted: merged.reduce((n, p) => n + p.deletions, 0),
-    };
-  }
-  return { at: Date.now(), final: Date.now() > w.to + SETTLED_MS, repos };
+
+let me: Promise<{ login: string; id: string }> | undefined;
+const viewer = () => (me ??= graphql("query { viewer { login id } }").then(d => d.viewer).catch(e => ((me = undefined), Promise.reject(e))));
+
+let repoList: { at: number; repos: Promise<string[]> } | undefined;
+/** The repos he worked in lately, his default first: the ones of his last 100 PRs, reviews and review requests (busiest first), the ones cloned
+ * here, then the rest GitHub says he contributed to. Looked up at most every 6 hours. */
+export function repos(): Promise<string[]> {
+  if (repoList && Date.now() - repoList.at < 6 * 3600_000) return repoList.repos;
+  const since = new Date(Date.now() - 90 * DAY).toISOString().slice(0, 10);
+  const p = retried(`query { search(type: ISSUE, first: 100, query: "is:pr involves:@me updated:>=${since}") { nodes { ... on PullRequest { repository { nameWithOwner } } } }
+    viewer { repositoriesContributedTo(first: 50, includeUserRepositories: true, orderBy: { field: PUSHED_AT, direction: DESC }) { nodes { nameWithOwner } } } }`)
+    .then(d => {
+      const seen = new Map<string, number>();
+      for (const n of d.search.nodes as { repository?: { nameWithOwner: string } }[]) if (n.repository) seen.set(n.repository.nameWithOwner, (seen.get(n.repository.nameWithOwner) ?? 0) + 1);
+      const busiest = [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([r]) => r);
+      const contributed = (d.viewer.repositoriesContributedTo.nodes as { nameWithOwner: string }[]).map(r => r.nameWithOwner);
+      return [...new Set([DEFAULT_REPO, ...busiest, ...Object.keys(CLONES), ...contributed])];
+    })
+    .catch((e: Error) => {
+      console.error(`stats: listing his repos failed: ${e.message}`);
+      repoList = undefined;
+      return [DEFAULT_REPO, ...Object.keys(CLONES).filter(r => r !== DEFAULT_REPO)];
+    });
+  repoList = { at: Date.now(), repos: p };
+  return p;
 }
 
-export function gh(w: Week): Promise<GhWeek> {
-  const hit = ghCache[w.key];
+async function fetchGh(repo: string, w: Week): Promise<GhWeek> {
+  const { login, id } = await viewer();
+  const [owner, name] = repo.split("/");
+  const range = `${new Date(w.from).toISOString().slice(0, 19)}Z..${new Date(w.to - 1000).toISOString().slice(0, 19)}Z`;
+  const clone = CLONES[repo];
+  // Merged PRs bring their line counts along.
+  const q = `query {
+    o: search(type: ISSUE, query: "is:pr author:@me repo:${repo} created:${range}") { issueCount }
+    m: search(type: ISSUE, first: 100, query: "is:pr author:@me repo:${repo} merged:${range}") { issueCount pageInfo { endCursor hasNextPage } nodes { ... on PullRequest { additions deletions } } }
+    c: search(type: ISSUE, query: "is:pr author:@me repo:${repo} is:unmerged closed:${range}") { issueCount }
+    p: search(type: ISSUE, query: "is:pr review-requested:@me repo:${repo} created:${range}") { issueCount }
+    d: search(type: ISSUE, query: "is:pr reviewed-by:@me -author:@me repo:${repo} created:${range}") { issueCount }
+    r: search(type: ISSUE, first: 100, query: "is:pr reviewed-by:@me -author:@me repo:${repo} updated:${range}") { nodes { ... on PullRequest { reviews(first: 100, author: "${login}") { nodes { submittedAt } } } } }
+    ${clone ? "" : `h: repository(owner: "${owner}", name: "${name}") { defaultBranchRef { target { ... on Commit { history(since: "${new Date(w.from).toISOString()}", until: "${new Date(w.to).toISOString()}", author: { id: "${id}" }) { totalCount } } } } }`}
+  }`;
+  const data = await retried(q);
+  // The contributions API hides the org's private repos from this token, so reviews are counted off the PRs he reviewed.
+  const reviews = (data.r.nodes as { reviews?: { nodes: { submittedAt: string | null }[] } }[])
+    .flatMap(p => p.reviews?.nodes ?? [])
+    .filter(r => r.submittedAt && Date.parse(r.submittedAt) >= w.from && Date.parse(r.submittedAt) < w.to).length;
+  const merged = data.m.nodes as { additions: number; deletions: number }[];
+  // Over 100 merged PRs in a week, the line counts need the rest of the pages.
+  for (let page = data.m.pageInfo, n = 0; page.hasNextPage && n < 5; n++) {
+    const more = (await retried(`query { m: search(type: ISSUE, first: 100, after: ${JSON.stringify(page.endCursor)}, query: "is:pr author:@me repo:${repo} merged:${range}") { pageInfo { endCursor hasNextPage } nodes { ... on PullRequest { additions deletions } } } }`)).m;
+    merged.push(...more.nodes);
+    page = more.pageInfo;
+  }
+  const counts: Counts = {
+    commits: clone ? cloneCommits(clone, w) : (data.h?.defaultBranchRef?.target?.history?.totalCount ?? 0),
+    opened: data.o.issueCount,
+    merged: data.m.issueCount,
+    closed: data.c.issueCount,
+    reviews,
+    requested: data.p.issueCount + data.d.issueCount,
+    added: merged.reduce((n, p) => n + p.additions, 0),
+    deleted: merged.reduce((n, p) => n + p.deletions, 0),
+  };
+  return { at: Date.now(), final: Date.now() > w.to + SETTLED_MS, counts };
+}
+
+export function gh(repo: string, w: Week): Promise<GhWeek> {
+  const key = `${repo} ${w.key}`;
+  const hit = ghCache[key];
   if (hit && !hit.error && (hit.final || Date.now() - hit.at < GH_FRESH_MS)) return Promise.resolve(hit);
   // A week that hasn't started has nothing to count.
-  if (w.from > Date.now()) return Promise.resolve({ at: Date.now(), final: false, repos: {} });
-  const running = inflight.get(w.key);
+  if (w.from > Date.now()) return Promise.resolve({ at: Date.now(), final: false });
+  const running = inflight.get(key);
   if (running) return running;
-  const p = fetchGh(w)
+  const p = fetchGh(repo, w)
     .then(r => {
-      ghCache[w.key] = r;
+      ghCache[key] = r;
       writeFileSync(GH_CACHE, JSON.stringify(ghCache));
       return r;
     })
     .catch((e: Error) => {
-      console.error(`stats: GitHub fetch for week ${w.key} failed: ${e.message}`);
+      console.error(`stats: GitHub fetch for ${repo} week ${w.key} failed: ${e.message}`);
       // Keep showing what was fetched before; an error is retried on the next look.
-      return hit ? { ...hit, error: e.message } : { at: Date.now(), final: false, repos: {}, error: e.message };
+      return hit ? { ...hit, error: e.message } : { at: Date.now(), final: false, error: e.message };
     })
-    .finally(() => inflight.delete(w.key));
-  inflight.set(w.key, p);
+    .finally(() => inflight.delete(key));
+  inflight.set(key, p);
   return p;
 }
 
@@ -262,9 +283,11 @@ export function yarn(w: Week): YarnWeek {
   return value;
 }
 
-export async function stats(key?: string) {
+export async function stats(key?: string, repo?: string) {
   const w = week(key);
   const prev = week(addDays(w.key, -7));
-  const [now, before] = await Promise.all([gh(w), gh(prev)]);
-  return { week: w, gh: { now, before }, yarn: yarn(w), yarnBefore: yarn(prev) };
+  // Only an owner/name is put into a search query.
+  const r = repo && /^[\w.-]+\/[\w.-]+$/.test(repo) ? repo : DEFAULT_REPO;
+  const [now, before, list] = await Promise.all([gh(r, w), gh(r, prev), repos()]);
+  return { week: w, gh: { repo: r, repos: list.includes(r) ? list : [...list, r], now, before }, yarn: yarn(w), yarnBefore: yarn(prev) };
 }

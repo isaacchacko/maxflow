@@ -6,14 +6,14 @@ import { cn } from "@/lib/utils";
 // yarn's statistics a week at a time, opened from the mark at the top of the sidebar: his GitHub week beside how fast yarn moved,
 // each number with the change from the week before. The server counts them (stats.ts); GitHub's are cached there, not fetched per look.
 
-type RepoCounts = { commits: number; opened: number; merged: number; closed: number; reviews: number; requested: number; added: number; deleted: number };
-type GhWeek = { at: number; final: boolean; repos: Record<string, RepoCounts>; error?: string };
+type Counts = { commits: number; opened: number; merged: number; closed: number; reviews: number; requested: number; added: number; deleted: number };
+type GhWeek = { at: number; final: boolean; counts?: Counts; error?: string };
 type Latency = { id: string; samples: { at: number; ms: number }[] };
 type Count = { id: string; days: number[] };
 type YarnWeek = { since: number; latencies: Latency[]; counts: Count[] };
-type Stats = { week: { key: string; from: number; to: number; days: string[] }; gh: { now: GhWeek; before: GhWeek }; yarn: YarnWeek; yarnBefore: YarnWeek };
+type Stats = { week: { key: string; from: number; to: number; days: string[] }; gh: { repo: string; repos: string[]; now: GhWeek; before: GhWeek }; yarn: YarnWeek; yarnBefore: YarnWeek };
 
-const GH: { key: keyof RepoCounts; label: string }[] = [
+const GH: { key: keyof Counts; label: string }[] = [
   { key: "commits", label: "Commits" },
   { key: "opened", label: "PRs opened" },
   { key: "merged", label: "PRs merged" },
@@ -59,8 +59,8 @@ function duration(ms: number | undefined) {
 
 /** The change from last week as a signed percent; green when it went the good way. A total for a week still running can't be
  * compared to a whole one yet, so it shows last week's total instead. */
-function Delta({ now, before, lowerIsBetter, running, terse }: { now?: number; before?: number; lowerIsBetter?: boolean; running?: boolean; terse?: boolean }) {
-  if (running && before !== undefined) return <span className="text-xs text-muted-foreground tabular-nums">{terse ? `vs ${before.toLocaleString()}` : `${before.toLocaleString()} last week`}</span>;
+function Delta({ now, before, lowerIsBetter, running }: { now?: number; before?: number; lowerIsBetter?: boolean; running?: boolean }) {
+  if (running && before !== undefined) return <span className="text-xs text-muted-foreground tabular-nums">{before.toLocaleString()} last week</span>;
   if (now === undefined || !before) return <span className="text-xs text-muted-foreground">–</span>;
   const pct = Math.round(((now - before) / before) * 100);
   if (pct === 0) return <span className="text-xs text-muted-foreground tabular-nums">same</span>;
@@ -96,61 +96,46 @@ function Card({ label, hint, value, delta, children }: { label: string; hint?: s
   );
 }
 
-function GitHub({ stats }: { stats: Stats }) {
-  const { now, before } = stats.gh;
+function GitHub({ stats, picked, onRepo }: { stats: Stats; picked?: string; onRepo(repo: string): void }) {
+  const { now, before, repo, repos } = stats.gh;
   const running = stats.week.to > Date.now();
-  const repos = Object.keys(now.repos).length ? Object.keys(now.repos) : Object.keys(before.repos);
-  const sum = (w: GhWeek, key: keyof RepoCounts) => (Object.keys(w.repos).length ? Object.values(w.repos).reduce((n, r) => n + r[key], 0) : undefined);
-  const lines = (w: GhWeek) => {
-    const a = sum(w, "added"), d = sum(w, "deleted");
-    return a === undefined ? undefined : a + d!;
-  };
+  const value = (w: GhWeek, key: keyof Counts) => w.counts?.[key];
+  const lines = (w: GhWeek) => w.counts && w.counts.added + w.counts.deleted;
   return (
     <section>
       <div className="mb-2 flex items-baseline gap-2">
         <h2 className="text-base font-semibold">GitHub</h2>
+        <select
+          value={picked ?? repo}
+          onChange={e => onRepo(e.target.value)}
+          className="max-w-64 rounded-md border bg-transparent px-1.5 py-0.5 text-xs"
+          title="Repo"
+        >
+          {repos.map(r => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
         <span className="text-xs text-muted-foreground">
-          {repos.join(", ")} · checked {new Date(now.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
-          {now.error && <span className="text-rose-600 dark:text-rose-400"> · last fetch failed, showing older numbers</span>}
+          checked {new Date(now.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+          {now.error && <span className="text-rose-600 dark:text-rose-400"> · last fetch failed{now.counts ? ", showing older numbers" : ""}</span>}
         </span>
       </div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {GH.map(({ key, label }) => (
-          <Card key={key} label={label} value={String(sum(now, key) ?? "–")} delta={<Delta now={sum(now, key)} before={sum(before, key)} running={running} />}>
-            <PerRepo repos={repos} now={now} before={before} value={r => r[key]} running={running} />
-          </Card>
+          <Card key={key} label={label} value={value(now, key)?.toLocaleString() ?? "–"} delta={<Delta now={value(now, key)} before={value(before, key)} running={running} />} />
         ))}
-        <Card
-          label="Lines changed in merged PRs"
-          value={lines(now) === undefined ? "–" : lines(now)!.toLocaleString()}
-          delta={<Delta now={lines(now)} before={lines(before)} running={running} />}
-        >
-          <div className="mt-1 text-xs tabular-nums">
-            <span className="text-emerald-600 dark:text-emerald-400">+{(sum(now, "added") ?? 0).toLocaleString()}</span>{" "}
-            <span className="text-rose-600 dark:text-rose-400">−{(sum(now, "deleted") ?? 0).toLocaleString()}</span>
-          </div>
-          <PerRepo repos={repos} now={now} before={before} value={r => r.added + r.deleted} running={running} />
+        <Card label="Lines changed in merged PRs" value={lines(now)?.toLocaleString() ?? "–"} delta={<Delta now={lines(now)} before={lines(before)} running={running} />}>
+          {now.counts && (
+            <div className="mt-1 text-xs tabular-nums">
+              <span className="text-emerald-600 dark:text-emerald-400">+{now.counts.added.toLocaleString()}</span>{" "}
+              <span className="text-rose-600 dark:text-rose-400">−{now.counts.deleted.toLocaleString()}</span>
+            </div>
+          )}
         </Card>
       </div>
     </section>
-  );
-}
-
-function PerRepo({ repos, now, before, value, running }: { repos: string[]; now: GhWeek; before: GhWeek; value: (r: RepoCounts) => number; running: boolean }) {
-  if (repos.length < 2) return null;
-  return (
-    <ul className="mt-2 flex flex-col gap-0.5">
-      {repos.map(name => {
-        const n = now.repos[name], b = before.repos[name];
-        return (
-          <li key={name} className="flex items-baseline gap-1.5 text-xs">
-            <span className="min-w-0 flex-1 truncate text-muted-foreground">{name.split("/")[1]}</span>
-            <span className="tabular-nums">{n ? value(n).toLocaleString() : "–"}</span>
-            <Delta now={n && value(n)} before={b && value(b)} running={running} terse />
-          </li>
-        );
-      })}
-    </ul>
   );
 }
 
@@ -200,8 +185,19 @@ function Yarn({ stats }: { stats: Stats }) {
   );
 }
 
+// The repo he picked last is kept in this browser; none means the server's default, Dryft-AI/app.
+const REPO_KEY = "stats-repo";
+const savedRepo = () => {
+  try {
+    return localStorage.getItem(REPO_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export function StatsView() {
   const [weekKey, setWeekKey] = useState<string>();
+  const [repo, setRepo] = useState(savedRepo);
   const [stats, setStats] = useState<Stats>();
   const [failed, setFailed] = useState<string>();
   const live = liveStore.use();
@@ -210,16 +206,23 @@ export function StatsView() {
     if (!live) return;
     let gone = false;
     setFailed(undefined);
-    fetch(`/api/stats${weekKey ? `?week=${weekKey}` : ""}`)
+    const query = new URLSearchParams({ ...(weekKey && { week: weekKey }), ...(repo && { repo }) });
+    fetch(`/api/stats?${query}`)
       .then(async r => (r.ok ? r.json() : Promise.reject(new Error(await r.text()))))
       .then(s => !gone && setStats(s))
       .catch((e: Error) => !gone && setFailed(e.message));
     return () => void (gone = true);
-  }, [weekKey, live]);
+  }, [weekKey, repo, live]);
 
-  const shown = stats && (!weekKey || stats.week.key === weekKey) ? stats : undefined;
+  const shown = stats && (!weekKey || stats.week.key === weekKey) && (!repo || stats.gh.repo === repo) ? stats : undefined;
   const key = shown?.week.key ?? weekKey;
   const thisWeek = !weekKey || (!!shown && shown.week.to > Date.now());
+  const pickRepo = (r: string) => {
+    setRepo(r);
+    try {
+      localStorage.setItem(REPO_KEY, r);
+    } catch {}
+  };
   const step = (n: number) => key && setWeekKey(addDays(key, 7 * n));
 
   return (
@@ -249,7 +252,7 @@ export function StatsView() {
             <p className="text-sm text-muted-foreground">Counting…</p>
           ) : (
             <>
-              <GitHub stats={shown ?? stats} />
+              <GitHub stats={shown ?? stats} picked={repo} onRepo={pickRepo} />
               <Yarn stats={shown ?? stats} />
             </>
           )}
