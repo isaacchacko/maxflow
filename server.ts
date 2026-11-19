@@ -1820,7 +1820,9 @@ async function world() {
   const agents = all.filter((s) => isAgent(s) && !isSentry(s) && live(s));
   const unrouted = agents.filter((s) => !s.role || !objectives.some((o) => o.id === s.role!.objective));
   const front = funnel();
-  const taskIdsOf = (s: Session) => tasks.filter((t) => t.sessions.includes(s.id)).map((t) => taskRef(t.id));
+  // A dropped task isn't sent, so no objective or agent may name one: the page looks each name up in the tasks sent.
+  const shown = tasks.filter((t) => t.status !== "dropped");
+  const taskIdsOf = (s: Session) => shown.filter((t) => t.sessions.includes(s.id)).map((t) => taskRef(t.id));
   const agentOf = (s: Session) => ({
     id: s.id,
     name: s.name,
@@ -1879,7 +1881,7 @@ async function world() {
     id: o.id,
     title: o.title,
     cwd: o.cwd,
-    taskIds: tasks.filter((t) => t.objective === o.id).map((t) => taskRef(t.id)),
+    taskIds: shown.filter((t) => t.objective === o.id).map((t) => taskRef(t.id)),
     events: signals.filter((sig) => objectiveOf(sig) === o.id).slice(0, 50).reverse().map((sig) => ({ from: fromKind(sig), at: sig.at, text: sig.text })),
     page: o.page,
   }));
@@ -1887,7 +1889,7 @@ async function world() {
   return {
     objectives: os,
     agents: out,
-    tasks: tasks.filter((t) => t.status !== "dropped").map((t) => ({
+    tasks: shown.map((t) => ({
       id: taskRef(t.id),
       title: t.title,
       status: v2Status(t),
