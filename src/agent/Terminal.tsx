@@ -59,7 +59,13 @@ export function Terminal({ id, onClose = () => {}, handle }: { id: string; onClo
     ws.onopen = () => send({ type: "resize", cols: term.cols, rows: term.rows });
     ws.onmessage = (e) => (typeof e.data === "string" ? term.write("", () => (replaying = false)) : term.write(new Uint8Array(e.data)));
     ws.onclose = () => closed.current();
-    term.onData((data) => replaying || send({ type: "input", data }));
+    // xterm's device-attribute replies only ever answer tmux's own queries on attach (tmux answers the pane's itself), and
+    // tmux.conf names the terminal's features already. One that comes late, as when a restarting server is slow to pass it on,
+    // tmux types into the pane, and "?1;2c>0;276;0c" left in router 17656f41's prompt held its messages as a draft of his.
+    term.onData((data) => {
+      data = data.replace(/\x1b\[[?>][\d;]*c/g, "");
+      if (!replaying && data) send({ type: "input", data });
+    });
     term.attachCustomKeyEventHandler((e) => {
       const action = macKey(e, term);
       if (!action) return true;

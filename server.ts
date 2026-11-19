@@ -1,5 +1,5 @@
 import type { ServerWebSocket, Subprocess } from "bun";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { backgroundShells } from "./background";
 import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./context-notes";
@@ -14,6 +14,7 @@ import { enforce, onReply } from "./restrictions-enforce";
 import { invalid, loadRestrictions, resolve, saveRestrictions, type Person, type Restriction } from "./restrictions";
 import { backfill, link, people as restrictionPeople } from "./restrictions-identities";
 import { preview } from "./restrictions-recent";
+import { unsentCount } from "./unsent";
 import app from "./src/index.html";
 
 const HOST = "127.0.0.1";
@@ -197,6 +198,31 @@ function createSession(name: string, cmd: string[], cwd: string, chatId?: string
   return session;
 }
 
+// A session's inbox, and the messages of it pasted but not yet seen as a prompt, kept in a file written before anything is typed, so
+// a restart delivers each message once: it confirms what was in flight against the transcript instead of pasting it again. They
+// were a tmux option, which tmux refuses past ~16KB ("command too long"), so a long inbox (the funnel's) kept an old value holding
+// messages already delivered, and each restart in a run of deploys delivered them again (258121 four times on 2026-11-19).
+const INBOXES = `${STATE_DIR}/inboxes`;
+mkdirSync(INBOXES, { recursive: true });
+function saveInbox(s: Session) {
+  const file = `${INBOXES}/${s.id}.json`;
+  if (!s.inbox.length && !s.sending) return rmSync(file, { force: true });
+  writeFileSync(`${file}.tmp`, JSON.stringify({ inbox: s.inbox, sending: s.sending && { count: s.sending.count, at: s.sending.at } }));
+  renameSync(`${file}.tmp`, file);
+}
+function loadInbox(id: string, option: string | undefined): Pick<Session, "inbox" | "sending"> {
+  try {
+    const { inbox, sending } = JSON.parse(readFileSync(`${INBOXES}/${id}.json`, "utf8")) as { inbox: string[]; sending?: { count: number; at: number } };
+    return { inbox, sending: sending && { ...sending, text: inbox.slice(0, sending.count).join("\n") } };
+  } catch {}
+  // Kept by a server from before the file: the last value tmux took.
+  try {
+    return { inbox: JSON.parse(option ?? "") || [] };
+  } catch {
+    return { inbox: [] };
+  }
+}
+
 // Pick up sessions that outlived a previous server, seeding scrollback from tmux's history.
 // One display-message reads every option a session keeps, so adopting costs two tmux calls per session instead of ten.
 const ADOPT_FIELDS = ["history_size", "@mf", "@mf-inbox", "@mf-claude", "@mf-transcript", "@mf-archived", "@mf-asleep", "@mf-sentry", "@mf-wait", "@mf-role"];
@@ -211,7 +237,7 @@ function adoptSessions() {
       } catch {}
     };
     const meta = json(f["@mf"]) ?? { name: t, cmd: [], cwd: "", createdAt: Date.now() };
-    const session = { id, ...meta, chunks: [], bytes: 0, clients: new Set(), exitCode: null, inbox: json(f["@mf-inbox"]) ?? [] } as unknown as Session;
+    const session = { id, ...meta, chunks: [], bytes: 0, clients: new Set(), exitCode: null, ...loadInbox(id, f["@mf-inbox"]) } as unknown as Session;
     const history = Number(f.history_size) > 0 ? tmux("capture-pane", "-p", "-e", "-J", "-t", t, "-S", "-", "-E", "-1").out : "";
     if (history.trim()) push(session, new TextEncoder().encode(history.replace(/\n/g, "\r\n")));
     session.lastOutputAt = session.createdAt;
@@ -595,11 +621,11 @@ function stamp(req: Request, text: string, isaac?: boolean): { text: string; req
   return { text: `${VERIFIED}\n${unforge(text)}`, request };
 }
 
-// The inbox lives in tmux too, so a server restart doesn't drop a message the agent hasn't been given yet.
+// The inbox lives in a file too (saveInbox), so a server restart doesn't drop a message the agent hasn't been given yet.
 // Only dispatch() calls it: every message reaches an agent through the event log.
 function enqueue(s: Session, text: string) {
   s.inbox.push(text);
-  setOption(s.id, "@mf-inbox", JSON.stringify(s.inbox));
+  saveInbox(s);
   wake(s);
 }
 
@@ -1950,10 +1976,9 @@ async function inputBox(s: Session) {
 // The draft as typed, near enough: claude indents each line after the first by two spaces (a wrapped line comes back as two).
 const draftOf = (text: string) => text.split("\n").map((l) => l.replace(/^ {2}/, "")).join("\n");
 // A message the inbox pasted whose Enter was lost (it landed while claude was still taking the paste in) sits in the box unsent,
-// and keeps every later message from being delivered. It starts with the server's stamp, or is shown collapsed if it was long.
+// and keeps every later message from being delivered: how many inbox messages the box holds that way (see unsentCount).
 const ENTER_RETRIES = 3, PASTE_SEEN_MS = 10 * 60_000;
-const unsent = (s: Session, box: { text: string; empty: boolean }) =>
-  !box.empty && (box.text.startsWith("[maxflow") || (/^\[Pasted text #\d+/.test(box.text) && Date.now() - (s.pastedAt ?? 0) < PASTE_SEEN_MS));
+const unsent = (s: Session, box: { text: string; empty: boolean }) => (box.empty ? 0 : unsentCount(s.inbox, box.text));
 // Messages behind the user's own draft show as blocked after 2 minutes. A draft unchanged for 5 (1 for his own request relayed by
 // the funnel) is cleared with Ctrl+C, which empties a non-empty prompt, the messages go in, and the draft is typed back without Enter
 // once that turn ends.
@@ -2130,13 +2155,18 @@ async function confirmSending(s: Session) {
   const box = Date.now() - sent.at < CONFIRM_MS && s.transcript ? undefined : await inputBox(s);
   if (await prompted(s, sent, box)) {
     s.inbox.splice(0, sent.count);
-    setOption(s.id, "@mf-inbox", JSON.stringify(s.inbox));
     s.sending = s.resends = undefined;
+    saveInbox(s);
     return false;
   }
   if (Date.now() - sent.at < CONFIRM_MS || !box) return true;
   if (!box.empty) {
-    if ((s.enterRetries ?? 0) >= ENTER_RETRIES || !unsent(s, box)) return true;
+    if (!unsent(s, box)) return true;
+    if ((s.enterRetries ?? 0) >= ENTER_RETRIES) {
+      if (s.enterRetries === ENTER_RETRIES) console.error(`${s.id}: Enter pressed ${ENTER_RETRIES} more times and the pasted message(s) still sit unsent`);
+      s.enterRetries = ENTER_RETRIES + 1;
+      return true;
+    }
     s.enterRetries = (s.enterRetries ?? 0) + 1;
     if (s.peerTurnAt) s.peerTurnAt = Date.now();
     await pressEnter(tmuxName(s.id));
@@ -2148,9 +2178,9 @@ async function confirmSending(s: Session) {
   if (s.resends > RESENDS) {
     console.error(`${s.id}: ${sent.count} message(s) never became a prompt after ${RESENDS} resends; dropped: ${sent.text.slice(0, 120)}`);
     s.inbox.splice(0, sent.count);
-    setOption(s.id, "@mf-inbox", JSON.stringify(s.inbox));
     s.resends = undefined;
   }
+  saveInbox(s);
   return false;
 }
 
@@ -2165,9 +2195,15 @@ async function deliver(s: Session) {
   if (!s.inbox.length && !s.savedDraft && Date.now() - (s.pastedAt ?? 0) >= PASTE_SEEN_MS) return;
   const box = await inputBox(s);
   if (!box) return;
-  // One of ours left unsent from before (a paste the server restarted on): Enter again.
-  if ((s.enterRetries ?? 0) < ENTER_RETRIES && unsent(s, box)) {
+  // One of ours left unsent from before (a paste the server restarted on, so it has no record of sending it): Enter again, and
+  // confirm it like a fresh paste, so the messages leave the inbox once they are a prompt instead of being pasted a second time.
+  const left = (s.enterRetries ?? 0) < ENTER_RETRIES ? unsent(s, box) : 0;
+  if (left) {
+    console.log(`${s.id}: ${left} message(s) sat pasted in the prompt unsent; pressing Enter`);
     s.enterRetries = (s.enterRetries ?? 0) + 1;
+    s.sending = { count: left, text: s.inbox.slice(0, left).join("\n"), at: Date.now() };
+    saveInbox(s);
+    s.pastedAt = Date.now();
     if (s.peerTurnAt) s.peerTurnAt = Date.now();
     await pressEnter(tmuxName(s.id));
     return;
@@ -2193,6 +2229,7 @@ async function deliver(s: Session) {
   s.blockedSince = s.draft = undefined;
   const text = s.inbox.join("\n");
   s.sending = { count: s.inbox.length, text, at: Date.now() };
+  saveInbox(s);
   s.peerTurnAt = text.includes(VERIFIED) ? undefined : Date.now();
   s.pastedAt = Date.now();
   s.enterRetries = 0;
@@ -2892,6 +2929,7 @@ Bun.serve<WsData>({
       if (req.method === "DELETE") {
         publish(`session/${s.id}/killed`, { session: s.id, name: s.name });
         sessions.delete(s.id);
+        rmSync(`${INBOXES}/${s.id}.json`, { force: true });
         tmux("kill-session", "-t", tmuxName(s.id));
         s.proc.kill();
         for (const ws of s.clients) ws.close();
