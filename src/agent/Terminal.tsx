@@ -49,6 +49,7 @@ function openTerminal(el: HTMLDivElement) {
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.loadAddon(new WebLinksAddon());
+  // @ts-expect-error @xterm/addon-clipboard's typings declare one constructor argument, but its code takes (base64, provider)
   term.loadAddon(new ClipboardAddon(new Base64(), systemClipboard));
   term.open(el);
   fit.fit();
