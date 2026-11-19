@@ -14,6 +14,9 @@ const PROBE_TIMEOUT_MS = 2000;
 const REAP_EVERY_MS = 30_000;
 const VIEWPORT = { width: 1280, height: 800 };
 
+// constraint: without these, headless Chrome on macOS asks the login keychain for its Safe Storage key and can raise a dialog on Isaac's screen
+export const KEYCHAIN_UNTOUCHED = ["--use-mock-keychain", "--password-store=basic"];
+
 const browsers = new Map<string, Browser>();
 const starting = new Map<string, Promise<Browser>>();
 
@@ -42,13 +45,17 @@ async function isAnswering(port: number) {
   }
 }
 
+export function chromeFlags(profile: string): string[] {
+  const window = `--window-size=${String(VIEWPORT.width)},${String(VIEWPORT.height)}`;
+  return ["--headless=new", `--user-data-dir=${profile}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", "--disable-features=Translate", ...KEYCHAIN_UNTOUCHED, window];
+}
+
 async function launchChrome(session: string): Promise<number> {
   const binary = chromeBinary();
   if (binary === undefined) throw new BrowserCap("no Chrome or Chromium on this machine: install one, or point MAXFLOW_CHROME at its binary");
   const profile = stateDirectory(profileOf(session));
   removeState(portFileOf(session));
-  const flags = ["--headless=new", `--user-data-dir=${profile}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", "--disable-features=Translate"];
-  const chrome = Bun.spawn([binary, ...flags, `--window-size=${String(VIEWPORT.width)},${String(VIEWPORT.height)}`, "about:blank"], { stdout: "ignore", stderr: "ignore" });
+  const chrome = Bun.spawn([binary, ...chromeFlags(profile), "about:blank"], { stdout: "ignore", stderr: "ignore" });
   chrome.unref();
   const end = Date.now() + LAUNCH_DEADLINE_MS;
   while (Date.now() < end) {
