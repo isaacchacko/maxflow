@@ -882,7 +882,7 @@ Bun.serve<WsData>({
     if (path === "/api/stats" && req.method === "GET") return Response.json(await stats(url.searchParams.get("week") ?? undefined, url.searchParams.get("repo") ?? undefined));
     if (path === "/api/stats/calendar" && req.method === "GET") return Response.json(await calendar());
     if (path === "/api/stats/health" && req.method === "GET") return Response.json(health([...sessions.values()].map((s) => describe(s))));
-    if (path === "/api/stats/jev" && req.method === "GET") return Response.json(jev(Math.min(90, Math.max(1, Number(url.searchParams.get("days")) || 7))));
+    if (path === "/api/stats/jev" && req.method === "GET") return Response.json(jev(url.searchParams.get("days")));
     if (path === "/api/stats/agents" && req.method === "GET")
       return Response.json(agents(Math.min(90, Math.max(1, Number(url.searchParams.get("days")) || 7)), [...sessions.values()].map((s) => describe(s)), objectives));
     if (path === "/api/todos" && req.method === "POST") {

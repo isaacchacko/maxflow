@@ -119,7 +119,12 @@ function quality(list: Call[]) {
   };
 }
 
-export function jev(dayCount: number) {
+const DEFAULT_DAYS = 7;
+const MOST_DAYS = 90;
+
+export function jev(asked: string | null) {
+  const n = Math.round(Number(asked ?? DEFAULT_DAYS));
+  const dayCount = Number.isFinite(n) && n >= 1 ? Math.min(MOST_DAYS, n) : DEFAULT_DAYS;
   const days = lastDays(dayCount);
   const all = calls();
   const since = Date.now() - dayCount * DAY_MS;
