@@ -1,4 +1,3 @@
-// yarn's service worker exists only so Chrome offers to install yarn as an app. It caches nothing and has no fetch handler, so
-// every request goes to the server as if it weren't here, and a live reload always shows the new code.
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+// constraint: it exists only so Chrome offers to install yarn; it caches nothing and has no fetch handler, so a reload always shows new code
+globalThis.addEventListener("install", () => globalThis.skipWaiting());
+globalThis.addEventListener("activate", (e) => e.waitUntil(globalThis.clients.claim()));
