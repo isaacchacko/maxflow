@@ -1,4 +1,5 @@
 import { createStore } from "@/store";
+import { focusRegion } from "./region";
 
 // Slack's side pane: one thread open beside the page, shift-clicked from anywhere. It belongs to the page it was opened on: going
 // back to that page (Esc, ←, Back, h) opens it again, as Forward does, and closing it there forgets it. Its width is kept too.
@@ -23,10 +24,15 @@ function remember(id: string | undefined) {
   } catch {}
 }
 
-export const openPane = (threadId: string) => (remember(threadId), paneStore.set(threadId));
-export const closePane = () => (remember(undefined), paneStore.set(undefined));
+// Opening puts him in it, so Esc closes it at once; closing puts him back on the page.
+function show(id: string | undefined) {
+  if (id !== paneStore.get()) focusRegion(id ? "pane" : "main");
+  paneStore.set(id);
+}
+export const openPane = (threadId: string) => (remember(threadId), show(threadId));
+export const closePane = () => (remember(undefined), show(undefined));
 /** The page changed: its own pane, if it had one open, or none. */
-export const restorePane = () => paneStore.set(byPage[page()]);
+export const restorePane = () => show(byPage[page()]);
 restorePane();
 
 export function paneWidth() {
