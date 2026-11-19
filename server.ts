@@ -1161,10 +1161,10 @@ function relayRefusal(t: Thread, from: Session, text: string): string | undefine
   if (handedTo !== undefined && t.routers.includes(handedTo))
     return `You handed ${t.id} to ${handedTo}, which answers him here. Tell it what it needs with \`${CLI} notify ${handedTo} '<text>'\` instead.`;
   const otherRouter = text
-    .matchAll(/\[\[(?:agent|router):([\w-]+)\]\]|\b([0-9a-f]{8})\b/g)
-    .map((m) => sessions.get(m[1] ?? m[2] ?? ""))
+    .matchAll(/\[\[(?:agent|router):([\w-]+)\]\]/g)
+    .map((m) => sessions.get(m[1] ?? ""))
     .find((s): s is Session => s !== undefined && s !== from && s.role?.role === "router");
-  return otherRouter !== undefined && HANDS_TO_ANOTHER.test(text)
+  return from.role?.role === "router" && otherRouter !== undefined && HANDS_TO_ANOTHER.test(text)
     ? `This hands ${t.id} to ${otherRouter.id}, and maxflow shows hand-offs in the thread itself; ${otherRouter.id} answers him. Post what you found or did, without the hand-off, or nothing.`
     : undefined;
 }
