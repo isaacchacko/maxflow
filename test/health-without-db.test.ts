@@ -30,10 +30,11 @@ async function panicState(): Promise<Response | undefined> {
 }
 
 async function firstPanicState() {
-  for (const end = Date.now() + PAGE_DEADLINE_MS; Date.now() < end; await Bun.sleep(250)) {
+  for (const end = Date.now() + PAGE_DEADLINE_MS; Date.now() < end; ) {
     if (health.exitCode !== null) throw new Error(`health exited ${String(health.exitCode)}: ${await new Response(health.stderr).text()}`);
     const res = await panicState();
     if (res !== undefined) return res;
+    await Bun.sleep(250);
   }
   throw new Error(`no panic page on port ${String(port)} after ${String(PAGE_DEADLINE_MS)}ms`);
 }
