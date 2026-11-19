@@ -8,11 +8,12 @@
   "lifecycle.ts": 10,
   "mentions.ts": 3,
   "sentries/health.ts": 6,
-  "server.ts": 99,
+  "server.ts": 96,
   "service.ts": 5,
   "sleeper.ts": 3,
   "state.ts": 1,
   "threads.ts": 6,
   "tmux.ts": 1,
-  "unsent.ts": 1
+  "unsent.ts": 1,
+  "world.ts": 3
 }
