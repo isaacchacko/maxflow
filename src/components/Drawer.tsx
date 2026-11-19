@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useRef } from "react";
+import { useEventListener, usePresence } from "@/lib/effects";
 import { cn } from "@/lib/utils";
 
 // In on a spring-like ease-out, out a little faster; transform and opacity only, so nothing lays out while it moves.
@@ -14,44 +15,18 @@ const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").match
  * drawn from the last open state while it leaves, and a new `contentKey` while open fades the content instead of re-sliding.
  */
 export function Drawer({ open, onClose, contentKey, children, className, ...rest }: { open: boolean; onClose: () => void; contentKey?: string; children: React.ReactNode; className?: string; "data-agent"?: string }) {
-  const [mounted, setMounted] = useState(open);
-  const [shown, setShown] = useState(false);
+  const { mounted, shown } = usePresence(open, reducedMotion() ? 0 : OUT_MS);
   const kept = useRef({ children, contentKey });
   if (open) kept.current = { children, contentKey };
   // The content it opened with arrives with the slide; only a switch while open fades.
   const openedWith = useRef(contentKey);
   if (!mounted) openedWith.current = contentKey;
 
-  useLayoutEffect(() => {
-    if (open) setMounted(true);
-  }, [open]);
-
-  useEffect(() => {
-    if (!mounted) return;
-    if (open) {
-      // One frame at rest off-screen first, so the slide has somewhere to start from.
-      const frame = requestAnimationFrame(() => requestAnimationFrame(() => setShown(true)));
-      return () => cancelAnimationFrame(frame);
-    }
-    setShown(false);
-    const done = setTimeout(() => setMounted(false), reducedMotion() ? 0 : OUT_MS);
-    return () => clearTimeout(done);
-  }, [open, mounted]);
-
   const panel = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && (e.stopImmediatePropagation(), onClose());
-    // The page stays clickable under the dimming: a click outside closes it, and runs before the page's own handler, so a
-    // click on another event closes and reopens in one update and the content just fades over.
-    const onClick = (e: MouseEvent) => !panel.current?.contains(e.target as Node) && onClose();
-    addEventListener("keydown", onKey, true);
-    document.addEventListener("click", onClick, true);
-    return () => {
-      removeEventListener("keydown", onKey, true);
-      document.removeEventListener("click", onClick, true);
-    };
-  }, [open, onClose]);
+  useEventListener("keydown", e => open && e.key === "Escape" && (e.stopImmediatePropagation(), onClose()), { capture: true });
+  // The page stays clickable under the dimming: a click outside closes it, and runs before the page's own handler, so a
+  // click on another event closes and reopens in one update and the content just fades over.
+  useEventListener("click", e => open && !panel.current?.contains(e.target as Node) && onClose(), { target: document, capture: true });
 
   if (!mounted) return null;
   const motion = (ms: number, ease: string) => ({ transitionDuration: `${ms}ms`, transitionTimingFunction: ease });

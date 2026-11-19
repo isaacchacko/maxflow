@@ -1,5 +1,6 @@
 import { toCanvas } from "html-to-image";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useEventListener } from "@/lib/effects";
 import { Kbd } from "@/components/ui/kbd";
 import { startThread } from "@/store";
 
@@ -136,9 +137,9 @@ export function Capture() {
   // Hover hit-testing waits for the next frame and runs once per frame, however fast the mouse moves.
   const frame = useRef(0);
   const sendWhenReady = useRef(false);
-  useEffect(() => {
-    if (shot?.png && sendWhenReady.current) (sendWhenReady.current = false), void send();
-  }, [shot?.png]);
+  // The picture finishes after the render that started it; sending then uses the comment as he has typed it since.
+  const sendLatest = useRef(send);
+  sendLatest.current = send;
 
   function reset() {
     if (shot?.preview) URL.revokeObjectURL(shot.preview);
@@ -147,8 +148,9 @@ export function Capture() {
     setMode("off"), setDrag(null), setHover(null), setShot(null), setComment(""), setError("");
   }
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+  useEventListener(
+    "keydown",
+    e => {
       if (e.key.toLowerCase() === "s" && (e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey) {
         e.preventDefault(), e.stopPropagation();
         setMode(m => (m === "off" ? "picking" : m));
@@ -156,10 +158,9 @@ export function Capture() {
         e.preventDefault(), e.stopPropagation();
         reset();
       }
-    };
-    addEventListener("keydown", onKey, true);
-    return () => removeEventListener("keydown", onKey, true);
-  });
+    },
+    { capture: true },
+  );
 
   // The popover opens at once with the comment box focused, and the picture renders behind it: he types while it draws.
   async function take(rect: Rect, picked?: Element) {
@@ -179,6 +180,7 @@ export function Capture() {
       const png = await capture(rect, target);
       if (mine !== taking.current) return;
       setShot(s => s && { ...s, png, preview: URL.createObjectURL(png) });
+      if (sendWhenReady.current) (sendWhenReady.current = false), void sendLatest.current(png);
       // The Escape goes to the dialog's input, which the app's own Escape (back out of a page) ignores.
       if (dialog?.isConnected) (dialog.querySelector("input") ?? dialog).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     } catch (err) {
@@ -186,11 +188,11 @@ export function Capture() {
     }
   }
 
-  async function send() {
-    if (!shot?.png) return;
+  async function send(png = shot?.png) {
+    if (!shot || !png) return;
     setMode("shooting");
     try {
-      const res = await fetch("/api/uploads", { method: "POST", headers: { "content-type": "image/png" }, body: shot.png });
+      const res = await fetch("/api/uploads", { method: "POST", headers: { "content-type": "image/png" }, body: png });
       if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
       const { path } = (await res.json()) as { path: string };
       await startThread([comment.trim(), `![screenshot](${path})`, shot.context].filter(Boolean).join("\n"));

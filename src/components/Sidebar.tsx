@@ -2,7 +2,8 @@ import { CircleCheckBig, MessagesSquare, ShieldCheck, X, type LucideIcon } from 
 import { AgentFace, type Expression } from "@/components/AgentFace";
 import { Dots } from "@/components/Working";
 import type { Thread } from "@/mock";
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useRef, useState, type MouseEvent } from "react";
+import { useEventListener } from "@/lib/effects";
 import { Mark } from "@/components/Mark";
 import { cn } from "@/lib/utils";
 import { setPinned, setPinOrder, taskStore, threadStore } from "@/store";
@@ -24,6 +25,12 @@ const load = (): Saved => {
   } catch {
     return { width: 216, pinned: false };
   }
+};
+const keep = (s: Saved) => {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(s));
+  } catch {}
+  return s;
 };
 
 /** The ids with `dragged` moved to where `onto` is. */
@@ -123,20 +130,12 @@ export function Sidebar({ view }: { view: string }) {
   const threads = threadStore.use();
   taskStore.use();
   useSeen();
-  const [saved, setSaved] = useState(load);
+  const [saved, setSavedState] = useState(load);
+  const setSaved = (change: (s: Saved) => Saved) => setSavedState(s => keep(change(s)));
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
   const timer = useRef(0);
-  useEffect(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(saved));
-    } catch {}
-  }, [saved]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => (e.metaKey || e.ctrlKey) && e.key === "\\" && (e.preventDefault(), setSaved(s => ({ ...s, pinned: !s.pinned })));
-    addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
-  }, []);
+  useEventListener("keydown", e => (e.metaKey || e.ctrlKey) && e.key === "\\" && (e.preventDefault(), setSaved(s => ({ ...s, pinned: !s.pinned }))));
   // Dragging its edge sets the open width, between a narrow column and a third of a laptop screen.
   const drag = (e: React.PointerEvent) => {
     e.preventDefault();

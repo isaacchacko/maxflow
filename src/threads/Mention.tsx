@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useKeyedState } from "@/lib/useKeyedState";
 import { score, useThreadItems, type Item } from "@/components/QuickSwitcher";
 import { cn } from "@/lib/utils";
 import { agentStore, objectiveStore, sentryStore } from "@/store";
@@ -51,12 +52,13 @@ export function useMentionPicker(input: React.RefObject<HTMLTextAreaElement | nu
   const items = useThreadItems();
   const agents = useAgentItems();
   const [caret, setCaret] = useState(0);
-  const [active, setActive] = useState(0);
-  const [dismissed, setDismissed] = useState(-1);
 
   const typed = draft.slice(0, caret).match(AT);
   const query = typed?.[1] ?? "";
   const start = typed ? caret - query.length - 1 : -1;
+  const [active, setActive] = useKeyedState(`${start}:${query}`, 0);
+  // Esc dismisses one @; once it's deleted, a new @ in the same place opens again.
+  const [dismissed, setDismissed] = useKeyedState(start >= 0, -1);
 
   const shown = useMemo(() => {
     if (start < 0) return [];
@@ -75,11 +77,6 @@ export function useMentionPicker(input: React.RefObject<HTMLTextAreaElement | nu
 
   // Past a space with nothing matching, the @ was just text.
   const open = start >= 0 && start !== dismissed && (shown.length > 0 || !query.includes(" "));
-  useEffect(() => setActive(0), [query, start]);
-  // Esc dismisses one @; once it's deleted, a new @ in the same place opens again.
-  useEffect(() => {
-    if (start < 0) setDismissed(-1);
-  }, [start]);
 
   function pick(item: Item | undefined) {
     const el = input.current;
