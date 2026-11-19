@@ -119,7 +119,7 @@ function yarnWeekOf(w: Week): YarnWeek {
   const isInWeek = (at: number) => at >= w.from && at < w.to;
   const scan = newLogScan();
   for (const e of events) scanEvent(scan, e, isInWeek);
-  const isInWeekOnly = (ats: MapIterator<number>) => ats.filter((at) => isInWeek(at)).toArray();
+  const thoseInWeek = (ats: MapIterator<number>) => ats.filter((at) => isInWeek(at)).toArray();
   const opened = threads.flatMap((t) => (t.messages[0] && isInWeek(t.messages[0].at) ? t.messages[0].at : []));
   return {
     since,
@@ -131,11 +131,11 @@ function yarnWeekOf(w: Week): YarnWeek {
     ],
     counts: [
       countOf("said", scan.said, w),
-      countOf("started", isInWeekOnly(scan.firstWait.values()).filter((at) => at > since + ALIVE_BEFORE_LOG_GRACE_MS), w),
+      countOf("started", thoseInWeek(scan.firstWait.values()).filter((at) => at > since + ALIVE_BEFORE_LOG_GRACE_MS), w),
       countOf("opened", opened, w),
-      countOf("resolved", isInWeekOnly(scan.resolvedAt.values()), w),
-      countOf("prsOpened", isInWeekOnly(scan.prsOpened.values()), w),
-      countOf("prsMerged", isInWeekOnly(scan.prsMerged.values()), w),
+      countOf("resolved", thoseInWeek(scan.resolvedAt.values()), w),
+      countOf("prsOpened", thoseInWeek(scan.prsOpened.values()), w),
+      countOf("prsMerged", thoseInWeek(scan.prsMerged.values()), w),
     ],
   };
 }
