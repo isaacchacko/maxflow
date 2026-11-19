@@ -4,34 +4,36 @@ import { AgentFace } from "@/components/AgentFace";
 import { AgentLink } from "@/components/AgentLink";
 import { Waiting } from "@/components/Waiting";
 import { GitHubGlyph, SlackGlyph } from "@/lib/slack";
-import { cn } from "@/lib/utils";
-import { statusColor, type Thread } from "@/mock";
+import { cn, hasText } from "@/lib/utils";
+import { statusColor, type Agent, type Objective, type Task, type Thread, type Wait } from "@/mock";
 import { agentStore, nameStore, objectiveStore, taskStore, threadStore } from "@/store";
 import { contributorsOf, stateOf, type Contributor } from "./contributors";
 import { when } from "./MessageRow";
 import { pausedLabel } from "./Pause";
 import { ago } from "./Replies";
 import { RefChip, refsIn, urlsIn, type Ref } from "./Rich";
+import { isRecord } from "../../shared/guards";
 
-// A thread's side panel, as Linear's issue sidebar: a quiet column on the window tint, sections under small muted headers that fold,
-// and rows that are an icon and a value (the icon says what it is), filled on hover and clickable where there is somewhere to go.
-
-const KEY = "yarn-panel-folded";
-const loadFolded = (): Record<string, boolean> => {
+const FOLDED_GROUPS = "yarn-panel-folded";
+function loadFolded(): Record<string, boolean> {
   try {
-    return JSON.parse(localStorage.getItem(KEY) ?? "{}");
+    const parsed: unknown = JSON.parse(localStorage.getItem(FOLDED_GROUPS) ?? "{}");
+    const entries = isRecord(parsed) ? Object.entries(parsed) : [];
+    return Object.fromEntries(entries.filter((entry): entry is [string, boolean] => typeof entry[1] === "boolean"));
   } catch {
     return {};
   }
-};
+}
 
 function Group({ title, id, children }: { title: string; id?: string; children: React.ReactNode }) {
-  const [folded, setFolded] = useState(() => !!loadFolded()[title]);
+  const [folded, setFolded] = useState(() => loadFolded()[title] === true);
   const toggle = () => {
     setFolded(!folded);
     try {
-      localStorage.setItem(KEY, JSON.stringify({ ...loadFolded(), [title]: !folded }));
-    } catch {}
+      localStorage.setItem(FOLDED_GROUPS, JSON.stringify({ ...loadFolded(), [title]: !folded }));
+    } catch {
+      // constraint: localStorage throws in a private window or on a full quota; the fold then lasts only this page load
+    }
   };
   return (
     <section id={id} data-agent={`panel:${title.toLowerCase()}`} className="flex flex-col">
@@ -47,14 +49,14 @@ function Group({ title, id, children }: { title: string; id?: string; children: 
 const row = "flex h-9 min-w-0 items-center gap-2.5 rounded-md px-2 text-[13px] whitespace-nowrap";
 const hover = "hover:bg-black/[0.04]";
 
-function Prop({ icon, children, href, title, onClick, className }: { icon: React.ReactNode; children: React.ReactNode; href?: string; title?: string; onClick?: () => void; className?: string }) {
+function Prop({ icon, children, href, title, onClick, className }: { icon: React.ReactNode; children: React.ReactNode; href?: string | undefined; title?: string | undefined; onClick?: () => void; className?: string }) {
   const body = (
     <>
       <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">{icon}</span>
       <span className="min-w-0 truncate">{children}</span>
     </>
   );
-  if (href)
+  if (hasText(href))
     return (
       <a href={href} title={title} target={href.startsWith("#") ? undefined : "_blank"} rel="noreferrer" className={cn(row, hover, className)}>
         {body}
@@ -73,21 +75,29 @@ function Prop({ icon, children, href, title, onClick, className }: { icon: React
   );
 }
 
-const span = (at?: string) => (at && Number.isFinite(Date.parse(at)) ? ago(Date.parse(at)) : "");
+const agoText = (at: string | undefined) => (hasText(at) && Number.isFinite(Date.parse(at)) ? ago(Date.parse(at)) : "");
 
-/** One agent on the thread: its face doing what it does, its name, and its state with how long. */
+function stateWord(c: Contributor, word: string, time: string) {
+  if (c.agent) return hasText(time) ? `${word} ${time}` : word;
+  return hasText(time) ? `done ${time} ago` : "done";
+}
+
+function waitElsewhere(c: Contributor, expression: string, t: Thread): Wait | undefined {
+  const wait = c.agent?.wait;
+  if (expression !== "asleep" || !wait || wait.kind === "done") return undefined;
+  return wait.kind === "thread" && wait.ref === t.id ? undefined : wait;
+}
+
 function AgentRow({ c, t }: { c: Contributor; t: Thread }) {
   const s = stateOf(c, t);
-  const time = span(s.at);
-  const word = c.agent ? `${s.word}${time ? ` ${time}` : ""}` : `done${time ? ` ${time} ago` : ""}`;
-  // Asleep on something other than this thread: the sentence, its condition a chip that opens it.
-  const sleepsOn = s.expression === "asleep" && !!c.agent?.wait && c.agent.wait.kind !== "done" && !(c.agent.wait.kind === "thread" && c.agent.wait.ref === t.id);
+  const word = stateWord(c, s.word, agoText(s.at));
+  const sleepsOn = waitElsewhere(c, s.expression, t);
   const face = <AgentFace id={c.id} expression={s.expression} small still={!c.agent} className="size-5" />;
   const body = (
     <>
       {face}
       <span className={cn("min-w-0 flex-1 truncate", !c.agent && "text-muted-foreground")}>{c.name}</span>
-      {sleepsOn ? <Waiting wait={c.agent!.wait} lead="Asleep" className="max-w-[60%] shrink-0 truncate text-xs text-muted-foreground" /> : <span className="max-w-[55%] shrink-0 truncate text-xs text-muted-foreground">{word}</span>}
+      {sleepsOn ? <Waiting wait={sleepsOn} lead="Asleep" className="max-w-[60%] shrink-0 truncate text-xs text-muted-foreground" /> : <span className="max-w-[55%] shrink-0 truncate text-xs text-muted-foreground">{word}</span>}
     </>
   );
   const title = [c.name, c.agent?.doing, `${c.why}${c.agent?.role === "router" ? " · router" : ""}`].filter(Boolean).join("\n");
@@ -109,6 +119,50 @@ export function useContributors(t: Thread | undefined) {
   return t ? contributorsOf(t, threads, agents, names) : [];
 }
 
+function StatusProp({ thread }: { thread: Thread }) {
+  if (thread.resolved) return <Prop icon={<Check className="size-4 text-ok" />}>Resolved {when(thread.resolved.at)}</Prop>;
+  if (thread.paused) return <Prop icon={<Pause className="size-4" />}>Paused {pausedLabel(thread.paused)}</Prop>;
+  return <Prop icon={<Circle className="size-4" />}>Open</Prop>;
+}
+
+function FeedIcon({ source }: { source: string }) {
+  if (source === "slack") return <SlackGlyph className="size-3.5" />;
+  if (source === "gh") return <GitHubGlyph className="size-3.5" />;
+  return <ExternalLink className="size-3.5" />;
+}
+
+function Properties({ thread, agents, names, objective, task }: { thread: Thread; agents: Agent[]; names: Record<string, string>; objective: Objective | undefined; task: Task | undefined }) {
+  return (
+    <Group title="Properties">
+      <StatusProp thread={thread} />
+      {objective && (
+        <Prop icon={<Waypoints className="size-4 text-agent" />} href={`#objective/${objective.id}`} title={objective.title}>
+          {objective.title}
+        </Prop>
+      )}
+      {thread.routerIds.map(rid => {
+        const r = agents.find(a => a.id === rid);
+        const name = r?.name ?? names[rid] ?? rid;
+        return (
+          <Prop key={rid} icon={<AgentFace id={rid} expression="idle" small still className="size-4" />} href={r ? `#agent/${rid}` : undefined} title={[name, r?.scope].filter(Boolean).join("\n")}>
+            {name}
+          </Prop>
+        );
+      })}
+      {task && (
+        <Prop icon={<span className={cn("size-2 rounded-full", statusColor[task.status])} />} href={`#task/${task.id}`} title={task.title}>
+          {task.title}
+        </Prop>
+      )}
+      {thread.feed && (
+        <Prop icon={<FeedIcon source={thread.feed.source} />} href={thread.feed.link} title={thread.feed.link}>
+          {thread.feed.who}
+        </Prop>
+      )}
+    </Group>
+  );
+}
+
 export function ThreadPanel({ thread }: { thread: Thread }) {
   const all = threadStore.use();
   const agents = agentStore.use();
@@ -120,44 +174,11 @@ export function ThreadPanel({ thread }: { thread: Thread }) {
   const mentioned = new Map<string, Ref>();
   for (const m of thread.messages) for (const r of refsIn(m.text)) mentioned.set(`${r.kind}:${r.id}`, r);
   const links = new Map(thread.messages.flatMap(m => urlsIn(m.text)).map(l => [l.url, l]));
-  // Backlinks: the threads with a message that @-mentions this one.
   const mentionedIn = all.filter(t => t.id !== thread.id && t.messages.some(m => m.text.includes(`[[thread:${thread.id}]]`)));
 
   return (
     <aside data-agent="thread-panel" className="flex h-full w-72 shrink-0 flex-col gap-6 overflow-y-auto border-l bg-window/60 px-3 py-4">
-      <Group title="Properties">
-        {thread.resolved ? (
-          <Prop icon={<Check className="size-4 text-ok" />}>Resolved {when(thread.resolved.at)}</Prop>
-        ) : thread.paused ? (
-          <Prop icon={<Pause className="size-4" />}>Paused {pausedLabel(thread.paused)}</Prop>
-        ) : (
-          <Prop icon={<Circle className="size-4" />}>Open</Prop>
-        )}
-        {objective && (
-          <Prop icon={<Waypoints className="size-4 text-agent" />} href={`#objective/${objective.id}`} title={objective.title}>
-            {objective.title}
-          </Prop>
-        )}
-        {thread.routerIds.map(rid => {
-          const r = agents.find(a => a.id === rid);
-          const name = r?.name ?? names[rid] ?? rid;
-          return (
-            <Prop key={rid} icon={<AgentFace id={rid} expression="idle" small still className="size-4" />} href={r ? `#agent/${rid}` : undefined} title={[name, r?.scope].filter(Boolean).join("\n")}>
-              {name}
-            </Prop>
-          );
-        })}
-        {task && (
-          <Prop icon={<span className={cn("size-2 rounded-full", statusColor[task.status])} />} href={`#task/${task.id}`} title={task.title}>
-            {task.title}
-          </Prop>
-        )}
-        {thread.feed && (
-          <Prop icon={thread.feed.source === "slack" ? <SlackGlyph className="size-3.5" /> : thread.feed.source === "gh" ? <GitHubGlyph className="size-3.5" /> : <ExternalLink className="size-3.5" />} href={thread.feed.link} title={thread.feed.link}>
-            {thread.feed.who}
-          </Prop>
-        )}
-      </Group>
+      <Properties thread={thread} agents={agents} names={names} objective={objective} task={task} />
 
       {contributors.length > 0 && (
         <Group title="Agents" id={`agents-${thread.id}`}>
@@ -169,9 +190,10 @@ export function ThreadPanel({ thread }: { thread: Thread }) {
 
       {mentioned.size > 0 && (
         <Group title="Related">
-          {[...mentioned.values()].map(r => (
-            <RefChip key={`${r.kind}:${r.id}`} r={r} row />
-          ))}
+          {mentioned
+            .values()
+            .map(r => <RefChip key={`${r.kind}:${r.id}`} r={r} row />)
+            .toArray()}
         </Group>
       )}
 
@@ -187,26 +209,25 @@ export function ThreadPanel({ thread }: { thread: Thread }) {
 
       {links.size > 0 && (
         <Group title="Links">
-          {[...links.values()].map(l => (
+          {links
+            .values()
+            .map(l => (
             <a key={l.url} href={l.url} target="_blank" rel="noreferrer" title={`${l.label}\n${l.url}`} className={cn(row, hover, "h-8")}>
               <ExternalLink className="size-4 shrink-0 text-muted-foreground" />
               <span className="min-w-0 truncate">{l.label}</span>
               <span className="ml-auto shrink-0 text-xs text-muted-foreground">{new URL(l.url).hostname.replace(/^www\./, "")}</span>
             </a>
-          ))}
+          ))
+            .toArray()}
         </Group>
       )}
     </aside>
   );
 }
 
-/**
- * The faces of the agents on a thread, up to four and a count, for a header. `onOpen` makes the stack a button (the page scrolls to
- * its Agents section); without it each face opens its agent (the side pane, which has no panel).
- */
 export function AgentStack({ thread, onOpen }: { thread: Thread; onOpen?: () => void }) {
   const cs = useContributors(thread).filter(c => c.agent);
-  if (!cs.length) return null;
+  if (cs.length === 0) return null;
   const shown = cs.slice(0, 4);
   const faces = shown.map(c => {
     const face = <AgentFace id={c.id} expression={stateOf(c, thread).expression} small className="size-5" />;
