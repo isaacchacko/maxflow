@@ -1,47 +1,66 @@
 import { useCallback, useSyncExternalStore } from "react";
-
-// The Stats page's data, one entry per URL, read through useSyncExternalStore so no component syncs a fetch by hand. A URL is
-// fetched when the first reader mounts and again when one mounts after it went stale; what was there stays on screen until the
-// new answer lands. `again` asks for one more look a few seconds later while the server is still filling something in.
+import { useLatest } from "@/lib/effects";
+import { hasText } from "@/lib/utils";
 
 type Loaded<T> = { value?: T; error?: string; loading: boolean };
-type Entry = { snap: Loaded<unknown>; at: number; listeners: Set<() => void>; timer?: ReturnType<typeof setTimeout>; again?: (v: unknown) => boolean };
-const entries = new Map<string, Entry>();
+type Entry<T> = { snap: Loaded<T>; at: number; listeners: Set<() => void>; timer?: ReturnType<typeof setTimeout>; shouldLookAgain?: (value: T) => boolean };
+const entries = new Map<string, Entry<unknown>>();
 const NOTHING: Loaded<never> = { loading: false };
 const STALE_MS = 60_000;
-const AGAIN_MS = 4_000;
+const LOOK_AGAIN_MS = 4000;
 
-function load(url: string, e: Entry) {
-  e.snap = { ...e.snap, loading: true };
-  e.listeners.forEach(l => l());
-  fetch(url)
-    .then(async r => (r.ok ? r.json() : Promise.reject(new Error((await r.text()) || `HTTP ${r.status}`))))
-    .then(
-      value => ((e.snap = { value, loading: false }), (e.at = Date.now())),
-      (err: Error) => (e.snap = { ...e.snap, error: err.message, loading: false }),
-    )
-    .finally(() => {
-      e.listeners.forEach(l => l());
-      clearTimeout(e.timer);
-      if (e.snap.value !== undefined && e.again?.(e.snap.value)) e.timer = setTimeout(() => e.listeners.size && load(url, e), AGAIN_MS);
-    });
+const entryAt = <T>(url: string | undefined) => (hasText(url) ? (entries.get(url) as Entry<T> | undefined) : undefined);
+
+function notify(entry: Entry<unknown>) {
+  for (const listener of entry.listeners) listener();
 }
 
-export function useJson<T>(url: string | undefined, again?: (value: T) => boolean): Loaded<T> {
+async function fetchJson(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(hasText(body) ? body : `HTTP ${response.status}`);
+  }
+  const value: unknown = await response.json();
+  return value;
+}
+
+async function load(url: string) {
+  const entry = entries.get(url);
+  if (!entry) return;
+  entry.snap = { ...entry.snap, loading: true };
+  notify(entry);
+  try {
+    entry.snap = { value: await fetchJson(url), loading: false };
+    entry.at = Date.now();
+  } catch (error) {
+    entry.snap = { ...entry.snap, error: error instanceof Error ? error.message : String(error), loading: false };
+  }
+  notify(entry);
+  clearTimeout(entry.timer);
+  if (entry.snap.value !== undefined && entry.shouldLookAgain?.(entry.snap.value) === true) {
+    entry.timer = setTimeout(() => {
+      if (entry.listeners.size > 0) void load(url);
+    }, LOOK_AGAIN_MS);
+  }
+}
+
+export function useJson<T>(url: string | undefined, shouldLookAgain?: (value: T) => boolean): Loaded<T> {
+  const latestShouldLookAgain = useLatest(shouldLookAgain);
   const subscribe = useCallback(
     (listener: () => void) => {
-      if (!url) return () => {};
-      let e = entries.get(url);
-      if (!e) entries.set(url, (e = { snap: NOTHING, at: 0, listeners: new Set() }));
-      e.again = again as Entry["again"];
-      e.listeners.add(listener);
-      if (!e.snap.loading && Date.now() - e.at > STALE_MS) load(url, e);
-      const mine = e;
-      return () => void mine.listeners.delete(listener);
+      if (!hasText(url)) return () => null;
+      if (!entries.has(url)) entries.set(url, { snap: NOTHING, at: 0, listeners: new Set() });
+      const entry = entryAt<T>(url);
+      if (!entry) return () => null;
+      entry.shouldLookAgain = value => latestShouldLookAgain.current?.(value) === true;
+      entry.listeners.add(listener);
+      if (!entry.snap.loading && Date.now() - entry.at > STALE_MS) void load(url);
+      return () => {
+        entry.listeners.delete(listener);
+      };
     },
-    // `again` is read fresh on each subscribe; the URL alone decides what is fetched.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [url],
+    [url, latestShouldLookAgain],
   );
-  return useSyncExternalStore(subscribe, () => ((url && entries.get(url)?.snap) || NOTHING) as Loaded<T>);
+  return useSyncExternalStore(subscribe, () => entryAt<T>(url)?.snap ?? NOTHING);
 }
