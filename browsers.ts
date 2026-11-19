@@ -11,6 +11,7 @@ const IDLE_MS = Number(process.env["MAXFLOW_BROWSER_IDLE_MS"] ?? 10 * 60_000);
 const CONSOLE_KEPT = 500;
 const LAUNCH_DEADLINE_MS = 15_000;
 const PROBE_TIMEOUT_MS = 2000;
+const REAP_EVERY_MS = 30_000;
 const VIEWPORT = { width: 1280, height: 800 };
 
 const browsers = new Map<string, Browser>();
@@ -184,6 +185,20 @@ async function reap(session: string, isLive: boolean) {
   else if (!browser && writtenPort(session) !== undefined) await adoptOrClose(session);
 }
 
-export async function reapBrowsers(isLive: (session: string) => boolean) {
+async function reapBrowsers(isLive: (session: string) => boolean) {
   for (const { name: session } of listState("browsers")) await reap(session, isLive(session));
+}
+
+export function keepReapingBrowsers(isLive: (session: string) => boolean) {
+  setInterval(() => {
+    void reapNow(isLive);
+  }, REAP_EVERY_MS);
+}
+
+async function reapNow(isLive: (session: string) => boolean) {
+  try {
+    await reapBrowsers(isLive);
+  } catch (error) {
+    console.error("reapBrowsers", error);
+  }
 }

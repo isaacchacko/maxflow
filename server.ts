@@ -22,7 +22,7 @@ import { restrictionsRoute } from "./routes-restrictions";
 import { statsTodosRoute } from "./routes-stats";
 import { tasksLinksRoute } from "./routes-tasks";
 import { browserRoute } from "./routes-browser";
-import { reapBrowsers } from "./browsers";
+import { keepReapingBrowsers } from "./browsers";
 import { closeViewer, openViewer, viewerAsked } from "./browser-screencast";
 import { SENTRIES } from "./sentry-commands";
 import { BARE_AGENT_SENTRIES, FED_AGENT_SENTRIES } from "./sentry-names";
@@ -256,16 +256,7 @@ if (seedUserComments)
       }
   } catch {}
 setInterval(checkShells, 2000);
-async function reapBrowsersNow() {
-  try {
-    await reapBrowsers((id) => sessions.get(id)?.exitCode === null);
-  } catch (error) {
-    console.error("reapBrowsers", error);
-  }
-}
-setInterval(() => {
-  void reapBrowsersNow();
-}, 30_000);
+keepReapingBrowsers((id) => sessions.get(id)?.exitCode === null);
 // Questions from before threads: each open one moves into a thread of its own, once, and its asker hears where.
 function migrateQuestions() {
   type Question = { id: number; session: string; name: string; status: string; at: number; thread: { from: string; text: string; at: number }[]; default?: string };
