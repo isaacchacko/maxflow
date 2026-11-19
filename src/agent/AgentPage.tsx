@@ -1,5 +1,4 @@
 import { Archive, ArrowLeft, Bot, ExternalLink, FolderGit2, GitBranch, GitPullRequest, Hash, Link2, Network, Pause, Play, Plus, Radar, SquareTerminal, User, Waypoints } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
 import { AgentFace, expressionOf } from "@/components/AgentFace";
 import { Waiting } from "@/components/Waiting";
 import { Dots } from "@/components/Working";
@@ -14,14 +13,14 @@ import { Rich } from "@/threads/Rich";
 import { Terminal } from "./Terminal";
 import { closing, transcriptFor, typedStore, type Line } from "./transcript";
 
+/** On the newest line, so each line that arrives scrolls its list to the bottom. */
+const scrollToBottom = (line: HTMLElement | null) => {
+  const list = line?.parentElement;
+  if (list) list.scrollTop = list.scrollHeight;
+};
+
 function Tty({ agent, lines }: { agent: Agent; lines: Line[] }) {
   const [draft, setDraft] = usePersistentDraft(`tty:${agent.id}`);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [lines.length]);
 
   function send(e: React.FormEvent) {
     e.preventDefault();
@@ -38,9 +37,9 @@ function Tty({ agent, lines }: { agent: Agent; lines: Line[] }) {
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col border bg-card font-mono text-[13px] leading-relaxed">
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {lines.map((l, i) => (
-          <div key={i} className="mb-2">
+          <div key={i} ref={i === lines.length - 1 ? scrollToBottom : undefined} className="mb-2">
             {l.kind === "system" && <p className="text-muted-foreground/60">{l.text}</p>}
             {l.kind === "router" && <p className="border-l-2 border-router/60 pl-3 text-router">{l.text}</p>}
             {l.kind === "sentry" && <p className="border-l-2 border-command/60 pl-3 text-command/90">{l.text}</p>}
