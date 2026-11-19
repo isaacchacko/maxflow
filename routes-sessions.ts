@@ -1,43 +1,91 @@
 import type { Server } from "bun";
+import { homedir } from "node:os";
 import type { WsData } from "./sessions";
 import { readFileSync } from "node:fs";
 import { CLI } from "./instance";
-import { type Role, sessions } from "./sessions";
+import { type Role, type Session, sessions } from "./sessions";
 import { createSession, dispatch } from "./lifecycle";
 import { freshWorld } from "./world";
 import { describe } from "./world-session";
 import { ROUTER_BRIEF, acceptTrust } from "./routing";
 import { handOff } from "./objectives";
+import { isFilled } from "./shared/guards";
+import { type Body, type Route, exactly, expandHome, firstAnswer, isStringList, jsonBody, sender, textOf } from "./route-kit";
 
-export async function sessionsWorldRoute(req: Request, _url: URL, path: string, server: Server<WsData>): Promise<Response | undefined> {
-  if (path === "/api/sessions" && req.method === "GET") return Response.json([...sessions.values()].map((s) => describe(s)));
-  if (path === "/api/sessions" && req.method === "POST") {
-    const body = (await req.json().catch(() => ({}))) as { name?: string; cmd?: string[] | string; cwd?: string; role?: "router" | "worker"; parent?: string; objective?: string; scope?: string };
-    // An agent a router starts is its worker; one started from a worker joins the same router.
-    const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-    const parent = sessions.get(body.parent ?? "") ?? (from?.role?.role === "router" ? from : from?.role?.parent ? sessions.get(from.role.parent) : undefined);
-    const objective = body.objective ?? parent?.role?.objective;
-    const handingRole = body.role === "router" && from?.role?.role === "router" && from.role.objective === objective && (body.scope ?? from.role.scope) === from.role.scope ? from.role : undefined;
-    const role: Role | undefined = body.role === "router" && objective ? { role: "router", objective, scope: handingRole?.scope ?? (body.scope || "Whole objective") } : parent && objective ? { role: "worker", objective, parent: parent.id } : undefined;
-    // With no command, a router or worker is a claude (a router with its brief, as startRouter starts one), never the bare shell
-    // that 662ba653 and b83e405d were: a shell holding a role takes his thread replies where nothing reads them.
-    const agent = ["claude", "--permission-mode", "bypassPermissions", ...(role?.role === "router" ? ["--append-system-prompt", readFileSync(ROUTER_BRIEF, "utf8")] : [])];
-    const cmd = typeof body.cmd === "string" ? ["zsh", "-lc", body.cmd] : body.cmd?.length ? body.cmd : role ? agent : [process.env.SHELL ?? "zsh", "-l"];
-    const s = createSession(body.name || cmd.join(" ").slice(0, 40), cmd, body.cwd?.replace(/^~(?=\/|$)/, process.env.HOME!) || parent?.cwd || process.env.HOME!, { role });
-    if (cmd[0] === "claude") acceptTrust(s);
-    if (handingRole && from) handOff(from, handingRole, s);
-    // Spawned from the browser under a router: the router hears it has a new worker to brief.
-    if (parent && !from) dispatch({ to: [parent], target: s.id, text: `[maxflow] The user started a worker for you, "${s.name}" (${s.id}). Brief it with \`${CLI} notify ${s.id} '<brief>'\`.` });
-    return Response.json(describe(s), { status: 201 });
-  }
+function routerTheNewAgentWorksFor(from: Session | undefined, asked = ""): Session | undefined {
+  const named = sessions.get(asked);
+  if (named) return named;
+  if (from?.role?.role === "router") return from;
+  return isFilled(from?.role?.parent) ? sessions.get(from.role.parent) : undefined;
+}
 
-  if (path === "/api/world" && req.method === "GET") {
-    const b = await freshWorld();
-    const etag = `"w${b.v}"`;
-    const headers = { etag, "x-world-v": String(b.v), "cache-control": "no-cache" };
-    if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
-    return new Response((b.json ??= JSON.stringify(b.w)), { headers: { ...headers, "content-type": "application/json" } });
-  }
-  if (path === "/api/world/ws") return server.upgrade(req, { data: { id: "", world: true } }) ? undefined : new Response("upgrade failed", { status: 400 });
-  return undefined;
+function roleHandedOverByTheCallingRouter(from: Session | undefined, askedRole: string | undefined, objective: string | undefined, scope: string | undefined): Role | undefined {
+  const fromRole = from?.role;
+  if (askedRole !== "router" || fromRole?.role !== "router" || fromRole.objective !== objective) return undefined;
+  return (scope ?? fromRole.scope) === fromRole.scope ? fromRole : undefined;
+}
+
+function roleOf(askedRole: string | undefined, objective: string | undefined, parent: Session | undefined, scope: string): Role | undefined {
+  if (!isFilled(objective)) return undefined;
+  if (askedRole === "router") return { role: "router", objective, scope };
+  return parent ? { role: "worker", objective, parent: parent.id } : undefined;
+}
+
+function claudeForARoleNeverABareShellThatWouldDropHisThreadReplies(role: Role): string[] {
+  return ["claude", "--permission-mode", "bypassPermissions", ...(role.role === "router" ? ["--append-system-prompt", readFileSync(ROUTER_BRIEF, "utf8")] : [])];
+}
+
+function commandOf(asked: unknown, role: Role | undefined): string[] {
+  if (typeof asked === "string") return ["zsh", "-lc", asked];
+  if (isStringList(asked) && asked.length > 0) return asked;
+  if (role) return claudeForARoleNeverABareShellThatWouldDropHisThreadReplies(role);
+  return [process.env["SHELL"] ?? "zsh", "-l"];
+}
+
+function tellTheRouterItHasANewWorkerFromTheBrowser(router: Session, worker: Session) {
+  dispatch({ to: [router], target: worker.id, text: `[maxflow] The user started a worker for you, "${worker.name}" (${worker.id}). Brief it with \`${CLI} notify ${worker.id} '<brief>'\`.` });
+}
+
+function placeInTheObjective(body: Body, from: Session | undefined) {
+  const askedRole = textOf(body, "role");
+  const askedScope = textOf(body, "scope");
+  const parent = routerTheNewAgentWorksFor(from, textOf(body, "parent"));
+  const objective = textOf(body, "objective") ?? parent?.role?.objective;
+  const handingRole = roleHandedOverByTheCallingRouter(from, askedRole, objective, askedScope);
+  const role = roleOf(askedRole, objective, parent, handingRole?.scope ?? (isFilled(askedScope) ? askedScope : "Whole objective"));
+  return { parent, handingRole, role };
+}
+
+async function startSession(req: Request): Promise<Response> {
+  const body = await jsonBody(req);
+  const from = sender(req);
+  const { parent, handingRole, role } = placeInTheObjective(body, from);
+  const cmd = commandOf(body["cmd"], role);
+  const name = textOf(body, "name");
+  const cwd = [expandHome(textOf(body, "cwd") ?? ""), parent?.cwd].find(isFilled) ?? homedir();
+  const s = createSession(isFilled(name) ? name : cmd.join(" ").slice(0, 40), cmd, cwd, { role });
+  if (cmd[0] === "claude") void acceptTrust(s);
+  if (handingRole && from) handOff(from, handingRole, s);
+  if (parent && !from) tellTheRouterItHasANewWorkerFromTheBrowser(parent, s);
+  return Response.json(describe(s), { status: 201 });
+}
+
+async function world(req: Request): Promise<Response> {
+  const b = await freshWorld();
+  const etag = `"w${b.v}"`;
+  const headers = { etag, "x-world-v": String(b.v), "cache-control": "no-cache" };
+  if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
+  return new Response((b.json ??= JSON.stringify(b.w)), { headers: { ...headers, "content-type": "application/json" } });
+}
+
+const ROUTES: Route[] = [
+  exactly("GET", "/api/sessions", () => Response.json(sessions.values().map((s) => describe(s)).toArray())),
+  exactly("POST", "/api/sessions", startSession),
+  exactly("GET", "/api/world", world),
+];
+
+export async function sessionsWorldRoute(req: Request, url: URL, path: string, server: Server<WsData>): Promise<Response | undefined> {
+  const answer = await firstAnswer(ROUTES, req, url, path);
+  if (answer !== undefined || path !== "/api/world/ws") return answer;
+  return server.upgrade(req, { data: { id: "", world: true } }) ? undefined : new Response("upgrade failed", { status: 400 });
 }
