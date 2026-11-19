@@ -98,9 +98,10 @@ async function drain(after: number) {
 const isState = (value: unknown): value is { seq: number } => typeof value === "object" && value !== null && typeof (value as Record<string, unknown>)["seq"] === "number";
 
 if (import.meta.main) {
-  let seq = readStateJson(STATE_FILE, isState)?.seq ?? (await events(SHADOWED, "now")).seq;
+  let seq = readStateJson(STATE_FILE, isState)?.seq;
   for (;;) {
     try {
+      seq ??= (await events(SHADOWED, "now")).seq;
       seq = await drain(seq);
     } catch (error) {
       console.error(`reading the event bus failed: ${String(error)}`);
