@@ -3,49 +3,100 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { matches, type Call, type Restriction } from "./restrictions";
 
-// Tool calls agents really made lately, read from the newest Claude Code transcripts, so a custom rule shows what it would have
-// caught before he saves it. Only each transcript's tail is read, and the result is kept a minute.
-const PROJECTS = join(homedir(), ".claude", "projects");
-const FILES = 40;
-const TAIL = 400_000;
+const TRANSCRIPT_DIRS = join(homedir(), ".claude", "projects");
+const NEWEST_TRANSCRIPTS = 40;
+const TAIL_BYTES = 400_000;
+const CACHE_MS = 60_000;
+const PREVIEW_CAUGHT = 8;
+const PREVIEW_TEXT = 200;
 export type Recent = Call & { at: string };
+type Transcript = { path: string; mtime: number };
 
-let cache: { at: number; calls: Recent[] } = { at: 0, calls: [] };
-export function recentCalls(): Recent[] {
-  if (Date.now() - cache.at < 60_000) return cache.calls;
-  const files: { path: string; mtime: number }[] = [];
-  try {
-    for (const dir of readdirSync(PROJECTS))
-      for (const f of readdirSync(join(PROJECTS, dir)))
-        if (f.endsWith(".jsonl")) {
-          const path = join(PROJECTS, dir, f);
-          files.push({ path, mtime: statSync(path).mtimeMs });
-        }
-  } catch {}
-  const calls: Recent[] = [];
-  for (const { path } of files.sort((a, b) => b.mtime - a.mtime).slice(0, FILES)) {
-    const size = statSync(path).size, start = Math.max(0, size - TAIL), buf = Buffer.alloc(size - start), fd = openSync(path, "r");
-    readSync(fd, buf, 0, buf.length, start), closeSync(fd);
-    for (const line of buf.toString("utf8").split("\n").slice(start ? 1 : 0)) {
-      if (!line.includes('"tool_use"')) continue;
-      try {
-        const e = JSON.parse(line) as { timestamp?: string; cwd?: string; message?: { content?: { type: string; name?: string; input?: Record<string, unknown> }[] } };
-        for (const c of e.message?.content ?? []) if (c.type === "tool_use" && c.name) calls.push({ tool: c.name, input: c.input, cwd: e.cwd, at: e.timestamp ?? "" });
-      } catch {}
+const cache: { at: number; calls: Recent[] } = { at: 0, calls: [] };
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+const optionalString = (value: unknown) => (typeof value === "string" ? value : undefined);
+
+function addTranscripts(found: Transcript[]) {
+  for (const dir of readdirSync(TRANSCRIPT_DIRS)) {
+    const dirPath = join(TRANSCRIPT_DIRS, dir);
+    for (const name of readdirSync(dirPath)) {
+      if (!name.endsWith(".jsonl")) continue;
+      const path = join(dirPath, name);
+      found.push({ path, mtime: statSync(path).mtimeMs });
     }
   }
-  cache = { at: Date.now(), calls: calls.sort((a, b) => b.at.localeCompare(a.at)) };
+}
+
+function transcriptsUntilUnreadable(): Transcript[] {
+  const found: Transcript[] = [];
+  try {
+    addTranscripts(found);
+  } catch {
+    return found;
+  }
+  return found;
+}
+
+function tailLines(path: string): string[] {
+  const size = statSync(path).size;
+  const start = Math.max(0, size - TAIL_BYTES);
+  const buf = Buffer.alloc(size - start);
+  const fd = openSync(path, "r");
+  readSync(fd, buf, 0, buf.length, start);
+  closeSync(fd);
+  const lines = buf.toString("utf8").split("\n");
+  return start > 0 ? lines.slice(1) : lines;
+}
+
+function toolCallsIn(entry: unknown): Recent[] {
+  if (!isRecord(entry) || !isRecord(entry["message"])) return [];
+  const content: unknown = entry["message"]["content"];
+  const items: unknown[] = Array.isArray(content) ? content : [];
+  const cwd = optionalString(entry["cwd"]);
+  const at = optionalString(entry["timestamp"]) ?? "";
+  const calls: Recent[] = [];
+  for (const item of items) {
+    if (!isRecord(item) || item["type"] !== "tool_use") continue;
+    const tool = optionalString(item["name"]) ?? "";
+    const input = item["input"];
+    if (tool !== "") calls.push({ tool, ...(isRecord(input) && { input }), ...(cwd !== undefined && { cwd }), at });
+  }
+  return calls;
+}
+
+function toolCallsOnLine(line: string): Recent[] {
+  if (!line.includes('"tool_use"')) return [];
+  try {
+    return toolCallsIn(JSON.parse(line));
+  } catch {
+    return [];
+  }
+}
+
+export function recentCalls(): Recent[] {
+  if (Date.now() - cache.at < CACHE_MS) return cache.calls;
+  const newest = transcriptsUntilUnreadable()
+    .toSorted((a, b) => b.mtime - a.mtime)
+    .slice(0, NEWEST_TRANSCRIPTS);
+  const calls = newest.flatMap(({ path }) => tailLines(path).flatMap((line) => toolCallsOnLine(line)));
+  cache.at = Date.now();
+  cache.calls = calls.toSorted((a, b) => b.at.localeCompare(a.at));
   return cache.calls;
 }
 
-/** What a rule's matchers would have caught among the recent calls: how many were looked at, and the newest few it catches. */
+const commandText = (call: Call) => {
+  const command = call.input?.["command"];
+  return typeof command === "string" ? command : "";
+};
+
 export function preview(match: Restriction["match"]) {
-  const r = { id: "", action: "", label: "", mode: "ask", match } as Restriction;
+  const draft: Restriction = { id: "", action: "", label: "", mode: "ask", match };
   const calls = recentCalls();
-  const caught = calls.filter((c) => matches(r, c));
+  const caught = calls.filter((c) => matches(draft, c));
   return {
     checked: calls.length,
     count: caught.length,
-    caught: caught.slice(0, 8).map((c) => ({ tool: c.tool, text: c.tool === "Bash" ? String(c.input?.command ?? "").slice(0, 200) : c.tool, at: c.at })),
+    caught: caught.slice(0, PREVIEW_CAUGHT).map((c) => ({ tool: c.tool, text: c.tool === "Bash" ? commandText(c).slice(0, PREVIEW_TEXT) : c.tool, at: c.at })),
   };
 }
