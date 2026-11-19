@@ -1,30 +1,36 @@
-// Writes a small fixture state into a dev instance's state dir (./dev.sh --seed), so a UI flow can be tried at once:
-// two objectives, threads in each state the inbox shows (open, waiting on him, resolved, a subthread), a board with a
-// task in every column, and today's todos. Times are relative to now so nothing reads as weeks old.
-// The agents it names are made up and never run: their ids only give the messages an author with a name.
-//   bun fixtures/seed.ts <state dir>
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+const USAGE = [
+  "usage: bun fixtures/seed.ts <state dir>",
+  "Writes a small fixture state into a dev instance's state dir (./dev.sh --seed), so a UI flow can be tried at once:",
+  "two objectives, threads in each state the inbox shows (open, waiting on him, resolved, a subthread), a board with a",
+  "task in every column, and today's todos. Times are relative to now so nothing reads as weeks old.",
+].join("\n");
+
 const dir = process.argv[2];
-if (!dir) throw new Error("usage: bun fixtures/seed.ts <state dir>");
+if (dir === undefined || dir === "") throw new Error(USAGE);
 mkdirSync(dir, { recursive: true });
-// Stores already moved into yarn.db import their JSON only into a new database, so seeding starts it over.
-for (const f of ["yarn.db", "yarn.db-wal", "yarn.db-shm"]) rmSync(join(dir, f), { force: true });
+
+function startDatabaseOverSoStoresImportTheSeededJson(stateDir: string) {
+  for (const f of ["yarn.db", "yarn.db-wal", "yarn.db-shm"]) rmSync(join(stateDir, f), { force: true });
+}
+startDatabaseOverSoStoresImportTheSeededJson(dir);
 const now = Date.now();
 const ago = (min: number) => now - min * 60_000;
 const day = new Date(now - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 const write = (name: string, data: unknown) => writeFileSync(join(dir, name), JSON.stringify(data, null, 2));
 
-const router = "a0000001", worker = "a0000002", other = "a0000003";
+const AUTHOR_IDS_OF_AGENTS_THAT_NEVER_RUN = { router: "a0000001", worker: "a0000002", other: "a0000003" };
+const { router, worker, other } = AUTHOR_IDS_OF_AGENTS_THAT_NEVER_RUN;
 write("names.json", { [router]: "router: Checkout redesign", [worker]: "cart summary component", [other]: "router: Flaky CI" });
 
 write("objectives.json", [
-  { id: "checkout-redesign", title: "Checkout redesign", cwd: process.env.HOME, at: ago(600), page: [
+  { id: "checkout-redesign", title: "Checkout redesign", cwd: process.env["HOME"], at: ago(600), page: [
     { id: "v", kind: "vision", w: 8, h: 2, goal: "A one-page checkout with the cart summary beside the form", doneWhen: ["Cart summary renders beside the form", "Storybook story for every cart state"] },
     { id: "s", kind: "status", w: 4, h: 2, summary: "Cart summary in review (#101); payment step next." },
   ] },
-  { id: "flaky-ci", title: "Flaky CI", cwd: process.env.HOME, at: ago(300), page: [] },
+  { id: "flaky-ci", title: "Flaky CI", cwd: process.env["HOME"], at: ago(300), page: [] },
 ]);
 
 write("threads.json", [
@@ -45,17 +51,18 @@ write("threads.json", [
   ] },
 ]);
 
-const task = (id: number, title: string, status: string, minutes: number, events: string[], extra = {}) => ({
+type SeedTask = { id: number; title: string; status: string; minutes: number; events: string[] };
+const task = ({ id, title, status, minutes, events }: SeedTask, extra = {}) => ({
   id, title, kind: "task", status, sessions: [], links: [], at: ago(minutes), updated: ago(minutes / 2), objective: "checkout-redesign",
   timeline: events.map((text, i) => ({ at: ago(minutes - i * 5), text })), ...extra,
 });
 write("tasks.json", [
-  task(1, "Cart summary beside the form", "waiting", 240, ["opened from th-seed01", "why here: PR #101 waits on review"], { sessions: [worker], links: ["https://github.com/example/shop/pull/101"] }),
-  task(2, "Mobile layout for the summary", "you", 30, ["why here: asks you whether it collapses on mobile"]),
-  task(3, "Payment step", "todo", 20, ["why here: starts after #101 merges"]),
-  task(4, "Storybook stories for cart states", "doing", 60, ["why here: worker writing the empty and overflow states"]),
-  task(5, "Flaky e2e checkout test", "done", 180, ["why here: #102 merged, ten runs green"], { objective: "flaky-ci" }),
-  task(6, "Address autocomplete", "blocked", 90, ["why here: needs a Places API key nobody has issued"]),
+  task({ id: 1, title: "Cart summary beside the form", status: "waiting", minutes: 240, events: ["opened from th-seed01", "why here: PR #101 waits on review"] }, { sessions: [worker], links: ["https://github.com/example/shop/pull/101"] }),
+  task({ id: 2, title: "Mobile layout for the summary", status: "you", minutes: 30, events: ["why here: asks you whether it collapses on mobile"] }),
+  task({ id: 3, title: "Payment step", status: "todo", minutes: 20, events: ["why here: starts after #101 merges"] }),
+  task({ id: 4, title: "Storybook stories for cart states", status: "doing", minutes: 60, events: ["why here: worker writing the empty and overflow states"] }),
+  task({ id: 5, title: "Flaky e2e checkout test", status: "done", minutes: 180, events: ["why here: #102 merged, ten runs green"] }, { objective: "flaky-ci" }),
+  task({ id: 6, title: "Address autocomplete", status: "blocked", minutes: 90, events: ["why here: needs a Places API key nobody has issued"] }),
 ]);
 
 write("todos.json", [
