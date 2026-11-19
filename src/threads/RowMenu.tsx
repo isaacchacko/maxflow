@@ -7,7 +7,7 @@ import { repliesOf } from "./Replies";
 import { markRead, markUnread, unseenDeep } from "./seen";
 
 /** One line of a right-click menu; "-" draws a rule. */
-export type MenuItem = { label: string; icon: LucideIcon; run(): void; agent?: string; pressed?: boolean } | "-";
+export type MenuItem = { label: string; icon: LucideIcon; run: () => void; agent?: string; pressed?: boolean } | "-";
 
 export const copy = (text: string) => void navigator.clipboard.writeText(text);
 export const threadLink = (id: string) => `${location.origin}${location.pathname}#thread/${id}`;
