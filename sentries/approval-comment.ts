@@ -44,8 +44,8 @@ export function history(key: string): ReviewedHead[] {
   return listState(dir)
     .map(({ name }) => name)
     .filter((f) => f.endsWith(".json"))
-    .map((f) => readStateJson(join(dir, f), isReviewedHead))
-    .filter((head) => head !== undefined)
+    .map((f) => readStateJson(join(dir, f), isRecord))
+    .filter((head) => isReviewedHead(head))
     .toSorted((a, b) => (a.finished ?? 0) - (b.finished ?? 0));
 }
 
