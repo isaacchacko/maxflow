@@ -1,10 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { slackAvatar, slackNames } from "./slack-meta";
 import { agents, calendar, health, stats } from "./stats";
-import { inboxesTable, peekStateJson, slackMessagesTable, watchedStateFile, writeStateJson } from "./state";
+import { inboxesTable, slackMessagesTable, watchedStateFile, writeStateJson } from "./state";
 import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
-import { isOwnComment as ownComment, markRead } from "./gh";
 import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR } from "./instance";
 import { enforce } from "./restrictions-enforce";
 import { invalid, resolve, saveRestrictions, type Person, type Restriction } from "./restrictions";
@@ -14,7 +13,7 @@ import app from "./src/index.html";
 import { TMUX, flushOptions, paneEnv, paste, pressEnter, respawn, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
 import { type ClaudeState, type Role, type Session, type Wait, type WsData, chatOf, isAgent, isSentry, sessions } from "./sessions";
 import { candidates } from "./mentions";
-import { type Block, type Feed, type FeedPost, type Message, TODO_STATES, type Task, type TaskEdit, type Thread, type Todo, type UserComment } from "./model";
+import { type Block, type Feed, type FeedPost, type Message, TODO_STATES, type Task, type TaskEdit, type Thread, type Todo } from "./model";
 import { live, names, objectives, saveObjectives, saveTasks, saveThreads, saveTodos, tasks, threads, threadsDirty, todos, writeThreads } from "./stores";
 import { DEFAULT_AFTER_H, DEFAULT_AFTER_MS, VERIFIED, intro } from "./intro";
 import { SessionCap, attachViewer, createSession, derive, dispatch, editTask, endWait, funnel, live_thread, push, routersOf, screen, setArchived, setClaudeState, setWait, settleTasks, stopAgent, taskPrs, waitsOn, wake } from "./lifecycle";
@@ -23,9 +22,10 @@ import { ISAAC_IN_THREAD, ancestors, answered, ask, enforcing, headline, mention
 import { DRAFTS, deliver } from "./delivery";
 import { RESYNC_MS, claudeStateChanged, resync } from "./turns";
 import { docsRoute } from "./docs-api";
-import { ARCHIVED_LINKS, SENTRY_USES, archivedLinks, built, describe, freshWorld, ghStatus, judged, openWorld, prStates, worldClients } from "./world";
+import { ARCHIVED_LINKS, SENTRY_USES, archivedLinks, built, describe, freshWorld, judged, openWorld, prStates, worldClients } from "./world";
 import { EXTERNAL_SEEN, ROUTER_BRIEF, acceptTrust, externalSeen, externalSignal, feedMore, feedPosts, feedToFunnel, known, requested, reroute, slackChannels, startRouter } from "./routing";
 import { handOff, mergeThread, newObjective, pointsAtItself, relayRefusal, setRole, subthread, titleOf } from "./objectives";
+import { onEvent, openUserComments, recordUserComment, seedUserComments } from "./events";
 
 const HOST = "127.0.0.1";
 function loadInbox(id: string): Pick<Session, "inbox" | "sending"> {
@@ -330,52 +330,6 @@ async function checkClaude() {
   }
 }
 setInterval(() => void checkClaude().catch((e) => console.error("checkClaude", e)), CLAUDE_CHECK_MS);
-// gh sentry's events that end a PR wait, and why.
-function prWaitEnds(kind: Wait["kind"], event: string, data: any) {
-  if (event === "merged" || event === "closed") return `the PR was ${event}`;
-  if (kind === "ci" && event === "ci") return `CI ${String(data?.state).toLowerCase()}`;
-  if (kind === "approval" && ((event === "review" && data?.state === "APPROVED") || (event === "decision" && data?.decision === "APPROVED"))) return "the PR is approved";
-  return null;
-}
-// The user's own PR comment reaches the funnel as his ask, typed in unstamped like a graph double-click, so the funnel can relay it as his.
-// The sessions line is marked [maxflow] so stamp() takes only his comment as the request the funnel must relay verbatim.
-// Only the gh sentry's word that it is his is taken; with no funnel up, the sessions on the PR hear it from the server instead.
-function commentAsk(kind: string, d: any) {
-  const where = kind === "review" ? `review (${String(d.state).toLowerCase().replace("_", " ")})` : d.path ? `comment on ${d.path}` : "comment";
-  const on = (d.told as string[]).flatMap((id) => sessions.get(id) ?? []).map((s) => `${s.id} (${s.name})`);
-  const text = `My ${where} on PR ${d.pr}: "${String(d.body ?? "").trim()}" ${d.url ?? ""}${on.length ? `\n[maxflow] Sessions on this PR: ${on.join(", ")}` : ""}`;
-  const gh = [...sessions.values()].find((s) => s.name === "sentry:gh" && isSentry(s));
-  const front = funnel();
-  // His own words: the log shows them as his, the funnel gets them unstamped to relay.
-  if (front) dispatch({ source: "isaac", target: d.pr, to: [front], text });
-  else dispatch({ source: "gh", from: gh, target: d.pr, to: (d.told as string[]).flatMap((id) => sessions.get(id) ?? []), text, deliver: `[maxflow · from "sentry:gh"] ${unforge(text)}` });
-  if (d.id) markRead(d.id);
-}
-function onEvent(topic: string, data: any, from?: Session) {
-  const intent = topic.match(/^intent\/([\w-]+)$/);
-  const owner = intent && sessions.get(intent[1]);
-  if (owner && typeof data?.request === "string") requested(owner, data.request, typeof data.root === "string" ? data.root.trim() || undefined : undefined);
-  // A Slack wait ends on the first new message in its thread, channel or search that someone else posted.
-  if (topic.startsWith("slack/") && data?.target)
-    for (const s of sessions.values()) if (s.wait?.kind === "slack" && s.wait.ref === data.target && data.told?.includes(s.id)) endWait(s, `new Slack message from ${data.from}`);
-  const m = topic.match(/^gh\/[^/]+\/[^/]+\/pr\/\d+\/(\w+)$/);
-  if (!m || !data?.pr) return;
-  recordUserComment(m[1], data, Date.now());
-  if (from?.name === "sentry:gh" && isSentry(from) && ["comment", "thread", "review"].includes(m[1]) && ownComment(data.who) && Array.isArray(data.told)) commentAsk(m[1], data);
-  for (const s of sessions.values())
-    if ((s.wait?.kind === "approval" || s.wait?.kind === "ci") && s.wait.ref === data.pr) {
-      const why = prWaitEnds(s.wait.kind, m[1], data);
-      if (why) endWait(s, why);
-    }
-}
-const USER_COMMENTS = "user-comments.json";
-const userComments: UserComment[] = (() => { try { return (peekStateJson(USER_COMMENTS) as UserComment[] | undefined) ?? []; } catch { return []; } })();
-const seedUserComments = !userComments.length;
-function recordUserComment(kind: string, data: any, at: number) {
-  if ((kind !== "comment" && kind !== "thread") || !data.who?.startsWith("the user") || userComments.some((c) => c.id === data.id)) return;
-  userComments.push({ id: data.id, pr: data.pr, kind, url: data.url, body: data.body, path: data.path, at });
-  writeStateJson(USER_COMMENTS, userComments);
-}
 // The bus holds only its tail in memory, so the first boot reads the whole log once for his earlier comments.
 if (seedUserComments)
   try {
@@ -385,23 +339,6 @@ if (seedUserComments)
         recordUserComment(e.topic.split("/").at(-1), e.data, e.at);
       }
   } catch {}
-// Open while its PR is: a thread comment until the thread is resolved, a top-level one until someone comments after it.
-function openUserComments() {
-  return userComments.flatMap((c) => {
-    const pr = ghStatus()[c.pr]?.pr;
-    if (pr?.state !== "OPEN") return [];
-    if (c.kind === "thread") {
-      const thread = pr.reviewThreads.nodes.find((t) => t.comments.nodes.some((o) => o.id === c.id));
-      if (!thread || thread.isResolved) return [];
-      const replies = thread.comments.nodes.length - 1 - thread.comments.nodes.findIndex((o) => o.id === c.id);
-      return [{ ...c, title: pr.title, replies }];
-    }
-    // CI bots post plans and reports after anything, so only a person's or an agent's comment counts as an answer.
-    const i = pr.comments.nodes.findIndex((o) => o.id === c.id);
-    const answered = pr.comments.nodes.slice(i + 1).some((o) => !/bot\b|\[bot\]|^github-actions$/i.test(o.author?.login ?? ""));
-    return i >= 0 && !answered ? [{ ...c, title: pr.title, replies: 0 }] : [];
-  });
-}
 setInterval(checkShells, 2000);
 // How far a task's PRs got, counting only those whose state is known.
 function prProgress(t: Task) {

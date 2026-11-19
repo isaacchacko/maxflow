@@ -3,7 +3,6 @@ import { contextBlock, relatedBlock, slackStoreDay, type SlackSaid } from "./con
 import { peekStateJson, writeStateJson } from "./state";
 import { publish, query } from "./bus";
 import { CLI, DIR } from "./instance";
-import { link } from "./restrictions-identities";
 import { tmuxAsync, tmuxName } from "./tmux";
 import { type Session, sessions } from "./sessions";
 import type { Feed, FeedPost, Message, Objective, Signal, Source, Thread } from "./model";
