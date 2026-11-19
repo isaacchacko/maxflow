@@ -20,7 +20,8 @@ type JevStats = {
 };
 
 function money(n: number) {
-  return n >= 10 ? `$${Math.round(n)}` : n >= 0.01 || n === 0 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`;
+  if (n >= 10) return `$${Math.round(n)}`;
+  return n === 0 || n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`;
 }
 
 function count(n: number) {
@@ -135,6 +136,21 @@ function Disagreements({ d }: { d: JevStats }) {
   );
 }
 
+function JevBody({ d, error }: { d: JevStats | undefined; error: string | undefined }) {
+  if (!d) return <p className={cn("text-sm", hasText(error) ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>{error ?? "Reading Jev's log…"}</p>;
+  if (d.since === undefined) return <p className="text-sm text-muted-foreground">Jev hasn't been asked anything yet.</p>;
+  return (
+    <div className="flex flex-col gap-3">
+      <Kpis d={d} />
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <CallsPerDay d={d} />
+        <Quality d={d} />
+      </div>
+      <Disagreements d={d} />
+    </div>
+  );
+}
+
 export function Jev({ days }: { days: number }) {
   const data = useJson<JevStats>(`/api/stats/jev?days=${days}`);
   const d = data.value;
@@ -146,20 +162,7 @@ export function Jev({ days }: { days: number }) {
           {d?.since === undefined ? "" : ` · logged since ${new Date(d.since).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`}
         </span>
       </SectionHead>
-      {!d ? (
-        <p className={cn("text-sm", hasText(data.error) ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>{data.error ?? "Reading Jev's log…"}</p>
-      ) : d.since === undefined ? (
-        <p className="text-sm text-muted-foreground">Jev hasn't been asked anything yet.</p>
-      ) : (
-        <div className="flex flex-col gap-3">
-          <Kpis d={d} />
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <CallsPerDay d={d} />
-            <Quality d={d} />
-          </div>
-          <Disagreements d={d} />
-        </div>
-      )}
+      <JevBody d={d} error={data.error} />
     </section>
   );
 }
