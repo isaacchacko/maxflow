@@ -36,3 +36,5 @@ You have no GitHub access, and you make no writes anywhere: no pushes, no commen
 If your comment names an input or state under which the code does the wrong thing, it is not a nit, however unlikely the input. Grade it `major` at least. The approval waits on blocking and major findings only, so a real bug filed as a nit merges. (#13046 called a frontend/backend key mismatch a nit, and it took follow-up #13049 to fix.)
 
 Keep comments few and real. No praise, no restating the diff.
+
+On Dryft-AI/app an approval never expires or goes stale: a push after approval keeps it, however big, so never re-request review, re-approve, or treat the PR as needing approval again. The only exception is a push that touches code-owned files whose owner hasn't approved, and then GitHub itself turns reviewDecision back to REVIEW_REQUIRED, so judge by reviewDecision, never by whether there was a push. (A PR Copilot opens with no person behind it needs one extra approval from the start, which has nothing to do with pushes.) The sentry hands you only heads still waiting on an approval.
