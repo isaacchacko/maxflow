@@ -142,7 +142,7 @@ const recorded = (record: SizeRecord) => {
 
 async function sizeOwner(record: SizeRecord, body: SizeBody) {
   const owner = await startOwner(record.seq, body);
-  return owner ? recorded({ ...record, session: owner.id, thread: owner.role?.thread }) : new Response("no such signal", { status: 404 });
+  return owner ? recorded({ ...record, session: owner.id, ...(owner.role?.thread !== undefined && { thread: owner.role.thread }) }) : new Response("no such signal", { status: 404 });
 }
 
 async function sizeDirect(record: SizeRecord, body: SizeBody) {
