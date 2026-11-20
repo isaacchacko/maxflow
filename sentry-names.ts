@@ -23,6 +23,7 @@ export const SENTRY_HELPERS = [
   "inbox-stalls",
   "inbox-state",
   "meta-digest",
+  "review-history",
   "singleton",
   "slack-conversations",
   "slack-notify",
