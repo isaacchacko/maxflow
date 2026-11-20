@@ -317,7 +317,7 @@ const threadRow = (t: Thread) => ({
 
 function asleepOn(t: Thread) {
   const ids = new Set([...t.routers, ...(t.pending?.routers ?? [])]);
-  const asleep = [...ids].flatMap((id) => sessions.get(id) ?? []).filter((s) => live(s) && isFilled(s.asleep));
+  const asleep = [...ids].flatMap((id) => sessions.get(id) ?? []).filter((s) => isLive(s) && isFilled(s.asleep));
   return asleep.map((s) => ({ sessionId: s.id, name: s.name, at: iso(s.sleptAt ?? s.lastOutputAt), wait: s.wait ?? null, wakes: wakesWhen(s.wait) }));
 }
 
