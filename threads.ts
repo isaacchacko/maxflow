@@ -193,7 +193,8 @@ function newAskThread(s: Session, text: string) {
   threads.push(t);
   return t;
 }
-export function ask(s: Session, text: string, re?: string, dflt?: string, isFresh?: boolean): Thread | null | { same: Thread } {
+type AskOptions = { re?: string | undefined; dflt?: string | undefined; isFresh?: boolean | undefined };
+export function ask(s: Session, text: string, { re, dflt, isFresh }: AskOptions = {}): Thread | null | { same: Thread } {
   const found = threadToAskIn(s, text, re, isFresh === true);
   if (found === null || (found !== undefined && "same" in found)) return found;
   const t = found ?? newAskThread(s, text);
@@ -218,7 +219,7 @@ export const enforcing = {
     const s = sessions.get(id);
     if (!s) return null;
     const first = ask(s, text);
-    const asked = first && "same" in first ? ask(s, text, undefined, undefined, true) : first;
+    const asked = first && "same" in first ? ask(s, text, { isFresh: true }) : first;
     return asked && !("same" in asked) ? asked.id : null;
   },
   log: (id: string, target: string, text: string, shouldTell?: boolean) => {

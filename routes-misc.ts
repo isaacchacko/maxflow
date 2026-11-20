@@ -187,7 +187,7 @@ async function openAThreadWaitingOnHim(req: Request): Promise<Response> {
   const text = textOf(body, "text")?.trim() ?? "";
   if (text === "") return new Response("text required", { status: 400 });
   const [re, dflt] = [textOf(body, "re")?.trim(), textOf(body, "default")?.trim()];
-  const t = ask(s, text, isFilled(re) ? re : undefined, isFilled(dflt) ? dflt : undefined, flagOf(body, "new"));
+  const t = ask(s, text, { re: isFilled(re) ? re : undefined, dflt: isFilled(dflt) ? dflt : undefined, isFresh: flagOf(body, "new") });
   if (t !== null && "same" in t) return sameAskRefusal(t.same);
   return t ? Response.json(t, { status: 201 }) : new Response(`no thread ${String(body["re"])}`, { status: 404 });
 }
