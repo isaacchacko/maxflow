@@ -81,10 +81,10 @@ const isApprovedReview = (review: unknown) => isRecord(review) && review["state"
 function isAwaitingReviewAt(pr: unknown, sha: string) {
   if (!isRecord(pr) || pr["state"] !== "OPEN" || pr["headRefOid"] !== sha) return false;
   const reviews: unknown = pr["latestReviews"];
-  const approved = Array.isArray(reviews) && reviews.some(isApprovedReview);
+  const hasApproval = Array.isArray(reviews) && reviews.some(isApprovedReview);
   const decision = pr["reviewDecision"];
   const merge = pr["mergeStateStatus"];
-  return isWaitingOnReview({ reviewDecision: typeof decision === "string" ? decision : null, mergeStateStatus: typeof merge === "string" ? merge : undefined, approved });
+  return isWaitingOnReview({ reviewDecision: typeof decision === "string" ? decision : null, mergeStateStatus: typeof merge === "string" ? merge : undefined, approved: hasApproval });
 }
 
 function standingOnGitHub(n: Note): Standing {

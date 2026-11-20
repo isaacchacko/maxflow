@@ -64,8 +64,8 @@ const unresolvedThreads = (pr: Pr) => pr.reviewThreads.nodes.filter((t) => !t.is
 
 function isAwaitingApproval(key: string, pr: Pr, drafts: Set<string>) {
   const ci = ciStateOf(pr);
-  const waits = isWaitingOnReview({ reviewDecision: pr.reviewDecision, mergeStateStatus: pr.mergeStateStatus, approved: isApproved(pr) });
-  return pr.author?.login === me && pr.state === "OPEN" && waits && ci !== "FAILURE" && ci !== "ERROR" && !drafts.has(key);
+  const isWaiting = isWaitingOnReview({ reviewDecision: pr.reviewDecision, mergeStateStatus: pr.mergeStateStatus, approved: isApproved(pr) });
+  return pr.author?.login === me && pr.state === "OPEN" && isWaiting && ci !== "FAILURE" && ci !== "ERROR" && !drafts.has(key);
 }
 
 function waiting() {
