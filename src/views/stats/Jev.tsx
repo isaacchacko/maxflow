@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cn, hasText } from "@/lib/utils";
+import { hasText } from "@/lib/utils";
 import { useJson } from "./load";
 import { Columns, InnerStat, SectionHead, Segmented, SkeletonTiles, StageBars, Tile, duration, short, weekday, type Peek } from "./parts";
 

@@ -302,11 +302,11 @@ export function SectionHead({ title, children }: { title: string; children?: Rea
   );
 }
 
-export function Skeleton({ className }: { className?: string }) {
+export function Skeleton({ className }: { className?: string | undefined }) {
   return <div aria-hidden className={cn("skeleton", className)} />;
 }
 
-export function SkeletonTile({ chart = "h-28", className, children }: { chart?: string | false; className?: string; children?: ReactNode }) {
+export function SkeletonTile({ chart = "h-28", className, children }: { chart?: string | false | undefined; className?: string | undefined; children?: ReactNode }) {
   return (
     <section aria-busy className={cn("flex min-w-0 flex-col gap-4 rounded-2xl bg-[var(--viz-tile)] px-4 pt-4 pb-3", className)}>
       <div className="flex flex-col gap-0.5">
@@ -321,7 +321,7 @@ export function SkeletonTile({ chart = "h-28", className, children }: { chart?: 
   );
 }
 
-export function SkeletonTiles({ count, chart, className }: { count: number; chart?: string | false; className?: string }) {
+export function SkeletonTiles({ count, chart, className }: { count: number; chart?: string | false | undefined; className?: string | undefined }) {
   return (
     <>
       {Array.from({ length: count }, (_, i) => (

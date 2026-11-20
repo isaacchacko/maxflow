@@ -218,12 +218,12 @@ function refresh(repo: string, w: Week, key: string) {
   return p;
 }
 
-const isFresh = (hit: GhWeek | undefined): hit is GhWeek => hit !== undefined && !hasError(hit) && (hit.final || Date.now() - hit.at < GH_FRESH_MS);
+const isFresh = (hit: GhWeek) => !hasError(hit) && (hit.final || Date.now() - hit.at < GH_FRESH_MS);
 
 export async function gh(repo: string, w: Week): Promise<GhWeek> {
   const key = `${repo} ${w.key}`;
   const hit = ghCache[key];
-  if (isFresh(hit)) return hit;
+  if (hit && isFresh(hit)) return hit;
   if (w.from > Date.now()) return { at: Date.now(), final: false };
   return refresh(repo, w, key);
 }
@@ -231,7 +231,7 @@ export async function gh(repo: string, w: Week): Promise<GhWeek> {
 export function ghNow(repo: string, w: Week): GhWeek {
   const key = `${repo} ${w.key}`;
   const hit = ghCache[key];
-  if (isFresh(hit)) return hit;
+  if (hit && isFresh(hit)) return hit;
   if (w.from > Date.now()) return { at: Date.now(), final: false };
   const failure = failures.get(key);
   if (failure && Date.now() - failure.at < RETRY_AFTER_FAILURE_MS) return { ...(hit ?? { at: failure.at, final: false }), error: failure.error };
