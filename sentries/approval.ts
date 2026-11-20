@@ -156,7 +156,7 @@ function score(clone: string, dir: string, ref: string, base: string): Scored {
 const findings = (h: Head) => (h.reviews ?? []).flatMap((r) => r.comments).filter((c) => c.severity !== "nit");
 const isPassed = (h: Head) => (h.reviews?.length ?? 0) > 0 && (h.reviews ?? []).every((r) => r.verdict !== "request_changes") && findings(h).length === 0;
 const decision = (h: Head) => (isPassed(h) ? "passed: notify Liudvikas" : "findings: back to its agent");
-const suggested = (suggestion: string | undefined, prefix: string, limit = Infinity) => ((suggestion ?? "") === "" ? "" : `${prefix}${(suggestion ?? "").slice(0, limit)}`);
+const suggestionLine = (suggestion: string | undefined) => ((suggestion ?? "") === "" ? "" : `\n  suggestion: ${suggestion ?? ""}`);
 
 function logEntry(key: string, h: Head) {
   const usd = (h.reviews ?? []).reduce((n, r) => n + r.usd, 0);
@@ -196,7 +196,7 @@ async function reviewSentryId() {
 }
 
 function findingsAsk(h: Head, rounds: number) {
-  const list = findings(h).map((c) => `- ${c.severity} ${c.path}:${c.line} ${c.body}${suggested(c.suggestion, "\n  suggestion: ")}`).join("\n");
+  const list = findings(h).map((c) => `- ${c.severity} ${c.path}:${c.line} ${c.body}${suggestionLine(c.suggestion)}`).join("\n");
   return `The approval sentry's review of ${h.url} at ${shortSha(h)} (tier ${String(h.tier)}, round ${rounds} of ${MAX_ROUNDS}) found these. Liudvikas is asked to approve it only once a head passes. Fix the real ones and push; the new head is reviewed again on its own. If one is wrong, leave it and say why in your commit message.\n${list}`;
 }
 
@@ -258,7 +258,8 @@ type Checkout = Pick<Reviewing, "dir" | "pr" | "body" | "ticket"> & { clone: str
 
 async function reviewHead(key: string, h: Head, { dir, pr, body, ticket, clone, ref }: Checkout) {
   const base = run(["git", "-C", dir, "merge-base", ref, "HEAD"]);
-  const landedSince = Number(run(["git", "-C", dir, "rev-list", "--count", `${base}..${ref}`])) || 0;
+  const landed = Number(run(["git", "-C", dir, "rev-list", "--count", `${base}..${ref}`]));
+  const landedSince = Number.isNaN(landed) ? 0 : landed;
   const scored = score(clone, dir, ref, base);
   const lenses: Lens[] = scored.tier >= 2 ? ["correctness", "design"] : ["full"];
   Object.assign(h, scored, { lenses });
@@ -320,11 +321,13 @@ const active = new Set<string>();
 const isRetryDue = (h: Head) => h.status === "failed" && (h.attempts ?? 1) < MAX_ATTEMPTS && Date.now() - (h.finished ?? 0) > RETRY_MS;
 const isDraftRecheckDue = (h: Head | undefined) => h?.status === "skipped" && h.why === "draft" && Date.now() - (h.finished ?? 0) > DRAFT_RECHECK_MS;
 
+const isSettled = (h: Head | undefined, sha: string) => h?.sha === sha && h.status !== "reviewing" && !isDraftRecheckDue(h) && !isRetryDue(h);
+
 function queueNewHeads() {
   for (const { key, pr } of waiting()) {
     const h = state.heads[key];
     if (active.has(key)) continue;
-    if (h?.sha === pr.headRefOid && h.status !== "reviewing" && !isDraftRecheckDue(h) && !isRetryDue(h)) continue;
+    if (isSettled(h, pr.headRefOid)) continue;
     const attempts = h?.sha === pr.headRefOid && h.status === "failed" ? (h.attempts ?? 1) + 1 : 1;
     state.heads[key] = { sha: pr.headRefOid, url: pr.url, title: pr.title, author: pr.author?.login ?? "?", status: "queued", started: Date.now(), attempts };
   }
@@ -360,11 +363,11 @@ const note = (key: string, h: Head): Note => ({
 const nits = (h: Head) => (h.reviews ?? []).flatMap((r) => r.comments).filter((c) => c.severity === "nit");
 
 const nitsAsk = (h: Head) =>
-  `The approval sentry's review of ${h.url} at ${shortSha(h)} passed; the approval doesn't wait on these optional nits. Fix the ones that are real and quick in this PR before Isaac merges it (a new head is reviewed again), and skip the rest. If one is in fact a bug, fix it.\n${nits(h).map((c) => `- ${c.path}:${c.line} ${c.body}${suggested(c.suggestion, "\n  suggestion: ")}`).join("\n")}`;
+  `The approval sentry's review of ${h.url} at ${shortSha(h)} passed; the approval doesn't wait on these optional nits. Fix the ones that are real and quick in this PR before Isaac merges it (a new head is reviewed again), and skip the rest. If one is in fact a bug, fix it.\n${nits(h).map((c) => `- ${c.path}:${c.line} ${c.body}${suggestionLine(c.suggestion)}`).join("\n")}`;
 
-// constraint: nits used to stop at the log, and some were real bugs that took a follow-up PR (#13046 then #13049), so a passed head's nits reach its own session; with no session they aren't worth reviving a chat for
+// constraint: some nits were real bugs that took a follow-up PR (#13046 then #13049), so they reach the PR's session
 async function sendNits(key: string, h: Head) {
-  h.nitsSent = Date.now();
+  Object.assign(h, { nitsSent: Date.now() });
   save();
   const owner = readQueue().find((q) => q.pr === key)?.sessions[0]?.id;
   if (owner !== undefined) await didNotify(owner, `[maxflow approval] ${nitsAsk(h)}`);
