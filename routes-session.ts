@@ -36,6 +36,9 @@ function deliverToAnAgentSayingWhoTypedIt(req: Request, s: Session, text: string
   return { text: stamped.text, isQueuedForAnIdlePrompt };
 }
 
+const typedFor = (req: Request, s: Session, text: string | undefined, body: Body): Typed | { error: string } =>
+  isFilled(text) && isAgent(s) ? deliverToAnAgentSayingWhoTypedIt(req, s, text, body) : { text, isQueuedForAnIdlePrompt: false };
+
 // constraint: a plain sentry is a script, not a prompt; text typed into its pane reaches nobody, so the sender has to hear that instead of a silent ok
 const nobodyReads = (s: Session) =>
   new Response(
@@ -43,12 +46,14 @@ const nobodyReads = (s: Session) =>
     { status: 409 },
   );
 
+const isTextForAPlainSentry = (s: Session, text: string | undefined) => isFilled(text) && isSentry(s) && !isAgent(s);
+
 async function typeInto(req: Request, s: Session): Promise<Response> {
   const body = await jsonBody(req);
   if (s.exitCode !== null) return new Response("session ended", { status: 409 });
   const text = textOf(body, "text");
-  if (isFilled(text) && isSentry(s) && !isAgent(s)) return nobodyReads(s);
-  const typed = isFilled(text) && isAgent(s) ? deliverToAnAgentSayingWhoTypedIt(req, s, text, body) : { text, isQueuedForAnIdlePrompt: false };
+  if (isTextForAPlainSentry(s, text)) return nobodyReads(s);
+  const typed = typedFor(req, s, text, body);
   if ("error" in typed) return new Response(typed.error, { status: 409 });
   touchFrom(req, s, "write");
   const t = tmuxName(s.id);

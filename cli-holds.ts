@@ -1,5 +1,5 @@
 import { argAt, fail, hasArg, mySession, type Verb } from "./cli-shared";
-import { hold, holds, prKeyOf, unhold } from "./holds";
+import { didUnhold, hold, holds, prKeyOf } from "./holds";
 
 function repoHere() {
   const r = Bun.spawnSync(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], { stderr: "pipe" });
@@ -21,7 +21,7 @@ function holdPr(args: string[]) {
 
 function unholdPr(args: string[]) {
   const key = keyOf(argAt(args, 0));
-  console.log(unhold(key) ? `unheld ${key}` : `${key} wasn't held`);
+  console.log(didUnhold(key) ? `unheld ${key}` : `${key} wasn't held`);
 }
 
 function listHolds() {

@@ -71,7 +71,6 @@ function isAwaitingApproval(key: string, pr: Pr, drafts: Set<string>) {
 
 const heldLogged = new Set<string>();
 
-// a held PR drops out of everything below: no review, comment, hand-back, or send for approval until it's unheld
 function isHeldNow(key: string) {
   const held = holdOn(key);
   if (held === undefined) {

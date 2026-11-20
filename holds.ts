@@ -10,7 +10,6 @@ const PR_KEY = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
 
 const isHolds = (value: unknown): value is Holds => isRecord(value) && Object.values(value).every((h) => isRecord(h) && typeof h["at"] === "number");
 
-// the same "owner/repo#n" lowercase key the review and approval sentries use
 export const prKey = (repo: string, n: number | string) => `${repo}#${String(n)}`.toLowerCase();
 
 export function prKeyOf(ref: string, repoHere: () => string): string | undefined {
@@ -45,10 +44,10 @@ export function hold(key: string, by: string, why: string) {
   writeStateJson(HOLDS_FILE, { ...holds(), [key.toLowerCase()]: { at: Date.now(), by, why } });
 }
 
-export function unhold(key: string): boolean {
+export function didUnhold(key: string): boolean {
   const all = holds();
-  if (all[key.toLowerCase()] === undefined) return false;
-  delete all[key.toLowerCase()];
-  writeStateJson(HOLDS_FILE, all);
+  const kept = Object.entries(all).filter(([held]) => held !== key.toLowerCase());
+  if (kept.length === Object.keys(all).length) return false;
+  writeStateJson(HOLDS_FILE, Object.fromEntries(kept));
   return true;
 }

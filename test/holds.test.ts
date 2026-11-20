@@ -18,8 +18,9 @@ const cli = (...args: string[]) => Bun.spawnSync(["bun", join(root, "cli.ts"), .
 const heldOn = (key: string) =>
   Bun.spawnSync(["bun", "-e", `import { holdOn } from "./holds"; console.log(JSON.stringify(holdOn(${JSON.stringify(key)}) ?? null))`], { cwd: root, env, stdout: "pipe" }).stdout.toString().trim();
 
+const here = () => "Dryft-AI/app";
+
 test("a PR ref resolves to the sentries' owner/repo#n key, from a url, a key or a bare number", () => {
-  const here = () => "Dryft-AI/app";
   expect(prKeyOf("https://github.com/Dryft-AI/app/pull/12236/files", here)).toBe("dryft-ai/app#12236");
   expect(prKeyOf("Dryft-AI/app#12236", here)).toBe("dryft-ai/app#12236");
   expect(prKeyOf("#12236", here)).toBe("dryft-ai/app#12236");
