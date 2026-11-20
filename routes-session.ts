@@ -13,6 +13,7 @@ import { describe } from "./world-session";
 import { requested } from "./routing";
 import { touchFrom } from "./sentry-files";
 import { stamp } from "./stamp";
+import { boardUrl, carry, ridesTheBoard } from "./board-bus";
 import { setTranscript } from "./transcripts";
 import { patch } from "./patch";
 import { askForHandoffNote, completeHandoff, noteHandoff, successorOf } from "./handoffs";
@@ -91,9 +92,14 @@ async function nativeSendMessageQueuedWhileAsleep(req: Request, addressed: Sessi
   if (text === "" || !from) return new Response("text and a calling session required", { status: 400 });
   const isAsleep = s.exitCode === null && (s.archived === true || isFilled(s.asleep));
   const stamped = stamp(req, text);
-  dispatch({ from, to: [s], text, deliver: "error" in stamped ? text : stamped.text, typed: !isAsleep });
-  if (isWaitingOn(s, from.id)) endWait(s);
+  const deliver = "error" in stamped ? text : stamped.text;
   touchFrom(req, s, "write");
+  if (boardUrl() !== undefined && ridesTheBoard(from, s)) {
+    const board = await carry({ from, to: s, text, deliver, isAlreadyTyped: !isAsleep });
+    return Response.json({ queued: isAsleep, board });
+  }
+  dispatch({ from, to: [s], text, deliver, typed: !isAsleep });
+  if (isWaitingOn(s, from.id)) endWait(s);
   return Response.json({ queued: isAsleep });
 }
 
@@ -107,10 +113,15 @@ async function notify(req: Request, addressed: Session): Promise<Response> {
   const stamped = stamp(req, text, isIsaac);
   if ("error" in stamped) return new Response(stamped.error, { status: 409 });
   if (isFilled(stamped.request)) requested(s, stamped.request);
-  dispatch({ ...fromSession(sender(req)), ...fromIsaac(isIsaac), to: [s], text, deliver: stamped.text });
+  touchFrom(req, s, "write");
+  const from = sender(req);
+  if (!isIsaac && boardUrl() !== undefined && from !== undefined && ridesTheBoard(from, s)) {
+    const board = await carry({ from, to: s, text, deliver: stamped.text, isAlreadyTyped: false });
+    return Response.json({ ...describe(s), board }, { status: 202 });
+  }
+  dispatch({ ...fromSession(from), ...fromIsaac(isIsaac), to: [s], text, deliver: stamped.text });
   const isFromTheAwaitedAgent = isWaitingOn(s, callerOf(req));
   if (isFromTheAwaitedAgent) endWait(s);
-  touchFrom(req, s, "write");
   return Response.json(describe(s), { status: 202 });
 }
 

@@ -1,4 +1,4 @@
-export const PLAIN_SENTRIES = ["gh", "slack", "rename", "health", "graph", "ram", "inbox", "approval", "docs", "jev", "board", "handoff", "timelines"];
+export const PLAIN_SENTRIES = ["gh", "slack", "rename", "health", "graph", "ram", "inbox", "approval", "docs", "jev", "board", "board-bus", "handoff", "timelines"];
 export const LIVE_ONLY_SENTRIES = new Set(["health"]);
 export const FED_AGENT_SENTRIES = ["review", "meta", "assistant", "context", "todo"];
 export const BARE_AGENT_SENTRIES = ["funnel"];

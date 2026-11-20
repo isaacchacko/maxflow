@@ -23,6 +23,7 @@ const usage = `usage:
   yarn rename <id> <name...> | yarn kill <id>
   yarn handoff <note-file>               when yarn asks (your context is filling up): hand your work to a fresh agent with this note once your turn ends
   yarn notify <id> <text...> [--isaac]    deliver text once the session is idle at an empty claude prompt; --isaac as for send
+  yarn board reply <board message id> <text...>   answer a message that reached you from the agent board, on the board, as you
   yarn who router|parent|workers|objective   the agents around you, as mf-<id> names for SendMessage
   yarn ask <question...> [--re THREAD] [--default REC] [--new] [--image PATH]   ask the user in a thread of yours, flagged as waiting on him; prints its id.
                                              Refused when an open ask on your objective reads the same: add to that one with --re, or --new if yours differs.

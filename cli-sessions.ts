@@ -105,9 +105,21 @@ async function agentsAround(args: string[]) {
   for (const s of picked) console.log(`mf-${s.id}  ${s.role.role.padEnd(6)}  ${s.status.padEnd(7)}  ${s.name}`);
 }
 
+function sayHowItWent(board: unknown) {
+  const how = replyOf(board);
+  if (how["via"] === "board") console.log(`on the agent board as #${str(how, "id")}; it reaches the agent at its next idle prompt`);
+  else if (how["via"] === "direct") console.log(`the agent board was down (${str(how, "error")}), so it was delivered directly`);
+}
+
 async function notify(args: string[]) {
   const [id, ...words] = positional(args, []);
-  await post(`/api/sessions/${String(id)}/notify`, { text: words.join(" "), isaac: args.includes("--isaac") });
+  sayHowItWent(replyOf(await post(`/api/sessions/${String(id)}/notify`, { text: words.join(" "), isaac: args.includes("--isaac") }))["board"]);
+}
+
+async function replyOnTheBoard(args: string[]) {
+  const [re, ...words] = positional(args.slice(1), []);
+  const r = replyOf(await post("/api/board-bus/reply", { re, text: words.join(" ") }));
+  console.log(`replied on the agent board as #${str(r, "id")}`);
 }
 
 async function publish(args: string[]) {
@@ -174,6 +186,7 @@ export const sessionVerbs: Verb[] = [
   },
   { matches: (verb, args) => verb === "who" && hasArg(args, 0), run: agentsAround },
   { matches: (verb, args) => verb === "notify" && hasArg(args, 1), run: notify },
+  { matches: (verb, args) => verb === "board" && args[0] === "reply" && hasArg(args, 2), run: replyOnTheBoard },
 ];
 
 export const eventVerbs: Verb[] = [

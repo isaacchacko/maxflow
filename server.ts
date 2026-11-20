@@ -27,6 +27,7 @@ import { prsRoute } from "./routes-prs";
 import { keepPrFeedback } from "./pr-feedback";
 import { objectivesRoute } from "./routes-objectives";
 import { sessionRoute } from "./routes-session";
+import { boardRoute } from "./routes-board";
 import { signalsRoute } from "./routes-signals";
 import { threadsRoute } from "./routes-threads";
 import { sessionsWorldRoute } from "./routes-sessions";
@@ -185,6 +186,7 @@ const ROUTES: Route[] = [
   async (req, url, path) => tasksLinksRoute(req, url, path),
   async (req, url, path) => filesRoute(req, url, path),
   async (req, url, path) => sessionRoute(req, url, path),
+  async (req, url, path) => boardRoute(req, url, path),
 ];
 
 async function answer(req: Request, server: Server<WsData>): Promise<Response | undefined> {
