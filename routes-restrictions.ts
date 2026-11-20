@@ -1,5 +1,5 @@
 import { invalid, resolve, saveRestrictions, type Restriction } from "./restrictions";
-import { backfill, link, people as restrictionPeople } from "./restrictions-identities";
+import { didBackfillPeople, link, people as restrictionPeople } from "./restrictions-identities";
 import { preview } from "./restrictions-recent";
 import { restrictions } from "./threads";
 import { restrictionRepos } from "./repos";
@@ -50,7 +50,7 @@ async function verdictForAToolCall(req: Request): Promise<Response> {
 }
 
 function peopleForAScope() {
-  if (backfill(restrictions)) saveRestrictions(restrictions);
+  if (didBackfillPeople(restrictions)) saveRestrictions(restrictions);
   return Response.json(restrictionPeople());
 }
 
@@ -67,7 +67,7 @@ async function linkOrUnlinkSlackAndGithub(req: Request): Promise<Response | unde
   const github = textOf(body, "github");
   if (!isFilled(slack) || !isFilled(github)) return new Response("slack and github required", { status: 400 });
   link({ slack, github }, req.method === "POST");
-  if (backfill(restrictions, req.method === "DELETE" ? { slack, github } : undefined)) saveRestrictions(restrictions);
+  if (didBackfillPeople(restrictions, req.method === "DELETE" ? { slack, github } : undefined)) saveRestrictions(restrictions);
   return Response.json(restrictionPeople());
 }
 

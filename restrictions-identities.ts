@@ -112,7 +112,7 @@ export function link(pair: Pair, isLinked: boolean) {
 const isTheUnlinkedPair = (p: Person, unlinked: Pair | undefined) =>
   unlinked !== undefined && p.slack === unlinked.slack && p.github?.toLowerCase() === unlinked.github.toLowerCase();
 
-export function backfill(list: Restriction[], unlinked?: Pair) {
+export function didBackfillPeople(list: Restriction[], unlinked?: Pair) {
   const everyone = hasState(".") ? people() : [];
   const named = list.flatMap((r) => r.scope?.people ?? []);
   let hasChanged = false;
