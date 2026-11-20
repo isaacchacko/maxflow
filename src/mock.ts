@@ -52,6 +52,7 @@ export type Thread = {
   resurfaced?: { at: string; from: number };
   feed?: { source: string; who: string; link: string };
   asks?: { sessionId: string; since: string; shown: boolean };
+  asleep?: { sessionId: string; name: string; at: string; wait: Wait | null; wakes: string }[];
   movedTo?: { id: string; title: string; objectiveId: string; messageId: string; at: string };
   taskId?: string;
   parentId?: string;
@@ -75,6 +76,8 @@ export type Agent = {
   cwd?: string;
   links?: string[];
   wait?: Wait | null;
+  sleep?: { at: string; wakes: string };
+  sleepHeld?: { what: string[]; at: string };
   browser?: boolean;
 };
 export type Wait = { kind: string; ref: string; at: number; desc?: string };

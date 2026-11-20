@@ -7,7 +7,7 @@ type BusLog = { size: number; events: BusEvent[]; since: number; perDay: Map<str
 type Message = { from: string; at: number };
 export type StatsThread = { id: string; messages: Message[]; objective?: string; routers?: string[] };
 
-const STATS_TOPICS = /"topic":"(signal\/isaac|signal-route\/|signal-size\/|slack\/|thread\/|ask\/|wait\/|gh\/[^"]*\/(merged|opened)"|ram\/killed|claude-resync\/|server\/start|sentry\/start)/;
+const STATS_TOPICS = /"topic":"(signal\/isaac|signal-route\/|signal-size\/|slack\/|thread\/|ask\/|wait\/|gh\/[^"]*\/(merged|opened)"|ram\/killed|claude-resync\/|health\/agent\/|server\/start|sentry\/start)/;
 const AT_FIELD = /"at":(\d+)/;
 const HOUR_MS = 3_600_000;
 

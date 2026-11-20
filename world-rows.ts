@@ -8,6 +8,7 @@ import { type Session, isAgent, isSentry, sessions } from "./sessions";
 import { isFilled, isRecord } from "./shared/guards";
 import { isLive, names, objectives, rememberNames, tasks, threads } from "./stores";
 import { shells } from "./waits";
+import { wakesWhen } from "./sleep";
 import {
   agentState,
   ghStatus,
@@ -86,8 +87,14 @@ function agentRow(s: Session, shownTasks: Task[], isUnroutedAgent: boolean, fron
     cwd: s.cwd,
     links: links(s),
     wait: s.wait ?? null,
+    ...sleepOf(s),
     ...(hasBrowser(s.id) && { browser: true }),
   };
+}
+
+function sleepOf(s: Session) {
+  if (isFilled(s.asleep)) return { sleep: { at: iso(s.sleptAt ?? s.wait?.at ?? s.lastOutputAt), wakes: wakesWhen(s.wait) } };
+  return s.sleepHeld ? { sleepHeld: { what: s.sleepHeld.what, at: iso(s.sleepHeld.at) } } : {};
 }
 
 function funnelRowHoldingTheUnroutedAgents(front: Session | undefined) {
@@ -304,8 +311,15 @@ const threadRow = (t: Thread) => ({
   ...(t.resurfaced && { resurfaced: { at: iso(t.resurfaced.at), from: t.resurfaced.from } }),
   ...(t.pinned && { pinned: { at: iso(t.pinned.at), order: t.pinned.order } }),
   ...(t.feed && { feed: { source: t.feed.source, who: t.feed.who, link: t.feed.link } }),
+  asleep: asleepOn(t),
   messages: t.messages.map(messageRow),
 });
+
+function asleepOn(t: Thread) {
+  const ids = new Set([...t.routers, ...(t.pending?.routers ?? [])]);
+  const asleep = [...ids].flatMap((id) => sessions.get(id) ?? []).filter((s) => live(s) && isFilled(s.asleep));
+  return asleep.map((s) => ({ sessionId: s.id, name: s.name, at: iso(s.sleptAt ?? s.lastOutputAt), wait: s.wait ?? null, wakes: wakesWhen(s.wait) }));
+}
 
 const threadRows = () => [...threads.filter((t) => !isFilled(t.mergedInto)).map(threadRow), ...threads.flatMap(movedStub)];
 

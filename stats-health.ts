@@ -66,6 +66,7 @@ export function health(sessions: SessionInfo[]) {
     events: daysTheLogCovers.map((d) => perDay.get(d) ?? 0),
     ramKills: perDayOf(events, daysTheLogCovers, (t) => t.startsWith("ram/killed")),
     resyncs: perDayOf(events, daysTheLogCovers, (t) => t.startsWith("claude-resync/")),
+    sleptWithWorkOpen: perDayOf(events, daysTheLogCovers, (t) => t.startsWith("health/agent/")),
     github: readRateHistory(),
   };
 }

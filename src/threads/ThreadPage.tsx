@@ -18,6 +18,7 @@ import { JumpToNew } from "./page/JumpToNew";
 import { EarlierInTheConversationLine, NudgeToggle } from "./page/marks";
 import { ReplyRow, RootMessage } from "./page/messages";
 import { resolveOrReopen, ThreadNavContext, type ThreadNav } from "./page/nav";
+import { AsleepLines, isPendingOnASleeper } from "./page/AsleepLines";
 import { Pending } from "./page/Pending";
 import { QuoteSelectionButton, useQuotableSelection } from "./page/selection";
 import { ThreadHeader } from "./page/ThreadHeader";
@@ -159,7 +160,8 @@ function ThreadMessages({ thread, all, root, replies, firstNew, lineRef, actions
       {replies.map((_, i) => (
         <ReplyRow key={i} thread={thread} all={all} root={root} replies={replies} i={i} isNew={i === firstNew} lineRef={lineRef} actions={actions} messageMenu={messageMenu} nav={nav} />
       ))}
-      {thread.pending && <Pending pending={thread.pending} names={thread.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />}
+      {thread.pending && !isPendingOnASleeper(thread) && <Pending pending={thread.pending} names={thread.pending.routerIds.map(rid => agents.find(a => a.id === rid)?.name ?? rid)} />}
+      <AsleepLines thread={thread} />
     </>
   );
 }

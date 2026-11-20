@@ -1,7 +1,7 @@
 import { Archive, ArrowLeft, Pause, Play } from "lucide-react";
 import { FitLabel, FitRow } from "@/components/Fit";
 import { AgentFace, expressionOf } from "@/components/AgentFace";
-import { Waiting } from "@/components/Waiting";
+import { Waiting, WakesWhen } from "@/components/Waiting";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn, hasText } from "@/lib/utils";
@@ -12,6 +12,7 @@ import { RouterSidebar } from "./RouterSidebar";
 import { SentryPage } from "./SentryPage";
 import { ShellPage } from "./ShellPage";
 import { stateOrder } from "./sidebar-parts";
+import { when } from "@/threads/MessageRow";
 import { Terminal } from "./Terminal";
 import { closing, transcriptFor, typedStore } from "./transcript";
 import { Tty } from "./Tty";
@@ -41,6 +42,23 @@ function CrewCounts({ crew }: { crew: Agent[] }) {
   );
 }
 
+const sleepLine = "hidden max-w-[32rem] min-w-0 shrink-[2] truncate text-sm whitespace-nowrap text-muted-foreground lg:block";
+function SleepOrWait({ agent }: { agent: Agent }) {
+  if (agent.sleep)
+    return (
+      <span data-agent="agent-asleep" title={`Claude is stopped to free memory. It wakes when ${agent.sleep.wakes}, or when any message reaches it.`} className={sleepLine}>
+        Asleep since {when(agent.sleep.at)} to free memory. <WakesWhen wait={agent.wait} />
+      </span>
+    );
+  if (agent.sleepHeld)
+    return (
+      <span data-agent="agent-held-awake" title="It declared a wait, but sleeping would stop claude and everything running inside it" className={sleepLine}>
+        Kept awake: {agent.sleepHeld.what.join(" and ")} still running. It sleeps once they finish.
+      </span>
+    );
+  return <Waiting wait={agent.wait} className="hidden max-w-72 min-w-0 shrink-[2] truncate text-sm whitespace-nowrap text-muted-foreground lg:block" />;
+}
+
 function AgentHeader({ agent, crew, back, isLive }: { agent: Agent; crew: Agent[]; back: string; isLive: boolean }) {
   return (
     <FitRow className="h-12 shrink-0 items-center gap-3 border-b px-3 data-[fit=glyph]:gap-1.5">
@@ -61,7 +79,7 @@ function AgentHeader({ agent, crew, back, isLive }: { agent: Agent; crew: Agent[
           {agent.scope}
         </span>
       )}
-      <Waiting wait={agent.wait} className="hidden max-w-72 min-w-0 shrink-[2] truncate text-sm whitespace-nowrap text-muted-foreground lg:block" />
+      <SleepOrWait agent={agent} />
       {agent.role === "router" && <CrewCounts crew={crew} />}
       <div className="ml-auto flex shrink-0 gap-1.5">
         {agent.state === "asleep" ? (

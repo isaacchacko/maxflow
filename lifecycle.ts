@@ -1,13 +1,14 @@
 import { mkdirSync } from "node:fs";
 import { inboxesTable, watchedStateFile, writeStateText } from "./state";
 import { publish } from "./bus";
-import { BASE, DIR, ARE_AGENTS_INERT, INERT_CWD, INSTANCE, MAX_SESSIONS } from "./instance";
+import { BASE, CLI, DIR, ARE_AGENTS_INERT, INERT_CWD, INSTANCE, MAX_SESSIONS } from "./instance";
 import { TMUX, launchable, named, paneEnv, didRespawn, scoped, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
 import { type ClaudeState, type Role, type Session, type Wait, chatOf, isAgent, isSentry, sessions } from "./sessions";
 import { type Signal, type Source, TASK_STATUSES, type Task, type TaskEdit, type Thread } from "./model";
 import { isLive, saveTasks, tasks, threads } from "./stores";
 import { patch } from "./patch";
 import { isFilled } from "./shared/guards";
+import { postAsMaxflow, threadsItIsOn, workLeftOpenAtSleep, workStillRunningInside } from "./sleep";
 
 const SCROLLBACK_BYTES = 2 * 1024 * 1024;
 const ESC = "\u{1B}";
@@ -137,7 +138,10 @@ export function setArchived(s: Session, isArchived: boolean) {
   patch(s, { archived: isArchived });
   setOption(s.id, "@mf-archived", isArchived ? "1" : "0");
   if (isArchived) void stopAgent(s);
-  else resumeAgent(s);
+  else {
+    patch(s, { sleepHeld: undefined });
+    resumeAgent(s);
+  }
 }
 const isStoppable = (s: Session, chat: string | undefined) =>
   s.archived === true && !isFilled(s.asleep) && isFilled(chat) && !isSentry(s) && isAgent(s) && s.exitCode === null && s.claude?.state !== "working" && s.claude?.state !== "waiting";
@@ -148,25 +152,44 @@ export async function stopAgent(s: Session) {
   try {
     const box = await inputBox(s);
     if (box?.empty !== true || !isStoppable(s, chat) || !isFilled(chat)) return;
-    putToSleep(s, chat);
+    const running = await workStillRunningInside(s, box.screen);
+    if (running.length > 0) holdAwake(s, running);
+    else if (isStoppable(s, chat)) putToSleep(s, chat);
   } finally {
     stopping.delete(s.id);
   }
+}
+function holdAwake(s: Session, running: string[]) {
+  if (s.sleepHeld?.what.join(",") === running.join(",")) return;
+  patch(s, { sleepHeld: { what: running, at: Date.now() } });
+  publish(`sleep-held/${s.id}`, { session: s.id, what: running });
 }
 function putToSleep(s: Session, chat: string) {
   const lastReplyScreen = tmux("capture-pane", "-p", "-e", "-J", "-t", tmuxName(s.id)).out.trimEnd();
   const lastReplyScreenFile = writeStateText(`asleep-${s.id}.ans`, `${lastReplyScreen}${ESC}[0m\n`);
   if (!didRespawn(s.id, "--", process.execPath, `${DIR}/sleeper.ts`, lastReplyScreenFile, BASE, s.id)) return;
-  patch(s, { asleep: chat });
+  const at = Date.now();
+  patch(s, { asleep: chat, sleptAt: at, sleepHeld: undefined });
   setOption(s.id, "@mf-asleep", chat);
   setClaudeState(s, "gone");
+  publish(`asleep/${s.id}`, { session: s.id, wait: s.wait ?? null });
+  raiseIfWorkLeftOpen(s);
+}
+function raiseIfWorkLeftOpen(s: Session) {
+  const open = workLeftOpenAtSleep(s);
+  if (open.length === 0) return;
+  const text = `⚠ ${s.name} (${s.id}) was put to sleep with work still open: ${open.join("; ")}. Nothing will pick this up on its own: wake it from its agent page or answer it.`;
+  for (const t of threadsItIsOn(s)) postAsMaxflow(t, text);
+  const owner = [sessions.get(s.role?.parent ?? ""), ...routersOf(s.role?.objective ?? ""), funnel()].find((x): x is Session => isReachable(x) && x !== s);
+  if (owner) dispatch({ to: [owner], target: s.name, text: `[maxflow] ${text} Wake it (\`${CLI} send ${s.id} '<what to do>'\`) or take its work over.` });
+  publish(`health/agent/${s.id}`, { session: s.id, name: s.name, open });
 }
 export function resumeAgent(s: Session) {
   const chat = s.asleep;
   if (!isFilled(chat) || s.exitCode !== null) return;
   const bypass = s.cmd.some((a) => a.includes("bypassPermissions")) ? ["--permission-mode", "bypassPermissions"] : [];
   if (!didRespawn(s.id, "-c", s.cwd, ...paneEnv(s.id), "--", ...named(s.id, ["claude", "--resume", chat, ...bypass]))) return;
-  patch(s, { asleep: undefined });
+  patch(s, { asleep: undefined, sleptAt: undefined });
   setOption(s.id, "@mf-asleep", "");
 }
 export function setWait(s: Session, wait?: Wait) {
@@ -305,5 +328,5 @@ export async function inputBox(s: Session) {
   const promptLine = lines[i] ?? "";
   const first = promptLine.slice(promptLine.indexOf("❯") + 1).trimStart();
   const text = lines.slice(i, end === -1 ? undefined : end).map(plain).join("\n").replace(/^❯/, "").trim();
-  return { text, empty: first.startsWith(`${ESC}[2m`) || text === "" };
+  return { text, empty: first.startsWith(`${ESC}[2m`) || text === "", screen: lines.slice(end === -1 ? i : end).map(plain).join("\n") };
 }

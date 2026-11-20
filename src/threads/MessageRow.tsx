@@ -8,11 +8,12 @@ export function when(at: string) {
     : new Date(at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+const ALARM = "⚠";
 function MaxflowNote({ at, text, className }: { at: string; text: string; className?: string | undefined }) {
   return (
-    <article data-from="maxflow" data-at={at} className={cn("-mx-5 flex items-baseline gap-2 px-5 py-1 text-xs text-muted-foreground", className)}>
+    <article data-from="maxflow" data-at={at} data-alarm={text.startsWith(ALARM) || undefined} className={cn("-mx-5 flex items-baseline gap-2 px-5 py-1 text-xs text-muted-foreground", text.startsWith(ALARM) && "border-l-2 border-destructive bg-destructive/5 py-2 text-sm font-medium text-destructive", className)}>
       <span className="w-9 shrink-0 text-right text-[10px] tabular-nums">{at.slice(11, 16)}</span>
-      <Markdown text={text} className="min-w-0 flex-1 text-xs" />
+      <Markdown text={text} className={cn("min-w-0 flex-1", text.startsWith(ALARM) ? "text-sm" : "text-xs")} />
     </article>
   );
 }

@@ -75,17 +75,17 @@ export function contributorsOf(t: Thread, threads: Thread[], agents: Agent[], na
   return found.values().toArray().toSorted(byRankThenMostRecent);
 }
 
-function asleepWord(wait: Wait, t: Thread) {
-  if (wait.kind === "thread" && wait.ref === t.id) return "asleep on this thread";
-  if (wait.kind === "until") return `asleep until ${wait.desc}`;
-  return `asleep on ${wait.kind}:${wait.ref}`;
+function waitWord(lead: string, wait: Wait, t: Thread) {
+  if (wait.kind === "thread" && wait.ref === t.id) return `${lead} on this thread`;
+  if (wait.kind === "until") return `${lead} until ${wait.desc}`;
+  return `${lead} on ${wait.kind}:${wait.ref}`;
 }
 
 export function stateOf(c: Contributor, t: Thread): { expression: Expression; word: string; at?: string | undefined } {
   const a = c.agent;
   if (!a) return { expression: "done", word: "done", at: c.last };
   if (t.asks?.sessionId === a.id) return { expression: "waiting", word: "waiting on you", at: t.asks.since };
-  if (a.wait && a.wait.kind !== "done") return { expression: "asleep", word: asleepWord(a.wait, t), at: a.since };
+  if (a.wait && a.wait.kind !== "done") return a.state === "asleep" ? { expression: "asleep", word: waitWord("asleep", a.wait, t), at: a.since } : { expression: "waiting", word: waitWord("waiting", a.wait, t), at: a.since };
   if (a.state === "working") return { expression: "working", word: "working", at: a.since };
   if (a.state === "waiting") return { expression: "waiting", word: "waiting", at: a.since };
   if (a.state === "asleep") return { expression: "asleep", word: "asleep", at: a.since };

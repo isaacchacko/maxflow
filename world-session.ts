@@ -48,6 +48,7 @@ export const taskRef = (id: number) => `t${String(id)}`;
 export const isWaitingOnSomething = (s: Session): s is Session & { wait: Wait } => s.wait !== undefined && s.wait.kind !== "done";
 
 export function agentState(s: Session) {
+  if (isFilled(s.asleep)) return "asleep";
   if (s.archived === true || isFilled(s.asleep)) return isWaitingOnSomething(s) ? "waiting" : "asleep";
   const st = status(s);
   if (st === "working" || st === "waiting") return st;
@@ -55,6 +56,7 @@ export function agentState(s: Session) {
 }
 
 export function stateSinceTurnStartSleepOrLastOutput(s: Session) {
+  if (isFilled(s.asleep) && s.sleptAt !== undefined) return s.sleptAt;
   if (isWaitingOnSomething(s) && agentState(s) !== "working") return s.wait.at;
   if (s.claude?.state === agentState(s)) return s.claude.at;
   return s.lastOutputAt;

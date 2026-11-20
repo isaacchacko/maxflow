@@ -84,7 +84,7 @@ function stateWord(c: Contributor, word: string, time: string) {
 
 function waitElsewhere(c: Contributor, expression: string, t: Thread): Wait | undefined {
   const wait = c.agent?.wait;
-  if (expression !== "asleep" || !wait || wait.kind === "done") return undefined;
+  if ((expression !== "asleep" && expression !== "waiting") || !wait || wait.kind === "done") return undefined;
   return wait.kind === "thread" && wait.ref === t.id ? undefined : wait;
 }
 
@@ -97,7 +97,7 @@ function AgentRow({ c, t }: { c: Contributor; t: Thread }) {
     <>
       {face}
       <span className={cn("min-w-0 flex-1 truncate", !c.agent && "text-muted-foreground")}>{c.name}</span>
-      {sleepsOn ? <Waiting wait={sleepsOn} lead="Asleep" className="max-w-[60%] shrink-0 truncate text-xs text-muted-foreground" /> : <span className="max-w-[55%] shrink-0 truncate text-xs text-muted-foreground">{word}</span>}
+      {sleepsOn ? <Waiting wait={sleepsOn} lead={s.expression === "asleep" ? "Asleep" : "Waiting"} className="max-w-[60%] shrink-0 truncate text-xs text-muted-foreground" /> : <span className="max-w-[55%] shrink-0 truncate text-xs text-muted-foreground">{word}</span>}
     </>
   );
   const title = [c.name, c.agent?.doing, `${c.why}${c.agent?.role === "router" ? " · router" : ""}`].filter(Boolean).join("\n");

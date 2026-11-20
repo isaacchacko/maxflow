@@ -17,6 +17,7 @@ type Health = {
   events: number[];
   ramKills: number[];
   resyncs: number[];
+  sleptWithWorkOpen: number[];
   github: RateSample[];
 };
 
@@ -194,10 +195,11 @@ function HealthSection({ h }: { h: Health }) {
           </Tile>
         </div>
         <GitHubBudget samples={h.github} />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <DailyTile label="Bus events" values={h.events} days={h.days} unit="events" hint="Everything published on yarn's event bus" />
           <DailyTile label="Jobs killed for RAM" values={h.ramKills} days={h.days} unit="kills" hint="Local tests or builds the ram sentry stopped" />
           <DailyTile label="Agent state resyncs" values={h.resyncs} days={h.days} unit="resyncs" hint="Times the server found an agent's state out of step with its pane" />
+          <DailyTile label="Agents asleep with work open" values={h.sleptWithWorkOpen} days={h.days} unit="agents" hint="Agents put to sleep with your message unanswered or a wait that can never end; each one posted in its thread and told its router" />
         </div>
       </div>
     </section>

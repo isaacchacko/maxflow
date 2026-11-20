@@ -118,21 +118,21 @@ function SlackTarget({ target }: { target: string }) {
   );
 }
 
-function UntilShell({ wait }: { wait: Wait }) {
+function UntilShell({ wait, word }: { wait: Wait; word: string }) {
   const shells = shellStore.use();
   return (
     <>
-      until <ShellChip wait={wait} shell={shells.find(x => x.id === wait.ref)} />
+      {word} <ShellChip wait={wait} shell={shells.find(x => x.id === wait.ref)} />
     </>
   );
 }
 
-function UntilAgents({ agentIds }: { agentIds: string }) {
+function UntilAgents({ agentIds, word }: { agentIds: string; word: string }) {
   const agents = agentStore.use();
   const names = nameStore.use();
   return (
     <>
-      until{" "}
+      {word}{" "}
       {agentIds.split(",").map((id, i) => (
         <span key={id}>
           {i > 0 && " or "}
@@ -144,11 +144,11 @@ function UntilAgents({ agentIds }: { agentIds: string }) {
   );
 }
 
-function UntilThreadAnswer({ threadId }: { threadId: string }) {
+function UntilThreadAnswer({ threadId, word }: { threadId: string; word: string }) {
   const t = threadStore.use().find(x => x.id === threadId);
   return (
     <>
-      until you answer in{" "}
+      {word} you answer in{" "}
       <Chip href={`#thread/${threadId}`} title={t?.title ?? threadId} icon={<MessagesSquare className="size-3 text-link" />} muted={!t}>
         {t?.title ?? threadId}
       </Chip>
@@ -156,30 +156,39 @@ function UntilThreadAnswer({ threadId }: { threadId: string }) {
   );
 }
 
-function WaitSentence({ wait }: { wait: Wait }) {
+function WaitSentence({ wait, word = "until" }: { wait: Wait; word?: string }) {
   switch (wait.kind) {
     case "until": {
-      return <UntilShell wait={wait} />;
+      return <UntilShell wait={wait} word={word} />;
     }
     case "agent": {
-      return <UntilAgents agentIds={wait.ref} />;
+      return <UntilAgents agentIds={wait.ref} word={word} />;
     }
     case "thread": {
-      return <UntilThreadAnswer threadId={wait.ref} />;
+      return <UntilThreadAnswer threadId={wait.ref} word={word} />;
     }
     case "approval": {
-      return <>until <PrChip pr={wait.ref} /> is approved</>;
+      return <>{word} <PrChip pr={wait.ref} /> is approved</>;
     }
     case "ci": {
-      return <>until CI finishes on <CiTarget target={wait.ref} /></>;
+      return <>{word} CI finishes on <CiTarget target={wait.ref} /></>;
     }
     case "slack": {
-      return <>until someone posts in <SlackTarget target={wait.ref} /></>;
+      return <>{word} someone posts in <SlackTarget target={wait.ref} /></>;
     }
     default: {
       return <>on {wait.kind}:{wait.ref}</>;
     }
   }
+}
+
+export function WakesWhen({ wait }: { wait: Wait | null | undefined }) {
+  if (!wait || wait.kind === "done") return <>It wakes when a message reaches it.</>;
+  return (
+    <>
+      It wakes <WaitSentence wait={wait} word="when" />.
+    </>
+  );
 }
 
 export function Waiting({ wait, className, lead = "Waiting" }: { wait?: Wait | null | undefined; className?: string; lead?: string }) {

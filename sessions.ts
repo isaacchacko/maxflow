@@ -19,6 +19,8 @@ export type Session = {
   transcript?: string;
   archived?: boolean;
   asleep?: string;
+  sleptAt?: number;
+  sleepHeld?: { what: string[]; at: number };
   claudeUp?: boolean;
   sentry?: boolean;
   wait?: Wait;
