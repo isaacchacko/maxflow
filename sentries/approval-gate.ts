@@ -40,7 +40,7 @@ export function mergeHoldWhy(pr: string, list: Restriction[] = loadRestrictions(
   return mode === "allow" ? undefined : `"${restriction?.label ?? "pr-merge"}" is set to ${mode}, so Liudvikas isn't asked to approve it for you; run b yourself once you've looked`;
 }
 
-// constraint: the b endpoint approves as Liudvikas outside any agent tool call, so the restrictions hook never sees it; this asks the server's enforce, which opens Isaac's ask thread and hands back his one-time pass
+// constraint: the b endpoint approves outside any agent tool call, so the restrictions hook never sees it
 export async function mayApprove(pr: string, list: Restriction[] = loadRestrictions()): Promise<Approval> {
   const { mode, restriction } = resolve(list, { tool: "Bash", input: { command: approveCommand(pr) } });
   if (mode === "allow") return { decision: "allow" };
