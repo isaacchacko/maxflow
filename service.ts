@@ -47,6 +47,7 @@ const LAUNCHD_BOOTOUT_POLLS = 20;
 
 function installLaunchd(bun: string, path: string, sentriesToRun: string) {
   mkdirSync(join(LAUNCHD_PLIST, ".."), { recursive: true });
+  /* eslint-disable unicorn/prefer-https -- Apple's plist DOCTYPE system identifier is this exact http URL; launchd matches it as text */
   writeFileSync(LAUNCHD_PLIST, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -62,6 +63,7 @@ function installLaunchd(bun: string, path: string, sentriesToRun: string) {
   <key>StandardErrorPath</key><string>${LOG}</string>
 </dict></plist>
 `);
+  /* eslint-enable unicorn/prefer-https */
   run(["launchctl", "bootout", LAUNCHD_SERVICE]);
   // constraint: launchctl bootout returns before the old job is gone, and bootstrapping over it fails with an I/O error
   for (let i = 0; i < LAUNCHD_BOOTOUT_POLLS && run(["launchctl", "print", LAUNCHD_SERVICE]).ok; i++) Bun.sleepSync(250);

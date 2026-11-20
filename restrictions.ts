@@ -1,6 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { STATE_DIR } from "./instance";
+import { hasState, readStateText, writeStateText } from "./state";
 import { CATALOG_WORDS, SEED } from "./restrictions-catalog";
 import { commandStarts, shellText } from "./restrictions-shell";
 import type { Call, Person, Restriction } from "./shared/restrictions-types";
@@ -14,18 +13,9 @@ const REACHES: ReadonlySet<string> = new Set(["slack", "email", "github"]);
 
 const RESTRICTIONS_FILE = "restrictions.json";
 const SEEDED_IDS_FILE = "restrictions-seeded.json";
-const stateFile = (name: string) => `${STATE_DIR}/${name}`;
 const writeStateFile = (name: string, text: string) => {
-  writeFileSync(stateFile(name), text);
+  writeStateText(name, text);
 };
-
-function readText(name: string): string | null {
-  try {
-    return readFileSync(stateFile(name), "utf8");
-  } catch {
-    return null;
-  }
-}
 
 const isSet = (value: string | null | undefined): value is string => value !== undefined && value !== null && value !== "";
 const hasAny = (values: readonly unknown[] | undefined) => (values?.length ?? 0) > 0;
@@ -93,11 +83,11 @@ function mergeCatalog(list: Restriction[], seeded: Set<string>): Restriction[] {
 }
 
 export function loadRestrictions(): Restriction[] {
-  if (!existsSync(stateFile(RESTRICTIONS_FILE))) return seedCatalog();
-  const text = readText(RESTRICTIONS_FILE);
-  const list = text === null ? undefined : parsedList(text);
-  if (text === null || list === undefined) return structuredClone(SEED);
-  const seededText = readText(SEEDED_IDS_FILE) ?? "";
+  if (!hasState(RESTRICTIONS_FILE)) return seedCatalog();
+  const text = readStateText(RESTRICTIONS_FILE);
+  const list = text === undefined ? undefined : parsedList(text);
+  if (text === undefined || list === undefined) return structuredClone(SEED);
+  const seededText = readStateText(SEEDED_IDS_FILE) ?? "";
   const seeded = seededIdsIn(seededText, list);
   const merged = mergeCatalog(list, seeded);
   // constraint: every hook process loads this on every tool call, so it writes only what the catalog changed
