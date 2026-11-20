@@ -4,11 +4,10 @@ import { liveStore } from "@/store";
 import { megabytes } from "@/views/stats/Resources";
 import { useJson } from "@/views/stats/load";
 
-type Brief = { at: number; total: { rssMb: number; cpu: number }; machine: { totalMb: number; usedMb: number; swapUsedMb: number; swapTotalMb: number } };
-
 const SWAPPING_HARD = 0.85;
 
 export function ResourceReadout({ open }: { open: boolean }) {
+  type Brief = { at: number; total: { rssMb: number; cpu: number }; machine: { totalMb: number; usedMb: number; swapUsedMb: number; swapTotalMb: number } };
   const isLive = liveStore.use();
   const brief = useJson<Brief | null>(isLive ? "/api/stats/resources?brief" : undefined, () => true).value;
   if (!brief) return null;

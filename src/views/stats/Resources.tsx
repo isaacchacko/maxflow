@@ -17,7 +17,7 @@ const KIND_LABEL: Record<Group["kind"], string> = { server: "server", agent: "ag
 export const megabytes = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(mb >= 10_240 ? 0 : 1)} GB` : `${Math.round(mb)} MB`);
 const percent = (cpu: number) => `${cpu >= 10 ? Math.round(cpu) : cpu.toFixed(1)}%`;
 
-export const useResources = (live: boolean) => useJson<Resources | null>(live ? "/api/stats/resources" : undefined, () => true);
+export const useResources = (isLive: boolean) => useJson<Resources | null>(isLive ? "/api/stats/resources" : undefined, () => true);
 
 export function Sparkline({ values, className, max }: { values: number[]; className?: string; max?: number }) {
   if (values.length < 2) return <div className={cn("rounded-md bg-[var(--viz-track)]", className)} />;

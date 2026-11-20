@@ -210,7 +210,7 @@ async function fetchAndCache(repo: string, w: Week, key: string, hit: GhWeek | u
   }
 }
 
-function refresh(repo: string, w: Week, key: string) {
+async function refresh(repo: string, w: Week, key: string) {
   const running = inflight.get(key);
   if (running) return running;
   const p = fetchAndCache(repo, w, key, ghCache[key]);

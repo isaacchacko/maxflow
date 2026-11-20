@@ -19,7 +19,7 @@ const PS_TIMEOUT_MS = 4000;
 const PROCS_SHOWN = 8;
 const MB = 1024;
 const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+([\d.]+)\s+(.*)$/;
-const SWAP_FIELD = (name: string) => new RegExp(`${name} = ([\\d.]+)M`);
+const SWAP_FIELD = (name: string) => new RegExp(String.raw`${name} = ([\d.]+)M`);
 const CHROME = /Google Chrome|Chromium|\/chrome(\s|$)/;
 const CHROME_TYPE = /--type=([\w-]+)/;
 const INTERPRETERS = new Set(["node", "bun", "python", "python3", "deno", "sh", "bash", "zsh"]);
@@ -93,10 +93,9 @@ function usageOf(pids: number[], procs: Map<number, Proc>): Usage {
 
 function procRows(pids: number[], procs: Map<number, Proc>): ProcRow[] {
   return pids
-    .flatMap((pid) => {
-      const p = procs.get(pid);
-      return p ? [{ pid, name: nameOf(p.args), rssMb: Math.round(p.rssKb / MB), cpu: round(p.cpu) }] : [];
-    })
+    .map((pid) => procs.get(pid))
+    .filter((p) => p !== undefined)
+    .map((p) => ({ pid: p.pid, name: nameOf(p.args), rssMb: Math.round(p.rssKb / MB), cpu: round(p.cpu) }))
     .toSorted((a, b) => b.rssMb - a.rssMb)
     .slice(0, PROCS_SHOWN);
 }
@@ -127,12 +126,12 @@ async function machine(): Promise<Machine> {
   const totalMb = Math.round(totalmem() / MB / MB);
   if (process.platform === "linux") {
     const info = await Bun.file("/proc/meminfo").text();
-    const kb = (key: string) => Number(new RegExp(`^${key}:\\s+(\\d+)`, "m").exec(info)?.[1] ?? 0);
+    const kb = (key: string) => Number(new RegExp(String.raw`^${key}:\s+(\d+)`, "m").exec(info)?.[1] ?? 0);
     return { totalMb, usedMb: Math.round((kb("MemTotal") - kb("MemAvailable")) / MB), swapUsedMb: Math.round((kb("SwapTotal") - kb("SwapFree")) / MB), swapTotalMb: Math.round(kb("SwapTotal") / MB) };
   }
   const [vm, swap] = await Promise.all([output(["vm_stat"]), output(["sysctl", "-n", "vm.swapusage"])]);
   const pageBytes = Number(/page size of (\d+) bytes/.exec(vm)?.[1] ?? 16_384);
-  const pages = (label: string) => Number(new RegExp(`${label}:\\s+(\\d+)`).exec(vm)?.[1] ?? 0);
+  const pages = (label: string) => Number(new RegExp(String.raw`${label}:\s+(\d+)`).exec(vm)?.[1] ?? 0);
   const availableMb = ((pages("Pages free") + pages("Pages inactive") + pages("Pages speculative")) * pageBytes) / MB / MB;
   return {
     totalMb,
@@ -211,7 +210,9 @@ async function sampleOnce() {
 
 export function keepSamplingResources() {
   void sampleOnce();
-  setInterval(() => void sampleOnce(), EVERY_MS);
+  setInterval(() => {
+    void sampleOnce();
+  }, EVERY_MS);
 }
 
 export const resources = () => sampled.latest;
