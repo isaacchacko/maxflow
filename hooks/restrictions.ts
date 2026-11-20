@@ -61,7 +61,7 @@ const deny = (reason: string) => {
   console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } }));
 };
 
-const refusal = gateRefusal(call.tool, call.input);
+const refusal = gateRefusal(call);
 if (refusal !== undefined) {
   deny(refusal);
   process.exit(0);

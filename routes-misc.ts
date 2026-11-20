@@ -169,7 +169,7 @@ async function verdictForTheRestrictionsHookWithTheSessionsObjective(req: Reques
   const { objective: _asked, ...call } = callOf(await jsonBody(req));
   const s = sender(req);
   if (!s || call.tool === "") return Response.json({ decision: "allow" });
-  const refusal = gateRefusal(call.tool, call.input);
+  const refusal = gateRefusal(call);
   if (refusal !== undefined) return Response.json({ decision: "deny", reason: refusal });
   const objective = s.role?.objective;
   return Response.json(enforce({ session: s.id, ...call, ...(objective !== undefined && { objective }) }, enforcing));

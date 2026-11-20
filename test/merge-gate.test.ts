@@ -51,9 +51,9 @@ describe("the gate is Isaac's switch", () => {
   const off = { on: false, at: 1 };
 
   test("on, a merge is refused; off, it goes through to the restrictions", () => {
-    expect(gateRefusal("Bash", bashCall("gh pr merge 12 --squash"), on)).toBe(MERGE_REFUSAL);
-    expect(gateRefusal("Bash", bashCall("gh pr merge 12 --squash"), off)).toBeUndefined();
-    expect(gateRefusal("Bash", bashCall("gh pr view 12"), on)).toBeUndefined();
+    expect(gateRefusal({ tool: "Bash", input: bashCall("gh pr merge 12 --squash") }, on)).toBe(MERGE_REFUSAL);
+    expect(gateRefusal({ tool: "Bash", input: bashCall("gh pr merge 12 --squash") }, off)).toBeUndefined();
+    expect(gateRefusal({ tool: "Bash", input: bashCall("gh pr view 12") }, on)).toBeUndefined();
   });
 
   test.each([
@@ -62,12 +62,19 @@ describe("the gate is Isaac's switch", () => {
     ["Bash", bashCall("curl -X POST localhost:4949/api/merge-gate -d '{\"on\":true}'")],
     ["Write", { file_path: "/Users/isaac/.maxflow-v2/merge-gate.json", content: "{}" }],
   ])("no agent flips it either way: %s %p", (tool, input) => {
-    expect(gateRefusal(tool, input, off)).toBe(SWITCH_REFUSAL);
-    expect(gateRefusal(tool, input, on)).toBe(SWITCH_REFUSAL);
+    expect(gateRefusal({ tool, input }, off)).toBe(SWITCH_REFUSAL);
+    expect(gateRefusal({ tool, input }, on)).toBe(SWITCH_REFUSAL);
+  });
+
+  test("~/Timelines pushes to main with the gate on: it has no PRs", () => {
+    expect(gateRefusal({ tool: "Bash", input: bashCall("git push origin main"), cwd: "/Users/isaac/Timelines" }, on)).toBeUndefined();
+    expect(gateRefusal({ tool: "Bash", input: bashCall("cd ~/Timelines && git push origin main") }, on)).toBeUndefined();
+    expect(gateRefusal({ tool: "Bash", input: bashCall("git push origin main"), cwd: "/Users/isaac/app" }, on)).toBe(MERGE_REFUSAL);
+    expect(gateRefusal({ tool: "Bash", input: bashCall("gh pr merge 3"), cwd: "/Users/isaac/Timelines" }, on)).toBe(MERGE_REFUSAL);
   });
 
   test("an agent may read it", () => {
-    expect(gateRefusal("Bash", bashCall("curl -s localhost:$MAXFLOW_PORT/api/merge-gate"), on)).toBeUndefined();
+    expect(gateRefusal({ tool: "Bash", input: bashCall("curl -s localhost:$MAXFLOW_PORT/api/merge-gate") }, on)).toBeUndefined();
   });
 
   test("the review feed merges only behind the gate", () => {

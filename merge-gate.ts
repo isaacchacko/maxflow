@@ -6,7 +6,10 @@ import { readStateJson, writeStateJson } from "./state";
 export const GATE_FILE = "merge-gate.json";
 export type MergeGate = { on: boolean; at: number };
 
-const MERGE_COMMANDS = [/^gh\s+pr\s+merge\b(?![^\n;&|]*--disable-auto)/, /^git\s+push\b[^\n;&|]*[\s:+](main|master)(\s|$)/m];
+const MERGE_COMMANDS = [/^gh\s+pr\s+merge\b(?![^\n;&|]*--disable-auto)/];
+const PUSH_TO_MAIN = /^git\s+push\b[^\n;&|]*[\s:+](main|master)(\s|$)/m;
+// constraint: ~/Timelines is an auto-committed log with no PRs, so it pushes to main with the gate on
+const NO_PR_REPO = /(^|\/)Timelines(\/|$|\s)/;
 const MERGE_ANYWHERE = [
   /\/pulls\/\d+\/merge\b/, /\brepos\/[\w.-]+\/[\w.-]+\/merges\b/, /\b(mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|mergeBranch)\b/,
   /(localhost|127\.0\.0\.1|MAXFLOW_PORT\}?|:\d{2,5})\S*\/api\/prs\/merge\b/,
@@ -29,16 +32,18 @@ export function setMergeGate(isOn: boolean): MergeGate {
   return gate;
 }
 
-function isMergeCommand(command: string) {
+function isMergeCommand(command: string, cwd = "") {
   const shown = shellText(command);
-  const isAtACommandStart = commandStarts(shown).some((at) => MERGE_COMMANDS.some((re) => re.test(shown.slice(at))));
+  const isNoPrRepo = NO_PR_REPO.test(cwd) || NO_PR_REPO.test(command);
+  const gated = isNoPrRepo ? MERGE_COMMANDS : [...MERGE_COMMANDS, PUSH_TO_MAIN];
+  const isAtACommandStart = commandStarts(shown).some((at) => gated.some((re) => re.test(shown.slice(at))));
   return isAtACommandStart || MERGE_ANYWHERE.some((re) => re.test(command));
 }
 
-export function isMergeCall(tool: string, input: Record<string, unknown> | undefined) {
+export function isMergeCall(tool: string, input: Record<string, unknown> | undefined, cwd?: string) {
   if (MERGE_TOOLS.some((re) => re.test(tool))) return true;
   const command = input?.["command"];
-  return tool === "Bash" && typeof command === "string" && isMergeCommand(command);
+  return tool === "Bash" && typeof command === "string" && isMergeCommand(command, cwd);
 }
 
 export function isSwitchWrite(tool: string, input: Record<string, unknown> | undefined) {
@@ -48,7 +53,9 @@ export function isSwitchWrite(tool: string, input: Record<string, unknown> | und
   return tool === "Bash" && typeof command === "string" && SWITCH_WRITE.some((re) => re.test(command));
 }
 
-export function gateRefusal(tool: string, input: Record<string, unknown> | undefined, gate = mergeGate()) {
+type GatedCall = { tool: string; input?: Record<string, unknown> | undefined; cwd?: string | undefined };
+
+export function gateRefusal({ tool, input, cwd }: GatedCall, gate = mergeGate()) {
   if (isSwitchWrite(tool, input)) return SWITCH_REFUSAL;
-  return gate.on && isMergeCall(tool, input) ? MERGE_REFUSAL : undefined;
+  return gate.on && isMergeCall(tool, input, cwd) ? MERGE_REFUSAL : undefined;
 }
