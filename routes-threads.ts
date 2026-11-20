@@ -5,7 +5,7 @@ import { type Session, isSentry } from "./sessions";
 import type { Feed, Message, Objective, Thread } from "./model";
 import { isLive, objectives, saveThreads, threads } from "./stores";
 import { dispatch, funnel, live_thread, routersOf } from "./lifecycle";
-import { ISAAC_IN_THREAD, ancestors, mentionsIn, message, pathTitle, postIn, schedulePause, sessionless, tellMembers, unforge, unpause } from "./threads";
+import { ISAAC_IN_THREAD, ancestors, markDone, mentionsIn, message, pathTitle, postIn, schedulePause, sessionless, squash, tellMembers, unforge, unpause } from "./threads";
 import { feedPosts, feedToFunnel, sizeFirst, slackChannels } from "./routing";
 import { mergeThread, subthread, titleOf } from "./objectives";
 import { patch } from "./patch";
@@ -165,6 +165,17 @@ async function foldADuplicateIn(req: Request, _url: URL, match: RegExpExecArray)
   return Response.json(into);
 }
 
+async function suggestDoneForHimToConfirm(req: Request, _url: URL, match: RegExpExecArray): Promise<Response | undefined> {
+  if (req.method !== "POST") return undefined;
+  const t = live_thread(threadAt(match));
+  const from = sender(req);
+  if (!t || !from) return new Response("a thread, marked done by a session", { status: 404 });
+  const outcome = squash(textOf(await jsonBody(req), "outcome") ?? "");
+  if (outcome === "") return new Response("outcome: one line saying what was done", { status: 400 });
+  const refusal = markDone(t, from, outcome);
+  return refusal === undefined ? Response.json(t) : new Response(refusal, { status: 409 });
+}
+
 async function whatTheRouterIsDoingOnHisAnswer(req: Request, _url: URL, match: RegExpExecArray): Promise<Response | undefined> {
   if (req.method !== "POST") return undefined;
   const t = threadAt(match);
@@ -273,6 +284,7 @@ const ROUTES: Route[] = [
   matching(/^\/api\/threads\/([\w-]+)\/split$/, splitAnotherTopicOut),
   matching(/^\/api\/threads\/([\w-]+)\/merge$/, foldADuplicateIn),
   matching(/^\/api\/threads\/([\w-]+)\/status$/, whatTheRouterIsDoingOnHisAnswer),
+  matching(/^\/api\/threads\/([\w-]+)\/done$/, suggestDoneForHimToConfirm),
   matching(/^\/api\/threads\/([\w-]+)\/objective$/, rehomeWithItsSubthreads),
   matching(/^\/api\/threads\/([\w-]+)$/, isaacsOwnThreadEditFromTheBrowser),
 ];

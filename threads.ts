@@ -103,7 +103,7 @@ function handToOwner(t: Thread, m: Message, woke: string, to: Session[]) {
   dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text: m.text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(m.text)}\n[maxflow] ${howToAnswer} While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line.${woke}${mentionsIn(m.text)}` });
 }
 function handHisPost(t: Thread, m: Message, woke: string) {
-  patch(t, { resolved: undefined });
+  patch(t, { resolved: undefined, done: undefined });
   unpause(t);
   const owner = threadOwner(t);
   const to = owner ? [owner] : [];
@@ -200,13 +200,22 @@ export function ask(s: Session, text: string, { re, dflt, isFresh }: AskOptions 
   const t = found ?? newAskThread(s, text);
   if (!t.routers.includes(s.id)) t.routers.push(s.id);
   t.messages.push(message(s.id, isFilled(dflt) ? `${text}\n\nIf you haven't answered in ${DEFAULT_AFTER_H}h, I go ahead with: ${dflt}` : text));
-  patch(t, { asks: { session: s.id, since: Date.now(), ...(isFilled(dflt) && { default: dflt }) }, resolved: undefined });
+  patch(t, { asks: { session: s.id, since: Date.now(), ...(isFilled(dflt) && { default: dflt }) }, resolved: undefined, done: undefined });
   unpause(t);
   saveThreads();
   publish(`thread/${t.id}`, { thread: t.id, from: s.id, asks: true });
   publish(`ask/${t.id}`, { thread: t.id, session: s.id, text: headline(text) });
   settleTasks();
   return t;
+}
+export function markDone(t: Thread, from: Session, outcome: string): string | undefined {
+  if (t.resolved) return `${t.id} is resolved already`;
+  if (t.asks) return `${t.id} has an open ask waiting on him; it isn't done until he answers it`;
+  postIn(t, from, `Done: ${outcome}`);
+  patch(t, { done: { at: Date.now(), by: from.id, outcome } });
+  saveThreads();
+  publish(`thread/${t.id}`, { thread: t.id, done: true });
+  return undefined;
 }
 export function answered(t: Thread) {
   patch(t, { asks: undefined });

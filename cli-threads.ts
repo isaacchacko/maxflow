@@ -56,6 +56,11 @@ async function postToThread(args: string[]) {
   await post(`/api/threads/${argAt(args, 1)}/messages`, { text: await withImages(words, args), as: flag(args, "--as") });
 }
 
+async function suggestDone(args: string[]) {
+  await post(`/api/threads/${argAt(args, 1)}/done`, { outcome: args.slice(2).join(" ") });
+  console.log(`${argAt(args, 1)} marked done; it waits in his "Done, confirm" list until he resolves it, and his reply reopens it`);
+}
+
 async function mergeThread(args: string[]) {
   const t = replyOf(await post(`/api/threads/${argAt(args, 1)}/merge`, { into: argAt(args, 2) }));
   console.log(`${argAt(args, 1)} merged into ${str(t, "id")} (${listAt(t, "messages").length} messages)`);
@@ -72,7 +77,8 @@ export const threadVerbs: Verb[] = [
   { matches: (verb, args) => verb === "thread" && args[0] === "new" && isTruthy(flag(args, "--parent")), run: newSubthread },
   { matches: (verb, args) => verb === "thread" && args[0] === "new" && hasArg(args, 1), run: newThread },
   { matches: (verb, args) => verb === "thread" && args[0] === "read" && hasArg(args, 1), run: readThread },
-  { matches: (verb, args) => verb === "thread" && (args[0] === "post" || args[0] === "done") && hasArg(args, 2), run: postToThread },
+  { matches: (verb, args) => verb === "thread" && args[0] === "post" && hasArg(args, 2), run: postToThread },
+  { matches: (verb, args) => verb === "thread" && args[0] === "done" && hasArg(args, 2), run: suggestDone },
   { matches: (verb, args) => verb === "thread" && args[0] === "merge" && hasArg(args, 2), run: mergeThread },
   { matches: (verb, args) => verb === "thread" && args[0] === "move" && hasArg(args, 2), run: moveThread },
   {

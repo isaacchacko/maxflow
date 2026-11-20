@@ -6,7 +6,7 @@ import { enforce } from "./restrictions-enforce";
 import { type Session, isSentry, sessions } from "./sessions";
 import type { Block, Thread } from "./model";
 import { names, saveThreads, threads } from "./stores";
-import { createSession, live_thread } from "./lifecycle";
+import { createSession, isReachable, live_thread, routersOf } from "./lifecycle";
 import { ask, enforcing, postIn, sessionless } from "./threads";
 import { describe } from "./world-session";
 import { externalSignal, feedMore } from "./routing";
@@ -182,10 +182,19 @@ function sameAskRefusal(same: Thread): Response {
   );
 }
 
+function routerToAskInstead(s: Session): Session | undefined {
+  if (s.role?.role !== "worker") return undefined;
+  const parent = sessions.get(s.role.parent ?? "");
+  return isReachable(parent) && parent.role?.role === "router" ? parent : routersOf(s.role.objective).at(-1);
+}
+
 async function openAThreadWaitingOnHim(req: Request): Promise<Response> {
   const body = await jsonBody(req);
   const s = sender(req);
   if (!s) return new Response("ask from inside a maxflow session ($MAXFLOW_SESSION)", { status: 400 });
+  const router = routerToAskInstead(s);
+  if (router)
+    return new Response(`Workers don't ask Isaac: ask your router "${router.name}" (${router.id}, \`${CLI} who router\`) with SendMessage to mf-${router.id} or \`${CLI} notify ${router.id} '<question>'\`. It decides, or asks him itself.`, { status: 403 });
   const text = textOf(body, "text")?.trim() ?? "";
   if (text === "") return new Response("text required", { status: 400 });
   const [re, dflt] = [textOf(body, "re")?.trim(), textOf(body, "default")?.trim()];

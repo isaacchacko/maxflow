@@ -1,4 +1,4 @@
-import { AlarmClock, Check, ChevronDown } from "lucide-react";
+import { AlarmClock, Check, CheckCheck, ChevronDown, ChevronRight } from "lucide-react";
 import { Fragment, useCallback, useRef, useState } from "react";
 import { FitLabel, FitRow } from "@/components/Fit";
 import { cn, hasText } from "@/lib/utils";
@@ -97,6 +97,46 @@ function NeedsYouStrip({ asks, onShow }: { asks: Row[]; onShow: (id: string) => 
   );
 }
 
+const awaitsHisConfirm = (t: Thread) => t.done !== undefined && !t.resolved;
+
+function DoneConfirm({ done, onOpen }: { done: Thread[]; onOpen: (id: string) => void }) {
+  const [isOpen, setOpen] = useState(false);
+  if (done.length === 0) return null;
+  const resolveAll = () => {
+    for (const t of done) void setResolved(t.id, true);
+  };
+  return (
+    <section data-agent="inbox-done" className="flex shrink-0 flex-col border-b px-3 py-1">
+      <div className="flex items-center gap-2 px-2 py-1 text-sm">
+        <button onClick={() => setOpen(v => !v)} className="flex min-w-0 items-center gap-1.5 text-muted-foreground hover:text-foreground">
+          {isOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+          <span className="font-medium">Done, confirm ({done.length})</span>
+        </button>
+        <button data-agent="inbox-resolve-all" onClick={resolveAll} className="ml-auto flex shrink-0 items-center gap-1.5 rounded-full border bg-card px-2.5 py-0.5 text-xs text-muted-foreground hover:border-ring hover:text-foreground">
+          <CheckCheck className="size-3" />
+          Resolve all
+        </button>
+      </div>
+      {isOpen && (
+        <ol className="flex flex-col pb-1">
+          {done.map(t => (
+            <li key={t.id} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-black/[0.04]">
+              <button onClick={() => onOpen(t.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                <Avatar from={t.done?.by ?? ""} small />
+                <span className="shrink-0 truncate font-medium">{t.title}</span>
+                <Rich still text={t.done?.outcome ?? ""} className="min-w-0 truncate text-muted-foreground" />
+              </button>
+              <button onClick={() => void setResolved(t.id, true)} title="Resolve" aria-label={`Resolve ${t.title}`} className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-black/[0.06] hover:text-foreground">
+                <Check className="size-3.5" />
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
 type FilterPill = { count: number; isOn: boolean; onToggle: () => void };
 
 function InboxHeader({ replied, onNextReplied, resolved, paused }: { replied: number; onNextReplied: () => void; resolved: FilterPill; paused: FilterPill }) {
@@ -161,7 +201,7 @@ function useInboxRows() {
   const [isShowingPaused, setShowingPaused] = useState(false);
   const [keptWhileHere, setKeptWhileHere] = useState<Set<string>>(() => new Set());
   const topLevelAndMovedStubs = [...threads.filter(t => !hasText(t.parentId)), ...movedStore.use()];
-  const isShown = (t: Thread) => (isShowingResolved || !t.resolved || keptWhileHere.has(t.id)) && (isShowingPaused || !t.paused || keptWhileHere.has(t.id));
+  const isShown = (t: Thread) => (!awaitsHisConfirm(t) || keptWhileHere.has(t.id)) && (isShowingResolved || !t.resolved || keptWhileHere.has(t.id)) && (isShowingPaused || !t.paused || keptWhileHere.has(t.id));
   const rows = topLevelAndMovedStubs
     .filter(isShown)
     .map(t => ({ t, first: openerOf(t) }))
@@ -169,7 +209,8 @@ function useInboxRows() {
   const keep = (id: string) => setKeptWhileHere(k => new Set(k).add(id));
   const resolved: FilterPill = { count: topLevelAndMovedStubs.filter(t => t.resolved).length, isOn: isShowingResolved, onToggle: () => setShowingResolved(v => !v) };
   const paused: FilterPill = { count: topLevelAndMovedStubs.filter(t => t.paused).length, isOn: isShowingPaused, onToggle: () => setShowingPaused(v => !v) };
-  return { threads, rows, keep, resolved, paused };
+  const done = topLevelAndMovedStubs.filter(awaitsHisConfirm);
+  return { threads, rows, keep, resolved, paused, done };
 }
 
 function useRowActions(threads: Thread[], keep: (id: string) => void): RowActions {
@@ -234,7 +275,7 @@ function useInboxScroll() {
 
 export function InboxView() {
   const objectives = objectiveStore.use();
-  const { threads, rows, keep, resolved, paused } = useInboxRows();
+  const { threads, rows, keep, resolved, paused, done } = useInboxRows();
   useSeen();
   const seenAt = useSeenAt();
   const asks = rows.filter(r => r.t.asks);
@@ -256,6 +297,7 @@ export function InboxView() {
     <div ref={openInboxUntilItGoes} className="flex h-full flex-col">
       <InboxHeader replied={replied.length} onNextReplied={nextReplied} resolved={resolved} paused={paused} />
       <NeedsYouStrip asks={asks} onShow={show} />
+      <DoneConfirm done={done} onOpen={openThread} />
       <section className="flex min-h-0 flex-1 flex-col">
         <div ref={attachScroll} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-5 pt-0 pb-4">
           {runs.map(run => (

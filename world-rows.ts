@@ -310,6 +310,7 @@ const threadRow = (t: Thread) => ({
   ...openAsk(t),
   taskId: t.task === undefined ? undefined : taskRef(t.task),
   ...(t.resolved && { resolved: { at: iso(t.resolved.at) } }),
+  ...(t.done && { done: { at: iso(t.done.at), by: t.done.by, outcome: t.done.outcome } }),
   ...pausedOf(t),
   ...(t.resurfaced && { resurfaced: { at: iso(t.resurfaced.at), from: t.resurfaced.from } }),
   ...(t.pinned && { pinned: { at: iso(t.pinned.at), order: t.pinned.order } }),
