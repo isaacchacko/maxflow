@@ -6,7 +6,8 @@ import { AgentFace } from "@/components/AgentFace";
 import { useInterval } from "@/lib/effects";
 import { cn, hasText } from "@/lib/utils";
 import { md } from "@/threads/rich/components";
-import { type CanvasNode, markTyping } from "./canvas-api";
+import { type CanvasNode, markTyping, type Proposal } from "./canvas-api";
+import { ProposalCard } from "./CanvasAgent";
 
 export type Selected = { from: string; text: string; near: number };
 export type BoxActions = {
@@ -23,6 +24,7 @@ export type BoxActions = {
   remove: (id: string) => void;
   offerLink: (selected: Selected | undefined, at?: DOMRect) => void;
   startLink: (selected: Selected) => void;
+  settle: (id: string, verdict: "accept" | "reject") => void;
 };
 
 export const BoxContext = createContext<BoxActions | undefined>(undefined);
@@ -33,6 +35,7 @@ const useActions = () => {
 };
 
 const MIN = { width: 80, height: 40 };
+const hasProposal = (node: CanvasNode): node is CanvasNode & { proposal: Proposal } => node.proposal !== undefined;
 const TYPING_BEAT_MS = 2000;
 
 function LinkSpan({ href = "", children }: { href?: string | undefined; children?: React.ReactNode }) {
@@ -218,6 +221,7 @@ export function Box({ node, isEditing, isFlashing }: { node: CanvasNode; isEditi
           <path d="M9 3 L3 9 M9 6 L6 9" stroke="currentColor" strokeWidth="1.2" />
         </svg>
       </div>
+      {hasProposal(node) && <ProposalCard path={actions.path} node={node} onSettle={(verdict) => actions.settle(node.id, verdict)} />}
     </div>
   );
 }

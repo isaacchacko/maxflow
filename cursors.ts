@@ -56,7 +56,7 @@ function boxEdit(file: string, id: string, body: Record<string, unknown>): Aim {
   const box = [boxOf(file, id)];
   const holds = [`canvas:${file}`];
   const onPlane = planeAt(body["x"], body["y"]);
-  if (typeof body["text"] === "string") return { gesture: "edit", action: "edit box", to: box, holds };
+  if (["text", "append", "find"].some((key) => typeof body[key] === "string")) return { gesture: "edit", action: "edit box", to: box, holds };
   if (body["width"] !== undefined || body["height"] !== undefined || !onPlane) return { gesture: "edit", action: "resize box", to: box, holds };
   return { gesture: "drag", action: "move box", from: box, to: [`canvas:plane:${file}`], onPlane, holds };
 }
@@ -73,9 +73,9 @@ const CANVAS_RULES: Rule[] = [
   {
     method: "POST",
     path: /^\/api\/canvas\/([^/]+)\/nodes$/,
-    aim: (m, { body, reply }) => {
+    aim: (m, { reply }) => {
       const file = canvasFile(m[1] ?? "");
-      const onPlane = planeAt(body["x"], body["y"]);
+      const onPlane = planeAt(reply["x"], reply["y"]);
       return { gesture: "create", action: "add box", to: [boxOf(file, reply["id"])], into: [`canvas:plane:${file}`], ...(onPlane && { onPlane }), holds: [`canvas:${file}`] };
     },
   },
@@ -86,6 +86,14 @@ const CANVAS_RULES: Rule[] = [
     aim: m => {
       const file = canvasFile(m[1] ?? "");
       return { gesture: "delete", action: "delete box", to: [boxOf(file, m[2])], holds: [`canvas:${file}`] };
+    },
+  },
+  {
+    method: "POST",
+    path: /^\/api\/canvas\/([^/]+)\/nodes\/([\w-]+)\/propose$/,
+    aim: (m) => {
+      const file = canvasFile(m[1] ?? "");
+      return { gesture: "create", action: "propose", to: [`canvas:proposal:${file}:${m[2] ?? ""}`], into: [boxOf(file, m[2])], holds: [`canvas:${file}`] };
     },
   },
   {

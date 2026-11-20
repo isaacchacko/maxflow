@@ -1,18 +1,23 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { freeSpotNear, heightFor, isFree } from "./canvas-place";
 import { DOCS_DIR, saveFile, vaultPath } from "./docs";
 import { mergeText } from "./shared/merge-text";
 
-// constraint: the file is JSON Canvas (jsoncanvas.org), which Obsidian opens too; author, who made or last edited a box, is our only addition
-export type CanvasNode = { id: string; type: "text"; text: string; x: number; y: number; width: number; height: number; color?: string; author?: string };
-export type Canvas = { nodes: CanvasNode[]; edges: { id: string; fromNode: string; toNode: string }[] };
+export type Proposal = { text: string; base: string; author: string; at: number };
+// constraint: the file is JSON Canvas (jsoncanvas.org), which Obsidian opens too; author (who made or last edited a box) and proposal are our only additions
+export type CanvasNode = { id: string; type: "text"; text: string; x: number; y: number; width: number; height: number; color?: string; author?: string; proposal?: Proposal };
+export type Edge = { id: string; fromNode: string; toNode: string };
+export type Canvas = { nodes: CanvasNode[]; edges: Edge[] };
 export type Box = Partial<Pick<CanvasNode, "text" | "x" | "y" | "width" | "height" | "color">>;
+export type Change = { author: string; kind: "add" | "edit" | "remove" | "link" | "propose" | "accept" | "reject"; id: string; proposal?: Proposal };
 
 type Held = { canvas: Canvas; mtimeMs: number; rev: number };
 
+export const ISAAC = "isaac";
 const DEFAULT_SIZE = { width: 260, height: 120 };
 const held = new Map<string, Held>();
-const changeListeners = new Set<(path: string, rev: number) => void>();
+const changeListeners = new Set<(path: string, rev: number, change: Change) => void>();
 
 export class CanvasConflict extends Error {
   constructor(readonly node: CanvasNode) {
@@ -21,12 +26,13 @@ export class CanvasConflict extends Error {
 }
 
 export const canvasPath = (path: string) => vaultPath(path.endsWith(".canvas") ? path : `${path}.canvas`);
-export const onCanvasChange = (listener: (path: string, rev: number) => void) => changeListeners.add(listener);
+export const onCanvasChange = (listener: (path: string, rev: number, change: Change) => void) => changeListeners.add(listener);
+export const isHis = (node: CanvasNode) => (node.author ?? ISAAC) === ISAAC;
 const newId = () => crypto.randomUUID().replaceAll("-", "").slice(0, 16);
 const linkTo = (id: string) => new RegExp(String.raw`\[([^\]]*)\]\(#${id}\)`, "g");
 
 function parsed(text: string): Canvas {
-  const raw = JSON.parse(text === "" ? "{}" : text) as { nodes?: (Omit<CanvasNode, "type"> & { type: string })[]; edges?: Canvas["edges"] };
+  const raw = JSON.parse(text === "" ? "{}" : text) as { nodes?: (Omit<CanvasNode, "type"> & { type: string })[]; edges?: Edge[] };
   return { nodes: (raw.nodes ?? []).filter((n): n is CanvasNode => n.type === "text"), edges: raw.edges ?? [] };
 }
 
@@ -44,17 +50,21 @@ function heldAt(path: string): Held {
   return now;
 }
 
-function save(path: string, was: Held) {
+function save(path: string, was: Held, change: Change) {
   saveFile(path, `${JSON.stringify(was.canvas, null, "\t")}\n`);
   const now = { ...was, mtimeMs: statSync(join(DOCS_DIR, path)).mtimeMs, rev: was.rev + 1 };
   held.set(path, now);
-  for (const listener of changeListeners) listener(path, now.rev);
+  for (const listener of changeListeners) listener(path, now.rev, change);
 }
 
 function nodeIn(h: Held, id: string) {
   const node = h.canvas.nodes.find((n) => n.id === id);
   if (!node) throw new Error(`no box ${id}`);
   return node;
+}
+
+function mayChange(node: CanvasNode, author: string) {
+  if (author !== ISAAC && isHis(node)) throw new Error(`box ${node.id} is isaac's: suggest the change with \`maxflow canvas propose\` instead`);
 }
 
 export function readCanvas(path: string) {
@@ -75,18 +85,27 @@ function placed(box: Box, base: Pick<CanvasNode, "x" | "y" | "width" | "height">
   return { x: finite(box.x, base.x), y: finite(box.y, base.y), width: Math.max(40, finite(box.width, base.width)), height: Math.max(30, finite(box.height, base.height)) };
 }
 
-export function addNode(path: string, box: Box, author: string) {
+function spotFor(h: Held, box: Box, near: CanvasNode | undefined, author: string) {
+  const fitted = box.height === undefined && (box.text ?? "") !== "" ? { height: Math.max(DEFAULT_SIZE.height, heightFor(box.text ?? "", box.width ?? DEFAULT_SIZE.width)) } : {};
+  const rect = placed(box, { x: 0, y: 0, ...DEFAULT_SIZE, ...fitted });
+  if (near) return { ...rect, ...freeSpotNear(near, rect, h.canvas.nodes) };
+  if (author === ISAAC || isFree(rect, h.canvas.nodes)) return rect;
+  return { ...rect, ...freeSpotNear(rect, rect, h.canvas.nodes) };
+}
+
+export function addNode(path: string, box: Box & { near?: string }, author: string) {
   const inVault = canvasPath(path);
   const h = heldAt(inVault);
-  const node: CanvasNode = { id: newId(), type: "text", text: box.text ?? "", ...placed(box, { x: 0, y: 0, ...DEFAULT_SIZE }), ...(box.color !== undefined && { color: box.color }), author };
+  const near = box.near === undefined ? undefined : nodeIn(h, box.near);
+  const node: CanvasNode = { id: newId(), type: "text", text: box.text ?? "", ...spotFor(h, box, near, author), ...(box.color !== undefined && { color: box.color }), author };
   h.canvas.nodes.push(node);
-  save(inVault, h);
+  if (near) h.canvas.edges.push({ id: newId(), fromNode: near.id, toNode: node.id });
+  save(inVault, h, { author, kind: "add", id: node.id });
   return node;
 }
 
 export type Edit = Box & { base?: string; find?: string; replace?: string; append?: string };
 
-const ISAAC = "isaac";
 const TYPING_MS = 5000;
 const typingUntil = new Map<string, number>();
 const typingKey = (path: string, id: string) => `${canvasPath(path)}\n${id}`;
@@ -113,22 +132,23 @@ export function editNode(path: string, id: string, edit: Edit, author: string) {
   const inVault = canvasPath(path);
   const h = heldAt(inVault);
   const node = nodeIn(h, id);
+  mayChange(node, author);
   const text = newText(inVault, node, edit, author);
   if (text === undefined) throw new CanvasConflict(node);
   if (text !== node.text) Object.assign(node, { text, author });
   Object.assign(node, placed(edit, node), edit.color === undefined ? {} : { color: edit.color });
-  save(inVault, h);
+  save(inVault, h, { author, kind: "edit", id });
   return node;
 }
 
-export function removeNode(path: string, id: string) {
+export function removeNode(path: string, id: string, author: string) {
   const inVault = canvasPath(path);
   const h = heldAt(inVault);
-  nodeIn(h, id);
+  mayChange(nodeIn(h, id), author);
   h.canvas.nodes = h.canvas.nodes.filter((n) => n.id !== id);
   h.canvas.edges = h.canvas.edges.filter((e) => e.fromNode !== id && e.toNode !== id);
   for (const n of h.canvas.nodes) n.text = n.text.replace(linkTo(id), "$1");
-  save(inVault, h);
+  save(inVault, h, { author, kind: "remove", id });
   return { id };
 }
 
@@ -148,11 +168,37 @@ export function linkNode(path: string, from: string, { text: phrase, to, near = 
   const inVault = canvasPath(path);
   const h = heldAt(inVault);
   const node = nodeIn(h, from);
+  mayChange(node, author);
   nodeIn(h, to);
   if (phrase.trim() === "" || /[[\]]/.test(phrase)) throw new Error("link text must be plain text without brackets");
   const at = unlinkedAt(node.text, phrase, near);
   if (at === -1) throw new Error(`"${phrase}" isn't unlinked text in box ${from}`);
   Object.assign(node, { text: `${node.text.slice(0, at)}[${phrase}](#${to})${node.text.slice(at + phrase.length)}`, author });
-  save(inVault, h);
+  save(inVault, h, { author, kind: "link", id: from });
+  return node;
+}
+
+export function proposeText(path: string, id: string, text: string, author: string) {
+  const inVault = canvasPath(path);
+  const h = heldAt(inVault);
+  const node = nodeIn(h, id);
+  if (author === ISAAC) throw new Error("isaac edits his boxes directly");
+  if (!isHis(node)) throw new Error(`box ${id} isn't isaac's: edit it directly`);
+  if (text.trim() === "" || text === node.text) throw new Error("a proposal must change the box's text");
+  node.proposal = { text, base: node.text, author, at: Date.now() };
+  save(inVault, h, { author, kind: "propose", id, proposal: node.proposal });
+  return node;
+}
+
+export function settleProposal(path: string, id: string, isAccepted: boolean, author: string) {
+  const inVault = canvasPath(path);
+  const h = heldAt(inVault);
+  const node = nodeIn(h, id);
+  const { proposal } = node;
+  if (author !== ISAAC) throw new Error("only isaac accepts or rejects a proposal");
+  if (!proposal) throw new Error(`box ${id} has no proposal`);
+  Reflect.deleteProperty(node, "proposal");
+  if (isAccepted) Object.assign(node, { text: mergeText(proposal.base, proposal.text, node.text) ?? proposal.text, author: ISAAC });
+  save(inVault, h, { author, kind: isAccepted ? "accept" : "reject", id, proposal });
   return node;
 }

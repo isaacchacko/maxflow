@@ -24,9 +24,19 @@ async function create(args: string[]) {
   console.log(str(made, "path"));
 }
 
+async function placement(args: string[]) {
+  if (args[2] === "--near") return { near: argAt(args, 3), text: await textFrom(args, 4) };
+  return { x: numberAt(args, 2), y: numberAt(args, 3), text: await textFrom(args, 4) };
+}
+
 async function add(args: string[]) {
-  const node = await send(at(argAt(args, 1), "/nodes"), "POST", { x: numberAt(args, 2), y: numberAt(args, 3), text: await textFrom(args, 4) });
+  const node = await send(at(argAt(args, 1), "/nodes"), "POST", await placement(args));
   console.log(str(node, "id"));
+}
+
+async function propose(args: string[]) {
+  await send(at(argAt(args, 1), `/nodes/${argAt(args, 2)}/propose`), "POST", { text: await textFrom(args, 3) });
+  console.log(`proposed new text for ${argAt(args, 2)}; isaac accepts or rejects it on the canvas`);
 }
 
 async function edit(args: string[]) {
@@ -67,6 +77,7 @@ const ACTIONS: Record<string, { run: (args: string[]) => Promise<void>; needs: n
   new: { run: create, needs: 2 },
   add: { run: add, needs: 4 },
   edit: { run: edit, needs: 3 },
+  propose: { run: propose, needs: 3 },
   replace: { run: replace, needs: 4 },
   append: { run: append, needs: 3 },
   move: { run: move, needs: 5 },
@@ -75,14 +86,14 @@ const ACTIONS: Record<string, { run: (args: string[]) => Promise<void>; needs: n
 };
 
 export const CANVAS_USAGE =
-  "yarn canvas show <path> | new <path> | add <path> <x> <y> [text...] | edit <path> <id> [text...] | replace <path> <id> <find> <replacement...> | append <path> <id> [text...] | move <path> <id> <x> <y> [w h] | rm <path> <id> | link <path> <from-id> <to-id> [text...]";
+  "yarn canvas show <path> | new <path> | add <path> <x> <y> | --near <id> [text...] | propose <path> <isaac's box id> [new text...] | edit <path> <id> [text...] | replace <path> <id> <find> <replacement...> | append <path> <id> [text...] | move <path> <id> <x> <y> [w h] | rm <path> <id> | link <path> <from-id> <to-id> [text...]";
 
 export const canvasVerbs: Verb[] = [
   {
     matches: (verb) => verb === "canvas",
     run: async (args) => {
       const action = ACTIONS[argAt(args, 0)];
-      if (!action || !hasArg(args, action.needs - 1)) fail(`usage: ${CANVAS_USAGE}\n(text comes from stdin when omitted. edit replaces the whole text and is refused while isaac is typing in that box; replace and append merge with his typing.
+      if (!action || !hasArg(args, action.needs - 1)) fail(`usage: ${CANVAS_USAGE}\n(text comes from stdin when omitted. An agent changes only boxes that aren't isaac's; on his it proposes. edit replaces the whole text and is refused while isaac is typing in that box; replace and append merge with his typing. add --near puts the box in free space beside that box, joined by a line.
 link marks the first unlinked occurrence of text in <from-id> as [text](#<to-id>))`);
       await action.run(args);
     },

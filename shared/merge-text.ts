@@ -13,7 +13,7 @@ function lcsTable(a: string[], b: string[]) {
   return table;
 }
 
-type Step = { kind: "same" | "drop" | "add"; token: string };
+export type Step = { kind: "same" | "drop" | "add"; token: string };
 
 type Table = Uint32Array[];
 const scoreAt = (table: Table, i: number, j: number) => table[i]?.[j] ?? 0;
@@ -89,4 +89,10 @@ export function mergeText(base: string, mine: string, theirs: string): string | 
     at = Math.max(at, h.end);
   }
   return merged + base.slice(at);
+}
+
+export function tokenDiff(base: string, changed: string): Step[] {
+  const [a, b] = [tokensOf(base), tokensOf(changed)];
+  if (a.length * b.length > MAX_TABLE) return [{ kind: "drop", token: base }, { kind: "add", token: changed }];
+  return stepsOf(a, b);
 }

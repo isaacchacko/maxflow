@@ -3,7 +3,8 @@ import { useState } from "react";
 import { useEventListener } from "@/lib/effects";
 import { cn, hasText } from "@/lib/utils";
 import { type Camera, fitting, useCamera } from "./camera";
-import { type CanvasNode, linkBox } from "./canvas-api";
+import { type Agent, askAgent, type CanvasNode, linkBox, settleProposal } from "./canvas-api";
+import { AgentChip, Edges, OffscreenMarkers, useFresh } from "./CanvasAgent";
 import { messageOf, useBoxes, useEditing } from "./canvas-boxes";
 import { Box, type BoxActions, BoxContext, LinkOffer, type Selected } from "./CanvasBox";
 
@@ -93,7 +94,9 @@ function useFlash() {
   return { flash, show };
 }
 
-function Header({ path, nodes, error, onDismiss }: { path: string; nodes: CanvasNode[] | undefined; error: string | undefined; onDismiss: () => void }) {
+type HeaderProps = { path: string; nodes: CanvasNode[] | undefined; error: string | undefined; onDismiss: () => void; agent: Agent | undefined; onAsk: () => void };
+
+function Header({ path, nodes, error, onDismiss, agent, onAsk }: HeaderProps) {
   return (
     <header className="flex items-center gap-2 border-b px-6 py-2.5">
       <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{path}</span>
@@ -104,6 +107,7 @@ function Header({ path, nodes, error, onDismiss }: { path: string; nodes: Canvas
         </button>
       )}
       <span className="text-xs text-muted-foreground">{nodes ? `${nodes.length} box${nodes.length === 1 ? "" : "es"}` : "Loading…"}</span>
+      <AgentChip agent={agent} onAsk={onAsk} />
     </header>
   );
 }
@@ -122,6 +126,20 @@ function Hints({ picking, isEmpty }: { picking: Selected | undefined; isEmpty: b
   );
 }
 
+function useAsk(path: string, boxes: ReturnType<typeof useBoxes>, editor: ReturnType<typeof useEditing>) {
+  const ask = () => {
+    const open = editor.editing;
+    if (open !== undefined) editor.flush(open);
+    void boxes.inTurn(open ?? "", async () => askAgent(path));
+  };
+  useEventListener("keydown", (e) => {
+    if (e.key !== "s" || !(e.metaKey || e.ctrlKey)) return;
+    e.preventDefault();
+    ask();
+  });
+  return ask;
+}
+
 function useCanvas(path: string, plane: HTMLDivElement | null) {
   const [error, setError] = useState<string | undefined>();
   const view = useCamera(plane);
@@ -129,6 +147,7 @@ function useCanvas(path: string, plane: HTMLDivElement | null) {
   const editor = useEditing(path, boxes);
   const linking = useLinking(path, boxes, editor.flush);
   const { flash, show } = useFlash();
+  const ask = useAsk(path, boxes, editor);
   const { nodes } = boxes;
   const fit = () => {
     if (plane && nodes) view.setCamera(fitting(nodes, plane.clientWidth, plane.clientHeight));
@@ -151,6 +170,9 @@ function useCanvas(path: string, plane: HTMLDivElement | null) {
       view.centerOn(target);
       show(id);
     },
+    settle: (id, verdict) => {
+      void boxes.inTurn(id, async () => boxes.upsert(await settleProposal(path, id, verdict)));
+    },
   };
   const press = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -168,13 +190,15 @@ function useCanvas(path: string, plane: HTMLDivElement | null) {
       },
     });
   };
-  return { view, nodes, editor, linking, actions, press, fit, flash, error: error ?? boxes.error?.message, setError };
+  return { view, nodes, edges: boxes.edges, agent: boxes.agent, ask, editor, linking, actions, press, fit, flash, error: error ?? boxes.error?.message, setError };
 }
 
 export function CanvasPane({ path }: { path: string }) {
   const [plane, setPlane] = useState<HTMLDivElement | null>(null);
-  const { view, nodes, editor, linking, actions, press, fit, flash, error, setError } = useCanvas(path, plane);
+  const { view, nodes, edges, agent, ask, editor, linking, actions, press, fit, flash, error, setError } = useCanvas(path, plane);
   const { camera } = view;
+  const seen = plane ? { camera, width: plane.clientWidth, height: plane.clientHeight } : undefined;
+  const fresh = useFresh(nodes, seen);
   const grid = GRID_PX * camera.z;
   const { offer } = linking;
   const zoomCenter = (factor: number) => {
@@ -182,7 +206,7 @@ export function CanvasPane({ path }: { path: string }) {
   };
   return (
     <article className="flex min-w-0 flex-1 flex-col">
-      <Header path={path} nodes={nodes} error={error} onDismiss={() => setError(undefined)} />
+      <Header path={path} nodes={nodes} error={error} onDismiss={() => setError(undefined)} agent={agent} onAsk={ask} />
       <div
         ref={setPlane}
         data-agent={`canvas:plane:${path}`}
@@ -194,10 +218,21 @@ export function CanvasPane({ path }: { path: string }) {
       >
         <BoxContext value={actions}>
           <div style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.z})` }} className="absolute top-0 left-0 origin-top-left">
+            <Edges nodes={nodes ?? []} edges={edges} />
             {nodes?.map((n) => <Box key={n.id} node={n} isEditing={editor.editing === n.id} isFlashing={flash === n.id} />)}
           </div>
         </BoxContext>
         <Hints picking={linking.picking} isEmpty={nodes?.length === 0} />
+        {seen && (
+          <OffscreenMarkers
+            nodes={fresh.offScreen}
+            view={seen}
+            onJump={(id) => {
+              fresh.dismiss(id);
+              actions.jump(id);
+            }}
+          />
+        )}
         <Controls zoom={camera.z} onZoom={zoomCenter} onFit={fit} />
       </div>
       {offer && <LinkOffer at={offer.at} onLink={() => linking.startLink(offer.selected)} />}

@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { isHeld } from "@/cursors/holds";
 import { useEventListener, useInterval, useLatest, useResource } from "@/lib/effects";
-import { addBox, CANVAS_CHANGED, type CanvasNode, editBox, loadBoxes, markTyping, removeBox } from "./canvas-api";
+import { addBox, CANVAS_CHANGED, type CanvasNode, editBox, loadCanvas, markTyping, removeBox, type Shown } from "./canvas-api";
 
 const REMOTE_CHECK_MS = 5000;
 const SAVE_AFTER_MS = 400;
@@ -15,10 +15,11 @@ const without = (local: Local, id: string, keys: (keyof CanvasNode)[]) => {
   return { ...local, [id]: rest };
 };
 
+const EMPTY: Shown = { nodes: [], edges: [], agent: undefined };
 const withText = (id: string, text: string) => (all: Local) => ({ ...all, [id]: { ...all[id], text } });
 
 export function useBoxes(path: string, onError: (message: string) => void) {
-  const loaded = useResource(`canvas:${path}`, async () => loadBoxes(path));
+  const loaded = useResource(`canvas:${path}`, async () => loadCanvas(path));
   const [local, setLocal] = useState<Local>({});
   const localNow = useLatest(local);
   const queues = useRef(new Map<string, Promise<void>>());
@@ -28,8 +29,9 @@ export function useBoxes(path: string, onError: (message: string) => void) {
   });
   useInterval(async () => (isHeld(`canvas:${path}`) ? undefined : loaded.reload()), REMOTE_CHECK_MS);
 
-  const upsert = (node: CanvasNode) => loaded.set((all = []) => (all.some((n) => n.id === node.id) ? all.map((n) => (n.id === node.id ? node : n)) : [...all, node]));
-  const drop = (id: string) => loaded.set((all = []) => all.filter((n) => n.id !== id));
+  const withNodes = (change: (all: CanvasNode[]) => CanvasNode[]) => loaded.set((was: Shown = EMPTY) => ({ ...was, nodes: change(was.nodes) }));
+  const upsert = (node: CanvasNode) => withNodes((all) => (all.some((n) => n.id === node.id) ? all.map((n) => (n.id === node.id ? node : n)) : [...all, node]));
+  const drop = (id: string) => withNodes((all) => all.filter((n) => n.id !== id));
   const inTurn = async (id: string, work: () => Promise<unknown>) => {
     const before = queues.current.get(id);
     const next = (async () => {
@@ -44,8 +46,8 @@ export function useBoxes(path: string, onError: (message: string) => void) {
     return next;
   };
 
-  const nodes = loaded.value?.map((n) => ({ ...n, ...local[n.id] }));
-  return { nodes, error: loaded.error, setLocal, localNow, upsert, drop, inTurn };
+  const nodes = loaded.value?.nodes.map((n) => ({ ...n, ...local[n.id] }));
+  return { nodes, edges: loaded.value?.edges ?? [], agent: loaded.value?.agent, error: loaded.error, setLocal, localNow, upsert, drop, inTurn };
 }
 
 type Boxes = ReturnType<typeof useBoxes>;
