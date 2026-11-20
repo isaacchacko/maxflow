@@ -5,14 +5,15 @@ import { IS_LIVE } from "./instance";
 import { stateDirectory } from "./state";
 
 export const TIMELINES_DIR = process.env["MAXFLOW_TIMELINES"] ?? (IS_LIVE ? join(homedir(), "Timelines") : stateDirectory("timelines"));
-export const TIMELINES_REMOTE = process.env["MAXFLOW_TIMELINES_REMOTE"] ?? (IS_LIVE ? "https://github.com/isaacchacko/timelines.git" : "");
+// constraint: yarn's merge gate refuses a push to main in any repo, this one too, until Isaac says otherwise (th-13b801)
+export const TIMELINES_REMOTE = process.env["MAXFLOW_TIMELINES_REMOTE"] ?? "";
 export const NOW = "now.txt";
 const AGENT_EMAIL = "timelines@maxflow.local";
 const LOCK_RETRIES = 20;
 const LOCK_RETRY_MS = 250;
 
 export type TimelineEvent = { file: string; text: string };
-export type Timeline = { path: string; events: number; latest?: string; now?: string };
+export type Timeline = { path: string; events: number; latest: string | undefined; now: string | undefined };
 
 export function git(args: string[], env: Record<string, string> = {}) {
   const run = Bun.spawnSync(["git", ...args], { cwd: TIMELINES_DIR, env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" });
@@ -92,10 +93,7 @@ export function setNow(path: string, text: string) {
 
 const isEventFile = (name: string) => name.endsWith(".txt") && name !== NOW;
 // constraint: "<time> <title> 2.txt" must follow "<time> <title>.txt", and a plain sort puts the space before the dot
-const byTime = (a: string, b: string) => {
-  const [x, y] = [a.slice(0, -4), b.slice(0, -4)];
-  return x < y ? -1 : x > y ? 1 : 0;
-};
+const byTime = (a: string, b: string) => Number(a.slice(0, -4) > b.slice(0, -4)) - Number(a.slice(0, -4) < b.slice(0, -4));
 const readIfThere = (file: string) => (existsSync(file) ? readFileSync(file, "utf8") : undefined);
 
 function eventsIn(dir: string) {
