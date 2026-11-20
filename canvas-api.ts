@@ -37,7 +37,8 @@ async function boxAction({ req, path, author }: Call, id: string, verb: string |
   if (verb === "link" && req.method === "POST") return linkNode(path, id, { text: stringOr(body["text"]), to: stringOr(body["to"]), near: typeof body["at"] === "number" ? body["at"] : 0 }, author);
   if (verb !== undefined) return;
   if (req.method === "PATCH") return editNode(path, id, boxOf(body), author);
-  if (req.method === "DELETE") return removeNode(path, id);
+  if (req.method !== "DELETE") return;
+  return removeNode(path, id);
 }
 
 async function canvasAction(call: Call) {
