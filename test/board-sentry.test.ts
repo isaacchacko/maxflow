@@ -24,7 +24,7 @@ writeFileSync(
   `import { appendFileSync } from "node:fs";
 const args = process.argv.slice(2);
 const after = Number(args[args.indexOf("--after") + 1] ?? 0);
-appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args, token: process.env.BOARD_TOKEN, url: process.env.BOARD_URL, pid: process.pid }) + "\\n");
+appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args, token: process.env.BOARD_TOKEN, url: process.env.BOARD_URL, pid: process.pid }) + String.fromCharCode(10));
 console.log("Vercel CLI noise");
 for (const line of ${JSON.stringify(events)}) if (Number(JSON.parse(line).cursor) > after) console.log(line);
 setInterval(() => {}, 1000);
@@ -85,7 +85,10 @@ const isRunning = (pid: number) => {
 };
 
 async function until(isDone: () => boolean, ms: number) {
-  for (const end = Date.now() + ms; Date.now() < end; await Bun.sleep(100)) if (isDone()) return;
+  for (const end = Date.now() + ms; Date.now() < end; ) {
+    if (isDone()) return;
+    await Bun.sleep(100);
+  }
   throw new Error("timed out");
 }
 

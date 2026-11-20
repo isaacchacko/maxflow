@@ -29,7 +29,7 @@ const configChangedAt = () => {
 };
 
 async function tokenFor(config: BoardConfig) {
-  if (config.tokenCommand === undefined || config.tokenCommand.length === 0) return undefined;
+  if (config.tokenCommand === undefined || config.tokenCommand.length === 0) return;
   const proc = Bun.spawn(config.tokenCommand, { stdout: "pipe", stderr: "pipe", timeout: TOKEN_MS });
   const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
   if (code !== 0 || out.trim() === "") throw new Error(`token command exited ${String(code)}: ${err.trim().slice(0, 300)}`);
@@ -52,7 +52,7 @@ function stopTail() {
 
 function stopTailLeftByAnEarlierCopy() {
   const pid = Number((readStateText(TAIL_PID_FILE) ?? "0").trim());
-  if (!Number.isInteger(pid) || pid <= 0) return;
+  if (!Number.isSafeInteger(pid) || pid <= 0) return;
   const command = Bun.spawnSync(["ps", "-o", "command=", "-p", String(pid)]).stdout.toString();
   if (command.includes("board") && command.includes("tail") && didStopGroup(pid)) log(`stopped the board tail (group ${String(pid)}) an earlier copy left running`);
 }
@@ -64,7 +64,7 @@ function liveThread(threads: FeedThread[], id: string | undefined): FeedThread |
 
 async function openFeedThreadOf(boardThread: string) {
   const known = state.threads[boardThread];
-  if (known === undefined) return undefined;
+  if (known === undefined) return;
   const thread = liveThread(await getThreads(), known);
   return thread === undefined || Boolean(thread.resolved) ? undefined : thread.id;
 }

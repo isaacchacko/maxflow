@@ -52,31 +52,40 @@ export function boardConfigOf(value: unknown): BoardConfig | undefined {
 const labelsOf = (value: unknown): Record<string, string> =>
   isRecord(value) ? Object.fromEntries(Object.entries(value).flatMap(([k, v]) => (typeof v === "string" ? [[k, v]] : []))) : {};
 
-export function boardEventOf(line: string): BoardEvent | undefined {
-  let parsed: unknown;
+function recordOf(line: string): Record<string, unknown> | undefined {
   try {
-    parsed = JSON.parse(line);
+    const parsed: unknown = JSON.parse(line);
+    return isRecord(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }
-  if (!isRecord(parsed)) return undefined;
-  const cursor = stringField(parsed, "cursor");
-  const type = stringField(parsed, "type");
-  if (cursor === undefined || cursor === "" || type === undefined) return undefined;
-  const payload = isRecord(parsed["payload"]) ? parsed["payload"] : {};
-  const message = isRecord(parsed["message"]) ? parsed["message"] : {};
-  const actor = isRecord(parsed["actor"]) ? parsed["actor"] : {};
+}
+
+const firstString = (records: Record<string, unknown>[], key: string) => records.map((r) => stringField(r, key)).find((v) => v !== undefined);
+const part = (record: Record<string, unknown>, key: string) => {
+  const value = record[key];
+  return isRecord(value) ? value : {};
+};
+
+export function boardEventOf(line: string): BoardEvent | undefined {
+  const parsed = recordOf(line);
+  const cursor = parsed && stringField(parsed, "cursor");
+  const type = parsed && stringField(parsed, "type");
+  if (!parsed || cursor === undefined || cursor === "" || type === undefined) return undefined;
+  const payload = part(parsed, "payload");
+  const message = part(parsed, "message");
+  const actor = part(parsed, "actor");
   return {
     cursor,
     type,
     at: stringField(parsed, "createdAt") ?? "",
-    id: stringField(message, "id") ?? stringField(payload, "id") ?? "",
-    channel: stringField(payload, "channel") ?? stringField(message, "channel") ?? "",
-    thread: stringField(payload, "thread") ?? stringField(message, "thread") ?? "",
+    id: firstString([message, payload], "id") ?? "",
+    channel: firstString([payload, message], "channel") ?? "",
+    thread: firstString([payload, message], "thread") ?? "",
     re: stringField(payload, "re"),
-    text: stringField(payload, "text") ?? stringField(message, "text") ?? "",
+    text: firstString([payload, message], "text") ?? "",
     labels: labelsOf(payload["labels"] ?? message["labels"]),
-    who: stringField(actor, "handle") ?? stringField(actor, "id") ?? "?",
+    who: firstString([actor], "handle") ?? firstString([actor], "id") ?? "?",
     name: stringField(actor, "name") ?? "?",
     kind: stringField(actor, "kind") ?? "",
   };
@@ -86,7 +95,7 @@ export const isOwn = (event: BoardEvent, config: BoardConfig) => config.self.inc
 export const isFed = (event: BoardEvent, config: BoardConfig) => event.type === "message.posted" && event.id !== "" && !isOwn(event, config);
 
 const HANDED_LABELS = ["priority", "ticket", "kind", "assignee"];
-export const isForIsaac = (event: BoardEvent) => HANDED_LABELS.some((k) => k in event.labels) || /\bisaac\b/i.test(event.text);
+export const isForIsaac = (event: BoardEvent) => HANDED_LABELS.some((k) => Object.hasOwn(event.labels, k)) || /\bisaac\b/i.test(event.text);
 
 export const boardLink = (event: BoardEvent) => `board:${event.channel}/${event.id}`;
 export const busTopic = (event: BoardEvent) => `board/${event.channel.replaceAll(/[^\w-]/g, "_") || "_"}/${event.type}`;
@@ -107,7 +116,7 @@ function routingHint(event: BoardEvent, config: BoardConfig) {
 }
 
 export function feedText(event: BoardEvent, config: BoardConfig) {
-  const cli = `${config.cli.join(" ")}`;
+  const cli = config.cli.join(" ");
   return [
     `${event.who} (${event.name}) on ${config.name}, #${event.channel}${labelText(event.labels)}:`,
     `> ${event.text.replaceAll("\n", "\n> ")}`,
