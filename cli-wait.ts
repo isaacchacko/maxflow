@@ -12,11 +12,15 @@ function sessionOrFail() {
   return me;
 }
 
+const SAFE_WORD = /^[\w@%+=:,./-]+$/;
+const shellWord = (arg: string) => (SAFE_WORD.test(arg) ? arg : `'${arg.replaceAll("'", String.raw`'\''`)}'`);
+const commandLine = (argv: string[]) => (argv.length === 1 ? (argv[0] ?? "") : argv.map((arg) => shellWord(arg)).join(" "));
+
 async function waitUntil(args: string[]) {
   const me = sessionOrFail();
   const dash = args.indexOf("--");
   const head = dash === -1 ? args.slice(1) : args.slice(1, dash);
-  const cmd = dash === -1 ? undefined : args.slice(dash + 1).join(" ");
+  const cmd = dash === -1 ? undefined : commandLine(args.slice(dash + 1));
   const pid = flag(head, "--pid");
   const pane = flag(head, "--pane");
   const desc = positional(head, ["--pid", "--pane", "--why"]).join(" ");
