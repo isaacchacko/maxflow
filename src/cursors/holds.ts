@@ -42,9 +42,9 @@ export function claim(key: string, capMs: number) {
 
 export function settleClaims(keys: string[]) {
   for (const key of keys) {
-    const release = claims.get(key);
+    const settle = claims.get(key);
     claims.delete(key);
-    release?.();
+    settle?.();
   }
 }
 
