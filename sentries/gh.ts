@@ -8,6 +8,7 @@ import {
   writeCommitWatches, writeWatches, type CommitCi, type CommitWatch, type Head, type Link, type PolledPr, type Pr, type RateSample, type Session,
 } from "../gh";
 import { BASE as base } from "../instance";
+import { sentryThatPosted } from "../sentry-posts";
 import { isRecord } from "../shared/guards";
 import { ghStatusTable, readStateJson, writeStateJson } from "../state";
 import { takeOver } from "./singleton";
@@ -107,10 +108,10 @@ function prChanges(pr: Pr, prev: PrState): Change[] {
   return changes;
 }
 
-function whoPosted(login: string | undefined, body: string, poster: Poster) {
+function whoPosted(login: string | undefined, body: string, poster: Poster, url?: string) {
   if (login === undefined || login === "") return null;
   if (login !== poster.me) return login;
-  return poster.isByAgent(body) ? null : `the user (${poster.me})`;
+  return poster.isByAgent(body) || sentryThatPosted(url) !== undefined ? null : `the user (${poster.me})`;
 }
 
 function reviewChanges(pr: Pr, seen: Set<string>, poster: Poster) {
@@ -128,8 +129,9 @@ function commentChanges(pr: Pr, seen: Set<string>, poster: Poster) {
   return pr.comments.nodes
     .filter((c) => !seen.has(c.id))
     .map((c): Change => {
-      const who = whoPosted(c.author?.login, c.body, poster);
-      return ["comment", { id: c.id, author: c.author?.login, body: c.body, url: c.url, who }, who === null ? null : `comment from ${who}: "${short(c.body)}" ${c.url}`];
+      const who = whoPosted(c.author?.login, c.body, poster, c.url);
+      const sentry = sentryThatPosted(c.url);
+      return ["comment", { id: c.id, author: c.author?.login, body: c.body, url: c.url, who, ...(sentry !== undefined && { sentry }) }, who === null ? null : `comment from ${who}: "${short(c.body)}" ${c.url}`];
     });
 }
 

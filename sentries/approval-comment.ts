@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { isRecord } from "../shared/guards";
+import { recordSentryPost } from "../sentry-posts";
 import { hasState, listState, readStateJson, stateDirectory } from "../state";
 
 export const isCommentingOn = () => hasState("approval-comment");
@@ -114,5 +115,7 @@ export function post(key: string, sha: string, body: string, prior?: Posted): Po
   const payload = JSON.stringify({ body });
   if (prior !== undefined && isEdited(repo, prior, payload)) return { id: prior.id, sha, body };
   const id = Number(gh(["api", "-X", "POST", `repos/${repo}/issues/${n}/comments`, "--input", "-", "--jq", ".id"], payload));
-  return id === 0 || Number.isNaN(id) ? null : { id, sha, body };
+  if (id === 0 || Number.isNaN(id)) return null;
+  recordSentryPost("approval", id);
+  return { id, sha, body };
 }
