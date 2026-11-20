@@ -62,32 +62,39 @@ function recordOf(line: string): Record<string, unknown> | undefined {
 }
 
 const firstString = (records: Record<string, unknown>[], key: string) => records.map((r) => stringField(r, key)).find((v) => v !== undefined);
+const textIn = (records: Record<string, unknown>[], key: string, fallback = "") => firstString(records, key) ?? fallback;
 const part = (record: Record<string, unknown>, key: string) => {
   const value = record[key];
   return isRecord(value) ? value : {};
 };
 
+function headOf(line: string) {
+  const parsed = recordOf(line) ?? {};
+  const cursor = textIn([parsed], "cursor");
+  const type = textIn([parsed], "type");
+  return cursor === "" || type === "" ? undefined : { parsed, cursor, type };
+}
+
 export function boardEventOf(line: string): BoardEvent | undefined {
-  const parsed = recordOf(line);
-  const cursor = parsed && stringField(parsed, "cursor");
-  const type = parsed && stringField(parsed, "type");
-  if (!parsed || cursor === undefined || cursor === "" || type === undefined) return undefined;
+  const head = headOf(line);
+  if (!head) return undefined;
+  const { parsed, cursor, type } = head;
   const payload = part(parsed, "payload");
   const message = part(parsed, "message");
   const actor = part(parsed, "actor");
   return {
     cursor,
     type,
-    at: stringField(parsed, "createdAt") ?? "",
-    id: firstString([message, payload], "id") ?? "",
-    channel: firstString([payload, message], "channel") ?? "",
-    thread: firstString([payload, message], "thread") ?? "",
+    at: textIn([parsed], "createdAt"),
+    id: textIn([message, payload], "id"),
+    channel: textIn([payload, message], "channel"),
+    thread: textIn([payload, message], "thread"),
     re: stringField(payload, "re"),
-    text: firstString([payload, message], "text") ?? "",
+    text: textIn([payload, message], "text"),
     labels: labelsOf(payload["labels"] ?? message["labels"]),
-    who: firstString([actor], "handle") ?? firstString([actor], "id") ?? "?",
-    name: stringField(actor, "name") ?? "?",
-    kind: stringField(actor, "kind") ?? "",
+    who: textIn([actor], "handle", textIn([actor], "id", "?")),
+    name: textIn([actor], "name", "?"),
+    kind: textIn([actor], "kind"),
   };
 }
 
