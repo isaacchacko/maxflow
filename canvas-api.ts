@@ -54,7 +54,8 @@ async function boxAction(call: Call, id: string, verb: string | undefined) {
 
 function canvasPost({ path, author }: Call, verb: string | undefined) {
   if (verb === undefined) return createCanvas(path);
-  if (verb === "ask" && author === "isaac") return { asked: wakeFor(path, "asked") };
+  if (verb !== "ask" || author !== "isaac") return;
+  return { asked: wakeFor(path, "asked") };
 }
 
 function shown({ path, author }: Call) {
