@@ -14,6 +14,7 @@ import { touchFrom } from "./sentry-files";
 import { stamp } from "./stamp";
 import { setTranscript } from "./transcripts";
 import { patch } from "./patch";
+import { askForHandoffNote, completeHandoff, noteHandoff, successorOf } from "./handoffs";
 import { isFilled } from "./shared/guards";
 import { type Body, type Route, firstAnswer, flagOf, isFromTheBrowser, jsonBody, matching, sender, textOf, textsOf } from "./route-kit";
 
@@ -76,7 +77,14 @@ async function hisWordsTypedIntoAnAsleepPane(req: Request, s: Session): Promise<
   return Response.json(describe(s));
 }
 
-async function nativeSendMessageQueuedWhileAsleep(req: Request, s: Session): Promise<Response> {
+// constraint: the agent that took over may still ask the one it replaced, so only its messages reach the old id
+function recipientAfterHandOffs(req: Request, addressed: Session) {
+  const successor = successorOf(addressed);
+  return sender(req) === successor ? addressed : successor;
+}
+
+async function nativeSendMessageQueuedWhileAsleep(req: Request, addressed: Session): Promise<Response> {
+  const s = recipientAfterHandOffs(req, addressed);
   const text = trimmedTextOf(await jsonBody(req));
   const from = sender(req);
   if (text === "" || !from) return new Response("text and a calling session required", { status: 400 });
@@ -88,7 +96,8 @@ async function nativeSendMessageQueuedWhileAsleep(req: Request, s: Session): Pro
   return Response.json({ queued: isAsleep });
 }
 
-async function notify(req: Request, s: Session): Promise<Response> {
+async function notify(req: Request, addressed: Session): Promise<Response> {
+  const s = recipientAfterHandOffs(req, addressed);
   const body = await jsonBody(req);
   const text = trimmedTextOf(body);
   if (text === "") return new Response("text required", { status: 400 });
@@ -176,7 +185,25 @@ async function waitForIdleOrMatch(req: Request, s: Session, url: URL): Promise<R
   }
 }
 
+async function handOver(req: Request, s: Session): Promise<Response> {
+  const body = await jsonBody(req);
+  const note = textOf(body, "note")?.trim() ?? "";
+  if (note !== "") {
+    const refusal = noteHandoff(s, note);
+    return refusal === null ? Response.json({ noted: true }) : new Response(refusal, { status: 409 });
+  }
+  if (flagOf(body, "complete") === true) {
+    const fresh = completeHandoff(s);
+    return fresh ? Response.json(describe(fresh)) : new Response(`${s.id} has no hand-off note to act on, or is mid-turn`, { status: 409 });
+  }
+  const [tokens, window] = [body["tokens"], body["window"]];
+  if (typeof tokens !== "number" || typeof window !== "number" || window <= 0) return new Response("note, complete, or tokens and window required", { status: 400 });
+  const refusal = askForHandoffNote(s, tokens, window);
+  return refusal === null ? Response.json({ asked: true }, { status: 202 }) : new Response(refusal, { status: 409 });
+}
+
 const ACTS = new Map<string, SessionAct>([
+  ["handoff POST", handOver],
   ["intro GET", (_req, s) => new Response(intro(s, SENTRY_USES))],
   ["input POST", typeInto],
   ["wake POST", hisWordsTypedIntoAnAsleepPane],
@@ -230,7 +257,7 @@ async function oneSession(req: Request, _url: URL, match: RegExpExecArray): Prom
   return req.method === "PATCH" ? renameOrArchive(req, s) : Response.json(describe(s));
 }
 
-const ROUTES: Route[] = [matching(/^\/api\/sessions\/([\w-]+)\/(input|screen|wait|notify|state|intro|await|wake|peer)$/, actOnSession), matching(/^\/api\/sessions\/([\w-]+)$/, oneSession)];
+const ROUTES: Route[] = [matching(/^\/api\/sessions\/([\w-]+)\/(input|screen|wait|notify|state|intro|await|wake|peer|handoff)$/, actOnSession), matching(/^\/api\/sessions\/([\w-]+)$/, oneSession)];
 
 export async function sessionRoute(req: Request, url: URL, path: string): Promise<Response | undefined> {
   return firstAnswer(ROUTES, req, url, path);

@@ -4,6 +4,7 @@ import { publish } from "./bus";
 import { type ClaudeState, type Session, isAgent, isSentry, sessions } from "./sessions";
 import { dispatch, inputBox, setArchived, setClaudeState, setWait, stopAgent, wake } from "./lifecycle";
 import { tellDone } from "./waits";
+import { completeHandoff } from "./handoffs";
 import { patch } from "./patch";
 import { isFilled, isRecord, stringOr } from "./shared/guards";
 
@@ -27,6 +28,7 @@ function sleepOnWaitUnlessStopBlocked(s: Session) {
 export function claudeStateChanged(s: Session, state: ClaudeState | "gone") {
   const was = s.claude?.state;
   setClaudeState(s, state);
+  if (isTurnEnd(was, state) && completeHandoff(s) !== undefined) return;
   if (isUserTurnWhileDone(s, was, state)) setWait(s);
   else if (isWaitingTurnEnd(s, was, state)) sleepOnWaitUnlessStopBlocked(s);
   else if (state === "idle" && s.archived === true) void stopAgent(s);

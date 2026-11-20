@@ -78,6 +78,8 @@ export type Agent = {
   wait?: Wait | null;
   sleep?: { at: string; wakes: string };
   sleepHeld?: { what: string[]; at: string };
+  handedTo?: string;
+  handedFrom?: string;
   browser?: boolean;
 };
 export type Wait = { kind: string; ref: string; at: number; desc?: string };

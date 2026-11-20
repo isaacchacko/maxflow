@@ -20,6 +20,7 @@ const usage = `usage:
   maxflow wait thread:<id> | approval:<pr> | ci:<pr | branch | sha> | agent:<id> [agent:<id>…] | slack:<permalink | channel | #channel | query> | done   declare what you wait on; you sleep from your turn's end until a message wakes you
   maxflow wait until '<what you wait for, in words>' -- <command...> | --pane <session> | --pid <pid>   sleep until a shell concludes: the server runs the command in its own pane (or watches the session or process), and you wake with its exit code and last lines
   maxflow rename <id> <name...> | maxflow kill <id>
+  maxflow handoff <note-file>               when maxflow asks (your context is filling up): hand your work to a fresh agent with this note once your turn ends
   maxflow notify <id> <text...> [--isaac]    deliver text once the session is idle at an empty claude prompt; --isaac as for send
   maxflow who router|parent|workers|objective   the agents around you, as mf-<id> names for SendMessage
   maxflow ask <question...> [--re THREAD] [--default REC] [--new] [--image PATH]   ask the user in a thread of yours, flagged as waiting on him; prints its id.

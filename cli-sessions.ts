@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { argAt, base, call, caller, fail, flag, hasArg, isBlank, isTruthy, mySession, positional, post, replies, replyOf, str, timeout, type Reply, type Verb } from "./cli-shared";
 
 type NewSession = { name: string | undefined; cwd: string; cmd: string[] | undefined; role: string | undefined; objective: string | undefined; parent: string | undefined; scope: string | undefined };
@@ -64,18 +65,18 @@ async function screenWait(args: string[]) {
   if (r["reason"] === "timeout") process.exit(2);
 }
 
-type Role = { role: string; objective: unknown; parent: string | undefined };
+type Role = { role: string; objective: unknown; parent: string | undefined; handedTo: string | undefined };
 type Around = { id: string; name: string; status: string; running: boolean; role: Role | undefined };
 
 function aroundOf(s: Reply): Around {
   const role = replyOf(s["role"]);
-  const parent = role["parent"];
+  const [parent, handedTo] = [role["parent"], role["handedTo"]];
   return {
     id: str(s, "id"),
     name: str(s, "name"),
     status: str(s, "status"),
     running: isTruthy(s["running"]),
-    role: s["role"] === undefined || s["role"] === null ? undefined : { role: str(role, "role"), objective: role["objective"], parent: typeof parent === "string" ? parent : undefined },
+    role: s["role"] === undefined || s["role"] === null ? undefined : { role: str(role, "role"), objective: role["objective"], parent: typeof parent === "string" ? parent : undefined, handedTo: typeof handedTo === "string" ? handedTo : undefined },
   };
 }
 
@@ -96,7 +97,7 @@ async function agentsAround(args: string[]) {
   const all = (await sessionList()).map(aroundOf);
   const me = all.find((s) => s.id === mySession());
   if (!hasRole(me)) fail("who works only inside a maxflow agent with a role (router or worker)");
-  const live = all.filter(hasRole).filter((s) => s.running && s.id !== me.id && s.role.objective === me.role.objective);
+  const live = all.filter(hasRole).filter((s) => s.running && s.id !== me.id && s.role.objective === me.role.objective && isBlank(s.role.handedTo));
   const picker = pickerFor(me, argAt(args, 0));
   if (!picker) fail("who router|parent|workers|objective");
   const picked = live.filter(picker);
@@ -136,7 +137,17 @@ async function printScreen(args: string[]) {
   console.log(screen["screen"]);
 }
 
+async function handOver(args: string[]) {
+  const me = mySession();
+  if (isBlank(me)) fail("handoff works only inside a maxflow agent");
+  const note = readFileSync(argAt(args, 0), "utf8").trim();
+  if (note === "") fail(`${argAt(args, 0)} is empty`);
+  await post(`/api/sessions/${me}/handoff`, { note });
+  console.log("noted: when this turn ends, maxflow starts the fresh agent with your note and moves your work to it. End your turn now, without a new wait.");
+}
+
 export const sessionVerbs: Verb[] = [
+  { matches: (verb, args) => verb === "handoff" && hasArg(args, 0), run: handOver },
   { matches: (verb) => verb === "ls", run: listSessions },
   { matches: (verb) => verb === "chats", run: listChats },
   { matches: (verb, args) => verb === "resume" && hasArg(args, 0), run: resumeChat },

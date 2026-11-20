@@ -31,7 +31,7 @@ function roleOf(askedRole: string | undefined, objective: string | undefined, pa
   return parent ? { role: "worker", objective, parent: parent.id } : undefined;
 }
 
-function claudeForARoleNeverABareShellThatWouldDropHisThreadReplies(role: Role): string[] {
+export function claudeForARoleNeverABareShellThatWouldDropHisThreadReplies(role: Role): string[] {
   return ["claude", "--permission-mode", "bypassPermissions", ...(role.role === "router" ? ["--append-system-prompt", readFileSync(ROUTER_BRIEF, "utf8")] : [])];
 }
 

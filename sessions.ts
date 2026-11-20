@@ -36,7 +36,7 @@ export type Session = {
   savedDraft?: string;
   role?: Role;
 };
-export type Role = { role: "router" | "worker"; objective: string; parent?: string; scope?: string; merged?: boolean; handedTo?: string };
+export type Role = { role: "router" | "worker"; objective: string; parent?: string; scope?: string; merged?: boolean; handedTo?: string; handedFrom?: string };
 export type Wait = { kind: "thread" | "approval" | "ci" | "agent" | "slack" | "until" | "done"; ref: string; at: number; desc?: string; awake?: boolean; auto?: boolean };
 export type ClaudeState = "working" | "waiting" | "idle";
 export type WsData = { id: string; pty?: Subprocess; world?: true; browser?: true };

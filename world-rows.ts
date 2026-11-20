@@ -88,6 +88,8 @@ function agentRow(s: Session, shownTasks: Task[], isUnroutedAgent: boolean, fron
     links: links(s),
     wait: s.wait ?? null,
     ...sleepOf(s),
+    ...(isFilled(s.role?.handedTo) && { handedTo: s.role.handedTo }),
+    ...(isFilled(s.role?.handedFrom) && { handedFrom: s.role.handedFrom }),
     ...(hasBrowser(s.id) && { browser: true }),
   };
 }

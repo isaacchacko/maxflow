@@ -44,6 +44,15 @@ function CrewCounts({ crew }: { crew: Agent[] }) {
 
 const sleepLine = "hidden max-w-[32rem] min-w-0 shrink-[2] truncate text-sm whitespace-nowrap text-muted-foreground lg:block";
 function SleepOrWait({ agent }: { agent: Agent }) {
+  if (hasText(agent.handedTo))
+    return (
+      <span data-agent="agent-handed-to" title="Its context was filling up, so maxflow moved its role, threads, task, watches and wait to a fresh agent, and messages sent to it go there" className={sleepLine}>
+        Handed off to{" "}
+        <a href={`#agent/${agent.handedTo}`} className="font-mono hover:underline">
+          {agent.handedTo}
+        </a>
+      </span>
+    );
   if (agent.sleep)
     return (
       <span data-agent="agent-asleep" title={`Claude is stopped to free memory. It wakes when ${agent.sleep.wakes}, or when any message reaches it.`} className={sleepLine}>
@@ -56,7 +65,19 @@ function SleepOrWait({ agent }: { agent: Agent }) {
         Kept awake: {agent.sleepHeld.what.join(" and ")} still running. It sleeps once they finish.
       </span>
     );
-  return <Waiting wait={agent.wait} className="hidden max-w-72 min-w-0 shrink-[2] truncate text-sm whitespace-nowrap text-muted-foreground lg:block" />;
+  return (
+    <>
+      {hasText(agent.handedFrom) && (
+        <span data-agent="agent-handed-from" title="It took this work over, with a hand-off note, from an agent whose context was filling up" className={sleepLine}>
+          Took over from{" "}
+          <a href={`#agent/${agent.handedFrom}`} className="font-mono hover:underline">
+            {agent.handedFrom}
+          </a>
+        </span>
+      )}
+      <Waiting wait={agent.wait} className="hidden max-w-72 min-w-0 shrink-[2] truncate text-sm whitespace-nowrap text-muted-foreground lg:block" />
+    </>
+  );
 }
 
 function AgentHeader({ agent, crew, back, isLive }: { agent: Agent; crew: Agent[]; back: string; isLive: boolean }) {

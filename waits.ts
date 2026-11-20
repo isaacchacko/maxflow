@@ -40,6 +40,11 @@ function saveShells() {
   writeStateJson(SHELLS, shells);
   publish("shells", { n: shells.length });
 }
+export function handShellsTo(from: string, to: string) {
+  const running = shells.filter((x) => x.owner === from && x.end === undefined);
+  for (const x of running) x.owner = to;
+  if (running.length > 0) saveShells();
+}
 function addShell(x: Shell) {
   shells.push(x);
   saveShells();
