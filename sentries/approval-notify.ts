@@ -84,7 +84,7 @@ function isAwaitingReviewAt(pr: unknown, sha: string) {
   const approved = Array.isArray(reviews) && reviews.some(isApprovedReview);
   const decision = pr["reviewDecision"];
   const merge = pr["mergeStateStatus"];
-  return isWaitingOnReview({ reviewDecision: typeof decision === "string" ? decision : null, ...(typeof merge === "string" && { mergeStateStatus: merge }), approved });
+  return isWaitingOnReview({ reviewDecision: typeof decision === "string" ? decision : null, mergeStateStatus: typeof merge === "string" ? merge : undefined, approved });
 }
 
 function standingOnGitHub(n: Note): Standing {
