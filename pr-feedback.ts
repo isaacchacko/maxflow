@@ -31,7 +31,7 @@ function isAgentPost(kind: string, data: Record<string, unknown>) {
   return POSTS.has(kind) && data["who"] === null && !textIn(data, "author").endsWith("[bot]");
 }
 
-function take(ev: Event): boolean {
+function didTake(ev: Event): boolean {
   const kind = PR_EVENT.exec(ev.topic)?.[1];
   const data = isRecord(ev.data) ? ev.data : {};
   const pr = textIn(data, "pr");
@@ -49,10 +49,10 @@ const save = () => {
 
 export function keepPrFeedback() {
   void query("gh/**", 0, 0).then((kept) => {
-    if (kept.map(take).includes(true)) save();
+    if (kept.map(didTake).includes(true)) save();
   });
   onPublish.add((ev) => {
-    if (take(ev)) save();
+    if (didTake(ev)) save();
   });
 }
 
