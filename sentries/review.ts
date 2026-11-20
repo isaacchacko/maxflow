@@ -234,10 +234,10 @@ function trackReachability(sessions: Session[]) {
 
 const isTiedTo = (l: Link, pr: Pr) => l.repo === pr.repository.nameWithOwner.toLowerCase() && (l.pr === keyOf(pr) || l.branch === pr.headRefName);
 
-const needsFixing = (pr: Pr) => pr.mergeStateStatus === "DIRTY" || pr.mergeable === "CONFLICTING" || isCiFailing(ciOf(pr));
+const isFixNeeded = (pr: Pr) => pr.mergeStateStatus === "DIRTY" || pr.mergeable === "CONFLICTING" || isCiFailing(ciOf(pr));
 
 function whyEscalated(pr: Pr, own: string[]) {
-  return needsFixing(pr) && own.length > 0 && own.every((id) => isUnreachable(id)) ? `owner ${own.join(", ")} isn't taking messages` : "";
+  return isFixNeeded(pr) && own.length > 0 && own.every((id) => isUnreachable(id)) ? `owner ${own.join(", ")} isn't taking messages` : "";
 }
 
 async function escalateOnce(pr: Pr, key: string, why: string) {
@@ -260,7 +260,7 @@ async function landOne(pr: Pr, ties: Link[], live: Set<string>): Promise<Landing
   }
   const why = whyEscalated(pr, own);
   await escalateOnce(pr, key, why);
-  const actions = landingLog.get(key) ?? [needsFixing(pr) ? `approved, but ${pr.mergeStateStatus.toLowerCase()}` : "approved and green"];
+  const actions = landingLog.get(key) ?? [isFixNeeded(pr) ? `approved, but ${pr.mergeStateStatus.toLowerCase()}` : "approved and green"];
   const note = [why === "" ? "" : `ESCALATED: ${why}`, ...actions].filter((part) => part !== "").join(" · ");
   return { pr: label(key), url: pr.url, note, why };
 }

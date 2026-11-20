@@ -10,8 +10,8 @@ export const MERGE_REFUSAL =
 
 function isMergeCommand(command: string) {
   const shown = shellText(command);
-  const atStarts = commandStarts(shown).some((at) => MERGE_COMMANDS.some((re) => re.test(shown.slice(at))));
-  return atStarts || MERGE_ANYWHERE.some((re) => re.test(command));
+  const isAtACommandStart = commandStarts(shown).some((at) => MERGE_COMMANDS.some((re) => re.test(shown.slice(at))));
+  return isAtACommandStart || MERGE_ANYWHERE.some((re) => re.test(command));
 }
 
 export function isMergeCall(tool: string, input: Record<string, unknown> | undefined) {

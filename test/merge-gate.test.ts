@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { isMergeCall } from "../merge-gate";
 
-const bash = (command: string) => isMergeCall("Bash", { command });
+const isMergeCommand = (command: string) => isMergeCall("Bash", { command });
 
 describe("the merge gate blocks every way an agent merges", () => {
   test.each([
@@ -21,7 +21,7 @@ describe("the merge gate blocks every way an agent merges", () => {
     "git push origin HEAD:master",
     "git push origin main",
   ])("blocks %s", (command) => {
-    expect(bash(command)).toBe(true);
+    expect(isMergeCommand(command)).toBe(true);
   });
 
   test.each([
@@ -34,7 +34,7 @@ describe("the merge gate blocks every way an agent merges", () => {
     "git merge origin/feat/v2",
     "git rebase origin/main",
   ])("allows %s", (command) => {
-    expect(bash(command)).toBe(false);
+    expect(isMergeCommand(command)).toBe(false);
   });
 
   test("blocks merge tools", () => {
@@ -54,7 +54,7 @@ describe("no sentry merges", () => {
       }
     })();
     expect(text).not.toMatch(/"--auto"|"--squash"|"--rebase"|enablePullRequestAutoMerge|mergePullRequest|\/pulls\/[^"]*\/merge/);
-    const merges = [...text.matchAll(/\["pr",\s*"merge"[^\]]*\]/g)].map((m) => m[0]);
+    const merges = text.matchAll(/\["pr",\s*"merge"[^\]]*\]/g).map((m) => m[0]).toArray();
     expect(merges.every((m) => m.includes("--disable-auto"))).toBe(true);
   });
 });
