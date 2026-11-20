@@ -26,7 +26,7 @@ export type PolledPr = { at: number; pr: Pr };
 type Found<T> = { byNumber: Map<number, T>; byBranch: Map<string, T> };
 export type Session = {
   id: string; name: string; cwd: string; running: boolean; sentry: boolean; chatId?: string; transcript?: string;
-  links: string[]; pending: number; status: string; blocked: object | null;
+  links: string[]; pending: number; status: string; blocked: object | null; wait?: { kind: string; ref: string; at: number } | null;
 };
 
 const SESSIONS_TIMEOUT_MS = 30_000;

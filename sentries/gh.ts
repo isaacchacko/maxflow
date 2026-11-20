@@ -264,16 +264,41 @@ const NOTICE_TAIL = "(Automated notice, not a request from the user: act on it o
 
 const ciLine = (on: string, ci: CommitCi) => (ci.state === "SUCCESS" ? `CI passed on ${on}` : `CI failed on ${on}: ${ci.failed.join(", ") || ci.state}`);
 
-async function announceCommit(w: CommitWatch, ci: CommitCi | undefined) {
+async function didAnnounceCommit(w: CommitWatch, ci: CommitCi | undefined) {
   const { repo, sha } = splitCommitKey(w.key);
   const on = `${repo}@${sha.slice(0, 7)}`;
   const line = ci === undefined ? `no CI finished on ${on} in ${COMMIT_WATCH_MS / 3_600_000}h, so the wait on it ends` : ciLine(on, ci);
-  await post("/api/events", { topic: `gh/${repo}/commit/${sha}/ci`, data: { commit: w.key, sha, state: ci?.state ?? "NONE", failed: ci?.failed ?? [], told: w.sessions } });
+  const res = await post("/api/events", { topic: `gh/${repo}/commit/${sha}/ci`, data: { commit: w.key, sha, state: ci?.state ?? "NONE", failed: ci?.failed ?? [], told: w.sessions } }).catch(() => undefined);
+  if (res?.ok !== true) {
+    console.log(`${new Date().toLocaleTimeString()}  maxflow didn't take the CI event for ${on} (${res?.status ?? "unreachable"}); the watch stays for the next poll`);
+    return false;
+  }
   for (const session of w.sessions) await post(`/api/sessions/${session}/notify`, { text: `[maxflow gh] ${line}. ${NOTICE_TAIL}` });
   console.log(`${new Date().toLocaleTimeString()}  ${line}  -> ${w.sessions.join(", ") || "nobody"}`);
+  return true;
+}
+
+const STRANDED_CI_WAIT_MS = Number(process.env["GH_STRANDED_CI_WAIT_MS"] ?? 30 * 60_000);
+const rewatched = new Set<string>();
+async function rewatchStrandedCommitWaits() {
+  const watched = new Set(readCommitWatches().map((w) => w.key));
+  const stranded = (await fetchSessions()).flatMap((s) => {
+    const wait = s.wait;
+    if (wait?.kind !== "ci" || !wait.ref.includes("@") || Date.now() - wait.at < STRANDED_CI_WAIT_MS || watched.has(wait.ref)) return [];
+    const once = `${s.id}>${wait.ref}>${String(wait.at)}`;
+    if (rewatched.has(once)) return [];
+    rewatched.add(once);
+    return [{ key: wait.ref, sessions: [s.id], at: wait.at }];
+  });
+  if (stranded.length === 0) return;
+  console.log(`${new Date().toLocaleTimeString()}  ci waits with no watch behind them, checked again: ${stranded.map((w) => `${w.sessions.join(",")} on ${w.key}`).join("; ")}`);
+  writeCommitWatches([...readCommitWatches(), ...stranded]);
 }
 
 async function pollCommits() {
+  await rewatchStrandedCommitWaits().catch((error: unknown) => {
+    console.error(`${new Date().toLocaleTimeString()}  couldn't look for stranded ci waits:`, error);
+  });
   const watches = readCommitWatches();
   if (watches.length === 0) return;
   const byRepo = new Map<string, string[]>();
@@ -284,8 +309,9 @@ async function pollCommits() {
   const finished = new Map<string, CommitCi>();
   for (const [repo, shas] of byRepo) for (const [sha, ci] of fetchCommitCi(repo, shas)) if (isFinished(ci.state)) finished.set(commitKey(repo, sha), ci);
   const ended = watches.filter((w) => finished.has(w.key) || Date.now() - w.at > COMMIT_WATCH_MS);
-  for (const w of ended) await announceCommit(w, finished.get(w.key));
-  if (ended.length > 0) writeCommitWatches(readCommitWatches().filter((w) => ended.every((e) => e.key !== w.key)));
+  const announced = new Set<string>();
+  for (const w of ended) if (await didAnnounceCommit(w, finished.get(w.key))) announced.add(w.key);
+  if (announced.size > 0) writeCommitWatches(readCommitWatches().filter((w) => !announced.has(w.key)));
 }
 
 async function tick(me: string, state: Map<string, PrState>) {
