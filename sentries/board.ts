@@ -148,7 +148,7 @@ async function tailUntilItEnds(config: BoardConfig) {
 
 function loadState() {
   const saved = readGatingStateJson(STATE_FILE, isBoardState);
-  if (saved !== undefined) Object.assign(state, { published: "", ...saved });
+  if (saved !== undefined) Object.assign(state, saved);
 }
 
 function seedCursor(value: unknown) {

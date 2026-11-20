@@ -36,9 +36,10 @@ export function boardConfigOf(value: unknown): BoardConfig | undefined {
   if (url === undefined || url === "") return undefined;
   const profile = stringField(value, "profile") ?? "claude";
   const restartMs = value["restartMs"];
+  const tokenCommand = strings(value["tokenCommand"]);
   return {
     url,
-    ...(strings(value["tokenCommand"]) !== undefined && { tokenCommand: strings(value["tokenCommand"]) }),
+    ...(tokenCommand !== undefined && { tokenCommand }),
     cli: strings(value["cli"]) ?? ["npx", "-y", "vercel@latest", "board"],
     profile,
     self: strings(value["self"]) ?? [],
