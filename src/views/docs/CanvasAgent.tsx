@@ -21,11 +21,11 @@ function borderToward(r: Rect, toward: Point): Point {
 
 export function Edges({ nodes, edges }: { nodes: CanvasNode[]; edges: Edge[] }) {
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const lines = edges.flatMap((e) => {
+  const lines: { id: string; a: Point; b: Point }[] = [];
+  for (const e of edges) {
     const [from, to] = [byId.get(e.fromNode), byId.get(e.toNode)];
-    if (!from || !to) return [];
-    return [{ id: e.id, a: borderToward(from, centerOf(to)), b: borderToward(to, centerOf(from)) }];
-  });
+    if (from && to) lines.push({ id: e.id, a: borderToward(from, centerOf(to)), b: borderToward(to, centerOf(from)) });
+  }
   return (
     <svg className="pointer-events-none absolute top-0 left-0 overflow-visible" width="1" height="1" aria-hidden>
       {lines.map((l) => (
@@ -110,7 +110,7 @@ export function useFresh(nodes: CanvasNode[] | undefined, view: View | undefined
   }
   const freshNodes = (nodes ?? []).filter((n) => fresh.includes(n.id));
   const seen = view ? freshNodes.filter((n) => isOnScreen(screenOf(n, view), view)) : [];
-  if (seen.length > 0) setFresh((was) => was.filter((id) => !seen.some((n) => n.id === id)));
+  if (seen.length > 0) setFresh((was) => was.filter((id) => seen.every((n) => n.id !== id)));
   const offScreen = view ? freshNodes.filter((n) => !seen.includes(n)) : [];
   return { offScreen, dismiss: (id: string) => setFresh((was) => was.filter((x) => x !== id)) };
 }

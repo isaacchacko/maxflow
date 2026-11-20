@@ -8,7 +8,9 @@ process.env["YARN_DOCS"] ??= mkdtempSync(join(tmpdir(), "yarn-canvas-"));
 const canvas = await import("../canvas");
 const { DOCS_DIR } = await import("../docs");
 const look = await import("../canvas-look");
-type Rect = { x: number; y: number; width: number; height: number };
+
+const isOverlapping = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) =>
+  a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
 // constraint: bun test shares one docs module, and so one vault, across test files
 const HERE = "canvas-test";
@@ -83,9 +85,8 @@ test("a box added near another lands in free space beside it, joined by an edge"
   canvas.addNode(path, { text: "in the way", x: 300, y: 0 }, "isaac");
   const added = canvas.addNode(path, { text: "about target", near: target.id }, "agent1");
   const { nodes, edges } = canvas.readCanvas(path).canvas;
-  const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-  expect(nodes.filter((n) => n.id !== added.id).some((n) => overlaps(n, added))).toBe(false);
-  expect(edges).toContainEqual(expect.objectContaining({ fromNode: target.id, toNode: added.id }));
+  expect(nodes.filter((n) => n.id !== added.id).some((n) => isOverlapping(n, added))).toBe(false);
+  expect(edges.some((e) => e.fromNode === target.id && e.toNode === added.id)).toBe(true);
   expect(Math.hypot(added.x - target.x, added.y - target.y)).toBeLessThan(500);
 });
 

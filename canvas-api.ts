@@ -1,6 +1,6 @@
 import { callerOf } from "./shared/legacy-maxflow";
 import { addNode, CanvasConflict, createCanvas, type Edit, editNode, linkNode, markTyping, onCanvasChange, proposeText, readCanvas, removeNode, settleProposal } from "./canvas";
-import { agentStatus, chargeAgent, markOpen, wakeFor } from "./canvas-agent";
+import { agentStatus, chargeAgent, didWake, markOpen } from "./canvas-agent";
 import { sessions } from "./sessions";
 import { isRecord, stringOr } from "./shared/guards";
 import { worldClients } from "./world";
@@ -55,7 +55,7 @@ async function boxAction(call: Call, id: string, verb: string | undefined) {
 function canvasPost({ path, author }: Call, verb: string | undefined) {
   if (verb === undefined) return createCanvas(path);
   if (verb !== "ask" || author !== "isaac") return;
-  return { asked: wakeFor(path, "asked") };
+  return { asked: didWake(path, "asked") };
 }
 
 function shown({ path, author }: Call) {

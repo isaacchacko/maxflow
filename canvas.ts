@@ -193,9 +193,9 @@ export function proposeText(path: string, id: string, text: string, author: stri
 export function settleProposal(path: string, id: string, isAccepted: boolean, author: string) {
   const inVault = canvasPath(path);
   const h = heldAt(inVault);
+  if (author !== ISAAC) throw new Error("only isaac accepts or rejects a proposal");
   const node = nodeIn(h, id);
   const { proposal } = node;
-  if (author !== ISAAC) throw new Error("only isaac accepts or rejects a proposal");
   if (!proposal) throw new Error(`box ${id} has no proposal`);
   Reflect.deleteProperty(node, "proposal");
   if (isAccepted) Object.assign(node, { text: mergeText(proposal.base, proposal.text, node.text) ?? proposal.text, author: ISAAC });

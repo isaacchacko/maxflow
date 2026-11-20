@@ -69,7 +69,7 @@ function spawned(path: string, text: string) {
 
 const lastHour = (look: Look) => look.lookedAt.filter((t) => Date.now() - t < HOUR_MS);
 
-export function wakeFor(asked: string, why: "idle" | "asked") {
+export function didWake(asked: string, why: "idle" | "asked") {
   const path = canvasPath(asked);
   timers.delete(path);
   if (!isOpen(path)) return false;
@@ -108,7 +108,7 @@ onCanvasChange((path, _rev, change) => {
   clearTimeout(timers.get(path));
   timers.set(
     path,
-    setTimeout(() => wakeFor(path, "idle"), IDLE_MS),
+    setTimeout(() => didWake(path, "idle"), IDLE_MS),
   );
 });
 
@@ -128,10 +128,9 @@ function sleepClosed() {
     openUntil.delete(path);
     clearTimeout(timers.get(path));
     const s = agentOf(path);
-    if (s && s.archived !== true) {
-      setArchived(s, true);
-      log(`${path} closed: ${s.id} sleeps`);
-    }
+    if (!s || s.archived === true) continue;
+    setArchived(s, true);
+    log(`${path} closed: ${s.id} sleeps`);
   }
 }
 
