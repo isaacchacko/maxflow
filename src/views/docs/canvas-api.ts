@@ -5,7 +5,9 @@ export type Box = Partial<Pick<CanvasNode, "text" | "x" | "y" | "width" | "heigh
 export type Link = { text: string; to: string; near: number };
 
 export const CANVAS_CHANGED = "maxflow:canvas-changed";
-export const canvasChanged = (path: string) => dispatchEvent(new CustomEvent(CANVAS_CHANGED, { detail: path }));
+export function canvasChanged(path: string) {
+  dispatchEvent(new CustomEvent(CANVAS_CHANGED, { detail: path }));
+}
 
 const at = (path: string, rest = "") => `/api/canvas/${encodeURIComponent(path)}${rest}`;
 
@@ -35,8 +37,8 @@ export async function editBox(path: string, id: string, box: Box & { base?: stri
 
 export async function markTyping(path: string, id: string) {
   try {
-    return (await fetch(at(path, `/nodes/${id}/typing`), { method: "POST" })).ok;
-  } catch {
-    return false;
+    await fetch(at(path, `/nodes/${id}/typing`), { method: "POST" });
+  } catch (error) {
+    console.warn("canvas typing beat dropped:", error);
   }
 }
