@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { gateRefusal, isMergeCall, MERGE_REFUSAL, SWITCH_REFUSAL } from "../merge-gate";
 
 const isMergeCommand = (command: string) => isMergeCall("Bash", { command });
+const bashCall = (command: string) => ({ command });
 
 describe("the merge gate blocks every way an agent merges", () => {
   test.each([
@@ -48,7 +49,6 @@ describe("the merge gate blocks every way an agent merges", () => {
 describe("the gate is Isaac's switch", () => {
   const on = { on: true, at: 1 };
   const off = { on: false, at: 1 };
-  const bashCall = (command: string) => ({ command });
 
   test("on, a merge is refused; off, it goes through to the restrictions", () => {
     expect(gateRefusal("Bash", bashCall("gh pr merge 12 --squash"), on)).toBe(MERGE_REFUSAL);

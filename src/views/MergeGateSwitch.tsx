@@ -37,7 +37,7 @@ export function MergeGateSwitch() {
       <span className="text-muted-foreground">
         Merge gate {isOn ? "on: only you merge PRs" : "off: agents merge as the pr-merge restriction allows"}
       </span>
-      <Button size="xs" variant="outline" onClick={() => void flip()}>
+      <Button size="xs" variant="outline" onClick={flip}>
         Turn {isOn ? "off" : "on"}
       </Button>
       {error !== undefined && <span className="text-destructive">{error}</span>}

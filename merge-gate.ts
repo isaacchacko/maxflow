@@ -23,8 +23,8 @@ const isGate = (value: unknown): value is MergeGate => isRecord(value) && typeof
 
 export const mergeGate = (): MergeGate => readStateJson(GATE_FILE, isGate) ?? { on: false, at: 0 };
 
-export function setMergeGate(on: boolean): MergeGate {
-  const gate = { on, at: Date.now() };
+export function setMergeGate(isOn: boolean): MergeGate {
+  const gate = { on: isOn, at: Date.now() };
   writeStateJson(GATE_FILE, gate);
   return gate;
 }
