@@ -2,13 +2,15 @@ import { type BoardPost, handOver, replyOnBoard } from "./board-bus";
 import { isSentry } from "./sessions";
 import { type Route, exactly, firstAnswer, jsonBody, sender, textOf } from "./route-kit";
 
+const orUnknown = (value: string | undefined) => value ?? "?";
+
 async function handOverFromTheSentry(req: Request): Promise<Response> {
   const from = sender(req);
   if (!from || !isSentry(from)) return new Response("only the board-bus sentry hands board messages over", { status: 403 });
   const body = await jsonBody(req);
   const [id, channel, text, handle, device, re] = ["id", "channel", "text", "handle", "device", "re"].map((key) => textOf(body, key));
   if (id === undefined || channel === undefined || text === undefined) return new Response("id, channel and text required", { status: 400 });
-  const post: BoardPost = { id, channel, text, handle: handle ?? "?", device: device ?? "?", ...(re !== undefined && { re }) };
+  const post: BoardPost = { id, channel, text, handle: orUnknown(handle), device: orUnknown(device), ...(re !== undefined && { re }) };
   return Response.json({ outcome: handOver(post) });
 }
 

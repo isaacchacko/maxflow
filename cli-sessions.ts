@@ -113,7 +113,8 @@ function sayHowItWent(board: unknown) {
 
 async function notify(args: string[]) {
   const [id, ...words] = positional(args, []);
-  sayHowItWent(replyOf(await post(`/api/sessions/${String(id)}/notify`, { text: words.join(" "), isaac: args.includes("--isaac") }))["board"]);
+  const answer = replyOf(await post(`/api/sessions/${String(id)}/notify`, { text: words.join(" "), isaac: args.includes("--isaac") }));
+  sayHowItWent(answer["board"]);
 }
 
 async function replyOnTheBoard(args: string[]) {

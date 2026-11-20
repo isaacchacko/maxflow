@@ -50,7 +50,9 @@ test("an agent's notify rides the board as its sender, into the recipient's chan
 
   board.isDown = true;
   const fallen = await notify(a, b, "the board is down");
-  expect(((await fallen.json()) as { board: { via: string; error: string } }).board).toMatchObject({ via: "direct", error: expect.stringContaining("503") });
+  const { board: how } = (await fallen.json()) as { board: { via: string; error: string } };
+  expect(how.via).toBe("direct");
+  expect(how.error).toContain("503");
 });
 
 test("a notify with no sending agent stays off the board", async () => {

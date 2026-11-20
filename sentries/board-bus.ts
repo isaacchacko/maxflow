@@ -30,9 +30,9 @@ async function boardGet(url: string, query: string): Promise<{ events: unknown[]
 const deviceOf = (principal: unknown) => (typeof principal === "string" ? (/user:([^@]+)@/.exec(principal)?.[1] ?? principal) : "?");
 
 function postOf(event: unknown) {
-  if (!isRecord(event) || event["type"] !== "message.posted" || dig(event, ["message", "deleted"]) === true) return undefined;
+  if (!isRecord(event) || event["type"] !== "message.posted" || dig(event, ["message", "deleted"]) === true) return;
   const [id, channel, text, re, handle] = [dig(event, ["message", "id"]), dig(event, ["payload", "channel"]), dig(event, ["payload", "text"]), dig(event, ["payload", "re"]), dig(event, ["actor", "handle"])];
-  if (typeof id !== "string" || typeof channel !== "string" || typeof text !== "string") return undefined;
+  if (typeof id !== "string" || typeof channel !== "string" || typeof text !== "string") return;
   return { id, channel, text, handle: typeof handle === "string" ? handle : "?", device: deviceOf(dig(event, ["payload", "by", "principal"])), ...(typeof re === "string" && { re }) };
 }
 
@@ -51,6 +51,12 @@ async function handOver(event: unknown) {
   }
 }
 
+function moveTo(cursor: string | undefined) {
+  if (cursor === undefined || cursor === state.cursor) return;
+  state.cursor = cursor;
+  writeStateJson(STATE_FILE, state);
+}
+
 async function followFrom(url: string) {
   if (state.cursor === "") {
     state.cursor = (await boardGet(url, "last=1")).cursor;
@@ -60,16 +66,9 @@ async function followFrom(url: string) {
   const { events, cursor } = await boardGet(url, `after=${encodeURIComponent(state.cursor)}&wait=${String(WAIT_S)}`);
   for (const event of events) {
     await handOver(event);
-    const at = isRecord(event) ? stringField(event, "cursor") : undefined;
-    if (at !== undefined) {
-      state.cursor = at;
-      writeStateJson(STATE_FILE, state);
-    }
+    moveTo(isRecord(event) ? stringField(event, "cursor") : undefined);
   }
-  if (cursor !== state.cursor) {
-    state.cursor = cursor;
-    writeStateJson(STATE_FILE, state);
-  }
+  moveTo(cursor);
 }
 
 async function run() {

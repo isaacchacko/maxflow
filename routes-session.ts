@@ -13,7 +13,7 @@ import { describe } from "./world-session";
 import { requested } from "./routing";
 import { touchFrom } from "./sentry-files";
 import { stamp } from "./stamp";
-import { boardUrl, carry, ridesTheBoard } from "./board-bus";
+import { boardUrl, carry, isForTheBoard } from "./board-bus";
 import { setTranscript } from "./transcripts";
 import { patch } from "./patch";
 import { askForHandoffNote, completeHandoff, noteHandoff, successorOf } from "./handoffs";
@@ -94,7 +94,7 @@ async function nativeSendMessageQueuedWhileAsleep(req: Request, addressed: Sessi
   const stamped = stamp(req, text);
   const deliver = "error" in stamped ? text : stamped.text;
   touchFrom(req, s, "write");
-  if (boardUrl() !== undefined && ridesTheBoard(from, s)) {
+  if (boardUrl() !== undefined && isForTheBoard(from, s)) {
     const board = await carry({ from, to: s, text, deliver, isAlreadyTyped: !isAsleep });
     return Response.json({ queued: isAsleep, board });
   }
@@ -115,7 +115,7 @@ async function notify(req: Request, addressed: Session): Promise<Response> {
   if (isFilled(stamped.request)) requested(s, stamped.request);
   touchFrom(req, s, "write");
   const from = sender(req);
-  if (!isIsaac && boardUrl() !== undefined && from !== undefined && ridesTheBoard(from, s)) {
+  if (!isIsaac && boardUrl() !== undefined && from !== undefined && isForTheBoard(from, s)) {
     const board = await carry({ from, to: s, text, deliver: stamped.text, isAlreadyTyped: false });
     return Response.json({ ...describe(s), board }, { status: 202 });
   }

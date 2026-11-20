@@ -29,8 +29,9 @@ const sent: SentLog = readStateJson(SENT_FILE, isSentLog) ?? {};
 function keep(id: string, record: Sent) {
   sent[id] = record;
   const ids = Object.keys(sent);
-  for (const old of ids.slice(0, Math.max(0, ids.length - SENT_KEPT))) delete sent[old];
-  writeStateJson(SENT_FILE, sent);
+  const kept = Object.fromEntries(ids.slice(-SENT_KEPT).map((x) => [x, sent[x]]));
+  writeStateJson(SENT_FILE, kept);
+  if (ids.length > SENT_KEPT) for (const old of ids.slice(0, ids.length - SENT_KEPT)) Reflect.deleteProperty(sent, old);
 }
 
 export const boardUrl = agentBoardUrl;
@@ -67,7 +68,7 @@ const isOpen = (t: Thread) => t.mergedInto === undefined && t.resolved === undef
 const isOn = (t: Thread, s: Session) => t.routers.includes(s.id) || t.members?.includes(s.id) === true || t.pending?.routers.includes(s.id) === true;
 const lastAt = (t: Thread) => t.messages.at(-1)?.at ?? 0;
 
-// constraint: Isaac reads agent traffic in his threads; a worker is usually on none, so the one its router or peer is on, preferring the thread either was last handed
+// constraint: a worker is usually on no thread, so its traffic shows in the one its router or peer is on
 function threadFor(from: Session | undefined, to: Session | undefined): Thread | undefined {
   const pair = [to, from].filter((s): s is Session => s !== undefined);
   const open = threads.filter(isOpen);
@@ -93,17 +94,23 @@ function mirror(from: Session | undefined, to: Session | undefined, text: string
   showInThread(t, from?.id ?? "yarn", `${toWhom} (${how}):\n${quoted(text)}`);
 }
 
+const FELL_BACK = `\n[yarn] The board didn't hand this over within ${String(SENTRY_GRACE_MS / 1000)}s, so it came directly.`;
+
+function typeInto(to: Session, from: Session | undefined, record: Sent, isDirect: boolean) {
+  dispatch({ ...(from && { from }), to: [to], text: record.text, deliver: `${record.deliver ?? record.text}${isDirect ? FELL_BACK : ""}` });
+  if (from && isWaitingOn(to, from.id)) endWait(to);
+}
+
 function deliverRecorded(id: string, record: Sent, how: "board" | "direct") {
   if (record.delivered) return;
   keep(id, { ...record, delivered: true });
   const to = sessions.get(record.to ?? "");
-  const from = sessions.get(record.from ?? "");
   if (!to || !isReachable(to)) return;
-  const fellBack = how === "direct" ? `\n[yarn] The board didn't hand this over within ${String(SENTRY_GRACE_MS / 1000)}s, so it came directly.` : "";
-  dispatch({ ...(from && { from }), to: [to], text: record.text, deliver: `${record.deliver ?? record.text}${fellBack}` });
-  if (from && isWaitingOn(to, from.id)) endWait(to);
-  mirror(from, to, record.text, how === "board" ? `board #${id}` : `board #${id}, delivered directly`);
-  if (how === "direct") publish("board-bus/fallback", { id, to: to.id, from: from?.id ?? null, why: "not handed over by the board sentry in time" });
+  const from = sessions.get(record.from ?? "");
+  const isDirect = how === "direct";
+  typeInto(to, from, record, isDirect);
+  mirror(from, to, record.text, isDirect ? `board #${id}, delivered directly` : `board #${id}`);
+  if (isDirect) publish("board-bus/fallback", { id, to: to.id, from: from?.id ?? null, why: "not handed over by the board sentry in time" });
 }
 
 function sweepUndelivered() {
@@ -114,14 +121,14 @@ setInterval(sweepUndelivered, SWEEP_MS).unref();
 
 export type Carried = { via: "board"; id: string } | { via: "direct"; error: string };
 
-// constraint: only an agent's message rides the board; sentries' notices stay direct, so the board and his threads hold the agents' conversation, not the fleet's noise
-export const ridesTheBoard = (from: Session | undefined, to: Session) => from !== undefined && !isSentry(from) && !isSentry(to) && from.id !== to.id;
+// constraint: sentries' notices stay direct, so the board and his threads hold only the agents' conversation
+export const isForTheBoard = (from: Session | undefined, to: Session) => from !== undefined && !isSentry(from) && !isSentry(to) && from.id !== to.id;
 
 export async function carry(m: { from: Session; to: Session; text: string; deliver: string; isAlreadyTyped: boolean }): Promise<Carried> {
   const posted = await postToBoard({ channel: agentChannel(m.to.id), text: m.text }, m.from);
   if ("error" in posted) {
-    if (!m.isAlreadyTyped) dispatch({ from: m.from, to: [m.to], text: m.text, deliver: `${m.deliver}\n[yarn] The agent board was down (${posted.error.slice(0, 120)}), so this came directly.` });
-    else dispatch({ from: m.from, to: [m.to], text: m.text, typed: true });
+    if (m.isAlreadyTyped) dispatch({ from: m.from, to: [m.to], text: m.text, typed: true });
+    else dispatch({ from: m.from, to: [m.to], text: m.text, deliver: `${m.deliver}\n[yarn] The agent board was down (${posted.error.slice(0, 120)}), so this came directly.` });
     if (isWaitingOn(m.to, m.from.id)) endWait(m.to);
     mirror(m.from, m.to, m.text, "board down, delivered directly");
     publish("board-bus/fallback", { to: m.to.id, from: m.from.id, why: posted.error });
@@ -159,7 +166,7 @@ function deliverToThread(p: BoardPost, t: Thread) {
   if (owners.length > 0) dispatch({ source: "agent", to: owners, target: t.title, text: p.text, deliver: `${unverifiedStamp(p)} In the board channel of your thread "${t.title}" (${t.id}): ${unforge(p.text)}${howToAnswer(p)}` });
 }
 
-// constraint: who posted is the board's word only as far as the device; the profile is whatever the poster typed, so only a message this server posted and recorded carries a yarn sender's stamp
+// constraint: the board vouches only for the device, the profile is typed by the poster, so only a post this server recorded carries a yarn sender stamp
 export function handOver(p: BoardPost): string {
   const record = sent[p.id];
   if (!record && inFlight.posts > 0) return "retry";
