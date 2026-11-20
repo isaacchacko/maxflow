@@ -6,12 +6,13 @@ import { cn } from "@/lib/utils";
 import { ago } from "@/threads/Replies";
 import { useJson } from "@/views/stats/load";
 
+type Feedback = { at: number; url: string; body: string; toldNames: string[]; replied: number | null; pushed: number | null };
 type Finding = { path: string; line: number; severity: string; body: string };
 type Approval = { verdict: string; sha: string; current: boolean | null; tier: number | null; round: number; at: number | null; summary: string; findings: Finding[] };
 export type PrRow = {
   pr: string; url: string; title: string; stage: string; since: number; created: number; ended: number | null; moves: { at: string; stage: string }[];
   sessions: { id: string; name: string; live: boolean; wait: string | null }[]; tasks: { id: number; title: string; status: string }[];
-  approval: Approval | null; failing: string[]; unresolved: number; ready: boolean; stuck: string | null;
+  approval: Approval | null; feedback: Feedback | null; failing: string[]; unresolved: number; ready: boolean; stuck: string | null;
 };
 
 export const PRS_URL = "/api/prs";
@@ -32,6 +33,23 @@ function ApprovalChip({ a }: { a: Approval | null }) {
     <span className={cn("shrink-0 text-xs", tone)} title={`approval sentry ${a.verdict} on ${a.sha.slice(0, 8)}${a.current === false ? " (an older head)" : ""}`}>
       review {a.verdict.split(":", 1)[0]}{a.findings.length > 0 && ` (${a.findings.length})`}{a.current === false && " · old head"}
     </span>
+  );
+}
+
+function answerOf(f: Feedback) {
+  const answers = [f.replied === null ? "" : `agent replied ${ago(f.replied)} ago`, f.pushed === null ? "" : `pushed ${ago(f.pushed)} ago`].filter(a => a !== "");
+  return answers.length > 0 ? answers.join(", ") : "no reply or push yet";
+}
+
+function FeedbackLine({ f }: { f: Feedback }) {
+  const to = f.toldNames.length > 0 ? f.toldNames.join(", ") : "the funnel, to route";
+  const isAnswered = f.replied !== null || f.pushed !== null;
+  return (
+    <p className="truncate text-xs" title={f.body}>
+      <a href={f.url === "" ? undefined : f.url} target="_blank" rel="noreferrer" className="hover:underline">your comment {ago(f.at)} ago</a>
+      <span className="text-muted-foreground"> · delivered to {to} · </span>
+      <span className={isAnswered ? "text-ok" : "text-warn"}>{answerOf(f)}</span>
+    </p>
   );
 }
 
@@ -112,10 +130,11 @@ function Row({ row }: { row: PrRow }) {
         <button type="button" onClick={() => setOpen(!isOpen)} aria-label="Details" className="shrink-0 text-muted-foreground">
           <ChevronRight className={cn("size-4 transition-transform", isOpen && "rotate-90")} />
         </button>
-        <a href={row.url} target="_blank" rel="noreferrer" className="w-28 shrink-0 font-mono text-xs hover:underline">{label(row.pr)}</a>
+        <a href={`${row.url}/files`} target="_blank" rel="noreferrer" className="w-28 shrink-0 font-mono text-xs hover:underline" title="Open the files on GitHub">{label(row.pr)}</a>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm" title={row.title}>{row.title}</p>
           <Who row={row} />
+          {row.feedback && <FeedbackLine f={row.feedback} />}
           {row.stuck !== null && <p className="text-xs text-warn">stuck: {row.stuck}</p>}
         </div>
         <ApprovalChip a={row.approval} />

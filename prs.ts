@@ -1,4 +1,5 @@
 import { readStatus, readWatches, type PolledPr } from "./gh";
+import { feedbackOn, type PrFeedback } from "./pr-feedback";
 import type { Task } from "./model";
 import { sessions } from "./sessions";
 import { watchedStateFile } from "./state";
@@ -27,7 +28,7 @@ export type PrApproval = { verdict: string; sha: string; current: boolean | null
 export type PrRow = {
   pr: string; url: string; title: string; stage: string; since: number; created: number; ended: number | null; moves: Move[];
   sessions: { id: string; name: string; live: boolean; wait: string | null }[]; tasks: { id: number; title: string; status: string }[];
-  approval: PrApproval | null; failing: string[]; unresolved: number; ready: boolean; stuck: string | null;
+  approval: PrApproval | null; feedback: (PrFeedback & { toldNames: string[] }) | null; failing: string[]; unresolved: number; ready: boolean; stuck: string | null;
 };
 
 const queueFile = watchedStateFile<QueueEntry[]>("review-queue.json", []);
@@ -70,6 +71,11 @@ function sessionsOf(key: string, url: string, known: SessionOn[]) {
     const isLive = s.archived !== true || (s.wait !== undefined && s.wait.kind !== "done");
     return { id, name: s.name, live: isLive, wait: s.wait ? `${s.wait.kind}:${s.wait.ref}` : null };
   });
+}
+
+function feedbackOf(key: string) {
+  const f = feedbackOn(key);
+  return f ? { ...f, toldNames: f.told.map((id) => sessions.get(id)?.name ?? id) } : null;
 }
 
 const tasksOf = (url: string) =>
@@ -118,8 +124,8 @@ function rowOf(key: string, basis: Basis, polled: PolledPr | undefined, isOpen: 
   const { known, ...shown } = basis;
   const unresolved = unresolvedOf(polled);
   const row = {
-    pr: key, ...shown, sessions: sessionsOf(key, basis.url, known), tasks: tasksOf(basis.url),
-    approval: approvalOf(key, polled), failing: failingChecks(polled), unresolved,
+    pr: key, ...shown, sessions: sessionsOf(key, basis.url, [...known, ...(feedbackOn(key)?.told ?? []).map((id) => ({ id, name: undefined }))]), tasks: tasksOf(basis.url),
+    approval: approvalOf(key, polled), feedback: feedbackOf(key), failing: failingChecks(polled), unresolved,
     ready: isOpen && isMergeableStage(key, basis.stage) && unresolved === 0,
   };
   return { ...row, stuck: isOpen ? stuckWhy(row) : null };
