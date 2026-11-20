@@ -73,6 +73,10 @@ describe("the gate is Isaac's switch", () => {
     expect(gateRefusal({ tool: "Bash", input: bashCall("gh pr merge 3"), cwd: "/Users/isaac/Timelines" }, on)).toBe(MERGE_REFUSAL);
   });
 
+  test("a message that names the switch file isn't a write", () => {
+    expect(gateRefusal({ tool: "Bash", input: bashCall("maxflow notify 09ee4563 'the gate lives in merge-gate.json'") }, on)).toBeUndefined();
+  });
+
   test("an agent may read it", () => {
     expect(gateRefusal({ tool: "Bash", input: bashCall("curl -s localhost:$YARN_PORT/api/merge-gate") }, on)).toBeUndefined();
   });

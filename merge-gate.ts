@@ -15,7 +15,7 @@ const MERGE_ANYWHERE = [
   /(localhost|127\.0\.0\.1|(?:YARN|MAXFLOW)_PORT\}?|:\d{2,5})\S*\/api\/prs\/merge\b/,
 ];
 const MERGE_TOOLS = [/^mcp__linear__merge_diff$/, /^mcp__.*github.*__(merge_pull_request|enable_auto_merge|.*automerge.*)$/i];
-const SWITCH_WRITE = [/merge-gate\.json/, /\/api\/merge-gate\b[^\n]*(-d\b|--data|-X\s*(POST|PUT|PATCH))|(-d\b|--data|-X\s*(POST|PUT|PATCH))[^\n]*\/api\/merge-gate\b/];
+const SWITCH_WRITE = [/(>|\b(tee|rm|mv|cp|ln|truncate|touch|unlink)\b|\bsed\s+-i|\bperl\s+-[a-z]*i)[^\n;&|]*merge-gate\.json/, /\/api\/merge-gate\b[^\n]*(-d\b|--data|-X\s*(POST|PUT|PATCH))|(-d\b|--data|-X\s*(POST|PUT|PATCH))[^\n]*\/api\/merge-gate\b/];
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
 export const MERGE_REFUSAL =
