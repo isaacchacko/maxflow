@@ -156,7 +156,7 @@ function score(clone: string, dir: string, ref: string, base: string): Scored {
 const findings = (h: Head) => (h.reviews ?? []).flatMap((r) => r.comments).filter((c) => c.severity !== "nit");
 const isPassed = (h: Head) => (h.reviews?.length ?? 0) > 0 && (h.reviews ?? []).every((r) => r.verdict !== "request_changes") && findings(h).length === 0;
 const decision = (h: Head) => (isPassed(h) ? "passed: notify Liudvikas" : "findings: back to its agent");
-const suggestionLine = (suggestion: string | undefined) => ((suggestion ?? "") === "" ? "" : `\n  suggestion: ${suggestion ?? ""}`);
+const suggestionLine = (suggestion = "") => (suggestion === "" ? "" : `\n  suggestion: ${suggestion}`);
 
 function logEntry(key: string, h: Head) {
   const usd = (h.reviews ?? []).reduce((n, r) => n + r.usd, 0);
@@ -326,8 +326,7 @@ const isSettled = (h: Head | undefined, sha: string) => h?.sha === sha && h.stat
 function queueNewHeads() {
   for (const { key, pr } of waiting()) {
     const h = state.heads[key];
-    if (active.has(key)) continue;
-    if (isSettled(h, pr.headRefOid)) continue;
+    if (active.has(key) || isSettled(h, pr.headRefOid)) continue;
     const attempts = h?.sha === pr.headRefOid && h.status === "failed" ? (h.attempts ?? 1) + 1 : 1;
     state.heads[key] = { sha: pr.headRefOid, url: pr.url, title: pr.title, author: pr.author?.login ?? "?", status: "queued", started: Date.now(), attempts };
   }
