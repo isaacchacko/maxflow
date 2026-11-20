@@ -1,7 +1,7 @@
 import { argAt, base, fail, flag, hasArg, mySession, positional, timeout, type Verb } from "./cli-shared";
 import { addEvent, didCommit, ensureTimelines, findEvents, listTimelines, readTimeline, setNow, TIMELINES_DIR } from "./timelines";
 
-const USAGE = `usage: maxflow timeline add <path> <title> [text...] (else stdin) | now <path> [text...] (else stdin) | read <path> [--last N] | ls [prefix] | find <words...>
+const USAGE = `usage: maxflow timeline add <path> <title> [text...] (else stdin) [--at <ISO time, for an event that happened earlier>] | now <path> [text...] (else stdin) | read <path> [--last N] | ls [prefix] | find <words...>
   timelines live in ${TIMELINES_DIR}/<folders>/<label>/, one "<UTC time> <title>.txt" per event plus now.txt, the current state`;
 const DEFAULT_LAST = 10;
 
@@ -18,18 +18,20 @@ async function author() {
   }
 }
 
-const textFrom = async (args: string[], from: number) => (hasArg(args, from) ? args.slice(from).join(" ") : await Bun.stdin.text());
+const textFrom = async (words: string[]) => (words.length > 0 ? words.join(" ") : await Bun.stdin.text());
 
 async function add(args: string[]) {
-  if (!hasArg(args, 2)) fail(USAGE);
-  const file = addEvent(argAt(args, 1), argAt(args, 2), await textFrom(args, 3));
-  didCommit(`${argAt(args, 1)}: ${argAt(args, 2)}`, await author());
+  const [, path = "", title = "", ...words] = positional(args, ["--at"]);
+  const at = new Date(flag(args, "--at") ?? Date.now());
+  if (title === "" || Number.isNaN(at.getTime())) fail(USAGE);
+  const file = addEvent(path, title, await textFrom(words), at);
+  didCommit(`${path}: ${title}`, await author());
   console.log(file);
 }
 
 async function now(args: string[]) {
   if (!hasArg(args, 1)) fail(USAGE);
-  const file = setNow(argAt(args, 1), await textFrom(args, 2));
+  const file = setNow(argAt(args, 1), await textFrom(args.slice(2)));
   didCommit(`${argAt(args, 1)}: now`, await author());
   console.log(file);
 }
