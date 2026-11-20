@@ -212,9 +212,9 @@ export function endWait(s: Session, why?: string) {
   if (isFilled(why)) dispatch({ to: [s], target: waitLabel(was), text: `[yarn] Your wait on ${waitLabel(was)} is over: ${why}${why.endsWith("```") ? "" : "."}` });
 }
 
-export function tellWaiters(on: Session, what: string) {
+export function tellWaiters(on: Session, what: string, isTold: (waiter: Session) => boolean = () => true) {
   for (const w of sessions.values())
-    if (w !== on && isWaitingOn(w, on.id) && w.exitCode === null) endWait(w, `"${on.name}" (session ${on.id}) ${what}`);
+    if (w !== on && isWaitingOn(w, on.id) && w.exitCode === null && isTold(w)) endWait(w, `"${on.name}" (session ${on.id}) ${what}`);
 }
 export const isWaitingOn = (w: Session, id?: string | null) => w.wait?.kind === "agent" && typeof id === "string" && id !== "" && w.wait.ref.split(",").includes(id);
 export function waitLabel(w: Wait) {

@@ -82,8 +82,11 @@ export function subthread(parent: Thread, messageId: string) {
   return t;
 }
 
-export function handOff(old: Session, oldRole: Role, to: Session) {
+export function reparentWorkers(old: Session, to: Session) {
   for (const w of sessions.values()) if (w.role?.role === "worker" && w.role.parent === old.id) setRole(w, { ...w.role, parent: to.id });
+}
+export function handOff(old: Session, oldRole: Role, to: Session) {
+  reparentWorkers(old, to);
   setRole(old, { role: "worker", objective: oldRole.objective, parent: to.id, handedTo: to.id });
   const handed = threads.filter((t) => t.mergedInto === undefined && t.routers.includes(old.id));
   for (const t of handed) {

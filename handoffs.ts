@@ -5,7 +5,7 @@ import { type Role, type Session, isAgent, isSentry, sessions } from "./sessions
 import type { Thread } from "./model";
 import { saveTasks, saveThreads, tasks, threads } from "./stores";
 import { createSession, dispatch, saveInbox, setWait, waitLabel } from "./lifecycle";
-import { handOff, setRole } from "./objectives";
+import { handOff, reparentWorkers, setRole } from "./objectives";
 import { claudeForARoleNeverABareShellThatWouldDropHisThreadReplies } from "./routes-sessions";
 import { acceptTrust } from "./routing";
 import { handShellsTo } from "./waits";
@@ -162,6 +162,7 @@ export function completeHandoff(old: Session): Session | undefined {
   const line = `Handed from [[agent:${old.id}]] to [[agent:${fresh.id}]]${pct === undefined ? "" : ` at ${pct} context`}, which carries this work from now on.`;
   if (role.role === "router") handOff(old, role, fresh);
   else setRole(old, { ...role, handedTo: fresh.id });
+  if (role.role === "owner") reparentWorkers(old, fresh);
   const moved = moveThreadsStillNaming(old, fresh, line);
   const movedTasks = moveTasks(old, fresh, line.replaceAll(/\[\[agent:([\w-]+)\]\]/g, "$1"));
   moveWatches(old.id, fresh.id);

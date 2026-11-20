@@ -84,7 +84,7 @@ function aroundOf(s: Reply): Around {
 function pickerFor(me: Around & { role: Role }, which: string) {
   const routerOf = me.role.role === "router" ? undefined : me.role.parent;
   const pickers = new Map<string, (s: Around & { role: Role }) => boolean>([
-    ["router", (s) => s.role.role === "router" && (isBlank(routerOf) || s.id === routerOf)],
+    ["router", (s) => (s.role.role === "router" && (isBlank(routerOf) || s.id === routerOf)) || (s.role.role === "owner" && s.id === routerOf)],
     ["parent", (s) => s.id === routerOf],
     ["workers", (s) => s.role.parent === me.id],
     ["objective", () => true],
@@ -97,7 +97,7 @@ const hasRole = (s: Around | undefined): s is Around & { role: Role } => s?.role
 async function agentsAround(args: string[]) {
   const all = (await sessionList()).map(aroundOf);
   const me = all.find((s) => s.id === mySession());
-  if (!hasRole(me)) fail("who works only inside a yarn agent with a role (router or worker)");
+  if (!hasRole(me)) fail("who works only inside a yarn agent with a role (router, owner or worker)");
   const live = all.filter(hasRole).filter((s) => s.running && s.id !== me.id && s.role.objective === me.role.objective && isBlank(s.role.handedTo));
   const picker = pickerFor(me, argAt(args, 0));
   if (!picker) fail("who router|parent|workers|objective");

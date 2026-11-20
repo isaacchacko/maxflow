@@ -179,7 +179,8 @@ function tellWhoWaitsOn(s: Session, kind: Wait["kind"], was: Wait | undefined, i
   }
   const wait = s.wait;
   if (wait === undefined) return;
-  if (!was || waitLabel(was) !== waitLabel(wait)) tellWaiters(s, `is now waiting on ${waitLabel(wait)}`);
+  // constraint: an owner wakes on its worker's report or finish, never on the worker's CI or review wait changing
+  if (!was || waitLabel(was) !== waitLabel(wait)) tellWaiters(s, `is now waiting on ${waitLabel(wait)}`, (w) => w.role?.role !== "owner");
 }
 const sameFinishAtOf = (kind: Wait["kind"], was: Wait | undefined) => (kind === "done" && was?.kind === "done" ? was.at : undefined);
 function didEndOnShellAlreadyOver(s: Session, shell: Shell | undefined) {

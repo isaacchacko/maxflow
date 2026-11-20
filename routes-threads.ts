@@ -57,7 +57,7 @@ function hisInboxMessageForTheFunnelToRoute(text: string): Response {
     target: t.title,
     text,
     deliver: (seq) =>
-      `${text}\n[yarn] signal ${seq}, his inbox thread ${t.id}: ${sizeFirst(seq)} His own inbox message is never fyi or ignore, small talk included: whoever takes it, a direct worker or a router, answers him in the thread.`,
+      `${text}\n[yarn] signal ${seq}, his inbox thread ${t.id}: ${sizeFirst(seq)} His own inbox message is never fyi or ignore, small talk included: whoever takes it answers him in the thread.`,
   });
   t.signal = ev.seq;
   threads.push(t);

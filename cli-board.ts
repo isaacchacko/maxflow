@@ -122,6 +122,12 @@ async function mergeObjective(args: string[]) {
 }
 
 async function routeSignal(args: string[]) {
+  const thread = flag(args, "--thread");
+  if (!isBlank(thread)) {
+    const r = replyOf(await post(`/api/signals/${argAt(args, 0)}/route`, { thread }));
+    console.log(`signal ${argAt(args, 0)} → thread ${str(r, "thread")} (owner ${listAt(r, "routedTo").join(", ")})`);
+    return;
+  }
   const title = flag(args, "--new");
   const r = replyOf(await post(`/api/signals/${argAt(args, 0)}/route`, isBlank(title) ? { objective: argAt(args, 1) } : { title, cwd: flag(args, "--cwd") ?? process.cwd() }));
   console.log(`signal ${argAt(args, 0)} → objective ${str(r, "objective")} (routers ${listAt(r, "routedTo").join(", ")})`);
@@ -147,8 +153,14 @@ export const boardVerbs: Verb[] = [
 async function sizeSignal(args: string[]) {
   const body = { size: argAt(args, 1), cwd: flag(args, "--cwd"), name: flag(args, "--name"), note: flag(args, "--note"), about: flag(args, "--about") };
   const r = replyOf(await post(`/api/signals/${argAt(args, 0)}/size`, body));
-  const made = isBlank(str(r, "session")) ? "" : `, worker ${str(r, "session")}`;
+  const made = isBlank(str(r, "session")) ? "" : `, ${str(r, "size") === "owner" ? "owner" : "worker"} ${str(r, "session")}${isBlank(str(r, "thread")) ? "" : ` of thread ${str(r, "thread")}`}`;
   console.log(`signal ${argAt(args, 0)} sized ${str(r, "size")}${made}${isBlank(str(r, "noted")) ? "" : `, noted in ${str(r, "noted")}`}`);
+}
+
+async function flipOwners(args: string[]) {
+  const which = args[0];
+  const r = replyOf(which === "on" || which === "off" ? await post("/api/thread-owners", { on: which === "on" }) : await call("/api/thread-owners"));
+  console.log(`thread owners are ${isTruthy(r["on"]) ? "on: new threads get an owner, and no router starts" : "off: the funnel routes to objectives and routers"}`);
 }
 
 async function promote(args: string[]) {
@@ -164,5 +176,6 @@ export const objectiveVerbs: Verb[] = [
   { matches: (verb, args) => verb === "route" && hasArg(args, 1), run: routeSignal },
   { matches: (verb, args) => verb === "size" && hasArg(args, 1), run: sizeSignal },
   { matches: (verb, args) => verb === "promote" && hasArg(args, 0), run: promote },
+  { matches: (verb) => verb === "owners", run: flipOwners },
   { matches: (verb, args) => verb === "page" && (args[0] === "put" || args[0] === "rm") && hasArg(args, 2), run: editPage },
 ];

@@ -12,6 +12,7 @@ import { peekStateJson, writeStateJson } from "./state";
 import { isLive, saveTasks, saveThreads, tasks, threads } from "./stores";
 import { headline, mentionsIn, message, unforge, unpause } from "./threads";
 import { tmuxAsync, tmuxName } from "./tmux";
+import { areOwnersOn } from "./owners";
 
 const SLACK_DAY_MS = 86_400_000;
 const EXTERNAL_SEEN_KEPT = 5000;
@@ -57,10 +58,10 @@ export async function handoff(seq: number) {
   return { seq, sig, text, thread, feed };
 }
 
-function giveFeedTaskToRouter(feed: Feed | undefined, owner: Session | undefined, o: Objective) {
+function giveFeedTaskTo(feed: Feed | undefined, owner: Session | undefined, to: string) {
   const fed = feed?.task === undefined ? undefined : tasks.find((t) => t.id === feed.task);
   if (fed === undefined || owner === undefined) return;
-  if (typeof editTask(fed, { session: owner.id, status: "doing", event: `why here: routed by the funnel to ${o.title} (${owner.id})` }) !== "string") saveTasks();
+  if (typeof editTask(fed, { session: owner.id, status: "doing", event: `why here: routed by the funnel to ${to} (${owner.id})` }) !== "string") saveTasks();
 }
 
 export async function reroute(seq: number, o: Objective) {
@@ -74,8 +75,30 @@ export async function reroute(seq: number, o: Objective) {
     for (const s of to) s.handed = thread.id;
     patch(thread, { objective: o.id, routers: to.map((s) => s.id), signal: undefined, pending: { routers: to.map((s) => s.id), since: Date.now() } });
   }
-  giveFeedTaskToRouter(feed, to[0], o);
+  giveFeedTaskTo(feed, to[0], o.title);
   publish(`signal-route/${seq}`, { seq, objective: o.id, routedTo: to.map((s) => s.id) });
+  if (sig.source === "isaac") for (const s of to) requested(s, sig.text);
+  if (thread) {
+    saveThreads();
+    publish(`thread/${thread.id}`, { thread: thread.id, pending: true });
+  }
+  return to;
+}
+
+export async function toThreadOwner(seq: number, target: Thread) {
+  const to = target.routers.flatMap((id) => sessions.get(id) ?? []).filter(isReachable);
+  if (to.length === 0) return to;
+  const h = await handoff(seq);
+  if (!h) return null;
+  const { sig, thread, feed } = h;
+  const continues = thread === target ? "" : `\n[yarn] It continues your thread "${target.title}" (${target.id}).`;
+  for (const s of to) enqueue(s, h.text + continues);
+  if (thread) {
+    for (const s of to) s.handed = thread.id;
+    patch(thread, { objective: target.objective, routers: to.map((s) => s.id), signal: undefined, pending: { routers: to.map((s) => s.id), since: Date.now() } });
+  }
+  giveFeedTaskTo(feed, to[0], `thread ${target.id}`);
+  publish(`signal-route/${seq}`, { seq, thread: target.id, routedTo: to.map((s) => s.id) });
   if (sig.source === "isaac") for (const s of to) requested(s, sig.text);
   if (thread) {
     saveThreads();
@@ -96,7 +119,10 @@ function sameConversation(t: Thread) {
   return threads.filter((x) => x !== t && !isFilled(x.mergedInto) && x.resolved === undefined && x.messages.some(isInOwnConversation));
 }
 
-export const sizeFirst = (seq: number) =>
+export const sizeFirst = (seq: number) => (areOwnersOn() ? ownerOrThread(seq) : sizeFirstForObjectives(seq));
+const ownerOrThread = (seq: number) =>
+  `decide whether it continues an open thread or is new. Continues one: \`${CLI} route ${seq} --thread <thread id>\` hands it to that thread's owner. New: \`${CLI} size ${seq} owner --cwd <dir> --name '<root, a few words>'\` starts a fresh owner on it. Nothing for an agent: \`${CLI} size ${seq} fyi --note '<one line>'\` or \`${CLI} size ${seq} ignore\`.`;
+const sizeFirstForObjectives = (seq: number) =>
   `size it first with \`${CLI} size ${seq} direct|area|fyi|ignore\` (direct: one worker on it; fyi: --note '<one line>'); only area is then routed, with \`${CLI} route ${seq} <objective id | --new '<title>' --cwd <dir>>\`.`;
 function ownerOf(t: Thread) {
   if (t.objective !== "") return ` (objective ${t.objective})`;
@@ -108,7 +134,7 @@ const lastExternal = (x: Thread) => x.messages.findLast((m) => m.ext !== undefin
 function candidatesLine(t: Thread) {
   const open = sameConversation(t);
   if (open.length === 0) return "";
-  return `\n[yarn] The same Slack conversation has these other open threads, from its earlier bursts. If this continues one's topic, give it to that thread's owner (size it area and route it to that thread's objective, or, when a direct worker holds it, \`${CLI} notify <worker id>\` it), then fold it in with \`${CLI} thread merge ${t.id} <thread id>\`. If it is a different topic, size and route it on its own: the same person or DM is never a reason to merge:\n${open.map((x) => `- ${x.id} "${x.title}"${ownerOf(x)}, last: ${headline(lastExternal(x)?.text ?? "")}`).join("\n")}`;
+  return `\n[yarn] The same Slack conversation has these other open threads, from its earlier bursts. If this continues one's topic, give it to that thread's owner (${areOwnersOn() ? `\`${CLI} route <seq> --thread <thread id>\`` : `size it area and route it to that thread's objective, or, when a direct worker holds it, \`${CLI} notify <worker id>\` it`}), then fold it in with \`${CLI} thread merge ${t.id} <thread id>\`. If it is a different topic, give it an owner of its own: the same person or DM is never a reason to merge:\n${open.map((x) => `- ${x.id} "${x.title}"${ownerOf(x)}, last: ${headline(lastExternal(x)?.text ?? "")}`).join("\n")}`;
 }
 
 export async function feedToFunnel(t: Thread, from: Session, text: string, feed = t.feed) {

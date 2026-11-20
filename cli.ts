@@ -46,8 +46,9 @@ const usage = `usage:
   yarn chats [query] | yarn resume <claude-session-id> [--safe] [--force]
   yarn objectives | yarn objective new <title...> [--cwd DIR] [--scope S]   an objective and its first router
   yarn objective merge <from id> <into id>   the target takes the source's agents, threads, tasks and signals; the source closes
-  yarn route <signal seq> <objective id> | yarn route <signal seq> --new <title> [--cwd DIR]   the funnel routing a signal from the event log
-  yarn size <signal seq> direct|area|fyi|ignore [--cwd DIR] [--name N] [--note '<line>'] [--about <thread id>]   the funnel sizing a signal first: direct starts one worker on it, fyi notes a digest line, area is routed next
+  yarn route <signal seq> <objective id> | yarn route <signal seq> --new <title> [--cwd DIR] | yarn route <signal seq> --thread <thread id>   the funnel routing a signal from the event log; --thread hands it to that thread's owner
+  yarn size <signal seq> direct|area|owner|fyi|ignore [--cwd DIR] [--name N] [--note '<line>'] [--about <thread id>]   the funnel sizing a signal first: owner starts a fresh owner agent on its thread, direct starts one worker on it, fyi notes a digest line, area is routed next
+  yarn owners [on|off]   the thread-owners switch: on, new threads get one owner agent and no router starts (docs: yarn/thread-owners.md)
   yarn promote <objective title...>   a direct worker whose job grew becomes the router of a new objective holding its thread
   yarn thread new <title...> [--objective ID] | yarn thread new --parent <thread id>:<message id> [text...]   a subthread under that message | yarn thread post <thread id> <text...> [--as <device>/<name>, outside yarn, where YARN_SESSION isn't set] | yarn thread status <thread id> <line...> | yarn threads
   yarn thread read <thread id> [--last N]   print a thread's messages as text, e.g. one he @-mentions

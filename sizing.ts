@@ -1,14 +1,16 @@
+import { readFileSync } from "node:fs";
 import { callerOf } from "./shared/legacy-maxflow";
 import { publish } from "./bus";
 import { CLI, DIR } from "./instance";
 import { createSession, editTask } from "./lifecycle";
 import type { Thread } from "./model";
-import { newObjective, setRole } from "./objectives";
+import { newObjective, setRole, titleOf } from "./objectives";
 import { acceptTrust, handoff } from "./routing";
 import { type Session, isSentry, sessions } from "./sessions";
 import { readStateJson, writeStateJson } from "./state";
 import { saveTasks, saveThreads, tasks, threads } from "./stores";
 import { message } from "./threads";
+import { OWNER_BRIEF, ROUTERS_RETIRED, areOwnersOn, ownerRole, owners, setOwners } from "./owners";
 
 export const SIZES = ["direct", "area", "fyi", "ignore"] as const;
 export type Size = (typeof SIZES)[number];
@@ -16,8 +18,9 @@ export type Size = (typeof SIZES)[number];
 type Handoff = NonNullable<Awaited<ReturnType<typeof handoff>>>;
 const home = process.env["HOME"] ?? "/";
 
+const homeOf = (cwd: string) => (/^~(?=\/|$)/.test(cwd) ? `${home}${cwd.slice(1)}` : cwd);
 function startAgent(name: string, cwd: string, prompt: string) {
-  const agent = createSession(name, ["claude", "--permission-mode", "bypassPermissions", prompt], /^~(?=\/|$)/.test(cwd) ? `${home}${cwd.slice(1)}` : cwd);
+  const agent = createSession(name, ["claude", "--permission-mode", "bypassPermissions", prompt], homeOf(cwd));
   void acceptTrust(agent);
   return agent;
 }
@@ -109,11 +112,38 @@ async function startDirect(seq: number, body: SizeBody) {
   return worker;
 }
 
-type SizeRecord = { seq: number; size: Size; by: "funnel" | "promote"; thread?: string; session?: string; noted?: string; objective?: string };
+const ownerBrief = (t: Thread) =>
+  `\n[yarn] You own thread "${t.title}" (${t.id}): do the work yourself, answer him there, and start a worker only for parallel work. Catch up first: read the thread, then the timelines it touches. Your brief is in your system prompt.`;
+
+function threadForTheSignal(h: Handoff): Thread {
+  if (h.thread) return h.thread;
+  const made: Thread = { id: `th-${crypto.randomUUID().slice(0, 6)}`, title: titleOf(h.sig.text), objective: "", routers: [], messages: [message(h.sig.source === "isaac" ? "isaac" : "yarn", h.sig.text)], signal: h.seq };
+  threads.push(made);
+  return made;
+}
+
+async function startOwner(seq: number, body: SizeBody) {
+  const h = await handoff(seq);
+  if (!h) return;
+  const thread = threadForTheSignal(h);
+  const name = firstFilled(body.name, thread.title) ?? `request ${String(seq)}`;
+  const cmd = ["claude", "--permission-mode", "bypassPermissions", "--append-system-prompt", readFileSync(OWNER_BRIEF, "utf8"), h.text + ownerBrief(thread)];
+  const owner = createSession(name.slice(0, 80), cmd, homeOf(firstFilled(body.cwd) ?? home), { role: ownerRole(thread.id) });
+  void acceptTrust(owner);
+  attachToThread(thread, owner);
+  return owner;
+}
+
+type SizeRecord = { seq: number; size: Size | "owner"; by: "funnel" | "promote"; thread?: string; session?: string; noted?: string; objective?: string };
 const recorded = (record: SizeRecord) => {
   publish(`signal-size/${String(record.seq)}`, record);
   return Response.json(record);
 };
+
+async function sizeOwner(record: SizeRecord, body: SizeBody) {
+  const owner = await startOwner(record.seq, body);
+  return owner ? recorded({ ...record, session: owner.id, thread: owner.role?.thread }) : new Response("no such signal", { status: 404 });
+}
 
 async function sizeDirect(record: SizeRecord, body: SizeBody) {
   const worker = await startDirect(record.seq, body);
@@ -128,10 +158,13 @@ function sizeFyi(record: SizeRecord, body: SizeBody) {
 }
 
 const isSize = (value: unknown): value is Size => SIZES.some((s) => s === value);
+const isRetiredWithOwners = (size: Size) => areOwnersOn() && (size === "direct" || size === "area");
 
 async function size(seq: number, body: SizeBody) {
-  if (!isSize(body.size)) return new Response(`size: one of ${SIZES.join(", ")}`, { status: 400 });
   const thread = threads.find((t) => t.signal === seq);
+  if (body.size === "owner") return sizeOwner({ seq, size: "owner", by: "funnel", ...(thread && { thread: thread.id }) }, body);
+  if (!isSize(body.size)) return new Response(`size: one of ${SIZES.join(", ")}, or owner`, { status: 400 });
+  if (isRetiredWithOwners(body.size)) return new Response(ROUTERS_RETIRED, { status: 409 });
   const record: SizeRecord = { seq, size: body.size, by: "funnel", ...(thread && { thread: thread.id }) };
   if (body.size === "direct") return sizeDirect(record, body);
   if (body.size === "fyi") return sizeFyi(record, body);
@@ -140,6 +173,7 @@ async function size(seq: number, body: SizeBody) {
 }
 
 function promote(s: Session, title: string | undefined) {
+  if (areOwnersOn()) return new Response("thread owners are on, so there is no objective to promote into: you own your thread already, and start workers with `new` when the work splits", { status: 409 });
   if (s.role !== undefined) return new Response("only a direct worker promotes itself; it already has a role", { status: 409 });
   if (isBlank(title)) return new Response("title required", { status: 400 });
   const o = newObjective(title.trim(), s.cwd);
@@ -175,7 +209,16 @@ async function promoteCaller(req: Request, from: Session | undefined) {
   return promote(from, (await bodyOf<{ title: string }>(req)).title);
 }
 
+async function flipOwners(req: Request) {
+  const { on } = await bodyOf<{ on: boolean }>(req);
+  if (typeof on !== "boolean") return new Response("on: true or false", { status: 400 });
+  const next = setOwners(on);
+  publish("thread-owners", next);
+  return Response.json(next);
+}
+
 export async function sizingRoute(req: Request, url: URL): Promise<Response | undefined> {
+  if (url.pathname === "/api/thread-owners") return req.method === "POST" ? flipOwners(req) : Response.json(owners());
   if (req.method !== "POST") return;
   const from = sessions.get(callerOf(req));
   const sized = /^\/api\/signals\/(\d+)\/size$/.exec(url.pathname);

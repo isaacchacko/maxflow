@@ -10,12 +10,13 @@ import { describe } from "./world-session";
 import { ROUTER_BRIEF, acceptTrust } from "./routing";
 import { askOldRouterToBriefTheNew, handOff } from "./objectives";
 import { isFilled } from "./shared/guards";
+import { OWNER_BRIEF } from "./owners";
 import { type Body, type Route, exactly, expandHome, firstAnswer, isStringList, jsonBody, sender, textOf } from "./route-kit";
 
 function routerTheNewAgentWorksFor(from: Session | undefined, asked = ""): Session | undefined {
   const named = sessions.get(asked);
   if (named) return named;
-  if (from?.role?.role === "router") return from;
+  if (from?.role?.role === "router" || from?.role?.role === "owner") return from;
   return isFilled(from?.role?.parent) ? sessions.get(from.role.parent) : undefined;
 }
 
@@ -26,13 +27,16 @@ function roleHandedOverByTheCallingRouter(from: Session | undefined, askedRole: 
 }
 
 function roleOf(askedRole: string | undefined, objective: string | undefined, parent: Session | undefined, scope: string): Role | undefined {
+  if (parent?.role?.role === "owner" && askedRole !== "router") return { role: "worker", objective: parent.role.objective, parent: parent.id };
   if (!isFilled(objective)) return undefined;
   if (askedRole === "router") return { role: "router", objective, scope };
   return parent ? { role: "worker", objective, parent: parent.id } : undefined;
 }
 
+const BRIEFS: Partial<Record<Role["role"], string>> = { router: ROUTER_BRIEF, owner: OWNER_BRIEF };
 export function claudeForARoleNeverABareShellThatWouldDropHisThreadReplies(role: Role): string[] {
-  return ["claude", "--permission-mode", "bypassPermissions", ...(role.role === "router" ? ["--append-system-prompt", readFileSync(ROUTER_BRIEF, "utf8")] : [])];
+  const brief = BRIEFS[role.role];
+  return ["claude", "--permission-mode", "bypassPermissions", ...(brief === undefined ? [] : ["--append-system-prompt", readFileSync(brief, "utf8")])];
 }
 
 function commandOf(asked: unknown, role: Role | undefined): string[] {

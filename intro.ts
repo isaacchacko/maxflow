@@ -49,12 +49,16 @@ function roleIntro(s: Session) {
   if (!r) return "";
   const o = objectives.find((x) => x.id === r.objective);
   const router = r.parent === undefined ? undefined : sessions.get(r.parent);
+  if (r.role === "worker" && router?.role?.role === "owner")
+    return `\n- Routing: you are a worker for "${router.name}" (${router.id}), the owner of thread ${router.role.thread ?? "?"}. It briefs you and hears from you through \`${CLI} notify\`; report to it when you finish, get stuck or change course, and bring it your questions for him instead of asking him yourself. Its wait doesn't end when yours changes, so tell it yourself.`;
   if (r.role === "worker")
     return `\n- Routing: you are a worker on the objective "${o?.title ?? r.objective}" (${r.objective})${router ? `, started by its router "${router.name}" (${router.id})` : ""}. Your router briefs you and hears from you through \`${CLI} notify\`; report to it when you finish, get stuck or change course, and bring it your questions for him instead of asking him yourself.`;
   const crew = sessions
     .values()
     .filter((w) => w.role?.parent === s.id && isLive(w))
     .toArray();
+  if (r.role === "owner")
+    return `\n- Routing: you own thread ${r.thread ?? "?"}. No objective, no router: you do its work, answer him there, and start workers (\`${CLI} new\`) only for parallel work. ${crew.length > 0 ? `Your workers: ${crew.map((w) => `"${w.name}" (${w.id})`).join(", ")}.` : "You have no workers yet."}`;
   return `\n- Routing: you are a router on the objective "${o?.title ?? r.objective}" (${r.objective}), scope: ${r.scope ?? "the whole objective"}. ${crew.length > 0 ? `Your workers: ${crew.map((w) => `"${w.name}" (${w.id})`).join(", ")}.` : "You have no workers yet."}`;
 }
 

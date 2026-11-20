@@ -8,10 +8,12 @@ import { describe } from "./world-session";
 import { startRouter } from "./routing";
 import { newObjective, setRole } from "./objectives";
 import { patch } from "./patch";
+import { ROUTERS_RETIRED, areOwnersOn } from "./owners";
 import { isFilled } from "./shared/guards";
 import { type Route, exactly, expandHome, firstAnswer, flagOf, jsonBody, matching, textOf } from "./route-kit";
 
 async function startObjectiveWithARouter(req: Request): Promise<Response> {
+  if (areOwnersOn()) return new Response(ROUTERS_RETIRED, { status: 409 });
   const body = await jsonBody(req);
   const title = textOf(body, "title")?.trim() ?? "";
   if (title === "") return new Response("title required", { status: 400 });

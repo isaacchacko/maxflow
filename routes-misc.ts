@@ -187,7 +187,7 @@ function sameAskRefusal(same: Thread): Response {
 function routerToAskInstead(s: Session): Session | undefined {
   if (s.role?.role !== "worker") return undefined;
   const parent = sessions.get(s.role.parent ?? "");
-  return isReachable(parent) && parent.role?.role === "router" ? parent : routersOf(s.role.objective).at(-1);
+  return isReachable(parent) && (parent.role?.role === "router" || parent.role?.role === "owner") ? parent : routersOf(s.role.objective).at(-1);
 }
 
 function workerAskRefusal(s: Session): Response | undefined {
