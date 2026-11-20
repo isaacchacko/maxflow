@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { holdOn } from "../holds";
 import { isRecord } from "../shared/guards";
 import { appendStateText, didClaimState, hasState, listState, readGatingStateJson, readStateJson, removeState, stateDirectory, writeStateJson } from "../state";
+import { mayApprove, mergeHoldWhy, requiredCi } from "./approval-gate";
 import { isWaitingOnReview } from "./approval-score";
 
 const STATE_FILE = "approval-notified.json";
@@ -98,8 +99,11 @@ function standingOnGitHub(n: Note): Standing {
 
 const OWNED_TIER = 3;
 const requiresCodeOwner = (n: Note) => (n.codeOwnedPaths === undefined ? n.tier >= OWNED_TIER : n.codeOwnedPaths.length > 0);
-const isHeld = (cfg: Config, n: Note) => requiresCodeOwner(n) || (cfg.holdTier !== undefined && n.tier >= cfg.holdTier);
-const heldWhy = (n: Note) => (requiresCodeOwner(n) ? "review passed, a code owner must review" : "review passed");
+const isHeld = (cfg: Config, n: Note) => requiresCodeOwner(n) || (cfg.holdTier !== undefined && n.tier >= cfg.holdTier) || mergeHoldWhy(n.pr) !== undefined;
+function heldWhy(n: Note) {
+  if (requiresCodeOwner(n)) return "review passed, a code owner must review";
+  return ["review passed", mergeHoldWhy(n.pr)].filter((part) => part !== undefined).join("; ");
+}
 
 function heldSection(held: Note[]) {
   const items = held.map((n) => ({ pr: n.pr.split("/", 2)[1], url: n.url, note: `${heldWhy(n)}; ${n.title}` }));
@@ -135,17 +139,42 @@ function backOff(n: Note, detail: string) {
   note(`failed ${tag(n)}: ${detail}; retrying after ${new Date(sent.retryAt).toISOString()}`);
 }
 
-async function sendOne(cfg: Endpoint, n: Note): Promise<"next" | "stop"> {
+function noteOnce(n: Note, line: string) {
+  const logged = `${tag(n)} ${line}`;
+  if (sent.logged.includes(logged)) return;
+  note(`${tag(n)}: ${line}`);
+  sent.logged = [...sent.logged, logged].slice(-LOGGED_KEPT);
+}
+
+function isCiGreen(n: Note) {
+  const ci = requiredCi(n.pr);
+  if (ci !== "green") noteOnce(n, `not sent: required CI is ${ci}`);
+  return ci === "green";
+}
+
+function dropWhy(n: Note, standing: Standing) {
   const held = holdOn(n.pr);
-  if (held !== undefined) {
-    note(`dropped ${tag(n)}: held by ${held.by}`);
+  if (held !== undefined) return `held by ${held.by}`;
+  return standing === "moved" ? "already sent, or no longer open at this head waiting on a review" : undefined;
+}
+
+async function isClearedToSend(n: Note) {
+  if (!isCiGreen(n)) return false;
+  const approval = await mayApprove(n.pr);
+  if (approval.decision !== "allow") noteOnce(n, `not sent: ${approval.reason ?? "restricted"}`);
+  return approval.decision === "allow";
+}
+
+async function sendOne(cfg: Endpoint, n: Note): Promise<"next" | "stop"> {
+  const standing = wasSent(n) ? "moved" : standingOnGitHub(n);
+  const drop = dropWhy(n, standing);
+  if (drop !== undefined) {
+    note(`dropped ${tag(n)}: ${drop}`);
     unqueue(n);
     return "next";
   }
-  const standing = wasSent(n) ? "moved" : standingOnGitHub(n);
-  if (standing === "unknown") return "next";
-  if (standing === "moved") note(`dropped ${tag(n)}: already sent, or no longer open at this head waiting on a review`);
-  if (standing === "moved" || !isClaimWon(n)) {
+  if (standing === "unknown" || !(await isClearedToSend(n))) return "next";
+  if (!isClaimWon(n)) {
     unqueue(n);
     return "next";
   }

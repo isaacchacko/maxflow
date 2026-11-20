@@ -4,6 +4,7 @@ export const FED_AGENT_SENTRIES = ["review", "meta", "assistant", "context", "to
 export const BARE_AGENT_SENTRIES = ["funnel"];
 export const SENTRY_HELPERS = [
   "approval-comment",
+  "approval-gate",
   "approval-notify",
   "approval-review",
   "approval-score",
