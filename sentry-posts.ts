@@ -18,7 +18,7 @@ export function recordSentryPost(sentry: string, commentId: number) {
   writeStateJson(POSTS_FILE, { ...Object.fromEntries(kept), [String(commentId)]: { sentry, at: Date.now() } });
 }
 
-export function sentryThatPosted(commentUrl: string | undefined): string | undefined {
-  const id = COMMENT_ID.exec(commentUrl ?? "")?.[1];
+export function sentryThatPosted(commentUrl = ""): string | undefined {
+  const id = COMMENT_ID.exec(commentUrl)?.[1];
   return id === undefined ? undefined : read()[id]?.sentry;
 }
