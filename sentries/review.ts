@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { fetchSessions, isOwnComment, links, prNumber, repoOfKey, REVIEW_WATCH, writeWatches, type Link, type Session, type Watch } from "../gh";
+import { holdOn } from "../holds";
 import { BASE as base } from "../instance";
 import { isRecord } from "../shared/guards";
 import { peekStateJson, readStateJson, writeStateJson } from "../state";
@@ -205,7 +206,16 @@ function disarm(pr: Pr) {
   logAction(keyOf(pr), r.ok ? "turned off auto-merge: Isaac merges it himself" : `turning off auto-merge failed: ${r.err}`);
 }
 
+function isLeftAloneForAHold(pr: Pr) {
+  const held = holdOn(keyOf(pr));
+  if (held === undefined) return false;
+  if (pr.autoMergeRequest) disarm(pr);
+  logAction(keyOf(pr), `held by ${held.by}: no retarget, branch update or owner nudges until \`maxflow unhold ${keyOf(pr)}\``);
+  return true;
+}
+
 async function land(pr: Pr, owners: string[]) {
+  if (isLeftAloneForAHold(pr)) return;
   const main = pr.repository.defaultBranchRef.name;
   if (isRetargetNeeded(pr, main)) {
     retarget(pr, main);
@@ -237,7 +247,7 @@ const isTiedTo = (l: Link, pr: Pr) => l.repo === pr.repository.nameWithOwner.toL
 const isFixNeeded = (pr: Pr) => pr.mergeStateStatus === "DIRTY" || pr.mergeable === "CONFLICTING" || isCiFailing(ciOf(pr));
 
 function whyEscalated(pr: Pr, own: string[]) {
-  return isFixNeeded(pr) && own.length > 0 && own.every((id) => isUnreachable(id)) ? `owner ${own.join(", ")} isn't taking messages` : "";
+  return isFixNeeded(pr) && holdOn(keyOf(pr)) === undefined && own.length > 0 && own.every((id) => isUnreachable(id)) ? `owner ${own.join(", ")} isn't taking messages` : "";
 }
 
 async function escalateOnce(pr: Pr, key: string, why: string) {
