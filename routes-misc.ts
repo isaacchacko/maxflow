@@ -188,13 +188,18 @@ function routerToAskInstead(s: Session): Session | undefined {
   return isReachable(parent) && parent.role?.role === "router" ? parent : routersOf(s.role.objective).at(-1);
 }
 
+function workerAskRefusal(s: Session): Response | undefined {
+  const router = routerToAskInstead(s);
+  if (!router) return undefined;
+  return new Response(`Workers don't ask Isaac: ask your router "${router.name}" (${router.id}, \`${CLI} who router\`) with SendMessage to mf-${router.id} or \`${CLI} notify ${router.id} '<question>'\`. It decides, or asks him itself.`, { status: 403 });
+}
+
 async function openAThreadWaitingOnHim(req: Request): Promise<Response> {
   const body = await jsonBody(req);
   const s = sender(req);
   if (!s) return new Response("ask from inside a maxflow session ($MAXFLOW_SESSION)", { status: 400 });
-  const router = routerToAskInstead(s);
-  if (router)
-    return new Response(`Workers don't ask Isaac: ask your router "${router.name}" (${router.id}, \`${CLI} who router\`) with SendMessage to mf-${router.id} or \`${CLI} notify ${router.id} '<question>'\`. It decides, or asks him itself.`, { status: 403 });
+  const refusal = workerAskRefusal(s);
+  if (refusal) return refusal;
   const text = textOf(body, "text")?.trim() ?? "";
   if (text === "") return new Response("text required", { status: 400 });
   const [re, dflt] = [textOf(body, "re")?.trim(), textOf(body, "default")?.trim()];

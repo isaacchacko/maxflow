@@ -97,7 +97,7 @@ function NeedsYouStrip({ asks, onShow }: { asks: Row[]; onShow: (id: string) => 
   );
 }
 
-const awaitsHisConfirm = (t: Thread) => t.done !== undefined && !t.resolved;
+const isAwaitingHisConfirm = (t: Thread) => t.done !== undefined && !t.resolved;
 
 function DoneConfirm({ done, onOpen }: { done: Thread[]; onOpen: (id: string) => void }) {
   const [isOpen, setOpen] = useState(false);
@@ -126,7 +126,9 @@ function DoneConfirm({ done, onOpen }: { done: Thread[]; onOpen: (id: string) =>
                 <span className="shrink-0 truncate font-medium">{t.title}</span>
                 <Rich still text={t.done?.outcome ?? ""} className="min-w-0 truncate text-muted-foreground" />
               </button>
-              <button onClick={() => void setResolved(t.id, true)} title="Resolve" aria-label={`Resolve ${t.title}`} className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-black/[0.06] hover:text-foreground">
+              <button onClick={() => {
+                  void setResolved(t.id, true);
+                }} title="Resolve" aria-label={`Resolve ${t.title}`} className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-black/[0.06] hover:text-foreground">
                 <Check className="size-3.5" />
               </button>
             </li>
@@ -201,7 +203,7 @@ function useInboxRows() {
   const [isShowingPaused, setShowingPaused] = useState(false);
   const [keptWhileHere, setKeptWhileHere] = useState<Set<string>>(() => new Set());
   const topLevelAndMovedStubs = [...threads.filter(t => !hasText(t.parentId)), ...movedStore.use()];
-  const isShown = (t: Thread) => (!awaitsHisConfirm(t) || keptWhileHere.has(t.id)) && (isShowingResolved || !t.resolved || keptWhileHere.has(t.id)) && (isShowingPaused || !t.paused || keptWhileHere.has(t.id));
+  const isShown = (t: Thread) => (!isAwaitingHisConfirm(t) || keptWhileHere.has(t.id)) && (isShowingResolved || !t.resolved || keptWhileHere.has(t.id)) && (isShowingPaused || !t.paused || keptWhileHere.has(t.id));
   const rows = topLevelAndMovedStubs
     .filter(isShown)
     .map(t => ({ t, first: openerOf(t) }))
@@ -209,7 +211,7 @@ function useInboxRows() {
   const keep = (id: string) => setKeptWhileHere(k => new Set(k).add(id));
   const resolved: FilterPill = { count: topLevelAndMovedStubs.filter(t => t.resolved).length, isOn: isShowingResolved, onToggle: () => setShowingResolved(v => !v) };
   const paused: FilterPill = { count: topLevelAndMovedStubs.filter(t => t.paused).length, isOn: isShowingPaused, onToggle: () => setShowingPaused(v => !v) };
-  const done = topLevelAndMovedStubs.filter(awaitsHisConfirm);
+  const done = topLevelAndMovedStubs.filter(isAwaitingHisConfirm);
   return { threads, rows, keep, resolved, paused, done };
 }
 
