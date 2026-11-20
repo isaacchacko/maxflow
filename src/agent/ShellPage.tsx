@@ -71,7 +71,7 @@ export function ShellPage({ shell, back }: { shell: Shell; back: string }) {
       </header>
       <div className="flex min-h-0 flex-1 gap-4 pl-3">
         <section className="dark min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-background p-2">
-          {shell.kind === "pid" ? <p className="p-4 font-mono text-sm text-muted-foreground">process {shell.pid}: its output isn't maxflow's to show</p> : <Terminal key={shell.id} id={shell.id} />}
+          {shell.kind === "pid" ? <p className="p-4 font-mono text-sm text-muted-foreground">process {shell.pid}: its output isn't yarn's to show</p> : <Terminal key={shell.id} id={shell.id} />}
         </section>
         <aside className="-my-3 flex w-1/4 min-w-72 shrink-0 flex-col gap-5 overflow-y-auto border-l px-4 py-4">
           <ShellProperties shell={shell} />

@@ -9,7 +9,7 @@ const look: Record<Source, { icon: typeof User; text: string; ring: string }> = 
   slack: { icon: Hash, text: "text-command", ring: "border-command/60" },
   agent: { icon: Bot, text: "text-agent", ring: "border-agent/60" },
   sentry: { icon: Radar, text: "text-warn", ring: "border-warn/60" },
-  maxflow: { icon: Waypoints, text: "text-muted-foreground", ring: "border-muted-foreground/60" },
+  yarn: { icon: Waypoints, text: "text-muted-foreground", ring: "border-muted-foreground/60" },
 };
 
 const isToday = (at: string) => at.slice(0, 10) === NOW_AT.slice(0, 10);

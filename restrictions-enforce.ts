@@ -118,8 +118,8 @@ export function onReply(thread: string, text: string, d: Deps) {
     p.session,
     `restriction: ${p.label}`,
     answer === "yes"
-      ? `[maxflow] Isaac approved the call held by restriction "${p.label}" in ${thread}. You have a one-time pass: retry exactly the same call now and it goes through, once.\n\`\`\`\n${shown(p.call)}\n\`\`\``
-      : `[maxflow] Isaac said no to the call held by restriction "${p.label}" in ${thread}. Don't run it or work around it.`,
+      ? `[yarn] Isaac approved the call held by restriction "${p.label}" in ${thread}. You have a one-time pass: retry exactly the same call now and it goes through, once.\n\`\`\`\n${shown(p.call)}\n\`\`\``
+      : `[yarn] Isaac said no to the call held by restriction "${p.label}" in ${thread}. Don't run it or work around it.`,
     true,
   );
 }

@@ -1,3 +1,4 @@
+import { callerOf } from "./shared/legacy-maxflow";
 import { resize, takeNews } from "./browser-size";
 import { accessibilityTree, click, evalIn, goTo, pageText, screenshot, typeInto } from "./browser-verbs";
 import { BrowserCap, browserFor, CONSOLE_KEPT, closeBrowser, hasBrowser, isHeld, pageSocketUrl, type Browser } from "./browsers";
@@ -52,7 +53,7 @@ const ACTS: Record<string, Act> = {
 
 function withSizeNews(browser: Browser, res: Response) {
   const said = takeNews(browser);
-  if (said !== undefined) res.headers.set("x-maxflow-browser-news", said);
+  if (said !== undefined) res.headers.set("x-yarn-browser-news", said);
   return res;
 }
 
@@ -84,8 +85,8 @@ export async function browserRoute(req: Request, path: string): Promise<Response
   const asked = /^\/api\/browsers\/([\w-]+)\/(\w+)$/.exec(path);
   if (!asked || req.method !== "POST") return undefined;
   const [, session = "", verb = ""] = asked;
-  const from = req.headers.get("x-maxflow-from");
-  if (from !== null && from !== session) return new Response("an agent drives only its own browser", { status: 403 });
+  const from = callerOf(req);
+  if (from !== "" && from !== session) return new Response("an agent drives only its own browser", { status: 403 });
   if (sessions.get(session)?.exitCode !== null) return new Response("no such live session", { status: 404 });
   return act(session, verb, req);
 }

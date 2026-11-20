@@ -27,7 +27,7 @@ function assistantTextsOf(line: string): string[] {
 function freshChatHandedTheOldOnesLastWords(s: Session, script: string, chat: string, transcript: string): string[] {
   const said = readFileSync(transcript, "utf8").split("\n").flatMap(assistantTextsOf);
   const name = s.name.slice(7);
-  const digest = writeStateText(`${name}-restart-digest.txt`, `[maxflow] Your brief (sentries/${name}.md) changed, so a deploy restarted you in a fresh chat. Your previous chat was ${chat} (transcript ${transcript}, if you need more of it). The last things you said there:\n${said.slice(-6).map((t) => `- ${t}`).join("\n")}`);
+  const digest = writeStateText(`${name}-restart-digest.txt`, `[yarn] Your brief (sentries/${name}.md) changed, so a deploy restarted you in a fresh chat. Your previous chat was ${chat} (transcript ${transcript}, if you need more of it). The last things you said there:\n${said.slice(-6).map((t) => `- ${t}`).join("\n")}`);
   return ["sh", "-c", `${script} "$(cat '${digest}')"`];
 }
 

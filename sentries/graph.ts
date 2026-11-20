@@ -14,19 +14,19 @@ const GROUP_EVERY_MS = Number(process.env["GRAPH_GROUP_EVERY"] ?? 120_000);
 const ROLES_FILE = "graph-roles.json";
 const ROLES = new Set(["review", "implement", "conflicts"]);
 const MODEL = process.env["GRAPH_MODEL"] ?? "haiku";
-const SENTRY_GROUP = "maxflow sentries";
-const MAXFLOW_GROUP = "maxflow development";
-const MAXFLOW_DIR = join(import.meta.dir, "..");
+const SENTRY_GROUP = "yarn sentries";
+const YARN_GROUP = "yarn development";
+const YARN_DIR = join(import.meta.dir, "..");
 const FETCH_MS = 30_000;
 
 const SYSTEM = `You curate a graph of an engineer's terminal and Claude agent sessions. Each URL a session mentions can become a clickable node beside it, and most mentions are noise. Keep a URL only if the engineer would want to click it from the graph:
 - something the agent made or changed and is pointing them to: a PR, issue or ticket it opened, a deploy or preview, a page, doc or artifact it published, a dashboard or run it started
 - a local dev server or app the session is running for them to open
 - a link the engineer gave the agent as the subject of the work (the ticket, PR or page to fix)
-Drop URLs that are incidental: inside code, config, shell commands, logs or stack traces; library, CDN, package, API or docs references; example or placeholder URLs; asset or API endpoints; links to maxflow itself (localhost:$MAXFLOW_PORT); anything mentioned only in passing. Drop when unsure.
+Drop URLs that are incidental: inside code, config, shell commands, logs or stack traces; library, CDN, package, API or docs references; example or placeholder URLs; asset or API endpoints; links to yarn itself (localhost:$YARN_PORT); anything mentioned only in passing. Drop when unsure.
 Some candidates are GitHub PRs the text named by number (#123, PR 123, owner/repo#123) rather than linked; judge them the same way, keeping a PR that is the subject or product of the work. Each candidate comes with who wrote it (user, assistant, or screen for a plain terminal) and the text around it. Reply with only JSON: {"keep": ["<url>", ...]}, listing URLs exactly as given.`;
 
-const GROUP_SYSTEM = `You group an engineer's running terminal and Claude agent sessions by the work they share, so a graph can draw related sessions close together. Sessions belong together when they work on the same project, feature, bug, ticket or PR; a shared folder alone is weak evidence when the titles point at unrelated work. Title each group the way a sidebar titles a session: 3 to 7 words naming the topic the group owns, e.g. "PRO-6201 safety stock dismissals" or "maxflow graph view". Name the ticket, PR, bug or feature when the sessions show one. Write a noun phrase, not a verb phrase. Never describe status, progress or the current step: no "fixing", "waiting on CI", "testing", "done". No quotes, no trailing period. Keep a group's existing title when it still names the right topic, so groups stay stable. Every session working on maxflow itself (the terminal and agent dashboard these sessions run in: its graph, sidebar, sentries, server or UI) goes in the one group "${MAXFLOW_GROUP}", never split by feature. A session unrelated to all others gets a group of its own. Reply with only JSON: {"<session id>": "<group name>", ...}, covering every session.`;
+const GROUP_SYSTEM = `You group an engineer's running terminal and Claude agent sessions by the work they share, so a graph can draw related sessions close together. Sessions belong together when they work on the same project, feature, bug, ticket or PR; a shared folder alone is weak evidence when the titles point at unrelated work. Title each group the way a sidebar titles a session: 3 to 7 words naming the topic the group owns, e.g. "PRO-6201 safety stock dismissals" or "yarn graph view". Name the ticket, PR, bug or feature when the sessions show one. Write a noun phrase, not a verb phrase. Never describe status, progress or the current step: no "fixing", "waiting on CI", "testing", "done". No quotes, no trailing period. Keep a group's existing title when it still names the right topic, so groups stay stable. Every session working on yarn itself (the terminal and agent dashboard these sessions run in: its graph, sidebar, sentries, server or UI) goes in the one group "${YARN_GROUP}", never split by feature. A session unrelated to all others gets a group of its own. Reply with only JSON: {"<session id>": "<group name>", ...}, covering every session.`;
 
 const ROLE_SYSTEM = `You name the role of each of an engineer's Claude agent sessions from its title, folder and first prompt. Roles:
 - "review": reviewing someone's PR or diff, leaving or answering review comments, style passes, approving
@@ -102,7 +102,7 @@ async function regroupWhenSessionsOrTitlesChange() {
   const sentries = running.filter((s) => s.sentry);
   const sessions = running.filter((s) => !sentries.includes(s));
   const fixed = Object.fromEntries(sentries.map((s) => [s.id, SENTRY_GROUP]));
-  for (const s of sessions) if (/maxflow/i.test(s.name) || s.cwd.startsWith(MAXFLOW_DIR)) fixed[s.id] = MAXFLOW_GROUP;
+  for (const s of sessions) if (/yarn|maxflow/i.test(s.name) || s.cwd.startsWith(YARN_DIR)) fixed[s.id] = YARN_GROUP;
   if (sessions.length < 2) {
     saveGroups(key, { ...Object.fromEntries(sessions.map((s) => [s.id, s.name])), ...fixed });
     return;

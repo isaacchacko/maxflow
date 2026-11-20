@@ -1,3 +1,4 @@
+import { noSessionEnv } from "../shared/legacy-maxflow";
 import { describe, expect, test } from "bun:test";
 import { SEED, type Mode } from "../restrictions";
 import { ciFrom, mayApprove, mergeHoldWhy } from "../sentries/approval-gate";
@@ -30,12 +31,12 @@ describe("Liudvikas is asked to approve only when the restrictions allow it", ()
   });
 
   test("pr-approve on ask with no session to ask as is refused, not let through", async () => {
-    const was = process.env["MAXFLOW_SESSION"];
-    process.env["MAXFLOW_SESSION"] = "";
+    const was = { ...process.env };
+    Object.assign(process.env, noSessionEnv());
     try {
       expect((await mayApprove(PR, withModes({ "pr-approve": "ask" }))).decision).toBe("deny");
     } finally {
-      process.env["MAXFLOW_SESSION"] = was;
+      for (const key of Object.keys(noSessionEnv())) process.env[key] = was[key];
     }
   });
 });

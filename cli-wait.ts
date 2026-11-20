@@ -8,7 +8,7 @@ const WAIT_KIND = /^(thread|q|approval|ci|agent|slack):.|^done$/;
 
 function sessionOrFail() {
   const me = mySession();
-  if (me === undefined || me === "") fail("wait works only inside a maxflow session");
+  if (me === undefined || me === "") fail("wait works only inside a yarn session");
   return me;
 }
 
@@ -24,8 +24,8 @@ async function waitUntil(args: string[]) {
   const pid = flag(head, "--pid");
   const pane = flag(head, "--pane");
   const desc = positional(head, ["--pid", "--pane", "--why"]).join(" ");
-  if (DEFAULT_RUN_WATCH.test(cmd ?? "")) fail(`gh run watch asks GitHub every 3s and drains the budget every agent shares; wait on CI with \`maxflow wait ci:<pr | branch | sha>\` instead, or pass --interval 30`);
-  if (desc === "" || (isBlank(cmd) && isBlank(pid) && isBlank(pane))) fail("usage: maxflow wait until '<what you wait for>' [--why '<line>'] -- <command...> | --pane <session> | --pid <pid>");
+  if (DEFAULT_RUN_WATCH.test(cmd ?? "")) fail(`gh run watch asks GitHub every 3s and drains the budget every agent shares; wait on CI with \`yarn wait ci:<pr | branch | sha>\` instead, or pass --interval 30`);
+  if (desc === "" || (isBlank(cmd) && isBlank(pid) && isBlank(pane))) fail("usage: yarn wait until '<what you wait for>' [--why '<line>'] -- <command...> | --pane <session> | --pid <pid>");
   const until = { kind: "until", desc, why: flag(head, "--why"), cmd, cwd: process.cwd(), path: process.env["PATH"], pane, pid: isBlank(pid) ? undefined : Number(pid) };
   const wait = replyOf(await post(`/api/sessions/${me}/await`, until))["wait"];
   console.log(

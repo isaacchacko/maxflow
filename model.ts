@@ -1,4 +1,4 @@
-export type Source = "isaac" | "gh" | "slack" | "agent" | "sentry" | "maxflow";
+export type Source = "isaac" | "gh" | "slack" | "agent" | "sentry" | "yarn";
 export type Signal = { source: Source; from?: string; target: string; text: string; routedTo: string[]; objective?: string; who?: string; where?: string; link?: string; on?: string; event?: number; at?: number; own?: boolean };
 export type Block = { id: string; kind: string; w: number; h: number; [k: string]: unknown };
 export type Objective = { id: string; title: string; cwd: string; at: number; page: Block[]; closed?: boolean; mergedInto?: string };

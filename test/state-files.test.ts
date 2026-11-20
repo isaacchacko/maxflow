@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const home = mkdtempSync(join(tmpdir(), "maxflow-state-"));
+const home = mkdtempSync(join(tmpdir(), "yarn-state-"));
 mkdirSync(join(home, ".maxflow-v2-statetest"), { recursive: true });
 
 afterAll(() => {
@@ -12,7 +12,7 @@ afterAll(() => {
 
 test("state files: a bad file is kept and reported, a gating read refuses, and a peek changes nothing", () => {
   const probe = Bun.spawnSync(["bun", join(import.meta.dir, "state-probe.ts")], {
-    env: { ...process.env, HOME: home, MAXFLOW_INSTANCE: "statetest", MAXFLOW_PORT: "1" },
+    env: { ...process.env, HOME: home, YARN_INSTANCE: "statetest", YARN_PORT: "1" },
     stdout: "pipe",
     stderr: "pipe",
   });

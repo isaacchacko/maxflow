@@ -1,3 +1,4 @@
+import { seqOf } from "./shared/legacy-maxflow";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import { isDeploying, noteRestartAnswered, noteRestartBegins } from "./deploy-restart";
@@ -171,7 +172,7 @@ function fastForwardTarget(live: string) {
 async function currentSeq() {
   try {
     const res = await fetch(`${BASE}/api/events?after=now`, { signal: AbortSignal.timeout(API_TIMEOUT_MS) });
-    return Number(res.headers.get("x-maxflow-seq") ?? 0);
+    return Number(seqOf(res) ?? 0);
   } catch {
     return 0;
   }

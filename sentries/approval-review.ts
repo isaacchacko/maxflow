@@ -1,3 +1,4 @@
+import { noSessionEnv } from "../shared/legacy-maxflow";
 import { readFileSync } from "node:fs";
 import { rollupOf, type Pr } from "../gh";
 import { isRecord } from "../shared/guards";
@@ -84,7 +85,7 @@ function reviewIn(out: string, lens: Lens): LensReview {
 }
 
 export async function runReview(reviewing: Reviewing, lens: Lens): Promise<LensReview> {
-  const env = { ...process.env, GH_CONFIG_DIR: reviewing.ghlessDir, GH_TOKEN: "", GITHUB_TOKEN: "", MAXFLOW_SESSION: "" };
+  const env = { ...process.env, GH_CONFIG_DIR: reviewing.ghlessDir, GH_TOKEN: "", GITHUB_TOKEN: "", ...noSessionEnv() };
   const proc = Bun.spawn(["claude", "-p", promptFor(reviewing, LENSES[lens]), "--model", MODEL, "--output-format", "json", "--json-schema", SCHEMA,
     "--append-system-prompt", readFileSync(BRIEF, "utf8"), "--permission-mode", "bypassPermissions",
     "--disallowedTools", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch"], { cwd: reviewing.dir, env, stdout: "pipe", stderr: "pipe" });

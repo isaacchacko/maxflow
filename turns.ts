@@ -166,6 +166,6 @@ function carryOn(s: Session, at: number) {
     if (Date.now() - clock.awakeSince < AWAKE_BEFORE_CARRYING_ON_MS || Date.now() - clock.tickAt > 10_000) return;
     clearInterval(check);
     publish(`turn-cut/${s.id}`, { session: s.id, reply: s.cutOff });
-    dispatch({ to: [s], target: s.name, text: "[maxflow] your last turn was cut off by the Mac sleeping; carry on" });
+    dispatch({ to: [s], target: s.name, text: "[yarn] your last turn was cut off by the Mac sleeping; carry on" });
   }, 5000);
 }

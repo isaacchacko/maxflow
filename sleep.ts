@@ -56,8 +56,8 @@ export function workLeftOpenAtSleep(s: Session) {
   return [...unanswered, ...[deadWait(s)].filter(isFilled)];
 }
 
-export function postAsMaxflow(t: Thread, text: string) {
-  const m: Message = { id: `m-${crypto.randomUUID().slice(0, 6)}`, from: "maxflow", at: Date.now(), text };
+export function postAsYarn(t: Thread, text: string) {
+  const m: Message = { id: `m-${crypto.randomUUID().slice(0, 6)}`, from: "yarn", at: Date.now(), text };
   t.messages.push(m);
   saveThreads();
   publish(`thread/${t.id}`, { thread: t.id, from: m.from });

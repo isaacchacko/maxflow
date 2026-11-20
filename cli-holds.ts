@@ -16,7 +16,7 @@ function holdPr(args: string[]) {
   const why = args.slice(1).join(" ");
   const by = mySession();
   hold(key, by === undefined || by === "" ? "isaac" : by, why);
-  console.log(`held ${key}: the review and approval sentries leave it alone until \`maxflow unhold ${key}\``);
+  console.log(`held ${key}: the review and approval sentries leave it alone until \`yarn unhold ${key}\``);
 }
 
 function unholdPr(args: string[]) {

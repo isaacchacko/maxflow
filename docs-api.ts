@@ -1,3 +1,4 @@
+import { callerOf } from "./shared/legacy-maxflow";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -100,7 +101,7 @@ export async function docsRoute(req: Request, url: URL): Promise<Response | unde
   try {
     const route = routeOf(url.pathname);
     if (!route) return undefined;
-    return await route.act(req, route.path, sessions.get(req.headers.get("x-maxflow-from") ?? ""));
+    return await route.act(req, route.path, sessions.get(callerOf(req)));
   } catch (error) {
     return new Response(error instanceof Error ? error.message : String(error), { status: 400 });
   }

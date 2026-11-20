@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { startServerWithoutSentries, stopByPidAndSocket, throwawayInstance, waitUntilAnswering, withTimeout } from "./throwaway-instance";
 
-const instance = throwawayInstance("maxflow-author-");
+const instance = throwawayInstance("yarn-author-");
 const server = startServerWithoutSentries(instance);
 
 afterAll(async () => {
@@ -20,7 +20,7 @@ async function saidIn(id: string) {
   return threads.find((t) => t.id === id)?.messages.map((m) => [m.from, m.text]);
 }
 
-describe("m-140a9e: a `thread post` run over ssh with no MAXFLOW_SESSION showed an agent's words under Isaac's name", () => {
+describe("m-140a9e: a `thread post` run over ssh with no YARN_SESSION showed an agent's words under Isaac's name", () => {
   test("only the browser posts as Isaac; an outside agent posts under its --as label, and anything else is refused", async () => {
     await waitUntilAnswering(instance, server);
     const inboxThreadWithoutSession = await send("/api/threads", { text: "agent words" });
@@ -35,8 +35,8 @@ describe("m-140a9e: a `thread post` run over ssh with no MAXFLOW_SESSION showed 
     const refused = await send(posts, { text: "agent words" });
     expect(refused.status).toBe(403);
     expect(await refused.text()).toContain("--as <device>/<name>");
-    expect((await send(posts, { text: "agent words" }, { "x-maxflow-from": "deadbeef" })).status).toBe(403);
-    expect((await send(posts, { text: "agent words" }, { "x-maxflow-from": "deadbeef", ...theBrowsersMarker })).status).toBe(403);
+    expect((await send(posts, { text: "agent words" }, { "x-yarn-from": "deadbeef" })).status).toBe(403);
+    expect((await send(posts, { text: "agent words" }, { "x-yarn-from": "deadbeef", ...theBrowsersMarker })).status).toBe(403);
     expect((await send(posts, { text: "agent words", as: "isaac" })).status).toBe(403);
     expect((await send(posts, { text: "agent words", as: "isaac" }, theBrowsersMarker)).status).toBe(403);
     expect((await send(posts, { text: "outside words", as: "cleopatra/yarn-browser" })).status).toBe(201);

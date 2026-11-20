@@ -1,3 +1,4 @@
+import { yarnEnv } from "./shared/legacy-maxflow";
 import { existsSync } from "node:fs";
 
 const CHROMES: Record<string, string[]> = {
@@ -6,7 +7,7 @@ const CHROMES: Record<string, string[]> = {
 };
 
 export function chromeBinary(): string | undefined {
-  const chosen = process.env["MAXFLOW_CHROME"];
+  const chosen = yarnEnv("CHROME");
   if (chosen !== undefined && chosen !== "") return chosen;
   return (CHROMES[process.platform] ?? []).find((path) => existsSync(path));
 }

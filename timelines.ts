@@ -4,10 +4,10 @@ import { join, relative, resolve } from "node:path";
 import { IS_LIVE } from "./instance";
 import { stateDirectory } from "./state";
 
-export const TIMELINES_DIR = process.env["MAXFLOW_TIMELINES"] ?? (IS_LIVE ? join(homedir(), "Timelines") : stateDirectory("timelines"));
-export const TIMELINES_REMOTE = process.env["MAXFLOW_TIMELINES_REMOTE"] ?? (IS_LIVE ? "https://github.com/isaacchacko/timelines.git" : "");
+export const TIMELINES_DIR = process.env["YARN_TIMELINES"] ?? (IS_LIVE ? join(homedir(), "Timelines") : stateDirectory("timelines"));
+export const TIMELINES_REMOTE = process.env["YARN_TIMELINES_REMOTE"] ?? (IS_LIVE ? "https://github.com/isaacchacko/timelines.git" : "");
 export const NOW = "now.txt";
-const AGENT_EMAIL = "timelines@maxflow.local";
+const AGENT_EMAIL = "timelines@yarn.local";
 const LOCK_RETRIES = 20;
 const LOCK_RETRY_MS = 250;
 
@@ -45,12 +45,12 @@ export const uncommitted = () =>
 const isLocked = (error: unknown) => String(error).includes("index.lock");
 
 // constraint: every agent's CLI and the sentry commit here, so two at once meet git's index.lock and the later one waits its turn
-export function didCommit(message: string, author = "maxflow") {
+export function didCommit(message: string, author = "yarn") {
   for (let tries = 0; ; tries++) {
     try {
       git(["add", "-A", "--", "."]);
       if (hasCommits() && git(["diff", "--cached", "--name-only"]).trim() === "") return false;
-      git(["commit", "-q", "-m", message], { GIT_AUTHOR_NAME: author, GIT_AUTHOR_EMAIL: AGENT_EMAIL, GIT_COMMITTER_NAME: "maxflow", GIT_COMMITTER_EMAIL: AGENT_EMAIL });
+      git(["commit", "-q", "-m", message], { GIT_AUTHOR_NAME: author, GIT_AUTHOR_EMAIL: AGENT_EMAIL, GIT_COMMITTER_NAME: "yarn", GIT_COMMITTER_EMAIL: AGENT_EMAIL });
       return true;
     } catch (error) {
       if (!isLocked(error) || tries >= LOCK_RETRIES) throw error;

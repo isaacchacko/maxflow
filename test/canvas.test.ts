@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mergeText } from "../shared/merge-text";
 
-process.env["MAXFLOW_DOCS"] ??= mkdtempSync(join(tmpdir(), "maxflow-canvas-"));
+process.env["YARN_DOCS"] ??= mkdtempSync(join(tmpdir(), "yarn-canvas-"));
 const canvas = await import("../canvas");
 const { DOCS_DIR } = await import("../docs");
 

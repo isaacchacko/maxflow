@@ -1,3 +1,4 @@
+import { yarnEnv, seqOf } from "../shared/legacy-maxflow";
 import { BASE as base } from "../instance";
 import { lowBudgets, RATE_LOW, readRateHistory } from "../gh";
 import { isRecord } from "../shared/guards";
@@ -22,7 +23,7 @@ async function eventsSinceLastCheckSkippingTheBacklogAtFirst(topic: string): Pro
   const res = await fetch(`${base}/api/events?topic=${topic}&after=${String(seen ?? "now")}`, { signal: AbortSignal.timeout(5000) });
   const body: unknown = await res.json();
   if (!isBusEvents(body)) throw new TypeError(`/api/events didn't return a list of events for ${topic}`);
-  seqSeenByTopic.set(topic, body.at(-1)?.seq ?? Number(res.headers.get("x-maxflow-seq")));
+  seqSeenByTopic.set(topic, body.at(-1)?.seq ?? Number(seqOf(res)));
   return seen === undefined ? [] : body.map((e) => e.data);
 }
 
@@ -41,7 +42,7 @@ const pt = (at: number) => new Date(at).toLocaleTimeString("en-US", { timeZone: 
 
 async function postBudgetWarning(title: string, text: string) {
   try {
-    await fetch(`${base}/api/threads`, { method: "POST", headers: { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" }, body: JSON.stringify({ title, text }), signal: AbortSignal.timeout(10_000) });
+    await fetch(`${base}/api/threads`, { method: "POST", headers: { "x-yarn-from": yarnEnv("SESSION") ?? "" }, body: JSON.stringify({ title, text }), signal: AbortSignal.timeout(10_000) });
     console.log(`${stamp()}  warned: ${title}`);
   } catch (error) {
     console.error(`${stamp()}  couldn't post the GitHub budget warning:`, error);

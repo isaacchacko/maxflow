@@ -3,11 +3,11 @@ import { loadRestrictions, resolve } from "./restrictions";
 import { isRecord } from "./shared/guards";
 
 async function ask(args: string[]) {
-  if (isBlank(mySession())) fail("ask works only inside a maxflow session");
+  if (isBlank(mySession())) fail("ask works only inside a yarn session");
   const text = await withImages(positional(args, ["--re", "--default", "--image"]).join(" "), args);
   const t = replyOf(await post("/api/asks", { text, re: flag(args, "--re"), default: flag(args, "--default"), new: args.includes("--new") }));
   console.log(
-    `${str(t, "id")}: asked in "${str(t, "title")}" in his inbox, flagged as waiting on him (it goes in the thread you were handed; --new for a thread of its own, --re <id> for another). Keep working; his reply arrives in your prompt. Once nothing is left that doesn't hang on it, run \`maxflow wait thread:${str(t, "id")}\` and end your turn.`,
+    `${str(t, "id")}: asked in "${str(t, "title")}" in his inbox, flagged as waiting on him (it goes in the thread you were handed; --new for a thread of its own, --re <id> for another). Keep working; his reply arrives in your prompt. Once nothing is left that doesn't hang on it, run \`yarn wait thread:${str(t, "id")}\` and end your turn.`,
   );
 }
 
@@ -89,7 +89,7 @@ const parsedAt = (at: string) => (/^\d+$/.test(at) ? Number(at) : Date.parse(at)
 async function editTask(args: string[]) {
   const [ref, ...words] = positional(args, TASK_VALUED);
   const at = flag(args, "--at");
-  if (ref === undefined) fail("usage: maxflow task new <title...> | maxflow task <id> [--title T] ...");
+  if (ref === undefined) fail("usage: yarn task new <title...> | yarn task <id> [--title T] ...");
   const edit = {
     title: flag(args, "--title") ?? (ref === "new" ? words.join(" ") : undefined),
     status: flag(args, "--status"),
@@ -152,7 +152,7 @@ async function sizeSignal(args: string[]) {
 }
 
 async function promote(args: string[]) {
-  if (isBlank(mySession())) fail("promote works only inside a maxflow agent");
+  if (isBlank(mySession())) fail("promote works only inside a yarn agent");
   const r = replyOf(await post("/api/promote", { title: positional(args, []).join(" ") }));
   console.log(`you are now the router of objective ${str(r, "objective")}. Read your brief, ${str(r, "brief")}, before you go on.`);
 }

@@ -1,3 +1,4 @@
+import { noSessionEnv } from "../shared/legacy-maxflow";
 import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,12 +8,12 @@ const ROOT = join(import.meta.dir, "..");
 const PAGE_DEADLINE_MS = 15_000;
 const instance = `nodb-${crypto.randomUUID().slice(0, 6)}`;
 const port = 20_000 + Math.floor(Math.random() * 20_000);
-const home = mkdtempSync(join(tmpdir(), "maxflow-health-nodb-"));
+const home = mkdtempSync(join(tmpdir(), "yarn-health-nodb-"));
 mkdirSync(join(home, `.maxflow-v2-${instance}`, "yarn.db"), { recursive: true });
 
 // constraint: a CI runner is a systemd service, and INVOCATION_ID would make the sentry start tmux through systemd-run --user
 const { INVOCATION_ID, ...envOutsideSystemd } = process.env;
-const env = { ...envOutsideSystemd, HOME: home, MAXFLOW_INSTANCE: instance, MAXFLOW_PORT: String(port), MAXFLOW_SESSION: "", HEALTH_DEV: "1", HEALTH_PAGE_AFTER_MS: "0", HEALTH_HELPER_AFTER_MS: "3600000" };
+const env = { ...envOutsideSystemd, HOME: home, YARN_INSTANCE: instance, YARN_PORT: String(port), ...noSessionEnv(), HEALTH_DEV: "1", HEALTH_PAGE_AFTER_MS: "0", HEALTH_HELPER_AFTER_MS: "3600000" };
 
 const health = Bun.spawn(["bun", join(ROOT, "sentries/health.ts")], { cwd: ROOT, env, stdout: "pipe", stderr: "pipe" });
 

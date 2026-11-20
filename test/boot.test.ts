@@ -1,7 +1,7 @@
 import { afterAll, expect, test } from "bun:test";
 import { startServerWithoutSentries, stopByPidAndSocket, throwawayInstance, waitUntilAnswering, withTimeout } from "./throwaway-instance";
 
-const instance = throwawayInstance("maxflow-boot-");
+const instance = throwawayInstance("yarn-boot-");
 const instanceServer = { process: startServerWithoutSentries(instance) };
 const shellSleep = (seconds: number) => ["sh", "-c", `sleep ${seconds}`];
 

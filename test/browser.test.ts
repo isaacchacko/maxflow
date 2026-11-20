@@ -11,7 +11,7 @@ const PAGE = `<!doctype html><title>Form</title><h1>Hello</h1>
 <input id="email" placeholder="Email"><button>Send it</button></form><p id="out"></p><a href="#two">Second link</a>`;
 
 const site = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response(PAGE, { headers: { "content-type": "text/html" } }) });
-const instance = throwawayInstance("maxflow-browser-");
+const instance = throwawayInstance("yarn-browser-");
 const server = startServerWithoutSentries(instance);
 const sessionIds: string[] = [];
 
@@ -21,7 +21,7 @@ const COLD_START_MS = 60_000;
 beforeAll(async () => {
   const binary = chromeBinary();
   if (binary === undefined) return;
-  const profile = mkdtempSync(join(tmpdir(), "maxflow-chrome-warm-"));
+  const profile = mkdtempSync(join(tmpdir(), "yarn-chrome-warm-"));
   const chrome = Bun.spawn([binary, "--headless=new", `--user-data-dir=${profile}`, "--no-first-run", ...KEYCHAIN_UNTOUCHED, "--dump-dom", "about:blank"], { stdout: "ignore", stderr: "ignore", timeout: COLD_START_MS });
   await chrome.exited;
 }, COLD_START_MS + 5000);
@@ -47,7 +47,7 @@ async function jsonOf(res: Response): Promise<unknown> {
 }
 
 const browse = async (id: string, verb: string, body: unknown = {}, from = id) =>
-  fetch(`${instance.base}/api/browsers/${id}/${verb}`, { method: "POST", headers: { "x-maxflow-from": from }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+  fetch(`${instance.base}/api/browsers/${id}/${verb}`, { method: "POST", headers: { "x-yarn-from": from }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
 
 test.skipIf(chromeBinary() === undefined)(
   "an agent opens a page, types into it, clicks, and reads it back",
@@ -150,9 +150,9 @@ test.skipIf(chromeBinary() === undefined)(
     viewer.socket.send(JSON.stringify({ type: "zoom", zoom: 2 }));
     await untilTrue(() => zoomOf(viewer) === 2);
     const told = await browse(id, "eval", { code: "screen.width" });
-    expect(told.headers.get("x-maxflow-browser-news")).toBe("Isaac set your browser to phone 390x844, mobile at 3x at 200% zoom");
+    expect(told.headers.get("x-yarn-browser-news")).toBe("Isaac set your browser to phone 390x844, mobile at 3x at 200% zoom");
     expect(await told.json()).toEqual({ value: 195, type: "number" });
-    expect((await browse(id, "eval", { code: "screen.width" })).headers.get("x-maxflow-browser-news")).toBeNull();
+    expect((await browse(id, "eval", { code: "screen.width" })).headers.get("x-yarn-browser-news")).toBeNull();
     viewer.socket.close();
   },
   60_000,

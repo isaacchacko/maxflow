@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { yarnEnv } from "../shared/legacy-maxflow";
 import { existsSync, statSync, writeFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import { join } from "node:path";
@@ -43,12 +44,12 @@ const store: { marks: Record<string, Mark> } = {
   marks: Object.fromEntries(Object.entries(kept ?? {}).filter((entry): entry is [string, Mark] => isMark(entry[1]))),
 };
 const readWindow = { since: Date.now() - INTERVAL_MS };
-const caller = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
+const caller = { "x-yarn-from": yarnEnv("SESSION") ?? "" };
 const notify = async (text: string) =>
-  fetch(`${base}/api/sessions/${String(process.env["MAXFLOW_SESSION"])}/notify`, {
+  fetch(`${base}/api/sessions/${String(yarnEnv("SESSION"))}/notify`, {
     method: "POST",
     headers: caller,
-    body: JSON.stringify({ text: `[maxflow meta] ${text}` }),
+    body: JSON.stringify({ text: `[yarn meta] ${text}` }),
     signal: AbortSignal.timeout(FETCH_MS),
   });
 const min = (ms: number) => `${(ms / 60_000).toFixed(0)}m`;

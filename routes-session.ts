@@ -1,3 +1,4 @@
+import { callerOf } from "./shared/legacy-maxflow";
 import { inboxesTable } from "./state";
 import { publish } from "./bus";
 import { CLI } from "./instance";
@@ -107,7 +108,7 @@ async function notify(req: Request, addressed: Session): Promise<Response> {
   if ("error" in stamped) return new Response(stamped.error, { status: 409 });
   if (isFilled(stamped.request)) requested(s, stamped.request);
   dispatch({ ...fromSession(sender(req)), ...fromIsaac(isIsaac), to: [s], text, deliver: stamped.text });
-  const isFromTheAwaitedAgent = isWaitingOn(s, req.headers.get("x-maxflow-from"));
+  const isFromTheAwaitedAgent = isWaitingOn(s, callerOf(req));
   if (isFromTheAwaitedAgent) endWait(s);
   touchFrom(req, s, "write");
   return Response.json(describe(s), { status: 202 });

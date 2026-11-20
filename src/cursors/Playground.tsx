@@ -33,7 +33,7 @@ const FIRST: Stage = {
     { id: "dev-th-3", from: "isaac", text: "why is the board stuck on Review?", merged: 0 },
     { id: "dev-th-4", from: "3fb08d17", text: "Board is stuck on Review again.", merged: 0 },
   ],
-  objectives: ["yarn polish", "maxflow development", "cleopatra handoff"].map((title, i) => ({ id: `dev-o${i + 1}`, title, threads: [] })),
+  objectives: ["yarn polish", "yarn development", "cleopatra handoff"].map((title, i) => ({ id: `dev-o${i + 1}`, title, threads: [] })),
   tasks: Array.from({ length: 3 }, (_, i) => ({ id: `dev-t${i + 1}`, title: `Task ${i + 1}`, isDone: false })),
   archive: Array.from({ length: 12 }, (_, i) => ({ id: `dev-a${i + 1}`, title: `Old task ${i + 1}` })),
   cards: [

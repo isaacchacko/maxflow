@@ -284,7 +284,7 @@ export function readGatingStateJson<T>(name: string, isValid: StateCheck<T>): T 
   if (read === undefined) return undefined;
   if ("value" in read) return read.value;
   reportCorruptState(name, read.problem, name, true);
-  throw new Error(`${name} is unreadable (${read.problem}). It gates an outward action, so this sentry won't start with it empty: restore or fix ~/.maxflow-v2/${name}, then restart the sentry.`);
+  throw new Error(`${name} is unreadable (${read.problem}). It gates an outward action, so this sentry won't start with it empty: restore or fix ${stateDisplayPath(name)}, then restart the sentry.`);
 }
 
 export function writeStateJson(name: string, value: unknown) {

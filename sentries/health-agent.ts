@@ -1,3 +1,4 @@
+import { bothEnvNames } from "../shared/legacy-maxflow";
 import { join } from "node:path";
 import { TMUX_SCOPE, TMUX_SOCKET } from "../instance";
 import { stateDirectory } from "../state";
@@ -19,11 +20,11 @@ export const stamp = () => new Date().toLocaleTimeString();
 
 export function startAgent(prompt: string): Agent {
   const id = crypto.randomUUID().slice(0, 8);
-  const meta = { name: "maxflow recovery", cmd: ["claude"], cwd: DIR, createdAt: Date.now() };
+  const meta = { name: "yarn recovery", cmd: ["claude"], cwd: DIR, createdAt: Date.now() };
   const t = `mf-${id}`;
   const cwd = IS_WATCHING_DEV_AS_IF_LIVE ? stateDirectory("helper-cwd") : DIR;
   const claudeArgs = IS_WATCHING_DEV_AS_IF_LIVE ? ["--model", "haiku", INERT] : [prompt];
-  const created = run([...TMUX_SCOPE, ...TMUX, "new-session", "-d", "-s", t, "-x", "120", "-y", "34", "-c", cwd, "-e", `MAXFLOW_SESSION=${id}`, "--", "claude", "--permission-mode", "bypassPermissions", ...claudeArgs]);
+  const created = run([...TMUX_SCOPE, ...TMUX, "new-session", "-d", "-s", t, "-x", "120", "-y", "34", "-c", cwd, ...bothEnvNames("SESSION").flatMap((key) => ["-e", `${key}=${id}`]), "--", "claude", "--permission-mode", "bypassPermissions", ...claudeArgs]);
   if (!created.ok) throw new Error(`tmux new-session failed: ${created.out}`);
   run([...TMUX, "set-option", "-t", t, "@mf", JSON.stringify(meta)]);
   const agent = { id, tmux: t, at: Date.now() };

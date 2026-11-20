@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { yarnEnv } from "../shared/legacy-maxflow";
 import { existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base } from "../instance";
@@ -25,7 +26,7 @@ const EVENT_CHARS = 600;
 const FETCH_MS = 30_000;
 const MOVES_A_TASK = /^(ask\/[\w-]+|wait\/\w+|intent\/\w+|inbox\/\w+|task\/\d+|gh\/.+\/pr\/\d+\/(opened|merged|closed|review|ci|decision))$/;
 const CANT_WAIT_FOR_NEXT_DIGEST = /^(ask|intent)\//;
-const OWN_SESSION = process.env["MAXFLOW_SESSION"];
+const OWN_SESSION = yarnEnv("SESSION");
 
 type Mark = { offset: number; reply?: string };
 type Session = { id: string; name: string; sentry: boolean; agent: boolean; status: string; transcript?: string; asleep?: boolean; wait: { kind: string; ref: string } | null };
@@ -56,13 +57,13 @@ const { pending } = state;
 const save = () => {
   writeStateJson(STATE_FILE, state);
 };
-const caller = { "x-maxflow-from": OWN_SESSION ?? "" };
+const caller = { "x-yarn-from": OWN_SESSION ?? "" };
 const getJson = async (path: string): Promise<unknown> => (await fetch(`${base}${path}`, { signal: AbortSignal.timeout(FETCH_MS) })).json();
 const notify = async (text: string) =>
   fetch(`${base}/api/sessions/${String(OWN_SESSION)}/notify`, {
     method: "POST",
     headers: caller,
-    body: JSON.stringify({ text: `[maxflow assistant] ${text}` }),
+    body: JSON.stringify({ text: `[yarn assistant] ${text}` }),
     signal: AbortSignal.timeout(FETCH_MS),
   });
 const isBusyEvenIfAsleepScreenSaysWorking = (s: Session) => s.status === "working" && s.asleep !== true;

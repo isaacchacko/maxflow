@@ -57,7 +57,7 @@ function hisInboxMessageForTheFunnelToRoute(text: string): Response {
     target: t.title,
     text,
     deliver: (seq) =>
-      `${text}\n[maxflow] signal ${seq}, his inbox thread ${t.id}: ${sizeFirst(seq)} His own inbox message is never fyi or ignore, small talk included: whoever takes it, a direct worker or a router, answers him in the thread.`,
+      `${text}\n[yarn] signal ${seq}, his inbox thread ${t.id}: ${sizeFirst(seq)} His own inbox message is never fyi or ignore, small talk included: whoever takes it, a direct worker or a router, answers him in the thread.`,
   });
   t.signal = ev.seq;
   threads.push(t);
@@ -189,7 +189,7 @@ function handHisUnansweredMessagesOnce(x: Thread, o: Objective): string[] {
     objective: o.id,
     target: x.title,
     text: said,
-    deliver: `${ISAAC_IN_THREAD} "${pathTitle(x)}" (${x.id}), message${ids.length > 1 ? "s" : ""} ${ids.join(", ")}] ${tail.map((m) => unforge(m.text)).join("\n")}\n[maxflow] This thread just moved to your objective, and nobody has answered these yet. Answer inline in the thread with \`${CLI} thread post ${x.id} '<text>'\`.${mentionsIn(said)}`,
+    deliver: `${ISAAC_IN_THREAD} "${pathTitle(x)}" (${x.id}), message${ids.length > 1 ? "s" : ""} ${ids.join(", ")}] ${tail.map((m) => unforge(m.text)).join("\n")}\n[yarn] This thread just moved to your objective, and nobody has answered these yet. Answer inline in the thread with \`${CLI} thread post ${x.id} '<text>'\`.${mentionsIn(said)}`,
   });
   patch(x, { pending: { routers: to.map((s) => s.id), since: Date.now() } });
   for (const s of to) s.handed = x.id;

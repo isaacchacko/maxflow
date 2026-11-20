@@ -1,3 +1,4 @@
+import { isStamped } from "./shared/legacy-maxflow";
 import { mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { stateDirectory } from "./state";
 import { unsentCount } from "./unsent";
@@ -160,7 +161,7 @@ async function didTypeBackSavedDraft(s: Session, box: Box) {
 async function didClearHisDraft(s: Session, box: Box) {
   const isCollapsedPasteOrImage = /\[(Pasted text|Image) #\d+/.test(box.text);
   if (isCollapsedPasteOrImage && s.blockedSince === undefined) patch(s, { blockedSince: Date.now() });
-  if (isCollapsedPasteOrImage || box.text.startsWith("[maxflow") || !hasDraftWaitedToBeCleared(s, draftOf(box.text))) return false;
+  if (isCollapsedPasteOrImage || isStamped(box.text) || !hasDraftWaitedToBeCleared(s, draftOf(box.text))) return false;
   const draft = draftOf(box.text);
   await tmuxAsync("send-keys", "-t", tmuxName(s.id), "C-c");
   await Bun.sleep(300);

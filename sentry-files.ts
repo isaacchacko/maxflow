@@ -1,9 +1,10 @@
+import { callerOf } from "./shared/legacy-maxflow";
 import { watchedStateFile } from "./state";
 import { publish } from "./bus";
 import { type Session, sessions } from "./sessions";
 
 export function touchFrom(req: Request, s: Session, kind: "read" | "write", isHeldByAWaitStillWatching = false) {
-  const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
+  const from = sessions.get(callerOf(req));
   if (from && from !== s) publish(`touch/${from.id}/${s.id}`, { from: from.id, to: s.id, kind, held: isHeldByAWaitStillWatching });
 }
 

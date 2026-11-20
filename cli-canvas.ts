@@ -36,7 +36,7 @@ async function edit(args: string[]) {
 
 async function replace(args: string[]) {
   const [find, ...rest] = args.slice(3);
-  if (find === undefined || find === "") fail("usage: maxflow canvas replace <path> <id> <find> <replacement...>");
+  if (find === undefined || find === "") fail("usage: yarn canvas replace <path> <id> <find> <replacement...>");
   await send(at(argAt(args, 1), `/nodes/${argAt(args, 2)}`), "PATCH", { find, replace: rest.join(" ") });
   console.log(`edited ${argAt(args, 2)}`);
 }
@@ -75,7 +75,7 @@ const ACTIONS: Record<string, { run: (args: string[]) => Promise<void>; needs: n
 };
 
 export const CANVAS_USAGE =
-  "maxflow canvas show <path> | new <path> | add <path> <x> <y> [text...] | edit <path> <id> [text...] | replace <path> <id> <find> <replacement...> | append <path> <id> [text...] | move <path> <id> <x> <y> [w h] | rm <path> <id> | link <path> <from-id> <to-id> [text...]";
+  "yarn canvas show <path> | new <path> | add <path> <x> <y> [text...] | edit <path> <id> [text...] | replace <path> <id> <find> <replacement...> | append <path> <id> [text...] | move <path> <id> <x> <y> [w h] | rm <path> <id> | link <path> <from-id> <to-id> [text...]";
 
 export const canvasVerbs: Verb[] = [
   {

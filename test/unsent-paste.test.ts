@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { startServerWithoutSentries, stopByPidAndSocket, throwawayInstance, waitUntilAnswering, withTimeout } from "./throwaway-instance";
 
-const instance = throwawayInstance("maxflow-unsent-");
+const instance = throwawayInstance("yarn-unsent-");
 const bin = join(instance.home, "bin");
 const enterReachedClaude = join(instance.home, "submitted");
 
@@ -39,7 +39,7 @@ describe("a restart between pasting an inbox message and its Enter leaves the pa
     const res = await fetch(`${instance.base}/api/sessions`, withTimeout({ method: "POST", body: JSON.stringify({ name: "unsent-test", cmd: ["claude"], cwd: instance.home }) }));
     expect(res.status).toBe(201);
     const { id } = (await res.json()) as { id: string };
-    const notified = await fetch(`${instance.base}/api/sessions/${id}/notify`, withTimeout({ method: "POST", body: JSON.stringify({ text: "[maxflow] one\ntwo\nthree" }) }));
+    const notified = await fetch(`${instance.base}/api/sessions/${id}/notify`, withTimeout({ method: "POST", body: JSON.stringify({ text: "[yarn] one\ntwo\nthree" }) }));
     expect(notified.status).toBe(202);
     for (const end = Date.now() + 20_000; !existsSync(enterReachedClaude) && Date.now() < end; ) await Bun.sleep(250);
     expect(existsSync(enterReachedClaude)).toBe(true);

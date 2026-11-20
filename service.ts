@@ -1,3 +1,4 @@
+import { yarnEnv } from "./shared/legacy-maxflow";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
@@ -54,7 +55,7 @@ function installLaunchd(bun: string, path: string, sentriesToRun: string) {
   <key>Label</key><string>${LABEL}</string>
   <key>ProgramArguments</key><array><string>${bun}</string><string>server.ts</string></array>
   <key>WorkingDirectory</key><string>${DIR}</string>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>${path}</string>${sentriesToRun ? `<key>MAXFLOW_SENTRIES</key><string>${sentriesToRun}</string>` : ""}</dict>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>${path}</string>${sentriesToRun ? `<key>YARN_SENTRIES</key><string>${sentriesToRun}</string>` : ""}</dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <!-- Stopping the server must leave its tmux sessions (every agent, the health sentry, a Chrome started from a pane) running. -->
@@ -73,13 +74,13 @@ function installLaunchd(bun: string, path: string, sentriesToRun: string) {
 function installSystemd(bun: string, path: string, sentriesToRun: string) {
   mkdirSync(join(SYSTEMD_UNIT, ".."), { recursive: true });
   writeFileSync(SYSTEMD_UNIT, `[Unit]
-Description=maxflow v2
+Description=yarn v2
 
 [Service]
 WorkingDirectory=${DIR}
 ExecStart=${bun} server.ts
 Environment=PATH=${path}
-${sentriesToRun ? `Environment=MAXFLOW_SENTRIES=${sentriesToRun}\n` : ""}Restart=always
+${sentriesToRun ? `Environment=YARN_SENTRIES=${sentriesToRun}\n` : ""}Restart=always
 RestartSec=2
 # Stopping the server must leave its tmux sessions (every agent, and the health sentry) running.
 KillMode=process
@@ -93,7 +94,7 @@ WantedBy=default.target
   return run(["systemctl", "--user", "enable", "--now", LABEL]);
 }
 
-export function install(sentriesToRun = process.env["MAXFLOW_SENTRIES"] ?? "") {
+export function install(sentriesToRun = yarnEnv("SENTRIES") ?? "") {
   const bun = process.execPath;
   const path = `${join(bun, "..")}:${process.env["PATH"] ?? ""}`;
   return IS_MAC ? installLaunchd(bun, path, sentriesToRun) : installSystemd(bun, path, sentriesToRun);

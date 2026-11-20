@@ -28,12 +28,12 @@ function commentPlace(kind: string, d: CommentEvent) {
 function relayHisPrCommentToFunnelUnstamped(kind: string, d: CommentEvent) {
   const toldSessions = d.told.flatMap((id) => sessions.get(id) ?? []);
   const on = toldSessions.map((s) => `${s.id} (${s.name})`);
-  const sessionsLine = on.length > 0 ? `\n[maxflow] Sessions on this PR: ${on.join(", ")}` : "";
+  const sessionsLine = on.length > 0 ? `\n[yarn] Sessions on this PR: ${on.join(", ")}` : "";
   const text = `My ${commentPlace(kind, d)} on PR ${d.pr}: "${stringOr(d.body).trim()}" ${stringOr(d.url)}${sessionsLine}`;
   const gh = sessions.values().find((s) => s.name === "sentry:gh" && isSentry(s));
   const front = funnel();
   if (front) dispatch({ source: "isaac", target: d.pr, to: [front], text });
-  else dispatch({ source: "gh", ...(gh && { from: gh }), target: d.pr, to: toldSessions, text, deliver: `[maxflow · from "sentry:gh"] ${unforge(text)}` });
+  else dispatch({ source: "gh", ...(gh && { from: gh }), target: d.pr, to: toldSessions, text, deliver: `[yarn · from "sentry:gh"] ${unforge(text)}` });
   if (typeof d.id === "string" && d.id !== "") void markRead(d.id);
 }
 function onIntent(topic: string, data: EventData) {

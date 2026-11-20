@@ -26,7 +26,7 @@ const server = { isBack: false };
 const urlOf = (input: string | URL | Request) => (input instanceof Request ? input.url : String(input));
 
 function answer(path: string): Response {
-  if (!server.isBack) return path === "/__panic/state" ? Response.json(DEPLOYING, { headers: { "x-yarn-panic": "1" } }) : new Response("maxflow is down", { status: 503, headers: { "x-yarn-panic": "1" } });
+  if (!server.isBack) return path === "/__panic/state" ? Response.json(DEPLOYING, { headers: { "x-yarn-panic": "1" } }) : new Response("yarn is down", { status: 503, headers: { "x-yarn-panic": "1" } });
   if (path === "/api/instance") return Response.json({ instance: "live", port: 4949, pid: 1 });
   if (path === "/__panic/state") return new Response("not found", { status: 404 });
   return new Response("<html></html>", { headers: { "content-type": "text/html" } });

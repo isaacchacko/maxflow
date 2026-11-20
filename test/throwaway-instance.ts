@@ -1,3 +1,4 @@
+import { noSessionEnv } from "../shared/legacy-maxflow";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,8 +21,8 @@ export function throwawayInstance(homePrefix: string): ThrowawayInstance {
 const { INVOCATION_ID, ...envOutsideSystemd } = process.env;
 
 export function startServerWithoutSentries(instance: ThrowawayInstance, env: Record<string, string> = {}) {
-  return Bun.spawn(["bun", join(import.meta.dir, "../server.ts"), `--maxflow-dev=${instance.name}`], {
-    env: { ...envOutsideSystemd, HOME: instance.home, MAXFLOW_INSTANCE: instance.name, MAXFLOW_PORT: String(instance.port), MAXFLOW_SENTRIES: "0", MAXFLOW_SESSION: "", ...env },
+  return Bun.spawn(["bun", join(import.meta.dir, "../server.ts"), `--yarn-dev=${instance.name}`], {
+    env: { ...envOutsideSystemd, HOME: instance.home, YARN_INSTANCE: instance.name, YARN_PORT: String(instance.port), YARN_SENTRIES: "0", ...noSessionEnv(), ...env },
     stdout: "pipe",
     stderr: "pipe",
   });

@@ -87,7 +87,7 @@ export function objectiveCriteria(candidates: ObjectiveRow[]): Record<string, st
 }
 
 export const ROUTE_INSTRUCTIONS =
-  "Isaac is a software engineer at Dryft, a supply-chain startup whose app (exceptions, cases, priority, Hugo, Festo and Trumpf customers) his agents work on. He also builds maxflow, also called yarn: the web app where he talks to those agents, with threads, subthreads, an inbox, a sidebar, objectives, commands, routers, sentries (slack, gh, inbox, funnel) and Chrome pages. The state is a request he sent into maxflow. Each option is an objective his agents are already working on. Which objective does this request belong to? A request about maxflow or yarn itself (its UI, threads, sidebar, agents, sentries, Slack polling) belongs to the maxflow development objective. Pick new only when the request starts work that no objective covers.";
+  "Isaac is a software engineer at Dryft, a supply-chain startup whose app (exceptions, cases, priority, Hugo, Festo and Trumpf customers) his agents work on. He also builds yarn: the web app where he talks to those agents, with threads, subthreads, an inbox, a sidebar, objectives, commands, routers, sentries (slack, gh, inbox, funnel) and Chrome pages. The state is a request he sent into yarn. Each option is an objective his agents are already working on. Which objective does this request belong to? A request about yarn or yarn itself (its UI, threads, sidebar, agents, sentries, Slack polling) belongs to the yarn development objective. Pick new only when the request starts work that no objective covers.";
 export const ROUTE_PROMPT = Bun.hash(ROUTE_INSTRUCTIONS).toString(36);
 
 export const SIZES: Record<string, string> = {
@@ -97,7 +97,7 @@ export const SIZES: Record<string, string> = {
   ignore: "Nothing for anyone: bot noise or a bare acknowledgement.",
 };
 export const SIZE_INSTRUCTIONS =
-  "Isaac is a software engineer at Dryft. He builds maxflow, also called yarn, the web app where his agents pick up his requests. The state is a request that reached maxflow. How much handling does it need?";
+  "Isaac is a software engineer at Dryft. He builds yarn, the web app where his agents pick up his requests. The state is a request that reached yarn. How much handling does it need?";
 export const SIZE_PROMPT = Bun.hash(SIZE_INSTRUCTIONS + JSON.stringify(SIZES)).toString(36);
 
 export async function sizeRequest(config: JevConfig, text: string) {

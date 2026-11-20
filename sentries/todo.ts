@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { yarnEnv, seqOf } from "../shared/legacy-maxflow";
 import { BASE as base } from "../instance";
 import { isRecord, stringOr } from "../shared/guards";
 import { readStateJson, writeStateJson } from "../state";
@@ -43,7 +44,7 @@ const loadTags = (): Tag[] => {
   const tags = readStateJson(TAGS_THE_AGENT_MADE_ITSELF, isList);
   return (tags ?? []).filter(isTag);
 };
-const caller = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
+const caller = { "x-yarn-from": yarnEnv("SESSION") ?? "" };
 const log = (line: string) => {
   console.log(`${new Date().toLocaleTimeString()}  ${line}`);
 };
@@ -126,9 +127,9 @@ async function flush() {
   }
   const tags = loadTags();
   const todoLines = open.map((t) => todoLine(t, tags, fresh));
-  const heading = `[maxflow todo] ${changed.length} thread${changed.length > 1 ? "s" : ""} to check against his ${open.length} open todos${fresh.length > 0 ? ` (${fresh.length} new)` : ""}.`;
+  const heading = `[yarn todo] ${changed.length} thread${changed.length > 1 ? "s" : ""} to check against his ${open.length} open todos${fresh.length > 0 ? ` (${fresh.length} new)` : ""}.`;
   const text = `${heading}\n\nOpen todos:\n${todoLines.join("\n")}\n\nThreads:\n${changed.map((t) => describe(t, objectives)).join("\n")}`;
-  const res = await fetch(`${base}/api/sessions/${String(process.env["MAXFLOW_SESSION"])}/notify`, { method: "POST", headers: caller, body: JSON.stringify({ text }), signal: AbortSignal.timeout(FETCH_MS) });
+  const res = await fetch(`${base}/api/sessions/${String(yarnEnv("SESSION"))}/notify`, { method: "POST", headers: caller, body: JSON.stringify({ text }), signal: AbortSignal.timeout(FETCH_MS) });
   if (!res.ok) {
     log(`notify failed: ${await res.text()}`);
     return;
@@ -172,7 +173,7 @@ async function tickFeed() {
 
 async function firstBatchOnceAgentIsUp() {
   const res = await fetch(`${base}/api/events?topic=none&after=now`, { signal: AbortSignal.timeout(FETCH_MS) });
-  state.seq = Number(res.headers.get("x-maxflow-seq") ?? 0);
+  state.seq = Number(seqOf(res) ?? 0);
   await Bun.sleep(AGENT_STARTUP_MS);
   await flush();
   state.started = true;

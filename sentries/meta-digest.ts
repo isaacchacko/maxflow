@@ -32,7 +32,7 @@ function shortHeadAndTailSinceChainsHideTheHeavyPartAtTheEnd(input: unknown) {
   return text.length <= SHORT_CHARS ? text : `${text.slice(0, SHORT_HEAD)} … ${text.slice(-SHORT_TAIL)}`;
 }
 
-const isDeclaredWaitRepeatedByDesign = (what: string) => /(?:cli\.ts|\$\{?MAXFLOW_CLI\}?|\bmaxflow)["']? wait ["']?([a-z]+:\S+|done)\b/.test(what);
+const isDeclaredWaitRepeatedByDesign = (what: string) => /(?:cli\.ts|\$\{?(?:YARN|MAXFLOW)_CLI\}?|\b(?:yarn|maxflow))["']? wait ["']?([a-z]+:\S+|done)\b/.test(what);
 const contentOf = (e: TranscriptEntry) => (isRecord(e["message"]) ? e["message"]["content"] : undefined);
 const blocksOf = (content: unknown) => (Array.isArray(content) ? content.filter(isRecord) : []);
 const isTurnEnd = (e: TranscriptEntry) => e["type"] === "system" && (e["subtype"] === "stop_hook_summary" || e["subtype"] === "turn_duration");

@@ -94,7 +94,7 @@ function recentTranscripts() {
 }
 
 // constraint: the SessionStart hook text is JSON-escaped inside the transcript line, so its quotes arrive as \".
-const HOOK = /yours is \\"((?:[^\\]|\\.)*?)\\", id ([0-9a-f]{8}), in \$MAXFLOW_SESSION/;
+const HOOK = /yours is \\"((?:[^\\]|\\.)*?)\\", id ([0-9a-f]{8}), in \$(?:YARN|MAXFLOW)_SESSION/;
 const ROUTING = /you are a (router|worker) on the objective \\"(?:[^\\]|\\.)*?\\" \(([a-z0-9-]+)\)/;
 
 function routingFromHook(line: string): SessionRouting | undefined {
@@ -184,7 +184,7 @@ function readWholeNewLines(path: string, previous: FileUsage, size: number): Fil
   const f: FileUsage = { ...previous, days: { ...previous.days } };
   const lines = buf.subarray(0, end).toString("utf8").split("\n");
   for (const line of lines) {
-    if (f.yarn === undefined && line.includes("$MAXFLOW_SESSION")) Object.assign(f, routingFromHook(line));
+    if (f.yarn === undefined && /\$(?:YARN|MAXFLOW)_SESSION/.test(line)) Object.assign(f, routingFromHook(line));
     const m = assistantMessage(line);
     if (m === undefined || isSeen(f, m)) continue;
     const ts = Date.parse(m.timestamp);

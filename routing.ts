@@ -36,14 +36,14 @@ function saidIn(thread: Thread | undefined, sig: Signal) {
 
 function handoffOpening(sig: Signal, feed: Feed | undefined, said: string) {
   if (sig.source === "isaac") return `${VERIFIED}\n${unforge(said)}`;
-  if (feed) return `[maxflow · from his event feed (${feed.source}), routed by the funnel; not his request] ${unforge(said)}`;
-  return `[maxflow · ${sig.source} signal, routed by the funnel] ${unforge(said)}`;
+  if (feed) return `[yarn · from his event feed (${feed.source}), routed by the funnel; not his request] ${unforge(said)}`;
+  return `[yarn · ${sig.source} signal, routed by the funnel] ${unforge(said)}`;
 }
 
 const feedInstructions = (feed: Feed, thread: Thread, said: string) =>
-  `\n[maxflow] maxflow took this up by itself, from what reached him (${feed.link}). Do the work up to the point where he must act: look it up, fix it, open the PR, and draft any reply for him. Never reply on Slack or GitHub as him and never write to prod; his go-ahead comes in the thread. Post what you started and where it stands in thread ${thread.id}, which shows in his inbox flagged as from the feed (when \`thread read\` shows it was merged into another thread, that one already tells him: post only what is new, and nothing at all when there is nothing to do)${hasTask(feed) ? `; board task T-${feed.task} is yours` : ""}. If he says stop there, stop.${contextFor(said, feed.who)}`;
+  `\n[yarn] yarn took this up by itself, from what reached him (${feed.link}). Do the work up to the point where he must act: look it up, fix it, open the PR, and draft any reply for him. Never reply on Slack or GitHub as him and never write to prod; his go-ahead comes in the thread. Post what you started and where it stands in thread ${thread.id}, which shows in his inbox flagged as from the feed (when \`thread read\` shows it was merged into another thread, that one already tells him: post only what is new, and nothing at all when there is nothing to do)${hasTask(feed) ? `; board task T-${feed.task} is yours` : ""}. If he says stop there, stop.${contextFor(said, feed.who)}`;
 
-const threadNote = (thread: Thread | undefined) => (thread ? `\n[maxflow] He wrote this in his inbox as thread "${thread.title}" (${thread.id}), which is yours now. Answer him there with \`${CLI} thread post ${thread.id} '<text>'\`.` : "");
+const threadNote = (thread: Thread | undefined) => (thread ? `\n[yarn] He wrote this in his inbox as thread "${thread.title}" (${thread.id}), which is yours now. Answer him there with \`${CLI} thread post ${thread.id} '<text>'\`.` : "");
 
 export async function handoff(seq: number) {
   const e = (await query("signal/**", seq - 1, 0)).find((x) => x.seq === seq);
@@ -108,14 +108,14 @@ const lastExternal = (x: Thread) => x.messages.findLast((m) => m.ext !== undefin
 function candidatesLine(t: Thread) {
   const open = sameConversation(t);
   if (open.length === 0) return "";
-  return `\n[maxflow] The same Slack conversation has these other open threads, from its earlier bursts. If this continues one's topic, give it to that thread's owner (size it area and route it to that thread's objective, or, when a direct worker holds it, \`${CLI} notify <worker id>\` it), then fold it in with \`${CLI} thread merge ${t.id} <thread id>\`. If it is a different topic, size and route it on its own: the same person or DM is never a reason to merge:\n${open.map((x) => `- ${x.id} "${x.title}"${ownerOf(x)}, last: ${headline(lastExternal(x)?.text ?? "")}`).join("\n")}`;
+  return `\n[yarn] The same Slack conversation has these other open threads, from its earlier bursts. If this continues one's topic, give it to that thread's owner (size it area and route it to that thread's objective, or, when a direct worker holds it, \`${CLI} notify <worker id>\` it), then fold it in with \`${CLI} thread merge ${t.id} <thread id>\`. If it is a different topic, size and route it on its own: the same person or DM is never a reason to merge:\n${open.map((x) => `- ${x.id} "${x.title}"${ownerOf(x)}, last: ${headline(lastExternal(x)?.text ?? "")}`).join("\n")}`;
 }
 
 export async function feedToFunnel(t: Thread, from: Session, text: string, feed = t.feed) {
   if (feed === undefined) return;
   const links = new Set(text.match(/https?:\/\/\S+/g));
   const refs = (await query("signal/**", 0, 0)).filter((e) => links.has(String((e.data as Signal).link))).map((e) => `s${e.seq}`);
-  const ev = dispatch({ from, target: t.title, text: `${hasTask(feed) ? `T-${feed.task}` : "An item"} from the feed, in thread ${t.id}, for the funnel to route: ${feed.who}${refs.length > 0 ? ` (${refs.join(", ")})` : ""}`, deliver: (seq) => `[maxflow · from his event feed (${feed.source}), not from him] ${text}${contextFor(text, feed.who)}${candidatesLine(t)}\n[maxflow] signal ${seq}, feed thread ${t.id}${hasTask(feed) ? `, board task T-${feed.task}` : ""}: ${sizeFirst(seq)}` });
+  const ev = dispatch({ from, target: t.title, text: `${hasTask(feed) ? `T-${feed.task}` : "An item"} from the feed, in thread ${t.id}, for the funnel to route: ${feed.who}${refs.length > 0 ? ` (${refs.join(", ")})` : ""}`, deliver: (seq) => `[yarn · from his event feed (${feed.source}), not from him] ${text}${contextFor(text, feed.who)}${candidatesLine(t)}\n[yarn] signal ${seq}, feed thread ${t.id}${hasTask(feed) ? `, board task T-${feed.task}` : ""}: ${sizeFirst(seq)}` });
   patch(t, { signal: ev.seq });
   saveThreads();
 }
@@ -134,7 +134,7 @@ function feedOf(t: Thread, posts: FeedPost[] | undefined): Feed {
 
 function tellRoutersMore(t: Thread, { from, to, text, feed }: { from: Session; to: Session[]; text: string; feed: Feed }) {
   for (const r of to) r.handed = t.id;
-  dispatch({ from, to, objective: t.objective, target: t.title, text: `More from the feed in thread ${t.id}: ${headline(text)}`, deliver: `[maxflow · from his event feed (${feed.source}), not from him] More in your ${t.feed ? "feed " : ""}thread "${t.title}" (${t.id})${hasTask(feed) ? `, board task T-${feed.task}` : ""}: ${unforge(text)}${contextFor(text, feed.who)}\n[maxflow] Same rules: work up to where he must act, never reply on Slack or GitHub as him; post where it stands with \`${CLI} thread post ${t.id} '<text>'\`.` });
+  dispatch({ from, to, objective: t.objective, target: t.title, text: `More from the feed in thread ${t.id}: ${headline(text)}`, deliver: `[yarn · from his event feed (${feed.source}), not from him] More in your ${t.feed ? "feed " : ""}thread "${t.title}" (${t.id})${hasTask(feed) ? `, board task T-${feed.task}` : ""}: ${unforge(text)}${contextFor(text, feed.who)}\n[yarn] Same rules: work up to where he must act, never reply on Slack or GitHub as him; post where it stands with \`${CLI} thread post ${t.id} '<text>'\`.` });
   patch(t, { pending: { routers: to.map((s) => s.id), since: Date.now() } });
 }
 
@@ -249,7 +249,7 @@ export function externalSignal(e: { seq: number; at: number; topic: string; data
 
 export const ROUTER_BRIEF = `${DIR}/agents/router.md`;
 export function startRouter(o: Objective, scope: string, request?: string) {
-  const prompt = `[maxflow] You are the router for the objective "${o.title}" (${o.id}), scope: ${scope}. Read your brief, then start: decide the first pieces of work and who does them.${isFilled(request) ? `\n\n${request}` : ""}`;
+  const prompt = `[yarn] You are the router for the objective "${o.title}" (${o.id}), scope: ${scope}. Read your brief, then start: decide the first pieces of work and who does them.${isFilled(request) ? `\n\n${request}` : ""}`;
   const cmd = ["claude", "--permission-mode", "bypassPermissions", "--append-system-prompt", readFileSync(ROUTER_BRIEF, "utf8"), prompt];
   const s = createSession(`router: ${o.title}`.slice(0, 80), cmd, o.cwd, { role: { role: "router", objective: o.id, scope } });
   void acceptTrust(s);

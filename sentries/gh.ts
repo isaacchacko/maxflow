@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { yarnEnv } from "../shared/legacy-maxflow";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -28,7 +29,7 @@ const REFETCH_PENDING_MS = 2 * 60_000;
 const REFETCH_SETTLED_MS = 10 * 60_000;
 const LINES_PER_NOTICE = 5;
 const CLI = new URL("../cli.ts", import.meta.url).pathname;
-const caller = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
+const caller = { "x-yarn-from": yarnEnv("SESSION") ?? "" };
 const CONTROL_CHARS = `${String.fromCodePoint(0)}-${String.fromCodePoint(0x1F)}`;
 const QUOTING_SAFE_RUN = new RegExp(`[^"'\`$\\\\${CONTROL_CHARS}0-9]{20,}`, "g");
 
@@ -224,7 +225,7 @@ async function announce(key: string, pr: Pr, changes: Change[], told: string[]) 
   const lines = changes.flatMap(([, data, line]) => (line === null || isOwnComment(whoOf(data)) ? [] : line));
   if (lines.length === 0) return;
   const more = lines.length > LINES_PER_NOTICE ? `; and ${lines.length - LINES_PER_NOTICE} more` : "";
-  const text = `[maxflow gh] ${key} (${short(pr.title, 60)}): ${lines.slice(0, LINES_PER_NOTICE).join("; ")}${more}. Full status: ${CLI} gh status ${key}. ${NOTICE_TAIL}`;
+  const text = `[yarn gh] ${key} (${short(pr.title, 60)}): ${lines.slice(0, LINES_PER_NOTICE).join("; ")}${more}. Full status: ${CLI} gh status ${key}. ${NOTICE_TAIL}`;
   for (const session of told) await post(`/api/sessions/${session}/notify`, { text });
   console.log(`${new Date().toLocaleTimeString()}  ${text}  -> ${told.join(", ") || "nobody"}`);
 }
@@ -281,10 +282,10 @@ async function didAnnounceCommit(w: CommitWatch, ci: CommitCi | undefined) {
   const line = ci === undefined ? `no CI finished on ${on} in ${COMMIT_WATCH_MS / 3_600_000}h, so the wait on it ends` : ciLine(on, ci);
   const taken = await postedOk("/api/events", { topic: `gh/${repo}/commit/${sha}/ci`, data: { commit: w.key, sha, state: ci?.state ?? "NONE", failed: ci?.failed ?? [], told: w.sessions } });
   if (taken !== true) {
-    console.log(`${new Date().toLocaleTimeString()}  maxflow didn't take the CI event for ${on} (${taken}); the watch stays for the next poll`);
+    console.log(`${new Date().toLocaleTimeString()}  yarn didn't take the CI event for ${on} (${taken}); the watch stays for the next poll`);
     return false;
   }
-  for (const session of w.sessions) await post(`/api/sessions/${session}/notify`, { text: `[maxflow gh] ${line}. ${NOTICE_TAIL}` });
+  for (const session of w.sessions) await post(`/api/sessions/${session}/notify`, { text: `[yarn gh] ${line}. ${NOTICE_TAIL}` });
   console.log(`${new Date().toLocaleTimeString()}  ${line}  -> ${w.sessions.join(", ") || "nobody"}`);
   return true;
 }

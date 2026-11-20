@@ -47,7 +47,7 @@ export const docVerbs: Verb[] = [
     matches: (verb) => verb === "docs",
     run: async (args) => {
       const action = ACTIONS[argAt(args, 0)];
-      if (!action || (args[0] !== "ls" && !hasArg(args, 1))) fail("usage: maxflow docs ls | read <path> | write <path> [text...] (else stdin) | mv <path> <to> | rm <path>");
+      if (!action || (args[0] !== "ls" && !hasArg(args, 1))) fail("usage: yarn docs ls | read <path> | write <path> [text...] (else stdin) | mv <path> <to> | rm <path>");
       await action(args);
     },
   },

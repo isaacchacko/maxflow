@@ -1,3 +1,4 @@
+import { callerOf, isStamped, BEFORE_A_STAMP } from "./shared/legacy-maxflow";
 import { readFileSync } from "node:fs";
 import { type Session, isSentry, sessions } from "./sessions";
 import { VERIFIED } from "./intro";
@@ -25,7 +26,7 @@ function partsTheServerDidNotStampAsFromASession(line: string): string[] {
   try {
     const text = promptTextOf(JSON.parse(line));
     if (text === undefined) return [];
-    return text.split(/\n(?=\[maxflow)/).filter((p) => p.trim() !== "" && !p.startsWith("[maxflow") && !p.startsWith("<")).map(squash);
+    return text.split(BEFORE_A_STAMP).filter((p) => p.trim() !== "" && !isStamped(p) && !p.startsWith("<")).map(squash);
   } catch {
     return [];
   }
@@ -38,8 +39,8 @@ function promptsIsaacTypedIntoTheFunnel(funnel: Session) {
 }
 
 export function stamp(req: Request, text: string, isIsaacsOwnRequest?: boolean): { text: string; request?: WordsIsaacTypedThatTheRelayStartsWith } | { error: string } {
-  const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-  if (isIsaacsOwnRequest !== true) return { text: from ? `[maxflow · from "${from.name}" (${from.id})] ${unforge(text)}` : unforge(text) };
+  const from = sessions.get(callerOf(req));
+  if (isIsaacsOwnRequest !== true) return { text: from ? `[yarn · from "${from.name}" (${from.id})] ${unforge(text)}` : unforge(text) };
   if (from?.name !== "sentry:funnel" || !isSentry(from)) return { error: "only the funnel sentry relays Isaac's requests" };
   const said = squash(text);
   const request = promptsIsaacTypedIntoTheFunnel(from).findLast((p) => p !== "" && said.startsWith(p));

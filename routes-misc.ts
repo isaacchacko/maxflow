@@ -1,3 +1,4 @@
+import { seqHeaders } from "./shared/legacy-maxflow";
 import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { CLI } from "./instance";
@@ -138,7 +139,7 @@ async function eventsAfter(_req: Request, url: URL): Promise<Response> {
   const after = p.get("after") === "now" ? latestSeq() : Number(p.get("after") ?? 0);
   const waitMs = Math.min(Number(p.get("wait") ?? 0), 3_600_000);
   const events = await query(p.get("topic") ?? "**", after, waitMs);
-  return Response.json(events, { headers: { "x-maxflow-seq": String(after) } });
+  return Response.json(events, { headers: seqHeaders(String(after)) });
 }
 
 async function publishEvent(req: Request): Promise<Response> {
@@ -185,7 +186,7 @@ function sameAskRefusal(same: Thread): Response {
 async function openAThreadWaitingOnHim(req: Request): Promise<Response> {
   const body = await jsonBody(req);
   const s = sender(req);
-  if (!s) return new Response("ask from inside a maxflow session ($MAXFLOW_SESSION)", { status: 400 });
+  if (!s) return new Response("ask from inside a yarn session ($YARN_SESSION)", { status: 400 });
   const text = textOf(body, "text")?.trim() ?? "";
   if (text === "") return new Response("text required", { status: 400 });
   const [re, dflt] = [textOf(body, "re")?.trim(), textOf(body, "default")?.trim()];

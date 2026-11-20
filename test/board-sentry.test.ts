@@ -1,9 +1,10 @@
+import { noSessionEnv } from "../shared/legacy-maxflow";
 import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const home = mkdtempSync(join(tmpdir(), "maxflow-board-sentry-"));
+const home = mkdtempSync(join(tmpdir(), "yarn-board-sentry-"));
 const name = `ci-${crypto.randomUUID().slice(0, 6)}`;
 const stateDir = join(home, `.maxflow-v2-${name}`);
 mkdirSync(stateDir);
@@ -32,7 +33,7 @@ setInterval(() => {}, 1000);
 );
 
 const got = { events: [] as { topic: string; data: { cursor: string; own: boolean } }[], threads: [] as { title: string; feed: { source: string; who: string } }[], more: [] as string[], failNextEvent: true };
-const maxflow = Bun.serve({
+const yarn = Bun.serve({
   port: 0,
   async fetch(req) {
     const path = new URL(req.url).pathname;
@@ -65,7 +66,7 @@ writeFileSync(
 
 const startSentry = () =>
   Bun.spawn(["bun", join(import.meta.dir, "../sentries/board.ts")], {
-    env: { ...process.env, HOME: home, MAXFLOW_INSTANCE: name, MAXFLOW_PORT: String(maxflow.port), MAXFLOW_SESSION: "" },
+    env: { ...process.env, HOME: home, YARN_INSTANCE: name, YARN_PORT: String(yarn.port), ...noSessionEnv() },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -93,7 +94,7 @@ async function until(isDone: () => boolean, ms: number) {
 }
 
 afterAll(() => {
-  void maxflow.stop(true);
+  void yarn.stop(true);
   rmSync(home, { recursive: true, force: true });
 });
 

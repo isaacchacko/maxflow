@@ -5,7 +5,7 @@ import { join } from "node:path";
 import tailwind from "bun-plugin-tailwind";
 
 const root = join(import.meta.dir, "..");
-const out = mkdtempSync(join(tmpdir(), "maxflow-check-"));
+const out = mkdtempSync(join(tmpdir(), "yarn-check-"));
 const glob = (pattern: string) => [...new Bun.Glob(pattern).scanSync(root)].map((f) => join(root, f));
 
 async function didBundleWithoutErrors(label: string, config: Bun.BuildConfig) {

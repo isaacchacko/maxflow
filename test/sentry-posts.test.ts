@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
-const home = mkdtempSync(join(tmpdir(), "maxflow-sentry-posts-"));
+const home = mkdtempSync(join(tmpdir(), "yarn-sentry-posts-"));
 mkdirSync(join(home, ".maxflow-v2-sentrypoststest"), { recursive: true });
-const env = { ...process.env, HOME: home, MAXFLOW_INSTANCE: "sentrypoststest", MAXFLOW_PORT: "1" };
+const env = { ...process.env, HOME: home, YARN_INSTANCE: "sentrypoststest", YARN_PORT: "1" };
 
 afterAll(() => {
   rmSync(home, { recursive: true, force: true });

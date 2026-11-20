@@ -1,3 +1,4 @@
+import { callerOf } from "./shared/legacy-maxflow";
 import { addNode, CanvasConflict, createCanvas, type Edit, editNode, linkNode, markTyping, onCanvasChange, readCanvas, removeNode } from "./canvas";
 import { sessions } from "./sessions";
 import { isRecord, stringOr } from "./shared/guards";
@@ -62,7 +63,7 @@ const USAGE = "GET or POST /api/canvas/<path>; POST <path>/nodes {text,x,y,width
 export async function canvasRoute(req: Request, url: URL): Promise<Response | undefined> {
   const m = /^\/api\/canvas\/([^/]+)(?:\/(.+))?$/.exec(url.pathname);
   if (m?.[1] === undefined) return;
-  const author = sessions.get(req.headers.get("x-maxflow-from") ?? "")?.id ?? "isaac";
+  const author = sessions.get(callerOf(req))?.id ?? "isaac";
   try {
     const done = await canvasAction({ req, path: decodeURIComponent(m[1]), rest: m[2], author });
     if (done === undefined) return new Response(USAGE, { status: 400 });

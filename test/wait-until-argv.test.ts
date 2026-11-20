@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { startServerWithoutSentries, stopByPidAndSocket, throwawayInstance, waitUntilAnswering, withTimeout } from "./throwaway-instance";
 
-const instance = throwawayInstance("maxflow-until-argv-");
+const instance = throwawayInstance("yarn-until-argv-");
 const server = startServerWithoutSentries(instance);
 
 afterAll(async () => {
@@ -23,7 +23,7 @@ describe("0e988876: `wait until ... -- sh -c '<loop with do/done>'` died with 'p
     const { id } = (await created.json()) as { id: string };
     const loop = `for word in one "two words"; do echo "got $word"; done; echo "it's done"`;
     const cli = Bun.spawnSync(["bun", join(import.meta.dir, "../cli.ts"), "wait", "until", "the loop prints", "--", "sh", "-c", loop], {
-      env: { ...process.env, MAXFLOW_INSTANCE: instance.name, MAXFLOW_PORT: String(instance.port), MAXFLOW_SESSION: id },
+      env: { ...process.env, YARN_INSTANCE: instance.name, YARN_PORT: String(instance.port), YARN_SESSION: id },
       stderr: "pipe",
     });
     expect(cli.stderr.toString()).toBe("");

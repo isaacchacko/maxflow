@@ -17,7 +17,7 @@ export default createRule({
     type: "problem",
     docs: { description: "Never kill processes by name or pattern" },
     messages: {
-      kill: "Never kill by name or pattern: pkill, killall and `xargs kill` match the live maxflow, other agents' work and Isaac's Chrome. Keep the Subprocess you started and call its .kill(), kill the one pid you own, or stop a dev instance with ./dev.sh stop <instance>.",
+      kill: "Never kill by name or pattern: pkill, killall and `xargs kill` match the live yarn, other agents' work and Isaac's Chrome. Keep the Subprocess you started and call its .kill(), kill the one pid you own, or stop a dev instance with ./dev.sh stop <instance>.",
     },
     schema: [],
     defaultOptions: [],

@@ -2,7 +2,7 @@ import { commandStarts, shellText } from "./restrictions-shell";
 
 // constraint: Isaac is the last step before any agent PR merges, so this gate reads no restrictions file an agent or the UI could loosen
 const MERGE_COMMANDS = [/^gh\s+pr\s+merge\b(?![^\n;&|]*--disable-auto)/, /^git\s+push\b[^\n;&|]*[\s:+](main|master)(\s|$)/m];
-const MERGE_ANYWHERE = [/\/pulls\/\d+\/merge\b/, /\brepos\/[\w.-]+\/[\w.-]+\/merges\b/, /\b(mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|mergeBranch)\b/, /(localhost|127\.0\.0\.1|MAXFLOW_PORT\}?|:\d{2,5})\S*\/api\/prs\/merge\b/];
+const MERGE_ANYWHERE = [/\/pulls\/\d+\/merge\b/, /\brepos\/[\w.-]+\/[\w.-]+\/merges\b/, /\b(mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|mergeBranch)\b/, /(localhost|127\.0\.0\.1|(?:YARN|MAXFLOW)_PORT\}?|:\d{2,5})\S*\/api\/prs\/merge\b/];
 const MERGE_TOOLS = [/^mcp__linear__merge_diff$/, /^mcp__.*github.*__(merge_pull_request|enable_auto_merge|.*automerge.*)$/i];
 
 export const MERGE_REFUSAL =

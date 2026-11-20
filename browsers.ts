@@ -1,3 +1,4 @@
+import { yarnEnv } from "./shared/legacy-maxflow";
 import { applyView, keptView } from "./browser-size";
 import { publish } from "./bus";
 import { Cdp, CdpError, unlessItFails } from "./cdp";
@@ -7,8 +8,8 @@ import { listState, readStateText, removeState, removeStateDirectory, stateDirec
 
 export type Browser = { session: string; port: number; page: Cdp; usedAt: number; console: string[]; consoleDropped: number; watchers: number; isHeld: boolean; resized: Set<() => void> };
 
-const MAX_BROWSERS = Number(process.env["MAXFLOW_BROWSERS_MAX"] ?? 3);
-const IDLE_MS = Number(process.env["MAXFLOW_BROWSER_IDLE_MS"] ?? 10 * 60_000);
+const MAX_BROWSERS = Number(yarnEnv("BROWSERS_MAX") ?? 3);
+const IDLE_MS = Number(yarnEnv("BROWSER_IDLE_MS") ?? 10 * 60_000);
 export const CONSOLE_KEPT = 500;
 const LAUNCH_DEADLINE_MS = 15_000;
 const PROBE_TIMEOUT_MS = 2000;
@@ -60,7 +61,7 @@ export function chromeFlags(profile: string): string[] {
 
 async function launchChrome(session: string): Promise<number> {
   const binary = chromeBinary();
-  if (binary === undefined) throw new BrowserCap("no Chrome or Chromium on this machine: install one, or point MAXFLOW_CHROME at its binary");
+  if (binary === undefined) throw new BrowserCap("no Chrome or Chromium on this machine: install one, or point YARN_CHROME at its binary");
   const profile = stateDirectory(profileOf(session));
   removeState(portFileOf(session));
   const chrome = Bun.spawn([binary, ...chromeFlags(profile), "about:blank"], { stdout: "ignore", stderr: Bun.file(`${profile}/chrome.log`) });

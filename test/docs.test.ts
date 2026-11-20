@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-process.env["MAXFLOW_DOCS"] = mkdtempSync(join(tmpdir(), "maxflow-docs-"));
+process.env["YARN_DOCS"] = mkdtempSync(join(tmpdir(), "yarn-docs-"));
 const docs = await import("../docs");
 
 const DOC = `---

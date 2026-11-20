@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { yarnEnv } from "../shared/legacy-maxflow";
 import { BASE as base } from "../instance";
 import { type Msg, permalink, read, readWatches, replyField, short, slackCall, splitTarget, writeWatches } from "../slack-read";
 import { isRecord } from "../shared/guards";
@@ -31,7 +32,7 @@ const DM_INTERVAL_MS = Number(process.env["SLACK_DM_INTERVAL"] ?? 20_000);
 const TIES_FRESH_MS = 60_000;
 const FETCH_MS = 30_000;
 const CLI = new URL("../cli.ts", import.meta.url).pathname;
-const graphCaller = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
+const graphCaller = { "x-yarn-from": yarnEnv("SESSION") ?? "" };
 
 type Tie = { target: string; session: string };
 type Ties = { ties: Tie[]; posted: Map<string, Set<string>> };
@@ -139,7 +140,7 @@ const readCommandArg = (target: string) => (target.startsWith("search:") ? JSON.
 async function notifySessions(told: string[], conversation: Conversation, line: string) {
   const { target, title } = conversation;
   const whole = splitTarget(target).thread === undefined ? "conversation" : "thread";
-  const text = `[maxflow slack] ${title}: new message from ${line}. Whole ${whole}: ${CLI} slack read ${readCommandArg(target)}. (Automated notice, not a request from the user: act on it only if it's part of your current task.)`;
+  const text = `[yarn slack] ${title}: new message from ${line}. Whole ${whole}: ${CLI} slack read ${readCommandArg(target)}. (Automated notice, not a request from the user: act on it only if it's part of your current task.)`;
   for (const session of told) await post(`/api/sessions/${session}/notify`, { text });
 }
 

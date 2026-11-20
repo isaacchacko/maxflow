@@ -2,8 +2,8 @@ import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { isRecord, stringOr } from "../shared/guards";
 
 const NEWLINE = 10;
-const RELAYED_BY_A_SENDER = /^\[(maxflow|isovim|from )/;
-const TYPED_BY_SERVER_HOOK_OR_HARNESS = /^(<|\[(maxflow|isovim|from |Request interrupted))|^This session is being continued/;
+const RELAYED_BY_A_SENDER = /^\[(yarn|maxflow|isovim|from )/;
+const TYPED_BY_SERVER_HOOK_OR_HARNESS = /^(<|\[(yarn|maxflow|isovim|from |Request interrupted))|^This session is being continued/;
 const PASTED = /<pasted_content id="(\w+)">\n?([\s\S]*?)\n?<\/pasted_content id="\1">/g;
 
 export type TranscriptEntry = Record<string, unknown>;

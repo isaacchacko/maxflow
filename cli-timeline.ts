@@ -1,13 +1,13 @@
 import { argAt, base, fail, flag, hasArg, mySession, positional, timeout, type Verb } from "./cli-shared";
 import { addEvent, didCommit, ensureTimelines, findEvents, listTimelines, readTimeline, setNow, TIMELINES_DIR } from "./timelines";
 
-const USAGE = `usage: maxflow timeline add <path> <title> [text...] (else stdin) [--at <ISO time, for an event that happened earlier>] | now <path> [text...] (else stdin) | read <path> [--last N] | ls [prefix] | find <words...>
+const USAGE = `usage: yarn timeline add <path> <title> [text...] (else stdin) [--at <ISO time, for an event that happened earlier>] | now <path> [text...] (else stdin) | read <path> [--last N] | ls [prefix] | find <words...>
   timelines live in ${TIMELINES_DIR}/<folders>/<label>/, one "<UTC time> <title>.txt" per event plus now.txt, the current state`;
 const DEFAULT_LAST = 10;
 
 async function author() {
   const id = mySession();
-  if (id === undefined || id === "") return "maxflow";
+  if (id === undefined || id === "") return "yarn";
   try {
     const res = await fetch(`${base}/api/sessions`, { signal: timeout() });
     const rows = (await res.json()) as { id: string; name: string }[];
@@ -38,7 +38,7 @@ async function now(args: string[]) {
 
 function listInside(path: string) {
   const inside = listTimelines(path);
-  if (inside.length === 0) fail(`no timeline at ${path}; \`maxflow timeline ls\` lists them`);
+  if (inside.length === 0) fail(`no timeline at ${path}; \`yarn timeline ls\` lists them`);
   console.log(`${path} holds no events itself; its timelines:`);
   for (const x of inside) console.log(`  ${x.path}  (${String(x.events)} events)`);
 }
@@ -52,7 +52,7 @@ function read(args: string[]) {
     listInside(path);
     return;
   }
-  console.log(`# ${t.path}/now.txt\n${t.now?.trim() ?? "(no now.txt yet: write one with `maxflow timeline now`)"}\n`);
+  console.log(`# ${t.path}/now.txt\n${t.now?.trim() ?? "(no now.txt yet: write one with `yarn timeline now`)"}\n`);
   if (t.total > t.events.length) console.log(`(${String(t.total - t.events.length)} earlier events not shown; --last ${String(t.total)} for all)\n`);
   for (const e of t.events) console.log(`## ${e.file}\n${e.text.trim()}\n`);
 }

@@ -57,7 +57,7 @@ export function askForHandoffNote(s: Session, tokens: number, window: number): s
   dispatch({
     to: [s],
     target: "context hand-off",
-    text: `[maxflow] Your context is ${String(pct)}% full (${k(tokens)} of ${k(window)} tokens), so maxflow is handing your work to a fresh agent before Claude Code compacts this chat. Write a hand-off note to a file: your goal and who asked for it, where it stands, what's left in order, the branch, worktree and PRs, what you're waiting on and why, and anything the next agent would otherwise have to rediscover (decisions made, dead ends, commands that work). Then run \`${CLI} handoff <file>\` and end your turn; don't declare a new wait. When the turn ends, maxflow starts the fresh agent in ${s.cwd} with your note, and moves your role, threads, task, watches and wait to it. Don't tell anyone; the hand-off shows itself.`,
+    text: `[yarn] Your context is ${String(pct)}% full (${k(tokens)} of ${k(window)} tokens), so yarn is handing your work to a fresh agent before Claude Code compacts this chat. Write a hand-off note to a file: your goal and who asked for it, where it stands, what's left in order, the branch, worktree and PRs, what you're waiting on and why, and anything the next agent would otherwise have to rediscover (decisions made, dead ends, commands that work). Then run \`${CLI} handoff <file>\` and end your turn; don't declare a new wait. When the turn ends, yarn starts the fresh agent in ${s.cwd} with your note, and moves your role, threads, task, watches and wait to it. Don't tell anyone; the hand-off shows itself.`,
   });
   publish(`handoff/asked/${s.id}`, { session: s.id, tokens, window, pct });
   return null;
@@ -88,10 +88,10 @@ function moveThreadsStillNaming(old: Session, fresh: Session, line: string) {
   const moved = threads.filter((t) => isNaming(t, old.id));
   for (const t of moved) {
     renameIn(t, old.id, fresh.id);
-    t.messages.push({ id: `m-${crypto.randomUUID().slice(0, 6)}`, from: "maxflow", at: Date.now(), text: line });
+    t.messages.push({ id: `m-${crypto.randomUUID().slice(0, 6)}`, from: "yarn", at: Date.now(), text: line });
   }
   saveThreads();
-  for (const t of moved) publish(`thread/${t.id}`, { thread: t.id, from: "maxflow" });
+  for (const t of moved) publish(`thread/${t.id}`, { thread: t.id, from: "yarn" });
   return moved;
 }
 
@@ -149,7 +149,7 @@ function briefFresh(old: Session, fresh: Session, pct: string | undefined, note:
   dispatch({
     to: [fresh],
     target: old.id,
-    text: `[maxflow] You take over from "${fresh.name}" (${old.id}), whose context ${pct === undefined ? "was filling up" : `was ${pct} full`}. Its role, threads, task, and PR and Slack watches are yours now, and messages sent to it reach you.${wait} Its transcript is ${old.transcript ?? "unknown"}, if the note leaves something out. Pick the work up from its note; don't announce the hand-off.\n\nIts hand-off note:\n\n${note}`,
+    text: `[yarn] You take over from "${fresh.name}" (${old.id}), whose context ${pct === undefined ? "was filling up" : `was ${pct} full`}. Its role, threads, task, and PR and Slack watches are yours now, and messages sent to it reach you.${wait} Its transcript is ${old.transcript ?? "unknown"}, if the note leaves something out. Pick the work up from its note; don't announce the hand-off.\n\nIts hand-off note:\n\n${note}`,
   });
 }
 

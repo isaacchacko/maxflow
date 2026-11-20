@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { yarnEnv } from "../shared/legacy-maxflow";
 import { statSync } from "node:fs";
 import { BASE as base } from "../instance";
 import { type Fill, lastFill, percent } from "../context-fill";
@@ -19,7 +20,7 @@ const GIVE_UP_AFTER_MS = 30 * 60_000;
 const TAIL_BYTES = 1_000_000;
 const FETCH_MS = 10_000;
 const isDryRun = process.env["HANDOFF_DRY"] === "1";
-const HEADERS = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
+const HEADERS = { "x-yarn-from": yarnEnv("SESSION") ?? "" };
 
 type Agent = { id: string; name: string; transcript: string; status: string; asleep: boolean; wait: { kind: string } | null; role: { handedTo?: string } };
 const isAgent = (s: unknown): s is Agent =>

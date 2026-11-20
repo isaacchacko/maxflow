@@ -22,7 +22,7 @@ import { takeOver } from "./singleton";
 if (import.meta.main) takeOver("health");
 
 if (!IS_LIVE && !IS_WATCHING_DEV_AS_IF_LIVE) {
-  console.log("health sentry: not the live maxflow, nothing to watch");
+  console.log("health sentry: not the live yarn, nothing to watch");
   process.exit(0);
 }
 

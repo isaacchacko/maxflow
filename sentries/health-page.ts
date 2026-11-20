@@ -38,7 +38,7 @@ function pageResponse(req: Request, didUpgrade: () => boolean, hooks: PageHooks)
   const asset = XTERM_ASSETS.get(path);
   if (asset !== undefined) return new Response(Bun.file(join(XTERM, asset)));
   if (path === "/__panic/inter.woff2") return new Response(Bun.file(APP_FONT_FROM_THE_PACKAGE_THE_APP_BUNDLES), { headers: { "content-type": "font/woff2" } });
-  if (path.startsWith("/api/")) return new Response("maxflow is down", { status: 503, headers: PANIC_HEADERS });
+  if (path.startsWith("/api/")) return new Response("yarn is down", { status: 503, headers: PANIC_HEADERS });
   return new Response(Bun.file(join(import.meta.dir, "panic.html")), { headers: { ...PANIC_HEADERS, "content-type": "text/html" } });
 }
 

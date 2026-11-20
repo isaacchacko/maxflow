@@ -7,7 +7,7 @@ const SETTINGS = join(homedir(), ".claude/settings.json");
 const state = (s: string) => `${HOOKS}/claude-state.sh ${s}`;
 const questions = `${HOOKS}/claude-questions.ts`;
 const restrictions = `${HOOKS}/restrictions.ts`;
-const HOOKS_INERT_OUTSIDE_A_MAXFLOW_PANE: Record<string, { matcher?: string; command: string }[]> = {
+const HOOKS_INERT_OUTSIDE_A_YARN_PANE: Record<string, { matcher?: string; command: string }[]> = {
   SessionStart: [{ command: state("idle") }, { command: `${HOOKS}/claude-intro.sh` }],
   UserPromptSubmit: [{ command: state("working") }],
   PreToolUse: [{ command: state("working") }, { matcher: "AskUserQuestion|SendMessage", command: questions }, { command: restrictions }],
@@ -35,10 +35,10 @@ function readSettings(): Settings {
 export function installHooks() {
   const settings = readSettings();
   const hooks = (settings.hooks ??= {});
-  const otherMaxflowsHook = Object.values(hooks).flat().flatMap((e) => e.hooks).find((h) => /claude-(intro|state)\.sh/.test(h.command) && !h.command.startsWith(HOOKS));
-  if (otherMaxflowsHook) return `hooks: left as they are, another maxflow's are installed (${otherMaxflowsHook.command.split(" ", 1)[0] ?? ""})`;
+  const otherYarnsHook = Object.values(hooks).flat().flatMap((e) => e.hooks).find((h) => /claude-(intro|state)\.sh/.test(h.command) && !h.command.startsWith(HOOKS));
+  if (otherYarnsHook) return `hooks: left as they are, another yarn's are installed (${otherYarnsHook.command.split(" ", 1)[0] ?? ""})`;
   let added = 0;
-  for (const [event, wanted] of Object.entries(HOOKS_INERT_OUTSIDE_A_MAXFLOW_PANE))
+  for (const [event, wanted] of Object.entries(HOOKS_INERT_OUTSIDE_A_YARN_PANE))
     for (const w of wanted) {
       const list = (hooks[event] ??= []);
       if (list.some((e) => e.hooks.some((h) => h.command === w.command) && e.matcher === w.matcher)) continue;
