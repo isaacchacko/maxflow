@@ -1,17 +1,4 @@
 {
   "eslint.config.ts": 1,
-  "pages.ts": 1,
-  "repos.ts": 1,
-  "routes-files.ts": 1,
-  "routes-misc.ts": 2,
-  "routes-objectives.ts": 2,
-  "routes-restrictions.ts": 3,
-  "routes-session.ts": 5,
-  "routes-sessions.ts": 3,
-  "routes-signals.ts": 2,
-  "routes-stats.ts": 2,
-  "routes-threads.ts": 5,
-  "sentry-commands.ts": 7,
-  "server.ts": 24,
-  "transcripts.ts": 1
+  "server.ts": 24
 }
