@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { DIR, IS_LIVE } from "./instance";
-import { paneEnv, respawn } from "./tmux";
+import { paneEnv, didRespawn } from "./tmux";
 import { type Session, chatOf } from "./sessions";
 import { writeStateText } from "./state";
 import { LIVE_ONLY_SENTRIES, PLAIN_SENTRIES } from "./sentry-names";
@@ -44,6 +44,6 @@ export function restartSentry(s: Session, hasBriefChanged: boolean) {
   const chat = isFilled(s.transcript) && existsSync(s.transcript) ? chatOf(s) : undefined;
   const isClaude = command[0] === "sh" && (command[2] ?? "").includes("exec claude ");
   const isResuming = isClaude && isFilled(chat) && !hasBriefChanged;
-  const isRespawned = respawn(s.id, "-c", DIR, ...paneEnv(s.id), "--", ...restartCommand(s, command, chat, hasBriefChanged));
+  const isRespawned = didRespawn(s.id, "-c", DIR, ...paneEnv(s.id), "--", ...restartCommand(s, command, chat, hasBriefChanged));
   return { ok: isRespawned, resumed: isResuming ? chat : undefined, fresh: isClaude && (hasBriefChanged || !isFilled(chat)) };
 }

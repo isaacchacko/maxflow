@@ -21,7 +21,7 @@ export function tmux(...args: string[]) {
   return { ok: r.exitCode === 0, out: r.stdout.toString(), err: r.stderr.toString().trim() };
 }
 // constraint: tmux 3.7 crashes respawning a pane whose fork failed (pid -1, no input parser), so that pane gets a new window instead
-export function respawn(id: string, ...args: string[]) {
+export function didRespawn(id: string, ...args: string[]) {
   const t = tmuxName(id);
   const [pid, index] = tmux("display-message", "-p", "-t", t, "#{pane_pid} #{window_index}").out.trim().split(" ", 2);
   const r = pid === "-1" ? tmux("new-window", "-k", "-t", `${t}:${index}`, ...args) : tmux("respawn-pane", "-k", "-t", t, ...args);

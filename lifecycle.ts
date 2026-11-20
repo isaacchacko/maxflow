@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { inboxesTable, watchedStateFile, writeStateText } from "./state";
 import { publish } from "./bus";
 import { BASE, DIR, ARE_AGENTS_INERT, INERT_CWD, INSTANCE, MAX_SESSIONS } from "./instance";
-import { TMUX, launchable, named, paneEnv, respawn, scoped, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
+import { TMUX, launchable, named, paneEnv, didRespawn, scoped, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
 import { type ClaudeState, type Role, type Session, type Wait, chatOf, isAgent, isSentry, sessions } from "./sessions";
 import { type Signal, type Source, TASK_STATUSES, type Task, type TaskEdit, type Thread } from "./model";
 import { isLive, saveTasks, tasks, threads } from "./stores";
@@ -156,7 +156,7 @@ export async function stopAgent(s: Session) {
 function putToSleep(s: Session, chat: string) {
   const lastReplyScreen = tmux("capture-pane", "-p", "-e", "-J", "-t", tmuxName(s.id)).out.trimEnd();
   const lastReplyScreenFile = writeStateText(`asleep-${s.id}.ans`, `${lastReplyScreen}${ESC}[0m\n`);
-  if (!respawn(s.id, "--", process.execPath, `${DIR}/sleeper.ts`, lastReplyScreenFile, BASE, s.id)) return;
+  if (!didRespawn(s.id, "--", process.execPath, `${DIR}/sleeper.ts`, lastReplyScreenFile, BASE, s.id)) return;
   patch(s, { asleep: chat });
   setOption(s.id, "@mf-asleep", chat);
   setClaudeState(s, "gone");
@@ -165,7 +165,7 @@ export function resumeAgent(s: Session) {
   const chat = s.asleep;
   if (!isFilled(chat) || s.exitCode !== null) return;
   const bypass = s.cmd.some((a) => a.includes("bypassPermissions")) ? ["--permission-mode", "bypassPermissions"] : [];
-  if (!respawn(s.id, "-c", s.cwd, ...paneEnv(s.id), "--", ...named(s.id, ["claude", "--resume", chat, ...bypass]))) return;
+  if (!didRespawn(s.id, "-c", s.cwd, ...paneEnv(s.id), "--", ...named(s.id, ["claude", "--resume", chat, ...bypass]))) return;
   patch(s, { asleep: undefined });
   setOption(s.id, "@mf-asleep", "");
 }
