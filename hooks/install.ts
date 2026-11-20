@@ -39,7 +39,8 @@ const movedOffLegacyCheckout = (command: string) => (command.startsWith(`${LEGAC
 export function installHooks() {
   const settings = readSettings();
   const hooks = (settings.hooks ??= {});
-  for (const h of Object.values(hooks).flat().flatMap((e) => e.hooks)) h.command = movedOffLegacyCheckout(h.command);
+  const installed = Object.values(hooks).flat().flatMap((e) => e.hooks);
+  for (const h of installed) h.command = movedOffLegacyCheckout(h.command);
   const otherYarnsHook = Object.values(hooks).flat().flatMap((e) => e.hooks).find((h) => /claude-(intro|state)\.sh/.test(h.command) && !h.command.startsWith(HOOKS));
   if (otherYarnsHook) return `hooks: left as they are, another yarn's are installed (${otherYarnsHook.command.split(" ", 1)[0] ?? ""})`;
   let added = 0;

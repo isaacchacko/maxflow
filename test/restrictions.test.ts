@@ -94,7 +94,8 @@ describe("the seed catalog", () => {
   test("edits under the live checkout are denied, and nothing else is", () => {
     expect(judged({ tool: "Edit", input: { file_path: `${DIR}/server.ts` } })).toEqual(["deny", "edit-live"]);
     expect(judged({ tool: "NotebookEdit", input: { notebook_path: `${DIR}/a.ipynb` } })).toEqual(["deny", "edit-live"]);
-    expect(judged({ tool: "Edit", input: { file_path: join(dirname(DIR), "maxflow-v2", "server.ts") } })).toEqual(["deny", "edit-live"]);
+    const throughTheOldPath = join(dirname(DIR), "maxflow-v2", "server.ts");
+    expect(judged({ tool: "Edit", input: { file_path: throughTheOldPath } })).toEqual(["deny", "edit-live"]);
     expect(judged({ tool: "Write", input: { file_path: `${DIR}-topic/server.ts` } })).toEqual(["allow", undefined]);
     expect(judged({ tool: "Read", input: { file_path: `${DIR}/server.ts` } })).toEqual(["allow", undefined]);
   });
