@@ -238,6 +238,14 @@ async function typeIn(c: Cursor, run: number, el: HTMLElement, text: string) {
   }
 }
 
+const ONE_LINE_PX = 48;
+
+function lineWith(el: HTMLElement, text: string) {
+  const isOneLine = (x: HTMLElement) => x.getBoundingClientRect().height <= ONE_LINE_PX;
+  if (isOneLine(el)) return el;
+  return el.querySelectorAll<HTMLElement>("*").values().find(x => x.textContent === text && isOneLine(x));
+}
+
 async function edit(c: Cursor, run: number, e: CursorEvent, release: () => void) {
   const target = visibleOf(e.to);
   if (!target) return;
@@ -257,7 +265,8 @@ async function edit(c: Cursor, run: number, e: CursorEvent, release: () => void)
   const after = visibleOf(e.to);
   if (!(after instanceof HTMLElement)) return;
   const text = after.textContent;
-  if (text !== before && after.getBoundingClientRect().height <= 48) await typeIn(c, run, after, text);
+  const line = text === before ? undefined : lineWith(after, text);
+  if (line) await typeIn(c, run, line, text);
   else after.animate([{ backgroundColor: "color-mix(in srgb, currentColor 12%, transparent)" }, { backgroundColor: "transparent" }], { duration: 600, easing: "ease-out" });
 }
 
