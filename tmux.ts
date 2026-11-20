@@ -14,7 +14,9 @@ export const termEnv = { LANG: "en_US.UTF-8", ...childEnv, TERM: "xterm-256color
 
 export const TMUX = ["tmux", "-L", TMUX_SOCKET, "-f", new URL("tmux.conf", import.meta.url).pathname];
 export const tmuxName = (id: string) => `mf-${id}`;
-export const paneEnv = (id: string) => ["-e", `MAXFLOW_SESSION=${id}`, "-e", `MAXFLOW_PORT=${PORT}`, "-e", `MAXFLOW_INSTANCE=${INSTANCE}`, "-e", `MAXFLOW_STATE=${stateDisplayPath("")}`, "-e", `MAXFLOW_CLI=${CLI}`, "-e", `MAXFLOW_DIR=${DIR}`];
+// constraint: bin/agent's gh refuses merges, so an agent's script that runs gh pr merge is stopped too, not only its Bash calls the hook reads
+const AGENT_PATH = `${DIR}/bin/agent:${process.env["PATH"] ?? ""}`;
+export const paneEnv = (id: string) => ["-e", `PATH=${AGENT_PATH}`, "-e", `MAXFLOW_SESSION=${id}`, "-e", `MAXFLOW_PORT=${PORT}`, "-e", `MAXFLOW_INSTANCE=${INSTANCE}`, "-e", `MAXFLOW_STATE=${stateDisplayPath("")}`, "-e", `MAXFLOW_CLI=${CLI}`, "-e", `MAXFLOW_DIR=${DIR}`];
 
 export function tmux(...args: string[]) {
   const r = Bun.spawnSync([...TMUX, ...args], { env: termEnv, timeout: TMUX_SYNC_TIMEOUT_MS });

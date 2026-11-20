@@ -1,6 +1,7 @@
 import { latestSeq, publish, query } from "./bus";
 import { findChat, listChats } from "./chats";
 import { CLI } from "./instance";
+import { isMergeCall, MERGE_REFUSAL } from "./merge-gate";
 import { enforce } from "./restrictions-enforce";
 import { type Session, isSentry, sessions } from "./sessions";
 import type { Block, Thread } from "./model";
@@ -168,6 +169,7 @@ async function verdictForTheRestrictionsHookWithTheSessionsObjective(req: Reques
   const { objective: _asked, ...call } = callOf(await jsonBody(req));
   const s = sender(req);
   if (!s || call.tool === "") return Response.json({ decision: "allow" });
+  if (isMergeCall(call.tool, call.input)) return Response.json({ decision: "deny", reason: MERGE_REFUSAL });
   const objective = s.role?.objective;
   return Response.json(enforce({ session: s.id, ...call, ...(objective !== undefined && { objective }) }, enforcing));
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { isMergeCall, MERGE_REFUSAL } from "../merge-gate";
 import { type Person, type Restriction, doesMatch, loadRestrictions, resolve } from "../restrictions";
 
 type HookInput = { tool_name?: unknown; tool_input?: unknown; cwd?: unknown };
@@ -56,6 +57,15 @@ const call = {
   cwd: typeof input.cwd === "string" ? input.cwd : process.cwd(),
 };
 
+const deny = (reason: string) => {
+  console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } }));
+};
+
+if (isMergeCall(call.tool, call.input)) {
+  deny(MERGE_REFUSAL);
+  process.exit(0);
+}
+
 const list = loadOrNone();
 const areOnlyAllowRestrictionsMatched = list.every((r) => r.mode === "allow" || !doesMatch(r, call, list));
 if (areOnlyAllowRestrictionsMatched) process.exit(0);
@@ -75,5 +85,4 @@ async function verdictOf(res: Response | null): Promise<Verdict> {
 }
 
 const verdict = await verdictOf(await askServerToEnforce(callWithPeople));
-if (verdict.decision === "deny")
-  console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: verdict.reason } }));
+if (verdict.decision === "deny") deny(verdict.reason ?? "Blocked by a yarn restriction.");

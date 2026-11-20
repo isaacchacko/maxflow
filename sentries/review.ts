@@ -40,8 +40,7 @@ const LANDING_FIELDS = `id number url title body isDraft mergeable reviewDecisio
   baseRef { associatedPullRequests(states: MERGED, first: 1) { totalCount } } latestReviews(first: 20) { nodes { state submittedAt } }`;
 const UI_FILE = /frontend\/.*\.(tsx|css)$/;
 const UI_TEST_FILE = /\.(test|stories)\.tsx$/;
-const LANDING = "Approved, not merged (the feed is landing these)";
-const ESCALATE_MS = 30 * 60_000;
+const LANDING = "Ready for you to merge";
 const STUCK_IDLE_MS = 60_000;
 const NEVER_MERGE = /never[- ]merge|do not merge|don'?t merge|not for merge|^one-off/i;
 
@@ -174,7 +173,7 @@ async function wake(pr: Pr, owners: string[], problem: string) {
   if (woken.has(tag)) return;
   woken.add(tag);
   const reachable = owners.filter((id) => !isUnreachable(id));
-  const fix = `merge ${pr.repository.defaultBranchRef.name} into ${pr.headRefName}, resolve, and push; auto-merge takes it from there`;
+  const fix = `merge ${pr.repository.defaultBranchRef.name} into ${pr.headRefName}, resolve, and push; then it waits for Isaac to merge it`;
   for (const id of reachable) await tellSession(id, `${label(key)} is approved but ${problem}: ${fix}. ${pr.url}`);
   if (reachable.length > 0) {
     logAction(key, `asked ${reachable.join(", ")} to fix: ${problem}`);
@@ -200,12 +199,10 @@ async function updateBranch(pr: Pr, owners: string[], main: string) {
   if (!r.ok) await wake(pr, owners, `behind ${main} and GitHub can't update the branch`);
 }
 
-function merge(pr: Pr) {
-  // constraint: GitHub won't arm auto-merge on a PR that can merge right now, so that one merges directly
-  const isClean = pr.mergeStateStatus === "CLEAN";
-  const r = gh(["pr", "merge", String(pr.number), "-R", pr.repository.nameWithOwner, ...(isClean ? [] : ["--auto"]), "--squash"]);
-  const done = isClean ? "merged" : "armed auto-merge";
-  logAction(keyOf(pr), r.ok ? done : `merge failed: ${r.err}`);
+// constraint: Isaac is the last step before any PR merges, so the feed never merges; it takes back auto-merge an agent armed before that rule
+function disarm(pr: Pr) {
+  const r = gh(["pr", "merge", String(pr.number), "-R", pr.repository.nameWithOwner, "--disable-auto"]);
+  logAction(keyOf(pr), r.ok ? "turned off auto-merge: Isaac merges it himself" : `turning off auto-merge failed: ${r.err}`);
 }
 
 async function land(pr: Pr, owners: string[]) {
@@ -218,9 +215,8 @@ async function land(pr: Pr, owners: string[]) {
     await wake(pr, owners, `conflicts with ${main}`);
     return;
   }
+  if (pr.autoMergeRequest) disarm(pr);
   if (pr.mergeStateStatus === "BEHIND") await updateBranch(pr, owners, main);
-  if (isCiFailing(ciOf(pr)) || pr.autoMergeRequest) return;
-  merge(pr);
 }
 
 function trackReachability(sessions: Session[]) {
@@ -237,16 +233,11 @@ function trackReachability(sessions: Session[]) {
 }
 
 const isTiedTo = (l: Link, pr: Pr) => l.repo === pr.repository.nameWithOwner.toLowerCase() && (l.pr === keyOf(pr) || l.branch === pr.headRefName);
-const approvedAtOf = (pr: Pr) => Math.max(...pr.latestReviews.nodes.filter((r) => r.state === "APPROVED").map((r) => Date.parse(r.submittedAt)), 0);
+
+const needsFixing = (pr: Pr) => pr.mergeStateStatus === "DIRTY" || pr.mergeable === "CONFLICTING" || isCiFailing(ciOf(pr));
 
 function whyEscalated(pr: Pr, own: string[]) {
-  const approvedAt = approvedAtOf(pr);
-  const armed = pr.autoMergeRequest ? ", auto-merge armed" : "";
-  const minutes = Math.round((Date.now() - approvedAt) / 60_000);
-  return [
-    approvedAt > 0 && Date.now() - approvedAt > ESCALATE_MS ? `approved ${minutes} min ago and still open (GitHub: ${pr.mergeStateStatus.toLowerCase()}${armed})` : "",
-    own.length > 0 && own.every((id) => isUnreachable(id)) ? `owner ${own.join(", ")} isn't taking messages` : "",
-  ].filter((reason) => reason !== "").join("; ");
+  return needsFixing(pr) && own.length > 0 && own.every((id) => isUnreachable(id)) ? `owner ${own.join(", ")} isn't taking messages` : "";
 }
 
 async function escalateOnce(pr: Pr, key: string, why: string) {
@@ -269,7 +260,7 @@ async function landOne(pr: Pr, ties: Link[], live: Set<string>): Promise<Landing
   }
   const why = whyEscalated(pr, own);
   await escalateOnce(pr, key, why);
-  const actions = landingLog.get(key) ?? [pr.autoMergeRequest ? "auto-merge armed" : "approved"];
+  const actions = landingLog.get(key) ?? [needsFixing(pr) ? `approved, but ${pr.mergeStateStatus.toLowerCase()}` : "approved and green"];
   const note = [why === "" ? "" : `ESCALATED: ${why}`, ...actions].filter((part) => part !== "").join(" · ");
   return { pr: label(key), url: pr.url, note, why };
 }

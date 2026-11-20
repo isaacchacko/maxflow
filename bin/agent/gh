@@ -1,0 +1,25 @@
+#!/bin/sh
+# yarn's merge gate for agent panes, behind the PreToolUse hook: it also catches a merge run from a script the hook never reads
+here=$(cd "$(dirname "$0")" && pwd)
+refuse() {
+  echo "gh: blocked by yarn's merge gate: Isaac is the last step before any PR merges, so no agent merges a PR or arms auto-merge. Leave it green and approved; he merges it from his PR queue." >&2
+  exit 1
+}
+if [ "$1" = pr ] && [ "$2" = merge ]; then
+  case " $* " in *" --disable-auto "*) ;; *) refuse ;; esac
+fi
+if [ "$1" = api ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      *mergePullRequest*|*enablePullRequestAutoMerge*|*enqueuePullRequest*|*mergeBranch*) refuse ;;
+      *pulls/*/merge|*pulls/*/merge\?*|*/merges) refuse ;;
+    esac
+  done
+fi
+IFS=:
+for dir in $PATH; do
+  [ "$dir" = "$here" ] && continue
+  [ -x "$dir/gh" ] && exec "$dir/gh" "$@"
+done
+echo "gh: not found on PATH" >&2
+exit 127

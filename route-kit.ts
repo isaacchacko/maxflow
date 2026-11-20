@@ -64,3 +64,6 @@ export const expandHome = (path: string) => path.replace(/^~(?=\/|$)/, () => hom
 export const sender = (req: Request) => sessions.get(req.headers.get("x-maxflow-from") ?? "");
 
 export const isFromTheBrowser = (req: Request) => req.headers.get("user-agent")?.includes("Mozilla") === true;
+
+// constraint: an agent's request carries x-maxflow-from, and only a page the server served sends same-origin; Isaac-only actions (merging a PR) check both
+export const isIsaacsBrowser = (req: Request) => (req.headers.get("x-maxflow-from") ?? "") === "" && req.headers.get("sec-fetch-site") === "same-origin";
