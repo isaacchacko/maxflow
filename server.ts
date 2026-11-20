@@ -16,7 +16,7 @@ import { DRAFTS, deliver } from "./delivery";
 import { RESYNC_MS, resync } from "./turns";
 import { docsRoute } from "./docs-api";
 import { sizingRoute } from "./sizing";
-import { cursorsAfter } from "./cursors";
+import { withCursors } from "./cursors";
 import { built, judged, openWorld, prStates, worldClients } from "./world";
 import { EXTERNAL_SEEN, externalSeen, externalSignal, known } from "./routing";
 import { recordUserComment, seedUserComments } from "./events";
@@ -386,12 +386,7 @@ Bun.serve<WsData>({
   development: { hmr: true },
   routes: { "/": app },
   error: (err) => (err instanceof SessionCap ? new Response(err.message, { status: 429 }) : undefined),
-  async fetch(req, server) {
-    const cursor = cursorsAfter(req);
-    const res = await answer(req, server);
-    void cursor?.(res);
-    return res;
-  },
+  fetch: withCursors(answer),
   websocket: {
     open(ws) {
       if (ws.data.world) return void openWorld(ws);

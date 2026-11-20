@@ -14,7 +14,7 @@ const PULSE_MS = 520;
 export const shownCursorsStore = createStore<Shown[]>([]);
 const cursors = new Map<string, Cursor>();
 
-const motionReduced = () => tuningStore.get().isMotionReduced || matchMedia("(prefers-reduced-motion: reduce)").matches;
+const isMotionReduced = () => tuningStore.get().isMotionReduced || matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function targetOf(targets: string[]) {
   const all = targets.flatMap(id => [...elementsFor(id)]).filter(el => isShown(el));
@@ -32,7 +32,7 @@ function aim(e: CursorEvent) {
 }
 
 function pulse(rig: Rig) {
-  const frames = motionReduced()
+  const frames = isMotionReduced()
     ? [{ opacity: 0.6 }, { opacity: 0 }]
     : [
         { transform: "translate(-50%, -50%) scale(0.2)", opacity: 0.55 },
@@ -42,32 +42,33 @@ function pulse(rig: Rig) {
 }
 
 function progress(c: Cursor, from: Point, goal: Point, now: number) {
-  if (motionReduced()) return 1;
+  if (isMotionReduced()) return 1;
   const ms = flightMs(distance(from, goal), tuningStore.get().speed);
   return Math.min(1, Math.max(0, (now - c.flight.start) / ms));
 }
 
 function place(rig: Rig, part: "arrow" | "edge", at: Point) {
-  rig.arrow.style.display = part === "arrow" ? "" : "none";
-  rig.edge.style.display = part === "edge" ? "" : "none";
-  rig[part].style.transform = `translate(${at.x}px, ${at.y}px)`;
+  rig.arrow.style.setProperty("display", part === "arrow" ? "" : "none");
+  rig.edge.style.setProperty("display", part === "edge" ? "" : "none");
+  rig[part].style.setProperty("transform", `translate(${at.x}px, ${at.y}px)`);
 }
 
 function onScreen(c: Cursor, rig: Rig, goal: Point, now: number) {
   const from = c.flight.from ?? { x: goal.x + ARRIVE_FROM.x, y: goal.y + ARRIVE_FROM.y };
   const t = progress(c, from, goal, now);
-  c.pos = along(from, goal, c.flight.bend, easeInOut(t));
-  place(rig, "arrow", c.pos);
+  const pos = along(from, goal, c.flight.bend, easeInOut(t));
+  Object.assign(c, { pos });
+  place(rig, "arrow", pos);
   if (t < 1 || c.flight.hasPulsed) return;
-  c.flight.hasPulsed = true;
+  Object.assign(c.flight, { hasPulsed: true });
   pulse(rig);
 }
 
 function offScreen(c: Cursor, rig: Rig, goal: Point, el: Element) {
   const at = clampInto(goal, clipBox(el), EDGE_INSET);
-  c.pos = at;
+  Object.assign(c, { pos: at });
   place(rig, "edge", at);
-  rig.pointer.style.transform = `rotate(${degreesToward(at, goal)}deg)`;
+  rig.pointer.style.setProperty("transform", `rotate(${degreesToward(at, goal)}deg)`);
 }
 
 function step(c: Cursor, now: number) {
@@ -75,8 +76,8 @@ function step(c: Cursor, now: number) {
   if (!rig) return;
   const isAwake = now - c.lastAt < tuningStore.get().idleSeconds * 1000;
   const el = isAwake ? targetOf(c.flight.targets) : undefined;
-  rig.root.style.opacity = el ? "1" : "0";
-  rig.root.style.transitionDuration = el ? "150ms" : "700ms";
+  rig.root.style.setProperty("opacity", el ? "1" : "0");
+  rig.root.style.setProperty("transition-duration", el ? "150ms" : "700ms");
   if (!el) return;
   const goal = tipOf(el.getBoundingClientRect());
   if (isInside(goal, clipBox(el))) onScreen(c, rig, goal, now);
@@ -84,10 +85,10 @@ function step(c: Cursor, now: number) {
 }
 
 export function rigCursor(agent: string, root: HTMLElement) {
-  const part = (name: string) => root.querySelector<HTMLElement>(`[data-part="${name}"]`);
+  const part = (name: string) => root.querySelector<HTMLElement>(`[data-part="${CSS.escape(name)}"]`);
   const [arrow, pulseEl, edge, pointer] = [part("arrow"), part("pulse"), part("edge"), part("pointer")];
   const c = cursors.get(agent);
-  if (!c || !arrow || !pulseEl || !edge || !pointer) return undefined;
+  if (!c || !arrow || !pulseEl || !edge || !pointer) return;
   c.rig = { root, arrow, pulse: pulseEl, edge, pointer };
   return () => {
     if (c.rig?.root === root) delete c.rig;
@@ -99,9 +100,9 @@ export function runCursors() {
     for (const c of cursors.values()) step(c, now);
     frame = requestAnimationFrame(tick);
   });
-  const stopListening = onCursor(aim);
+  const unsubscribe = onCursor(aim);
   return () => {
     cancelAnimationFrame(frame);
-    stopListening();
+    unsubscribe();
   };
 }

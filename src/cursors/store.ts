@@ -7,8 +7,9 @@ export type Missed = CursorEvent & { count: number };
 
 const SHOWN_KEY = "cursors-shown";
 const KEEP_RECENT = 40;
+const RENDER_GRACE_MS = 1500;
 
-function savedShown() {
+function isShownSaved() {
   try {
     return localStorage.getItem(SHOWN_KEY) !== "0";
   } catch {
@@ -16,7 +17,7 @@ function savedShown() {
   }
 }
 
-export const shownStore = createStore(savedShown());
+export const shownStore = createStore(isShownSaved());
 export const tuningStore = createStore<Tuning>({ speed: 1, arc: 0.18, idleSeconds: 4, isMotionReduced: false });
 export const recentStore = createStore<CursorEvent[]>([]);
 export const missedStore = createStore<Missed[]>([]);
@@ -25,12 +26,16 @@ const listeners = new Set<(e: CursorEvent) => void>();
 
 export function onCursor(listener: (e: CursorEvent) => void) {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 export function fireCursor(e: CursorEvent) {
   recentStore.set(all => [e, ...all].slice(0, KEEP_RECENT));
-  if (!e.targets.some(id => elementsFor(id).length > 0)) noteMissed(e);
+  setTimeout(() => {
+    if (e.targets.every(id => elementsFor(id).length === 0)) noteMissed(e);
+  }, RENDER_GRACE_MS);
   for (const listener of listeners) listener(e);
 }
 

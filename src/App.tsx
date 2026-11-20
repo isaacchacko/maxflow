@@ -60,11 +60,17 @@ function hashParts() {
   return [first, decodeURI(rest.join("/"))] as const;
 }
 
+function detailFromHash(first: string, id: string): Route | undefined {
+  if (first === "dev") return { view: lastView(), dev: id };
+  if (!hasText(id)) return;
+  if (first === "task" || first === "objective") return { view: lastView(), detail: { kind: "page", ref: `${first}/${id}` as PageRef } };
+  return first === "agent" || first === "thread" ? { view: lastView(), detail: { kind: first, id } } : undefined;
+}
+
 function routeFromHash(): Route {
   const [first, id] = hashParts();
-  if (hasText(id) && (first === "task" || first === "objective")) return { view: lastView(), detail: { kind: "page", ref: `${first}/${id}` as PageRef } };
-  if (hasText(id) && (first === "agent" || first === "thread")) return { view: lastView(), detail: { kind: first, id } };
-  if (first === "dev") return { view: lastView(), dev: id };
+  const detail = detailFromHash(first, id);
+  if (detail) return detail;
   const view = views.find(v => v.id === first)?.id ?? lastView();
   try {
     sessionStorage.setItem("view", view);
