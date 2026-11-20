@@ -11,9 +11,7 @@
   "routes-signals.ts": 2,
   "routes-stats.ts": 2,
   "routes-threads.ts": 5,
-  "sentries/health.ts": 6,
   "sentry-commands.ts": 7,
   "server.ts": 24,
-  "transcripts.ts": 1,
-  "world.ts": 3
+  "transcripts.ts": 1
 }
