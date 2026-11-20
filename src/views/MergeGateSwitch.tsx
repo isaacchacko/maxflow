@@ -21,14 +21,17 @@ export function MergeGateSwitch() {
   const gate = useResource("merge-gate", loadGate);
   const [error, setError] = useState<string>();
   const isOn = gate.value?.on === true;
-  const flip = async () => {
+  const flipTo = async (isTurningOn: boolean) => {
     try {
-      const next = await send({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on: !isOn }) });
+      const next = await send({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on: isTurningOn }) });
       gate.set(() => next);
       setError(undefined);
     } catch (error_) {
       setError(String(error_));
     }
+  };
+  const flip = () => {
+    void flipTo(!isOn);
   };
   if (gate.value === undefined) return null;
   return (
