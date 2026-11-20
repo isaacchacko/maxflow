@@ -132,6 +132,9 @@ function basisOf(queued: QueueEntry | undefined, history: History | undefined): 
 
 const rank = (stage: string) => (STAGE_ORDER.includes(stage) ? STAGE_ORDER.indexOf(stage) : STAGE_ORDER.length);
 
+const newestFirst = (a: PrRow, b: PrRow) => (b.ended ?? b.since) - (a.ended ?? a.since);
+const byStageThenNewest = (a: PrRow, b: PrRow) => (rank(a.stage) === rank(b.stage) ? newestFirst(a, b) : rank(a.stage) - rank(b.stage));
+
 export function prRows(): PrRow[] {
   const queue = new Map(queueFile().map((q) => [q.pr, q]));
   const history = historyFile();
@@ -142,5 +145,5 @@ export function prRows(): PrRow[] {
       const basis = basisOf(queue.get(key), history[key]);
       return basis ? rowOf(key, basis, polled[key], queue.has(key)) : [];
     })
-    .toSorted((a, b) => rank(a.stage) - rank(b.stage) || (b.ended ?? b.since) - (a.ended ?? a.since));
+    .toSorted(byStageThenNewest);
 }
