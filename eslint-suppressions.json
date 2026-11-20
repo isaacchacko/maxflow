@@ -1,7 +1,2 @@
 {
-  "eslint.config.ts": {
-    "@typescript-eslint/no-deprecated": {
-      "count": 1
-    }
-  }
 }
