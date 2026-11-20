@@ -14,10 +14,10 @@ test("every script under sentries/ is a sentry server.ts starts or a listed help
   expect([...FED_AGENT_SENTRIES, ...BARE_AGENT_SENTRIES].filter((s) => !existsSync(join(root, "sentries", `${s}.md`)))).toEqual([]);
 });
 
-test("server.ts and sentry-commands.ts build SENTRIES from sentry-names.ts alone", () => {
-  const server = readFileSync(join(root, "server.ts"), "utf8");
-  expect(server).not.toContain('SENTRIES["sentry:');
-  expect(server).toContain('from "./sentry-names"');
+test("boot-sentries.ts and sentry-commands.ts build SENTRIES from sentry-names.ts alone", () => {
+  const bootSentries = readFileSync(join(root, "boot-sentries.ts"), "utf8");
+  expect(bootSentries).not.toContain('SENTRIES["sentry:');
+  expect(bootSentries).toContain('from "./sentry-names"');
   expect(readFileSync(join(root, "sentry-commands.ts"), "utf8")).toContain("PLAIN_SENTRIES");
 });
 
