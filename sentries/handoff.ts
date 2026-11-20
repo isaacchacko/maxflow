@@ -33,7 +33,7 @@ function fillOf(path: string) {
   try {
     size = statSync(path).size;
   } catch {
-    return undefined;
+    return;
   }
   const kept = fills.get(path);
   if (kept?.size === size) return kept.fill;
@@ -43,7 +43,7 @@ function fillOf(path: string) {
 }
 
 function whyHandOff(a: Agent, fill: Fill) {
-  if (a.status === "working") return undefined;
+  if (a.status === "working") return;
   const idle = Date.now() - fill.at;
   const pct = percent(fill);
   if (pct >= FULL_PCT && (!a.asleep || idle < WARM_CACHE_MS)) return `${String(pct)}% full`;
@@ -66,16 +66,15 @@ async function completeIfTheTurnEndWasMissed(a: Agent) {
   if (at === undefined || a.status === "working" || Date.now() - at < COMPLETE_AFTER_MS) return;
   if (Date.now() - at > GIVE_UP_AFTER_MS) asked.delete(a.id);
   const res = await post(`/api/sessions/${a.id}/handoff`, { complete: true });
-  if (res.ok) {
-    console.log(`${new Date().toLocaleTimeString()}  handed ${a.name} [${a.id}] off after its turn end went unseen`);
-    asked.delete(a.id);
-  }
+  if (!res.ok) return;
+  console.log(`${new Date().toLocaleTimeString()}  handed ${a.name} [${a.id}] off after its turn end went unseen`);
+  asked.delete(a.id);
 }
 
 async function tick() {
   const listed: unknown = await (await fetch(`${base}/api/sessions`, { headers: HEADERS, signal: AbortSignal.timeout(FETCH_MS) })).json();
   const agents = Array.isArray(listed) ? listed.filter(isAgent) : [];
-  for (const id of asked.keys()) if (!agents.some((a) => a.id === id)) asked.delete(id);
+  for (const id of asked.keys()) if (agents.every((a) => a.id !== id)) asked.delete(id);
   for (const a of agents) {
     if (asked.has(a.id)) {
       await completeIfTheTurnEndWasMissed(a);

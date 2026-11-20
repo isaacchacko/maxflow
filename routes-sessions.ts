@@ -8,7 +8,7 @@ import { createSession, dispatch } from "./lifecycle";
 import { freshWorld } from "./world";
 import { describe } from "./world-session";
 import { ROUTER_BRIEF, acceptTrust } from "./routing";
-import { handOff } from "./objectives";
+import { askOldRouterToBriefTheNew, handOff } from "./objectives";
 import { isFilled } from "./shared/guards";
 import { type Body, type Route, exactly, expandHome, firstAnswer, isStringList, jsonBody, sender, textOf } from "./route-kit";
 
@@ -65,7 +65,7 @@ async function startSession(req: Request): Promise<Response> {
   const cwd = [expandHome(textOf(body, "cwd") ?? ""), parent?.cwd].find(isFilled) ?? homedir();
   const s = createSession(isFilled(name) ? name : cmd.join(" ").slice(0, 40), cmd, cwd, { role });
   if (cmd[0] === "claude") void acceptTrust(s);
-  if (handingRole && from) handOff(from, handingRole, s);
+  if (handingRole && from) askOldRouterToBriefTheNew(from, handingRole, s, handOff(from, handingRole, s));
   if (parent && !from) tellTheRouterItHasANewWorkerFromTheBrowser(parent, s);
   return Response.json(describe(s), { status: 201 });
 }

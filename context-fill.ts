@@ -2,7 +2,7 @@ import { isRecord } from "./shared/guards";
 
 export const LONG_WINDOW = 1_000_000;
 const SHORT_WINDOW = 200_000;
-// constraint: the transcript names the model without the [1m] the user picked, so a 1M Claude 5 shows as plain claude-opus-5-5; Claude Code compacts those at ~960k
+// constraint: transcripts drop the [1m] suffix, and Claude 5 models run 1M windows here (Claude Code auto-compacts them at ~960k)
 const LONG_WINDOW_MODEL = /\[1m\]|-(opus|sonnet|haiku|fable|mythos)-5/;
 
 export type Fill = { tokens: number; window: number; model: string; at: number };

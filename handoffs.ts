@@ -32,7 +32,7 @@ const k = (tokens: number) => `${String(Math.round(tokens / 1000))}k`;
 export function successorOf(s: Session): Session {
   const seen = new Set<string>();
   let at = s;
-  for (let next = sessions.get(at.role?.handedTo ?? ""); next && next.exitCode === null && !seen.has(next.id); next = sessions.get(at.role?.handedTo ?? "")) {
+  for (let next = sessions.get(at.role?.handedTo ?? ""); next?.exitCode === null && !seen.has(next.id); next = sessions.get(at.role?.handedTo ?? "")) {
     seen.add(next.id);
     at = next;
   }
@@ -72,18 +72,21 @@ export function noteHandoff(s: Session, note: string): string | null {
 
 const without = (ids: string[], old: string, fresh: string) => [...new Set(ids.map((id) => (id === old ? fresh : id)))];
 
+const isNaming = (t: Thread, id: string) =>
+  t.mergedInto === undefined && (t.routers.includes(id) || t.members?.includes(id) === true || t.pending?.routers.includes(id) === true || t.asks?.session === id);
+
+function renameIn(t: Thread, old: string, fresh: string) {
+  t.routers = without(t.routers, old, fresh);
+  if (t.members) t.members = without(t.members, old, fresh);
+  if (t.pending) t.pending.routers = without(t.pending.routers, old, fresh);
+  if (t.asks?.session === old) t.asks.session = fresh;
+}
+
 function moveThreadsStillNaming(old: Session, fresh: Session, line: string) {
-  const moved: Thread[] = [];
-  for (const t of threads) {
-    if (t.mergedInto !== undefined) continue;
-    const isNamed = t.routers.includes(old.id) || t.members?.includes(old.id) === true || t.pending?.routers.includes(old.id) === true || t.asks?.session === old.id;
-    if (!isNamed) continue;
-    t.routers = without(t.routers, old.id, fresh.id);
-    if (t.members) t.members = without(t.members, old.id, fresh.id);
-    if (t.pending) t.pending.routers = without(t.pending.routers, old.id, fresh.id);
-    if (t.asks?.session === old.id) t.asks.session = fresh.id;
+  const moved = threads.filter((t) => isNaming(t, old.id));
+  for (const t of moved) {
+    renameIn(t, old.id, fresh.id);
     t.messages.push({ id: `m-${crypto.randomUUID().slice(0, 6)}`, from: "maxflow", at: Date.now(), text: line });
-    moved.push(t);
   }
   saveThreads();
   for (const t of moved) publish(`thread/${t.id}`, { thread: t.id, from: "maxflow" });
@@ -117,8 +120,7 @@ function moveWaits(old: Session, fresh: Session) {
 
 function moveInbox(old: Session, fresh: Session) {
   if (old.inbox.length === 0) return;
-  fresh.inbox.push(...old.inbox);
-  old.inbox.length = 0;
+  fresh.inbox.push(...old.inbox.splice(0));
   saveInbox(old);
   saveInbox(fresh);
 }
@@ -137,15 +139,26 @@ function startFresh(old: Session, role: Role) {
   return fresh;
 }
 
+const isReadyToHandOff = (old: Session, ask: Ask | undefined): ask is Ask & { note: string } =>
+  isFilled(ask?.note) && old.role !== undefined && !isFilled(old.role.handedTo) && !isMidTurn(old) && old.exitCode === null;
+
+function briefFresh(old: Session, fresh: Session, pct: string | undefined, note: string) {
+  const wait = fresh.wait ? ` Its wait on ${waitLabel(fresh.wait)} is already yours: don't declare it again; when this turn ends you sleep on it as it did.` : "";
+  dispatch({
+    to: [fresh],
+    target: old.id,
+    text: `[maxflow] You take over from "${fresh.name}" (${old.id}), whose context ${pct === undefined ? "was filling up" : `was ${pct} full`}. Its role, threads, task, and PR and Slack watches are yours now, and messages sent to it reach you.${wait} Its transcript is ${old.transcript ?? "unknown"}, if the note leaves something out. Pick the work up from its note; don't announce the hand-off.\n\nIts hand-off note:\n\n${note}`,
+  });
+}
+
 export function completeHandoff(old: Session): Session | undefined {
   const ask = asks[old.id];
   const role = old.role;
-  if (ask === undefined || !isFilled(ask.note) || role === undefined || isFilled(role.handedTo) || isMidTurn(old) || old.exitCode !== null) return undefined;
-  const note = ask.note;
+  if (!isReadyToHandOff(old, ask) || role === undefined) return;
   const fresh = startFresh(old, role);
   const pct = ask.window > 0 ? `${String(percent(ask))}%` : undefined;
   const line = `Handed from [[agent:${old.id}]] to [[agent:${fresh.id}]]${pct === undefined ? "" : ` at ${pct} context`}, which carries this work from now on.`;
-  if (role.role === "router") handOff(old, role, fresh, false);
+  if (role.role === "router") handOff(old, role, fresh);
   else setRole(old, { ...role, handedTo: fresh.id });
   const moved = moveThreadsStillNaming(old, fresh, line);
   const movedTasks = moveTasks(old, fresh, line.replaceAll(/\[\[agent:([\w-]+)\]\]/g, "$1"));
@@ -153,11 +166,7 @@ export function completeHandoff(old: Session): Session | undefined {
   moveWaits(old, fresh);
   moveInbox(old, fresh);
   markHanded(old);
-  dispatch({
-    to: [fresh],
-    target: old.id,
-    text: `[maxflow] You take over from "${fresh.name}" (${old.id}), whose context ${pct === undefined ? "was filling up" : `was ${pct} full`}. Its role, threads, task, and PR and Slack watches are yours now, and messages sent to it reach you.${fresh.wait ? ` Its wait on ${waitLabel(fresh.wait)} is already yours: don't declare it again; when this turn ends you sleep on it as it did.` : ""} Its transcript is ${old.transcript ?? "unknown"}, if the note leaves something out. Pick the work up from its note; don't announce the hand-off.\n\nIts hand-off note:\n\n${note}`,
-  });
+  briefFresh(old, fresh, pct, ask.note);
   Reflect.deleteProperty(asks, old.id);
   saveAsks();
   publish(`handoff/${old.id}`, { from: old.id, to: fresh.id, objective: role.objective, role: role.role, ...(ask.window > 0 && { tokens: ask.tokens, window: ask.window }), threads: moved.map((t) => t.id), tasks: movedTasks.map((t) => t.id) });

@@ -82,7 +82,7 @@ export function subthread(parent: Thread, messageId: string) {
   return t;
 }
 
-export function handOff(old: Session, oldRole: Role, to: Session, isOldToldToBriefIt = true) {
+export function handOff(old: Session, oldRole: Role, to: Session) {
   for (const w of sessions.values()) if (w.role?.role === "worker" && w.role.parent === old.id) setRole(w, { ...w.role, parent: to.id });
   setRole(old, { role: "worker", objective: oldRole.objective, parent: to.id, handedTo: to.id });
   const handed = threads.filter((t) => t.mergedInto === undefined && t.routers.includes(old.id));
@@ -95,7 +95,9 @@ export function handOff(old: Session, oldRole: Role, to: Session, isOldToldToBri
   }
   saveThreads();
   publish(`handoff/${old.id}`, { from: old.id, to: to.id, objective: oldRole.objective, threads: handed.map((t) => t.id) });
-  if (!isOldToldToBriefIt) return;
+  return handed;
+}
+export function askOldRouterToBriefTheNew(old: Session, oldRole: Role, to: Session, handed: Thread[]) {
   const handedList = handed.length > 0 ? ` (${handed.map((t) => t.id).join(", ")})` : "";
   dispatch({ to: [old], target: to.id, text: `[maxflow] You handed objective ${oldRole.objective} to the new router ${to.id}. Its threads${handedList} and your workers are its now, and his messages there go to it alone; each thread shows the hand-off, so don't post there or announce it. Tell ${to.id} what it needs with \`${CLI} notify ${to.id} '<text>'\`, then end with \`${CLI} wait done\`.` });
 }

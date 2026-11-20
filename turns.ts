@@ -28,7 +28,10 @@ function sleepOnWaitUnlessStopBlocked(s: Session) {
 export function claudeStateChanged(s: Session, state: ClaudeState | "gone") {
   const was = s.claude?.state;
   setClaudeState(s, state);
-  if (isTurnEnd(was, state) && completeHandoff(s) !== undefined) return;
+  const isHandedOffAsItsTurnEnded = isTurnEnd(was, state) && completeHandoff(s) !== undefined;
+  if (!isHandedOffAsItsTurnEnded) settleTurnState(s, was, state);
+}
+function settleTurnState(s: Session, was: TurnState, state: ClaudeState | "gone") {
   if (isUserTurnWhileDone(s, was, state)) setWait(s);
   else if (isWaitingTurnEnd(s, was, state)) sleepOnWaitUnlessStopBlocked(s);
   else if (state === "idle" && s.archived === true) void stopAgent(s);
