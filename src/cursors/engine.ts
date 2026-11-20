@@ -120,7 +120,7 @@ function legMs(from: Point, to: Point) {
 }
 
 function ghostOf(rig: Rig, source: Element | undefined, carry: string | undefined) {
-  if (source) {
+  if (source && carry === undefined) {
     const r = source.getBoundingClientRect();
     const ghost = source.cloneNode(true) as HTMLElement;
     for (const el of [ghost, ...ghost.querySelectorAll<HTMLElement>("[data-agent]")]) delete el.dataset["agent"];
