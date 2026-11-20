@@ -64,7 +64,7 @@ function nodeIn(h: Held, id: string) {
 }
 
 function mayChange(node: CanvasNode, author: string) {
-  if (author !== ISAAC && isHis(node)) throw new Error(`box ${node.id} is isaac's: suggest the change with \`maxflow canvas propose\` instead`);
+  if (author !== ISAAC && isHis(node)) throw new Error(`box ${node.id} is isaac's: suggest the change with \`yarn canvas propose\` instead`);
 }
 
 export function readCanvas(path: string) {

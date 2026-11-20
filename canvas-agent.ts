@@ -54,7 +54,7 @@ export function chargeAgent(path: string, author: string, spend: Spend) {
 function brief(path: string, lines: string[], events: string[], why: string) {
   const said = [...events.map((e) => `* ${e}`), ...lines].join("\n");
   const asked = why === "asked" ? "Isaac asked you to look now (he pressed ⌘S)." : "Isaac has been idle for a while after editing.";
-  return `[maxflow canvas] ${path} changed since your last look. ${asked}
+  return `[yarn canvas] ${path} changed since your last look. ${asked}
 ${said === "" ? "(no box changed)" : said}
 
 \`${CLI} canvas show "${path}"\` prints every box. Budget for this look: ${PER_LOOK.box} new boxes, ${PER_LOOK.proposal} proposals. Doing nothing is a fine answer. End your turn with \`${CLI} wait done\`.`;
