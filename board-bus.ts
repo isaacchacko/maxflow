@@ -63,7 +63,6 @@ async function postAndRead(body: Record<string, unknown>, as: Session | undefine
   }
 }
 
-const nameOf = (id: string | undefined) => (id === undefined ? "yarn" : (sessions.get(id)?.name ?? id));
 const isOpen = (t: Thread) => t.mergedInto === undefined && t.resolved === undefined;
 const isOn = (t: Thread, s: Session) => t.routers.includes(s.id) || t.members?.includes(s.id) === true || t.pending?.routers.includes(s.id) === true;
 const lastAt = (t: Thread) => t.messages.at(-1)?.at ?? 0;
