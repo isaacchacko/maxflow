@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { isHeld } from "@/cursors/holds";
 import { useEventListener, useInterval, useLatest, useResource } from "@/lib/effects";
 import { addBox, CANVAS_CHANGED, type CanvasNode, editBox, loadBoxes, markTyping, removeBox } from "./canvas-api";
 
@@ -25,7 +26,7 @@ export function useBoxes(path: string, onError: (message: string) => void) {
   useEventListener(CANVAS_CHANGED, (e) => {
     if (e instanceof CustomEvent && e.detail === path) void loaded.reload();
   });
-  useInterval(loaded.reload, REMOTE_CHECK_MS);
+  useInterval(async () => (isHeld(`canvas:${path}`) ? undefined : loaded.reload()), REMOTE_CHECK_MS);
 
   const upsert = (node: CanvasNode) => loaded.set((all = []) => (all.some((n) => n.id === node.id) ? all.map((n) => (n.id === node.id ? node : n)) : [...all, node]));
   const drop = (id: string) => loaded.set((all = []) => all.filter((n) => n.id !== id));

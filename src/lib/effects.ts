@@ -100,6 +100,11 @@ async function fetchInto(owner: Resource<unknown>) {
   if (generation === resource.generation) settle(resource, { value });
 }
 
+export async function reloadResource(key: string) {
+  const resource = resources.get(key);
+  if (resource) await fetchInto(resource);
+}
+
 export function useResource<T>(key: string | undefined, load: () => Promise<T>) {
   const latestLoad = useLatest(load);
   const subscribe = useCallback(

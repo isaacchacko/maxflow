@@ -4,6 +4,7 @@ import { cn, hasText } from "@/lib/utils";
 import { RefChip } from "@/threads/Rich";
 import { type Doc, type DocSummary, loadDoc, loadVault, type Vault } from "./docs/api";
 import { CanvasPane } from "./docs/Canvas";
+import { isHeld } from "@/cursors/holds";
 import { useDocEditor } from "./docs/Editor";
 import { Tree } from "./docs/Tree";
 
@@ -30,7 +31,7 @@ function DocEditor({ doc, summary }: { doc: Doc; summary: DocSummary | undefined
         </button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div ref={mount} data-agent="docs:editor" className="mx-auto max-w-3xl px-6" />
+        <div ref={mount} data-agent={`doc-editor:${doc.path}`} className="mx-auto max-w-3xl px-6" />
       </div>
     </article>
   );
@@ -57,7 +58,7 @@ function Shown({ path, vault }: { path: string | undefined; vault: { error?: Err
 
 export function DocsView({ path }: { path: string | undefined }) {
   const vault = useResource("docs", loadVault);
-  useInterval(vault.reload, VAULT_CHECK_MS);
+  useInterval(async () => (isHeld("docs") ? undefined : vault.reload()), VAULT_CHECK_MS);
   const shown = hasText(path) ? withExtension(path) : firstToShow(vault.value?.docs ?? []);
   return (
     <div className="flex h-full min-h-0">

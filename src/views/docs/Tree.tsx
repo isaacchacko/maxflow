@@ -205,7 +205,7 @@ export function Tree({ vault, selected, onChanged }: Props) {
         </RowButton>
       </div>
       {hasText(error) && <p className="px-3 py-1 text-xs text-destructive">{error}</p>}
-      <nav className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto p-2">{rowsAt({ folder: "", depth: 0 })}</nav>
+      <nav data-agent="docs:tree" className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto p-2">{rowsAt({ folder: "", depth: 0 })}</nav>
     </div>
   );
 }

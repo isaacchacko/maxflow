@@ -1,13 +1,16 @@
 import { createStore } from "@/store";
-import { elementsFor } from "./geometry";
+import { isRecord } from "../../shared/guards";
+import { elementsFor, type Point } from "./geometry";
 
-export type CursorEvent = { agent: string; name: string; action: string; targets: string[]; at: number };
-export type Tuning = { speed: number; arc: number; idleSeconds: number; isMotionReduced: boolean };
+export type Gesture = "drag" | "edit" | "create" | "delete";
+export type CursorEvent = { agent: string; name: string; gesture: Gesture; action: string; to: string[]; from?: string[] | undefined; into?: string[] | undefined; carry?: string | undefined; onPlane?: Point | undefined; holds: string[]; at: number };
+export type Tuning = { speed: number; arc: number; isMotionReduced: boolean };
 export type Missed = CursorEvent & { count: number };
 
 const SHOWN_KEY = "cursors-shown";
 const KEEP_RECENT = 40;
 const RENDER_GRACE_MS = 1500;
+const GESTURES = new Set<string>(["drag", "edit", "create", "delete"]);
 
 function isShownSaved() {
   try {
@@ -18,7 +21,7 @@ function isShownSaved() {
 }
 
 export const shownStore = createStore(isShownSaved());
-export const tuningStore = createStore<Tuning>({ speed: 1, arc: 0.18, idleSeconds: 4, isMotionReduced: false });
+export const tuningStore = createStore<Tuning>({ speed: 1, arc: 0.18, isMotionReduced: false });
 export const recentStore = createStore<CursorEvent[]>([]);
 export const missedStore = createStore<Missed[]>([]);
 
@@ -31,10 +34,12 @@ export function onCursor(listener: (e: CursorEvent) => void) {
   };
 }
 
+const placesOf = (e: CursorEvent) => [...e.to, ...(e.from ?? []), ...(e.into ?? [])];
+
 export function fireCursor(e: CursorEvent) {
   recentStore.set(all => [e, ...all].slice(0, KEEP_RECENT));
   setTimeout(() => {
-    if (e.targets.every(id => elementsFor(id).length === 0)) noteMissed(e);
+    if (placesOf(e).every(id => elementsFor(id).length === 0)) noteMissed(e);
   }, RENDER_GRACE_MS);
   for (const listener of listeners) listener(e);
 }
@@ -56,10 +61,13 @@ export function setShown(isShown: boolean) {
   }
 }
 
-const isCursorEvent = (m: Record<string, unknown>) =>
-  typeof m["agent"] === "string" && typeof m["name"] === "string" && typeof m["action"] === "string" && Array.isArray(m["targets"]) && typeof m["at"] === "number";
+const strings = (v: unknown) => (Array.isArray(v) ? v.map(String) : undefined);
+const pointFrom = (v: unknown) => (isRecord(v) && typeof v["x"] === "number" && typeof v["y"] === "number" ? { x: v["x"], y: v["y"] } : undefined);
 
 export function cursorFrom(m: Record<string, unknown>): CursorEvent | undefined {
-  if (m["type"] !== "cursor" || !isCursorEvent(m)) return undefined;
-  return { agent: String(m["agent"]), name: String(m["name"]), action: String(m["action"]), targets: (m["targets"] as unknown[]).map(String), at: Number(m["at"]) };
+  const { agent, name, gesture, action, carry, at } = m;
+  const to = strings(m["to"]);
+  const isCursor = m["type"] === "cursor" && typeof agent === "string" && typeof name === "string" && typeof action === "string" && typeof at === "number";
+  if (!isCursor || typeof gesture !== "string" || !GESTURES.has(gesture) || !to) return undefined;
+  return { agent, name, gesture: gesture as Gesture, action, to, from: strings(m["from"]), into: strings(m["into"]), carry: typeof carry === "string" ? carry : undefined, onPlane: pointFrom(m["onPlane"]), holds: strings(m["holds"]) ?? [], at };
 }

@@ -64,6 +64,10 @@ type ReplyProps = {
   nav: ThreadNav;
 };
 
+const STREAMS_IN_WHEN_UNDER_MS = 6000;
+
+const isStreamingIn = (m: Message) => m.from !== "isaac" && Date.now() - Date.parse(m.at) < STREAMS_IN_WHEN_UNDER_MS;
+
 function ReplyBody({ thread, all, root, replies, i, actions, messageMenu, nav, isGrouped }: Omit<ReplyProps, "isNew" | "lineRef"> & { isGrouped: boolean }) {
   const m = replies[i];
   if (!m) return null;
@@ -73,7 +77,7 @@ function ReplyBody({ thread, all, root, replies, i, actions, messageMenu, nav, i
   return (
     <RowMenu agent={`msg:${k}`} items={messageMenu(m, k)}>
       <div data-msg={m.id} data-agent={`message:${m.id}`} data-thread={thread.id} data-row={k} className="group/bar relative">
-        <MessageRow from={m.from} at={m.at} text={m.text} ext={m.ext} where={m.ext !== undefined && conversationOf(m.ext.link) !== conversationOf(lastSaidWhere)} grouped={isGrouped} className={cn(!isGrouped && i > 0 && "mt-2.5")}>
+        <MessageRow from={m.from} at={m.at} text={m.text} ext={m.ext} where={m.ext !== undefined && conversationOf(m.ext.link) !== conversationOf(lastSaidWhere)} grouped={isGrouped} className={cn(!isGrouped && i > 0 && "mt-2.5")} bodyClassName={isStreamingIn(m) ? "streams-in" : undefined}>
           <MessageMarks message={m} threads={all} thread={thread.id} />
           {hasReplies(sub) && <Replies t={sub} />}
         </MessageRow>

@@ -1,99 +1,187 @@
 import { sessions } from "./sessions";
 import { isRecord, stringOr } from "./shared/guards";
+import { threads } from "./stores";
 import { worldClients } from "./world";
 
-export type Cursor = { type: "cursor"; agent: string; name: string; action: string; targets: string[]; at: number };
+export type Gesture = "drag" | "edit" | "create" | "delete";
+type Aim = { gesture: Gesture; action: string; to: string[]; from?: string[]; into?: string[]; carry?: string; onPlane?: { x: number; y: number }; holds: string[] };
+export type Cursor = Aim & { type: "cursor"; agent: string; name: string; at: number };
 type Seen = { body: Record<string, unknown>; reply: Record<string, unknown> };
-type Aim = { action: string; targets: string[] };
-type Rule = { method: string; path: RegExp; aim: (m: RegExpExecArray, seen: Seen) => Aim };
+type Rule = { method: string; path: RegExp; aim: (m: RegExpExecArray, seen: Seen) => Aim | undefined };
 
-const PLUMBING = /^\/api\/(touch|events|browsers?|files|uploads|sessions\/[\w-]+\/(state|await|screen|intro|input))(\/|$)/;
+const threadRow = (id: string) => [`inbox-row:${id}`, `thread-card:${id}`, `thread-title:${id}`, `pinned:${id}`];
+const titleOfThread = (id: string) => threads.find(t => t.id === id)?.title;
 
-const lastMessage = (reply: Record<string, unknown>) => {
-  const messages = reply["messages"];
-  const last: unknown = Array.isArray(messages) ? messages.at(-1) : undefined;
-  return isRecord(last) ? stringOr(last["id"]) : "";
+const docRow = (path: string) => [`docs:doc:${path}`, `docs:doc:${path}.md`, `docs:folder:${path}`];
+const dirOf = (path: string) => path.split("/").slice(0, -1).join("/");
+const holdDoc = (path: string) => ["docs", `doc:${path}`, `doc:${path}.md`];
+
+const taskRow = (ref: string) => [`row:${ref}`, `page-title:task/${ref}`, `worker-task:${ref}`, `card-task:${ref}`];
+const pageHold = (ref: string) => {
+  const [type, id = ""] = ref.split("/", 2);
+  return type === "task" ? `tasks:${id}` : `objectives:${id}`;
 };
 
-const aboutThread = (id: string) => [`inbox-row:${id}`, `thread-title:${id}`, `pinned:${id}`];
+function taskAim(id: string | undefined, { body, reply }: Seen): Aim | undefined {
+  const ref = `t${id ?? stringOr(reply["id"])}`;
+  const holds = [`tasks:${ref}`];
+  if (id === undefined) {
+    const objective = stringOr(reply["objective"], stringOr(body["objective"]));
+    return { gesture: "create", action: "new task", to: [`row:${ref}`], into: [`tasks:${objective}`], holds: [...holds, `objectives:${objective}`] };
+  }
+  if (typeof body["status"] === "string") return { gesture: "edit", action: `mark ${body["status"]}`, to: taskRow(ref), holds };
+  if (typeof body["title"] === "string") return { gesture: "edit", action: "retitle task", to: taskRow(ref), holds };
+  return undefined;
+}
 
-const inThread = (id: string, reply: Record<string, unknown>) => {
-  const thread = stringOr(reply["id"], id);
-  const message = lastMessage(reply);
-  return [...(message === "" ? [] : [`message:${message}`]), ...aboutThread(thread)];
-};
-
-const docTargets = (path: string) => {
-  const doc = decodeURIComponent(path);
-  return [`docs:doc:${doc}`, `docs:doc:${doc}.md`, `docs:folder:${doc}`];
-};
+function docMove(path: string, to: string): Aim {
+  const holds = [...holdDoc(path), ...holdDoc(to)];
+  if (dirOf(path) === dirOf(to)) return { gesture: "edit", action: "rename doc", to: docRow(path), holds };
+  return { gesture: "drag", action: "move doc", from: docRow(path), to: [`docs:folder:${dirOf(to)}`], holds };
+}
 
 const canvasFile = (path: string) => {
   const file = decodeURIComponent(path);
   return file.endsWith(".canvas") ? file : `${file}.canvas`;
 };
-const boxTarget = (path: string, id: unknown) => `canvas:node:${canvasFile(path)}:${stringOr(id)}`;
+const boxOf = (file: string, id: unknown) => `canvas:node:${file}:${stringOr(id)}`;
+const numberOr = (v: unknown) => (typeof v === "number" ? v : undefined);
+const planeAt = (x: unknown, y: unknown) => {
+  const [px, py] = [numberOr(x), numberOr(y)];
+  return px === undefined || py === undefined ? undefined : { x: px, y: py };
+};
 
-function boxAction(body: Record<string, unknown>) {
-  if (typeof body["text"] === "string") return "edit box";
-  return body["width"] === undefined && body["height"] === undefined ? "move box" : "resize box";
+function boxEdit(file: string, id: string, body: Record<string, unknown>): Aim {
+  const box = [boxOf(file, id)];
+  const holds = [`canvas:${file}`];
+  const onPlane = planeAt(body["x"], body["y"]);
+  if (typeof body["text"] === "string") return { gesture: "edit", action: "edit box", to: box, holds };
+  if (body["width"] !== undefined || body["height"] !== undefined || !onPlane) return { gesture: "edit", action: "resize box", to: box, holds };
+  return { gesture: "drag", action: "move box", from: box, to: [`canvas:plane:${file}`], onPlane, holds };
 }
 
-const taskTargets = (id: string) => [`row:t${id}`, `page-title:task/t${id}`, `worker-task:t${id}`, `card-task:t${id}`];
-
-function taskAction(id: string | undefined, body: Record<string, unknown>) {
-  if (typeof body["status"] === "string") return `move task to ${body["status"]}`;
-  return id === undefined ? "new task" : "edit task";
-}
-
-const RULES: Rule[] = [
-  { method: "POST", path: /^\/api\/threads\/([\w-]+)\/messages$/, aim: (m, { reply }) => ({ action: "post", targets: inThread(m[1] ?? "", reply) }) },
-  { method: "POST", path: /^\/api\/threads$/, aim: (_, { reply }) => ({ action: "new thread", targets: inThread("", reply) }) },
-  { method: "POST", path: /^\/api\/asks$/, aim: (_, { reply }) => ({ action: "ask", targets: inThread("", reply) }) },
-  { method: "POST", path: /^\/api\/threads\/([\w-]+)\/status$/, aim: m => ({ action: "status", targets: aboutThread(m[1] ?? "") }) },
-  { method: "POST", path: /^\/api\/threads\/([\w-]+)\/(split|merge)$/, aim: m => ({ action: m[2] ?? "", targets: aboutThread(m[1] ?? "") }) },
+const CANVAS_RULES: Rule[] = [
   {
     method: "POST",
-    path: /^\/api\/threads\/([\w-]+)\/objective$/,
-    aim: (m, { body }) => ({ action: "move thread", targets: [...aboutThread(m[1] ?? ""), `objective:${stringOr(body["objective"])}`] }),
+    path: /^\/api\/canvas\/([^/]+)$/,
+    aim: m => {
+      const file = canvasFile(m[1] ?? "");
+      return { gesture: "create", action: "new canvas", to: docRow(file), into: [`docs:folder:${dirOf(file)}`, "docs:tree"], holds: ["docs"] };
+    },
   },
   {
     method: "POST",
-    path: /^\/api\/tasks(?:\/(\d+))?$/,
-    aim: (m, { body, reply }) => ({ action: taskAction(m[1], body), targets: taskTargets(m[1] ?? String(reply["id"])) }),
+    path: /^\/api\/canvas\/([^/]+)\/nodes$/,
+    aim: (m, { body, reply }) => {
+      const file = canvasFile(m[1] ?? "");
+      const onPlane = planeAt(body["x"], body["y"]);
+      return { gesture: "create", action: "add box", to: [boxOf(file, reply["id"])], into: [`canvas:plane:${file}`], ...(onPlane && { onPlane }), holds: [`canvas:${file}`] };
+    },
   },
-  { method: "POST", path: /^\/api\/todos\/([\w-]+)\/threads\/([\w-]+)$/, aim: m => ({ action: "tag todo", targets: [`todo:${m[1] ?? ""}`] }) },
-  { method: "DELETE", path: /^\/api\/todos\/([\w-]+)\/threads\/([\w-]+)$/, aim: m => ({ action: "untag todo", targets: [`todo:${m[1] ?? ""}`] }) },
-  { method: "PATCH", path: /^\/api\/sessions\/([\w-]+)$/, aim: m => ({ action: "rename", targets: [`agent-name:${m[1] ?? ""}`, `agent:${m[1] ?? ""}`, `agent-link:${m[1] ?? ""}`] }) },
-  { method: "PATCH", path: /^\/api\/objectives\/([\w-]+)$/, aim: m => ({ action: "rename objective", targets: [`objective:${m[1] ?? ""}`, `page-title:objective/${m[1] ?? ""}`] }) },
+  { method: "PATCH", path: /^\/api\/canvas\/([^/]+)\/nodes\/([\w-]+)$/, aim: (m, { body }) => boxEdit(canvasFile(m[1] ?? ""), m[2] ?? "", body) },
   {
-    method: "POST",
-    path: /^\/api\/pages$/,
-    aim: (_, { body }) => ({ action: "edit card", targets: [`block:${isRecord(body["block"]) ? stringOr(body["block"]["id"]) : ""}`, `page-title:${stringOr(body["ref"])}`] }),
+    method: "DELETE",
+    path: /^\/api\/canvas\/([^/]+)\/nodes\/([\w-]+)$/,
+    aim: m => {
+      const file = canvasFile(m[1] ?? "");
+      return { gesture: "delete", action: "delete box", to: [boxOf(file, m[2])], holds: [`canvas:${file}`] };
+    },
   },
-  { method: "DELETE", path: /^\/api\/pages$/, aim: (_, { body }) => ({ action: "remove card", targets: [`page-title:${stringOr(body["ref"])}`] }) },
-  { method: "PUT", path: /^\/api\/docs\/(.+)$/, aim: m => ({ action: "edit doc", targets: docTargets(m[1] ?? "") }) },
-  { method: "POST", path: /^\/api\/docs-folder\/(.+)$/, aim: m => ({ action: "new folder", targets: docTargets(m[1] ?? "") }) },
-  { method: "PATCH", path: /^\/api\/docs\/(.+)$/, aim: m => ({ action: "move doc", targets: docTargets(m[1] ?? "") }) },
-  { method: "POST", path: /^\/api\/canvas\/([^/]+)$/, aim: m => ({ action: "new canvas", targets: docTargets(canvasFile(m[1] ?? "")) }) },
-  { method: "POST", path: /^\/api\/canvas\/([^/]+)\/nodes$/, aim: (m, { reply }) => ({ action: "add box", targets: [boxTarget(m[1] ?? "", reply["id"])] }) },
-  { method: "PATCH", path: /^\/api\/canvas\/([^/]+)\/nodes\/([\w-]+)$/, aim: (m, { body }) => ({ action: boxAction(body), targets: [boxTarget(m[1] ?? "", m[2])] }) },
-  { method: "DELETE", path: /^\/api\/canvas\/([^/]+)\/nodes\/([\w-]+)$/, aim: m => ({ action: "delete box", targets: [boxTarget(m[1] ?? "", m[2]), `canvas:plane:${canvasFile(m[1] ?? "")}`] }) },
   {
     method: "POST",
     path: /^\/api\/canvas\/([^/]+)\/nodes\/([\w-]+)\/link$/,
-    aim: (m, { body }) => ({ action: "link", targets: [boxTarget(m[1] ?? "", m[2]), boxTarget(m[1] ?? "", body["to"])] }),
+    aim: (m, { body }) => {
+      const file = canvasFile(m[1] ?? "");
+      return { gesture: "drag", action: "link", from: [boxOf(file, m[2])], to: [boxOf(file, body["to"])], carry: stringOr(body["text"], "link"), holds: [`canvas:${file}`] };
+    },
   },
 ];
 
-const unmapped = (method: string, path: string): Aim => ({ action: `${method} ${path.replace(/^\/api\//, "").replaceAll(/\/[\w-]*\d[\w-]*/g, "/:id")}`, targets: [] });
+const RULES: Rule[] = [
+  ...CANVAS_RULES,
+  {
+    method: "POST",
+    path: /^\/api\/threads\/([\w-]+)\/objective$/,
+    aim: (m, { body }) => {
+      const objective = stringOr(body["objective"]);
+      return { gesture: "drag", action: "move thread", from: threadRow(m[1] ?? ""), to: [`objective:${objective}`], holds: [`threads:${m[1] ?? ""}`, `objectives:${objective}`] };
+    },
+  },
+  {
+    method: "POST",
+    path: /^\/api\/threads\/([\w-]+)\/merge$/,
+    aim: (m, { body }) => {
+      const into = stringOr(body["into"]);
+      return { gesture: "drag", action: "merge thread", from: threadRow(m[1] ?? ""), to: threadRow(into), holds: [`threads:${m[1] ?? ""}`, `threads:${into}`] };
+    },
+  },
+  { method: "POST", path: /^\/api\/tasks(?:\/(\d+))?$/, aim: (m, seen) => taskAim(m[1], seen) },
+  {
+    method: "POST",
+    path: /^\/api\/todos\/([\w-]+)\/threads\/([\w-]+)$/,
+    aim: m => ({ gesture: "drag", action: "tag todo", from: threadRow(m[2] ?? ""), to: [`todo:${m[1] ?? ""}`], carry: titleOfThread(m[2] ?? ""), holds: ["todos"] }),
+  },
+  {
+    method: "PATCH",
+    path: /^\/api\/sessions\/([\w-]+)$/,
+    aim: (m, { body }) =>
+      typeof body["name"] === "string" ? { gesture: "edit", action: "rename", to: [`agent-name:${m[1] ?? ""}`, `agent:${m[1] ?? ""}`, `agent-link:${m[1] ?? ""}`], holds: [`agents:${m[1] ?? ""}`] } : undefined,
+  },
+  {
+    method: "PATCH",
+    path: /^\/api\/objectives\/([\w-]+)$/,
+    aim: (m, { body }) =>
+      typeof body["title"] === "string" ? { gesture: "edit", action: "rename objective", to: [`page-title:objective/${m[1] ?? ""}`, `objective:${m[1] ?? ""}`], holds: [`objectives:${m[1] ?? ""}`] } : undefined,
+  },
+  {
+    method: "POST",
+    path: /^\/api\/pages$/,
+    aim: (_, { body }) => {
+      const ref = stringOr(body["ref"]);
+      const block = isRecord(body["block"]) ? stringOr(body["block"]["id"]) : "";
+      return { gesture: "edit", action: "edit card", to: [`block:${block}`], into: ["page"], holds: [pageHold(ref)] };
+    },
+  },
+  {
+    method: "DELETE",
+    path: /^\/api\/pages$/,
+    aim: (_, { body }) => {
+      const ref = stringOr(body["ref"]);
+      return { gesture: "delete", action: "remove card", to: [`block:${stringOr(body["id"])}`], holds: [pageHold(ref)] };
+    },
+  },
+  {
+    method: "PUT",
+    path: /^\/api\/docs\/(.+)$/,
+    aim: m => {
+      const path = decodeURIComponent(m[1] ?? "");
+      return { gesture: "edit", action: "edit doc", to: [`doc-editor:${path}`, `doc-editor:${path}.md`, ...docRow(path)], holds: holdDoc(path) };
+    },
+  },
+  {
+    method: "PATCH",
+    path: /^\/api\/docs\/(.+)$/,
+    aim: (m, { body }) => docMove(decodeURIComponent(m[1] ?? ""), stringOr(body["to"])),
+  },
+  {
+    method: "PATCH",
+    path: /^\/api\/docs-folder\/(.+)$/,
+    aim: (m, { body }) => docMove(decodeURIComponent(m[1] ?? ""), stringOr(body["to"])),
+  },
+  {
+    method: "POST",
+    path: /^\/api\/docs-folder\/(.+)$/,
+    aim: m => {
+      const path = decodeURIComponent(m[1] ?? "");
+      return { gesture: "create", action: "new folder", to: [`docs:folder:${path}`], into: [`docs:folder:${dirOf(path)}`, "docs:tree"], holds: ["docs"] };
+    },
+  },
+];
 
-function aimOf(method: string, path: string, seen: Seen): Aim {
-  for (const rule of RULES) {
-    const m = rule.method === method ? rule.path.exec(path) : null;
-    if (m) return rule.aim(m, seen);
-  }
-  return unmapped(method, path);
+function aimOf(method: string, path: string, seen: Seen) {
+  const rule = RULES.find(r => r.method === method && r.path.test(path));
+  const m = rule?.path.exec(path);
+  return rule && m ? rule.aim(m, seen) : undefined;
 }
 
 async function jsonOf(r: Request | Response) {
@@ -109,7 +197,9 @@ async function send(agent: { id: string; name: string }, req: Request, sent: Req
   const path = new URL(req.url).pathname;
   const seen = { body: await jsonOf(sent), reply: await jsonOf(reply) };
   try {
-    const cursor: Cursor = { type: "cursor", agent: agent.id, name: agent.name, ...aimOf(req.method, path, seen), at: Date.now() };
+    const aim = aimOf(req.method, path, seen);
+    if (!aim) return;
+    const cursor: Cursor = { type: "cursor", agent: agent.id, name: agent.name, ...aim, at: Date.now() };
     const msg = JSON.stringify(cursor);
     for (const ws of worldClients) ws.sendText(msg);
   } catch (error) {
@@ -119,9 +209,10 @@ async function send(agent: { id: string; name: string }, req: Request, sent: Req
 
 type Answer<S> = (req: Request, server: S) => Promise<Response | undefined>;
 
+// constraint: world patches go out 100ms+ after a publish, so this event reaches the tab first and it can hold the change for the cursor
 export const withCursors = <S>(answer: Answer<S>) => async (req: Request, server: S) => {
   const agent = sessions.get(req.headers.get("x-maxflow-from") ?? "");
-  const isAction = agent !== undefined && req.method !== "GET" && !PLUMBING.test(new URL(req.url).pathname);
+  const isAction = agent !== undefined && req.method !== "GET" && RULES.some(r => r.method === req.method && r.path.test(new URL(req.url).pathname));
   const sent = isAction ? req.clone() : undefined;
   const res = await answer(req, server);
   if (!agent || !sent || res?.ok !== true || worldClients.size === 0) return res;

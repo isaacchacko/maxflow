@@ -1,6 +1,7 @@
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useCallback, useState } from "react";
+import { isHeld, onLand } from "@/cursors/holds";
 import { useInterval } from "@/lib/effects";
 import type { Doc } from "./api";
 import { extensionsFor } from "./extensions";
@@ -27,7 +28,11 @@ export function useDocEditor(doc: Doc) {
       const view = new EditorView({ parent, state: EditorState.create({ doc: doc.text, extensions: extensionsFor(s, doc.text) }) });
       s.view = view;
       setSession(s);
+      const stopLanding = onLand(`doc:${doc.path}`, () => {
+        void s.refresh();
+      });
       return () => {
+        stopLanding();
         s.dispose();
         view.destroy();
         s.view = undefined;
@@ -36,7 +41,7 @@ export function useDocEditor(doc: Doc) {
     },
     [doc],
   );
-  useInterval(async () => session?.refresh(), REMOTE_CHECK_MS);
+  useInterval(async () => (isHeld(`doc:${doc.path}`) ? undefined : session?.refresh()), REMOTE_CHECK_MS);
   const comment = () => {
     if (session?.view) didCommentOnSelection(session.view);
   };

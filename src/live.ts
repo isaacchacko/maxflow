@@ -1,10 +1,12 @@
 import { hasText } from "@/lib/utils";
 import type { Agent, Objective, Sentry, SentrySession, Shell, Signal, Task, Thread } from "./mock";
 import { markResurfaced } from "./threads/seen";
-import { agentStore, ownChanges, liveStore, movedStore, objectiveStore, nameStore, prStore, type Pr, refreshed, sentryStore, shellStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
+import { agentStore, ownChanges, liveStore, loadTodos, movedStore, objectiveStore, nameStore, prStore, type Pr, refreshed, sentryStore, shellStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
 import { isRecord } from "../shared/guards";
 import { cursorFrom, fireCursor } from "./cursors/store";
 import { canvasChanged } from "./views/docs/canvas-api";
+import { heldKeys, isHeld, onLand, onRelease } from "./cursors/holds";
+import { reloadResource } from "@/lib/effects";
 
 type World = { objectives: Objective[]; agents: Agent[]; tasks: Task[]; threads: Thread[]; signals: Signal[]; sentries: SentrySession[]; shells?: Shell[]; names?: Record<string, string>; prs?: Record<string, Pr> };
 type Patch = { from: number; v: number; upsert: Record<string, { id: string | number }[]>; remove: Record<string, string[]>; order: Record<string, string[]>; set: Record<string, unknown> };
@@ -27,8 +29,9 @@ function sourcesOf(sentries: SentrySession[]): Sentry[] {
   return (Object.keys(LABEL) as Sentry["id"][]).map(id => ({ id, label: LABEL[id], state: sourceState(SOURCE_SENTRY[id], sentries), every: EVERY[id], watching: [] }));
 }
 
-const live: { world: World | undefined; version: number; threadsAskingHim: number; serverMisses: number; socket: WebSocket | undefined } = {
+const live: { world: World | undefined; shown: World | undefined; version: number; threadsAskingHim: number; serverMisses: number; socket: WebSocket | undefined } = {
   world: undefined,
+  shown: undefined,
   version: 0,
   threadsAskingHim: 0,
   serverMisses: 0,
@@ -48,7 +51,32 @@ function setTitle() {
 }
 addEventListener("hashchange", setTitle);
 
-function apply(w: World) {
+const HELD_COLLECTIONS = new Set(["objectives", "agents", "tasks", "threads"]);
+
+function heldBack(list: { id: string | number }[], was: { id: string | number }[], id: string) {
+  const before = was.find(x => String(x.id) === id);
+  const i = list.findIndex(x => String(x.id) === id);
+  if (before && i !== -1) return list.with(i, before);
+  if (before) return [...list, before];
+  return i === -1 ? list : list.toSpliced(i, 1);
+}
+
+// constraint: an entity a cursor is still reaching for stays as it was on screen, so its change lands under the cursor instead of before it
+function withHeld(w: World): World {
+  const was = live.shown;
+  if (!was) return w;
+  const next: Record<string, unknown> = { ...w };
+  for (const key of heldKeys()) {
+    const c = key.slice(0, key.indexOf(":"));
+    const id = key.slice(key.indexOf(":") + 1);
+    if (HELD_COLLECTIONS.has(c)) next[c] = heldBack(next[c] as { id: string | number }[], (was as unknown as Record<string, { id: string | number }[]>)[c] ?? [], id);
+  }
+  return next as World;
+}
+
+function apply(world: World) {
+  const w = withHeld(world);
+  live.shown = w;
   objectiveStore.set(w.objectives);
   agentStore.set(w.agents);
   taskStore.set(w.tasks);
@@ -113,11 +141,28 @@ function patch(w: World, p: Patch): World {
   return Object.assign(next, p.set) as World;
 }
 
+const CURSOR_FOLLOWS_A_CANVAS_CHANGE_MS = 150;
+
+// constraint: the server sends a canvas change before the cursor event that caused it, so the reload waits a beat to see whether a cursor holds it
+function canvasChangedAfterItsCursor(path: string) {
+  setTimeout(() => {
+    const key = `canvas:${path}`;
+    if (!isHeld(key)) {
+      canvasChanged(path);
+      return;
+    }
+    const stop = onLand(key, () => {
+      stop();
+      canvasChanged(path);
+    });
+  }, CURSOR_FOLLOWS_A_CANVAS_CHANGE_MS);
+}
+
 function isSideMessage(m: unknown) {
   if (!isRecord(m)) return false;
   const cursor = cursorFrom(m);
   if (cursor) fireCursor(cursor);
-  if (m["type"] === "canvas" && typeof m["path"] === "string") canvasChanged(m["path"]);
+  if (m["type"] === "canvas" && typeof m["path"] === "string") canvasChangedAfterItsCursor(m["path"]);
   return cursor !== undefined || m["type"] === "canvas";
 }
 
@@ -155,6 +200,16 @@ async function loop() {
     void loop();
   }, liveStore.get() ? 1500 : 5000);
 }
+
+onRelease(() => {
+  if (live.world && ownChanges.inFlight === 0) apply(live.world);
+});
+onLand("todos", () => {
+  void loadTodos();
+});
+onLand("docs", () => {
+  void reloadResource("docs");
+});
 
 export async function startLive() {
   await refresh();

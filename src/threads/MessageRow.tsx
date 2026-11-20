@@ -37,7 +37,7 @@ function Header({ from, at, ext, where, meta }: { from: string; at: string; ext:
   );
 }
 
-export function MessageRow({ from, at, text, ext, where = true, grouped = false, meta, children, className, bodyClassName, onClick }: { from: string; at: string; text: string; ext?: External | undefined; where?: boolean; grouped?: boolean; meta?: React.ReactNode; children?: React.ReactNode; className?: string; bodyClassName?: string; onClick?: (e: React.MouseEvent) => void }) {
+export function MessageRow({ from, at, text, ext, where = true, grouped = false, meta, children, className, bodyClassName, onClick }: { from: string; at: string; text: string; ext?: External | undefined; where?: boolean; grouped?: boolean; meta?: React.ReactNode; children?: React.ReactNode; className?: string; bodyClassName?: string | undefined; onClick?: (e: React.MouseEvent) => void }) {
   if (from === "maxflow") return <MaxflowNote at={at} text={text} className={className} />;
   const isContext = ext?.context === true;
   return (

@@ -15,7 +15,7 @@ const goTo = (hash: string) => {
 export function ThreadCard({ t }: { t: Thread }) {
   const last = t.messages.at(-1);
   return (
-    <Card data-node={`thread:${t.id}`} onClick={() => goTo(`thread/${t.id}`)} className="cursor-pointer gap-1.5 px-3 py-2.5 hover:border-ring">
+    <Card data-node={`thread:${t.id}`} data-agent={`thread-card:${t.id}`} onClick={() => goTo(`thread/${t.id}`)} className="cursor-pointer gap-1.5 px-3 py-2.5 hover:border-ring">
       <div className="flex items-center gap-2">
         <MessagesSquare className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate text-sm font-medium">{t.title}</span>

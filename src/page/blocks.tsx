@@ -237,7 +237,7 @@ function TasksBlock({ subject }: Props<"tasks">) {
   return (
     <Shell title="Tasks" action={<span className="text-xs text-muted-foreground">{done}/{items.length} done</span>} className="flex flex-col">
       <Progress value={(done / Math.max(items.length, 1)) * 100} className="mb-3 h-1" />
-      <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+      <ul data-agent={`tasks:${subject.objectiveId ?? ""}`} className="min-h-0 flex-1 space-y-1 overflow-y-auto">
         {items.map(t => (
           <li key={t.id}>
             <a href={`#task/${t.id}`} data-agent={`row:${t.id}`} className="-mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted">

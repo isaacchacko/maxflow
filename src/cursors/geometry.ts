@@ -28,15 +28,40 @@ export function clipBox(el: Element): Box {
   return clippers(el).reduce<Box>((box, a) => intersect(box, a.getBoundingClientRect()), viewport);
 }
 
+export const isVisible = (el: Element) => isShown(el) && isInside(tipOf(el.getBoundingClientRect()), clipBox(el));
+
+export const visibleOf = (ids: string[]) => ids.flatMap(id => [...elementsFor(id)]).find(el => isVisible(el));
+
+const EDGE_OUTSET = 12;
+
+export function edgePoint(goal: Point): Point {
+  const gaps = [goal.x, innerWidth - goal.x, goal.y, innerHeight - goal.y];
+  const nearest = gaps.indexOf(Math.min(...gaps));
+  if (nearest === 0) return { x: -EDGE_OUTSET, y: goal.y };
+  if (nearest === 1) return { x: innerWidth + EDGE_OUTSET, y: goal.y };
+  return { x: goal.x, y: nearest === 2 ? -EDGE_OUTSET : innerHeight + EDGE_OUTSET };
+}
+
+const SPOT_BELOW_LAST = 14;
+
+export function spotIn(el: Element): Point {
+  const r = el.getBoundingClientRect();
+  const last = el.lastElementChild?.getBoundingClientRect();
+  const y = last && last.height > 0 ? last.bottom + SPOT_BELOW_LAST : r.top + Math.min(r.height / 2, TIP_Y_MAX);
+  return { x: r.left + Math.min(r.width / 2, TIP_X_MAX), y: Math.min(y, r.bottom - 4, clipBox(el).bottom - 4) };
+}
+
+export function planePoint(plane: Element, at: Point): Point | undefined {
+  const box = plane.querySelector<HTMLElement>("[data-agent^='canvas:node:']");
+  if (!box) return undefined;
+  const r = box.getBoundingClientRect();
+  const scale = box.offsetWidth > 0 ? r.width / box.offsetWidth : 1;
+  return { x: r.left + (at.x - box.offsetLeft) * scale, y: r.top + (at.y - box.offsetTop) * scale };
+}
+
 export const tipOf = (r: DOMRect): Point => ({ x: r.left + Math.min(r.width / 2, TIP_X_MAX), y: r.top + Math.min(r.height / 2, TIP_Y_MAX) });
 
 export const isInside = (p: Point, b: Box) => p.x >= b.left && p.x <= b.right && p.y >= b.top && p.y <= b.bottom;
-
-export function clampInto(p: Point, b: Box, inset: number): Point {
-  const left = Math.min(b.left + inset, b.right - inset);
-  const top = Math.min(b.top + inset, b.bottom - inset);
-  return { x: Math.min(Math.max(p.x, left), Math.max(left, b.right - inset)), y: Math.min(Math.max(p.y, top), Math.max(top, b.bottom - inset)) };
-}
 
 export const isShown = (el: Element) => {
   const r = el.getBoundingClientRect();
@@ -56,5 +81,3 @@ export function along(from: Point, to: Point, bend: number, t: number): Point {
 export const distance = (a: Point, b: Point) => Math.hypot(b.x - a.x, b.y - a.y);
 
 export const flightMs = (miles: number, speed: number) => (320 + 140 * Math.log2(1 + miles / 48)) / speed;
-
-export const degreesToward = (from: Point, to: Point) => (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI;
