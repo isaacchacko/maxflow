@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { holdOn } from "../holds";
 import { isRecord } from "../shared/guards";
 import { appendStateText, didClaimState, hasState, listState, readGatingStateJson, readStateJson, removeState, stateDirectory, writeStateJson } from "../state";
 import { isWaitingOnReview } from "./approval-score";
@@ -135,6 +136,12 @@ function backOff(n: Note, detail: string) {
 }
 
 async function sendOne(cfg: Endpoint, n: Note): Promise<"next" | "stop"> {
+  const held = holdOn(n.pr);
+  if (held !== undefined) {
+    note(`dropped ${tag(n)}: held by ${held.by}`);
+    unqueue(n);
+    return "next";
+  }
   const standing = wasSent(n) ? "moved" : standingOnGitHub(n);
   if (standing === "unknown") return "next";
   if (standing === "moved") note(`dropped ${tag(n)}: already sent, or no longer open at this head waiting on a review`);

@@ -2,6 +2,7 @@
 import { boardVerbs, objectiveVerbs } from "./cli-board";
 import { browserVerbs } from "./cli-browser";
 import { docVerbs } from "./cli-docs";
+import { holdVerbs } from "./cli-holds";
 import { eventVerbs, sessionVerbs } from "./cli-sessions";
 import { base, type Verb } from "./cli-shared";
 import { threadVerbs } from "./cli-threads";
@@ -27,6 +28,7 @@ const usage = `usage:
   maxflow todo tag <todo id> <thread id> | maxflow todo untag <todo id> <thread id>   show a thread under his todo, indented, or take it off
   maxflow restrictions ls [--json]           his autonomy restrictions: id, mode (allow|ask|deny), label, scope
   maxflow restrictions check --tool <name> [--input <json>] [--cwd D] [--objective O]   the mode that applies to that tool call, and which restriction
+  maxflow hold <pr> [why...] | maxflow unhold <pr> | maxflow holds   stand the sentries down on a PR: the approval sentry won't review, comment, hand back or send it for approval, and the review feed won't touch it
   maxflow tasks [--all]                      the user's task board, with each task's timeline; --all adds done and dropped ones
   maxflow task new <title...> | maxflow task <id> [--title T] [--status todo|doing|you|waiting|blocked|done|dropped] [--question] [--answer A]
                                              [--session ID] [--link URL] [--event TEXT] [--at TIME]   sentry:assistant's edits to the board
@@ -78,7 +80,7 @@ const shipVerbs: Verb[] = [
   { matches: (verb) => verb === "install", run: install },
 ];
 
-const VERBS: Verb[] = [...waitVerbs, ...sessionVerbs, ...boardVerbs, ...eventVerbs, ...watchVerbs, ...objectiveVerbs, ...threadVerbs, ...docVerbs, ...browserVerbs, ...shipVerbs];
+const VERBS: Verb[] = [...waitVerbs, ...sessionVerbs, ...boardVerbs, ...eventVerbs, ...watchVerbs, ...objectiveVerbs, ...threadVerbs, ...docVerbs, ...holdVerbs, ...browserVerbs, ...shipVerbs];
 
 const [verb, ...rest] = process.argv.slice(2);
 const chosen = VERBS.find((v) => v.matches(verb, rest));

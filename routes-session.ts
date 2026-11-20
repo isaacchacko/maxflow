@@ -2,7 +2,7 @@ import { inboxesTable } from "./state";
 import { publish } from "./bus";
 import { CLI } from "./instance";
 import { paste, pressEnter, setOption, tmux, tmuxAsync, tmuxName } from "./tmux";
-import { type Session, isAgent, sessions } from "./sessions";
+import { type Session, isAgent, isSentry, sessions } from "./sessions";
 import { intro } from "./intro";
 import { dispatch, endWait, screen, setArchived, isWaitingOn, wake } from "./lifecycle";
 import { declareWait, sayWhyInThreadsHeWaitsIn, untilShell } from "./waits";
@@ -36,10 +36,18 @@ function deliverToAnAgentSayingWhoTypedIt(req: Request, s: Session, text: string
   return { text: stamped.text, isQueuedForAnIdlePrompt };
 }
 
+// constraint: a plain sentry is a script, not a prompt; text typed into its pane reaches nobody, so the sender has to hear that instead of a silent ok
+const nobodyReads = (s: Session) =>
+  new Response(
+    `${s.name} (${s.id}) isn't an agent: it's a plain process, and nothing reads text sent to it. To stand the sentries down on a PR, run \`${CLI} hold <pr>\`; to reach the agent behind it, notify that agent's session instead.`,
+    { status: 409 },
+  );
+
 async function typeInto(req: Request, s: Session): Promise<Response> {
   const body = await jsonBody(req);
   if (s.exitCode !== null) return new Response("session ended", { status: 409 });
   const text = textOf(body, "text");
+  if (isFilled(text) && isSentry(s) && !isAgent(s)) return nobodyReads(s);
   const typed = isFilled(text) && isAgent(s) ? deliverToAnAgentSayingWhoTypedIt(req, s, text, body) : { text, isQueuedForAnIdlePrompt: false };
   if ("error" in typed) return new Response(typed.error, { status: 409 });
   touchFrom(req, s, "write");
@@ -79,6 +87,7 @@ async function notify(req: Request, s: Session): Promise<Response> {
   const body = await jsonBody(req);
   const text = trimmedTextOf(body);
   if (text === "") return new Response("text required", { status: 400 });
+  if (!isAgent(s)) return nobodyReads(s);
   const isIsaac = flagOf(body, "isaac") === true;
   const stamped = stamp(req, text, isIsaac);
   if ("error" in stamped) return new Response(stamped.error, { status: 409 });

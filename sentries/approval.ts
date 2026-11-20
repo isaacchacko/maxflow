@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ciStateOf, fetchSessions, readStatus, repoOf, run, type Pr } from "../gh";
+import { holdOn } from "../holds";
 import { BASE } from "../instance";
 import { isRecord } from "../shared/guards";
 import { appendStateText, hasState, readGatingStateJson, stateDirectory, writeStateJson } from "../state";
@@ -68,9 +69,23 @@ function isAwaitingApproval(key: string, pr: Pr, drafts: Set<string>) {
   return pr.author?.login === me && pr.state === "OPEN" && isWaiting && ci !== "FAILURE" && ci !== "ERROR" && !drafts.has(key);
 }
 
+const heldLogged = new Set<string>();
+
+// a held PR drops out of everything below: no review, comment, hand-back, or send for approval until it's unheld
+function isHeldNow(key: string) {
+  const held = holdOn(key);
+  if (held === undefined) {
+    if (heldLogged.delete(key)) log(`${key}: unheld`);
+    return false;
+  }
+  if (!heldLogged.has(key)) log(`${key}: held by ${held.by}${held.why === "" ? "" : ` (${held.why})`}; leaving it alone`);
+  heldLogged.add(key);
+  return true;
+}
+
 function waiting() {
   const drafts = new Set(readQueue().filter((q) => q.stage === "draft").map((q) => q.pr));
-  return Object.entries(readStatus()).filter(([key, { pr }]) => isAwaitingApproval(key, pr, drafts)).map(([key, { pr }]) => ({ key, pr }));
+  return Object.entries(readStatus()).filter(([key, { pr }]) => isAwaitingApproval(key, pr, drafts) && !isHeldNow(key)).map(([key, { pr }]) => ({ key, pr }));
 }
 
 function cloneOf(repo: string) {
@@ -318,7 +333,7 @@ async function reviewInBackground(key: string, h: Head, pr: Pr | undefined) {
 }
 
 function startQueued() {
-  const queued = Object.entries(state.heads).filter(([k, h]) => h.status === "queued" && !active.has(k)).toSorted(([, a], [, b]) => (a.started ?? 0) - (b.started ?? 0));
+  const queued = Object.entries(state.heads).filter(([k, h]) => h.status === "queued" && !active.has(k) && !isHeldNow(k)).toSorted(([, a], [, b]) => (a.started ?? 0) - (b.started ?? 0));
   const status = readStatus();
   for (const [key, h] of queued) {
     if (active.size >= MAX_REVIEWS) break;
