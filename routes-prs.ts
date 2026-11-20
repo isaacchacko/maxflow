@@ -1,0 +1,23 @@
+import { prRows } from "./prs";
+import { type Route, exactly, firstAnswer, jsonBody, textOf } from "./route-kit";
+
+const PR_KEY = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
+
+const isIsaacsClick = (req: Request) => req.headers.get("sec-fetch-site") === "same-origin" && !req.headers.has("x-maxflow-from");
+
+async function mergeAsIsaac(req: Request): Promise<Response> {
+  if (!isIsaacsClick(req)) return new Response("only Isaac merges, from the PR view", { status: 403 });
+  const key = textOf(await jsonBody(req), "pr") ?? "";
+  const [, repo = "", n = ""] = PR_KEY.exec(key) ?? [];
+  const row = prRows().find((r) => r.pr === key);
+  if (repo === "" || !row) return new Response("no such open PR", { status: 404 });
+  const gh = Bun.spawn(["gh", "pr", "merge", n, "-R", repo, "--squash"], { stdout: "pipe", stderr: "pipe" });
+  const [code, err] = await Promise.all([gh.exited, new Response(gh.stderr).text()]);
+  return code === 0 ? Response.json({ merged: key }) : new Response(err.trim() || `gh exited ${code}`, { status: 409 });
+}
+
+const ROUTES: Route[] = [exactly("GET", "/api/prs", () => Response.json(prRows())), exactly("POST", "/api/prs/merge", mergeAsIsaac)];
+
+export async function prsRoute(req: Request, url: URL, path: string): Promise<Response | undefined> {
+  return firstAnswer(ROUTES, req, url, path);
+}

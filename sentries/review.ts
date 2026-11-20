@@ -4,6 +4,7 @@ import { holdOn } from "../holds";
 import { BASE as base } from "../instance";
 import { isRecord } from "../shared/guards";
 import { peekStateJson, readStateJson, writeStateJson } from "../state";
+import { recordHistory } from "./review-history";
 import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("review");
@@ -335,6 +336,7 @@ async function tick() {
   const { names, on, owners } = sessionsOnPrs(prs, ties, sessions);
   const queue = prs.map((pr) => queueEntry(pr, on, names));
   writeStateJson(QUEUE_FILE, queue);
+  recordHistory(queue);
   writeWatches(queue.map((q): Watch => ({ pr: q.pr, sessions: owners.get(q.pr) ?? [] })), REVIEW_WATCH);
   writeStateJson("review-edges.json", queue.flatMap((q) => q.sessions.map((s) => ({ session: s.id, label: label(q.pr) }))));
   await landAll(prs, ties, sessions);

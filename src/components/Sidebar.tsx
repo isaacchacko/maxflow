@@ -1,4 +1,4 @@
-import { CircleCheckBig, FileText, Globe, MessagesSquare, ShieldCheck, X, type LucideIcon } from "lucide-react";
+import { CircleCheckBig, FileText, GitPullRequest, Globe, MessagesSquare, ShieldCheck, X, type LucideIcon } from "lucide-react";
 import { AgentFace, type Expression } from "@/components/AgentFace";
 import { Dots } from "@/components/Working";
 import type { Thread } from "@/mock";
@@ -12,6 +12,8 @@ import { agentStore, setPinned, setPinOrder, taskStore, threadStore } from "@/st
 import { closePane, openPane } from "@/threads/pane";
 import { unseenDeep, useSeen } from "@/threads/seen";
 import { isRecord } from "../../shared/guards";
+import { keepLooking, PRS_URL, type PrRow } from "@/views/PrsView";
+import { useJson } from "@/views/stats/load";
 
 const KEY = "yarn-sidebar";
 const RAIL = 52;
@@ -189,6 +191,7 @@ export function Sidebar({ view }: { view: string }) {
 
   const tops = threads.filter(t => !hasText(t.parentId) && !t.resolved && !t.paused);
   const needsYou = tops.filter(t => t.asks).length;
+  const readyToMerge = useJson<PrRow[]>(PRS_URL, keepLooking).value?.filter(r => r.ready).length ?? 0;
   const unread = tops.filter(t => unseenDeep(t, threads) > 0).length;
   const pins = threads.filter(t => t.pinned).toSorted((a, b) => (a.pinned?.order ?? 0) - (b.pinned?.order ?? 0));
   const dropPin = (onto: string) => (dragged: string) => {
@@ -214,6 +217,7 @@ export function Sidebar({ view }: { view: string }) {
         <div className="flex flex-col gap-0.5">
           <Entry view="todo" label="Todo" icon={CircleCheckBig} count={needsYou} warn active={view === "todo"} open={isOpen} />
           <Entry view="inbox" label="Threads" icon={MessagesSquare} count={unread} active={view === "inbox"} open={isOpen} />
+          <Entry view="prs" label="PRs" icon={GitPullRequest} count={readyToMerge} warn active={view === "prs"} open={isOpen} />
           <Entry view="docs" label="Docs" icon={FileText} count={0} active={view === "docs"} open={isOpen} />
           <Entry view="browsers" label="Browsers" icon={Globe} count={browsing} active={view === "browsers"} open={isOpen} />
           <Entry view="restrictions" label="Restrictions" icon={ShieldCheck} count={0} active={view === "restrictions"} open={isOpen} />

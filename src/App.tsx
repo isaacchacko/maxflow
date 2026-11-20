@@ -24,12 +24,14 @@ import { TodoView } from "@/views/TodoView";
 import { DocsView } from "@/views/DocsView";
 import { BrowsersView } from "@/views/BrowsersView";
 import { StatsView } from "@/views/StatsView";
+import { PrsView } from "@/views/PrsView";
 import { Cursors } from "@/cursors/Cursors";
 import { CursorPlayground } from "@/cursors/Playground";
 
 export const views = [
   { id: "todo", label: "Todo" },
   { id: "inbox", label: "Threads" },
+  { id: "prs", label: "PRs" },
   { id: "docs", label: "Docs" },
   { id: "browsers", label: "Browsers" },
   { id: "events", label: "Events" },
@@ -124,6 +126,7 @@ function MainView({ route }: { route: Route }) {
   if (route.detail) return <DetailView detail={route.detail} back={route.view} />;
   if (route.view === "inbox") return <InboxView />;
   if (route.view === "todo") return <TodoView />;
+  if (route.view === "prs") return <PrsView />;
   if (route.view === "docs") return <DocsView path={route.sub} />;
   if (route.view === "browsers") return <BrowsersView id={route.sub} />;
   if (route.view === "restrictions") return <RestrictionsView />;

@@ -22,6 +22,7 @@ import { browserRoute } from "./routes-browser";
 import { keepReapingBrowsers } from "./browsers";
 import { keepSamplingResources } from "./stats-resources";
 import { miscRoute } from "./routes-misc";
+import { prsRoute } from "./routes-prs";
 import { objectivesRoute } from "./routes-objectives";
 import { sessionRoute } from "./routes-session";
 import { signalsRoute } from "./routes-signals";
@@ -174,6 +175,7 @@ const ROUTES: Route[] = [
   async (req, url, path) => threadsRoute(req, url, path),
   async (req, _url, path) => browserRoute(req, path),
   async (req, url, path) => miscRoute(req, url, path),
+  async (req, url, path) => prsRoute(req, url, path),
   async (req, url, path) => statsTodosRoute(req, url, path),
   async (req, url, path) => restrictionsRoute(req, url, path),
   async (req, url, path) => tasksLinksRoute(req, url, path),
