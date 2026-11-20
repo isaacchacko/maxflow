@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { canvasPath, type Change, ISAAC, onCanvasChange, readCanvas } from "./canvas";
 import { diffOf, type Snapshot, snapshotOf } from "./canvas-look";
-import { DOCS_DIR } from "./docs";
 import { CLI, DIR } from "./instance";
 import { createSession, dispatch, setArchived } from "./lifecycle";
 import { type Session, sessions } from "./sessions";
@@ -60,8 +59,9 @@ ${said === "" ? "(no box changed)" : said}
 \`${CLI} canvas show "${path}"\` prints every box. Budget for this look: ${PER_LOOK.box} new boxes, ${PER_LOOK.proposal} proposals. Doing nothing is a fine answer. End your turn with \`${CLI} wait done\`.`;
 }
 
+// constraint: Claude Code stops at a trust prompt in a folder it hasn't been told to trust, like the vault; sentries start in the yarn checkout without one
 function spawned(path: string, text: string) {
-  const session = createSession(`canvas: ${basename(path, ".canvas")}`, ["claude", "--permission-mode", "bypassPermissions", "--append-system-prompt", readFileSync(BRIEF, "utf8"), text], DOCS_DIR);
+  const session = createSession(`canvas: ${basename(path, ".canvas")}`, ["claude", "--permission-mode", "bypassPermissions", "--append-system-prompt", readFileSync(BRIEF, "utf8"), text], DIR);
   agents[path] = session.id;
   writeStateJson(STATE_FILE, agents);
   log(`started ${session.id} for ${path}`);
