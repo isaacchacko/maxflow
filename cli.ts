@@ -69,9 +69,9 @@ const usage = `usage:
   yarn install                            run this checkout as the login service and add its hooks to ~/.claude/settings.json`;
 
 async function install() {
-  const { install: installService, LABEL, LOG } = await import("./service");
+  const { install: installService } = await import("./service");
   const r = installService();
-  console.log(r.ok ? `service ${LABEL} running ${base}, logging to ${LOG}` : `service install failed:\n${r.out}`);
+  console.log(r.ok ? `service ${r.label} running ${base}, logging to ${r.log}` : `service install failed:\n${r.out}`);
   const { installHooks } = await import("./hooks/install");
   console.log(installHooks());
 }

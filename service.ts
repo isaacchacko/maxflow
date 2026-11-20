@@ -112,5 +112,6 @@ WantedBy=default.target
 export function install(sentriesToRun = yarnEnv("SENTRIES") ?? "") {
   const bun = process.execPath;
   const path = `${join(bun, "..")}:${process.env["PATH"] ?? ""}`;
-  return IS_MAC ? installLaunchd(bun, path, sentriesToRun) : installSystemd(bun, path, sentriesToRun);
+  const r = IS_MAC ? installLaunchd(bun, path, sentriesToRun) : installSystemd(bun, path, sentriesToRun);
+  return { ...r, label: labelOf(YARN_SERVICE), log: YARN_SERVICE.log };
 }
