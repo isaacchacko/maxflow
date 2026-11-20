@@ -1,8 +1,10 @@
 #!/bin/sh
 # yarn's merge gate for agent panes, behind the PreToolUse hook: it also catches a merge run from a script the hook never reads
 here=$(cd "$(dirname "$0")" && pwd)
+# constraint: panes started before the rename to yarn carry only MAXFLOW_*
+state=${YARN_STATE:-$MAXFLOW_STATE}
 gate_is_on() {
-  [ -n "$YARN_STATE" ] && grep -Eq '"on" *: *true' "$YARN_STATE/merge-gate.json" 2>/dev/null
+  [ -n "$state" ] && grep -Eq '"on" *: *true' "$state/merge-gate.json" 2>/dev/null
 }
 refuse() {
   gate_is_on || return 0
