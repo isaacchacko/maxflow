@@ -123,15 +123,19 @@ function DetailView({ detail, back }: { detail: Detail; back: ViewId }) {
   return <ThreadPage key={detail.id} id={detail.id} back={back} />;
 }
 
+function PathView({ view, sub }: { view: "timelines" | "docs" | "browsers"; sub: string | undefined }) {
+  if (view === "timelines") return <TimelinesView path={sub} />;
+  if (view === "docs") return <DocsView path={sub} />;
+  return <BrowsersView id={sub} />;
+}
+
 function MainView({ route }: { route: Route }) {
   if (route.dev === "cursors") return <CursorPlayground />;
   if (route.detail) return <DetailView detail={route.detail} back={route.view} />;
   if (route.view === "inbox") return <InboxView />;
   if (route.view === "todo") return <TodoView />;
   if (route.view === "prs") return <PrsView />;
-  if (route.view === "timelines") return <TimelinesView path={route.sub} />;
-  if (route.view === "docs") return <DocsView path={route.sub} />;
-  if (route.view === "browsers") return <BrowsersView id={route.sub} />;
+  if (route.view === "timelines" || route.view === "docs" || route.view === "browsers") return <PathView view={route.view} sub={route.sub} />;
   if (route.view === "restrictions") return <RestrictionsView />;
   if (route.view === "stats") return route.sub === undefined ? <StatsView /> : <StatsView tab={route.sub} />;
   if (route.view === "sentries") return <SentriesView />;

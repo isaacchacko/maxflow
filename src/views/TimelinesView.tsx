@@ -15,7 +15,11 @@ const AUTHOR_WITH_ID = /^(.*) \(([0-9a-f]{8})\)$/;
 const goTo = (path: string) => `#timelines/${encodeURI(path)}`;
 const parentOf = (file: string) => file.split("/").slice(0, -1).join("/");
 const withChips = (text: string) => text.replaceAll(BARE_THREAD_ID, "$1[[thread:$2]]");
-const firstLine = (text: string | undefined) => (text ?? "").trim().split("\n", 1)[0] ?? "";
+const firstLine = (text = "") => text.trim().split("\n", 1)[0] ?? "";
+const agoIfPast = (at: number) => {
+  const since = ago(at);
+  return Number.isNaN(at) || since.startsWith("-") ? "" : ` · ${since} ago`;
+};
 
 function nodeAt(root: Node, path: string): Node {
   let node = root;
@@ -96,7 +100,7 @@ function EventCard({ e }: { e: TimelineEvent }) {
           {Number.isNaN(at) ? "" : new Date(at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
         </span>
         <span className="min-w-0 flex-1 text-sm font-medium">{e.title}</span>
-        <span className="shrink-0 truncate text-xs text-muted-foreground"><Author author={e.author} />{at <= Date.now() && ` · ${ago(at)} ago`}</span>
+        <span className="shrink-0 truncate text-xs text-muted-foreground"><Author author={e.author} />{agoIfPast(at)}</span>
       </div>
       <Markdown text={withChips(e.text)} className="text-sm leading-relaxed" />
     </li>

@@ -29,7 +29,7 @@ async function authorsIn(dir: string) {
   const out = await new Response(log.stdout).text();
   await log.exited;
   const authors = new Map<string, string>();
-  for (const block of out.split("\u0001").slice(1)) {
+  for (const block of out.split("\u{1}").slice(1)) {
     const [author = "", ...files] = block.split("\n").filter((line) => line !== "");
     for (const file of files) if (!authors.has(file)) authors.set(file, author);
   }
