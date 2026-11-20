@@ -14,7 +14,6 @@
   "sentries/health.ts": 6,
   "sentry-commands.ts": 7,
   "server.ts": 24,
-  "state.ts": 1,
   "transcripts.ts": 1,
   "world.ts": 3
 }

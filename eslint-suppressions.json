@@ -20,7 +20,7 @@
   },
   "instance.ts": {
     "unicorn/consistent-boolean-name": {
-      "count": 2
+      "count": 1
     }
   },
   "introduce.ts": {
@@ -37,19 +37,6 @@
       "count": 1
     },
     "yarn/no-comments": {
-      "count": 1
-    }
-  },
-  "lifecycle.ts": {
-    "max-params": {
-      "count": 1
-    },
-    "unicorn/consistent-boolean-name": {
-      "count": 2
-    }
-  },
-  "objectives.ts": {
-    "unicorn/consistent-boolean-name": {
       "count": 1
     }
   },
@@ -617,22 +604,6 @@
       "count": 22
     }
   },
-  "sentries/rename.ts": {
-    "yarn/state-dir-in-state": {
-      "count": 1
-    },
-    "yarn/state-writes-in-state": {
-      "count": 1
-    }
-  },
-  "sentries/singleton.ts": {
-    "yarn/state-dir-in-state": {
-      "count": 1
-    },
-    "yarn/state-writes-in-state": {
-      "count": 1
-    }
-  },
   "sentry-commands.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
@@ -848,17 +819,6 @@
       "count": 1
     }
   },
-  "src/pwa/sw.js": {
-    "@typescript-eslint/no-unsafe-call": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unsafe-member-access": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 2
-    }
-  },
   "stamp.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
@@ -892,41 +852,6 @@
     },
     "yarn/no-comments": {
       "count": 3
-    }
-  },
-  "state.ts": {
-    "@typescript-eslint/no-confusing-void-expression": {
-      "count": 8
-    },
-    "@typescript-eslint/no-deprecated": {
-      "count": 4
-    },
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    },
-    "@typescript-eslint/no-unsafe-return": {
-      "count": 3
-    },
-    "@typescript-eslint/no-unused-expressions": {
-      "count": 6
-    },
-    "no-restricted-syntax": {
-      "count": 13
-    },
-    "unicorn/consistent-boolean-name": {
-      "count": 1
-    },
-    "unicorn/no-computed-property-existence-check": {
-      "count": 1
-    },
-    "unicorn/no-for-each": {
-      "count": 2
-    },
-    "unicorn/no-unreadable-for-of-expression": {
-      "count": 1
-    },
-    "yarn/no-comments": {
-      "count": 16
     }
   },
   "stores.ts": {
