@@ -14,7 +14,7 @@ const AGENT_EMAIL = "docs@maxflow.local";
 export type Entry = { who: string; text: string };
 export type CommentThread = { line: number; entries: Entry[]; isOpen: boolean };
 export type DocSummary = { path: string; owner?: string; open: number };
-export type Vault = { docs: DocSummary[]; folders: string[]; files: string[] };
+export type Vault = { docs: DocSummary[]; canvases: string[]; folders: string[]; files: string[] };
 export const ATTACHMENTS = "attachments";
 
 function git(args: string[], env: Record<string, string> = {}) {
@@ -151,10 +151,10 @@ function summary(path: string): DocSummary {
 }
 
 export function listVault(): Vault {
-  if (!existsSync(DOCS_DIR)) return { docs: [], folders: [], files: [] };
+  if (!existsSync(DOCS_DIR)) return { docs: [], canvases: [], folders: [], files: [] };
   const { folders, files } = walk(DOCS_DIR, { folders: [], files: [] });
   const docs = files.filter((f) => f.endsWith(".md")).toSorted(byPath);
-  return { docs: docs.map((path) => summary(path)), folders: folders.toSorted(byPath), files: files.filter((f) => !f.endsWith(".md")).toSorted(byPath) };
+  return { docs: docs.map((path) => summary(path)), canvases: files.filter((f) => f.endsWith(".canvas")).toSorted(byPath), folders: folders.toSorted(byPath), files: files.filter((f) => !f.endsWith(".md")).toSorted(byPath) };
 }
 
 export const listDocs = () => listVault().docs;

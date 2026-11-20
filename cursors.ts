@@ -28,6 +28,17 @@ const docTargets = (path: string) => {
   return [`docs:doc:${doc}`, `docs:doc:${doc}.md`, `docs:folder:${doc}`];
 };
 
+const canvasFile = (path: string) => {
+  const file = decodeURIComponent(path);
+  return file.endsWith(".canvas") ? file : `${file}.canvas`;
+};
+const boxTarget = (path: string, id: unknown) => `canvas:node:${canvasFile(path)}:${stringOr(id)}`;
+
+function boxAction(body: Record<string, unknown>) {
+  if (typeof body["text"] === "string") return "edit box";
+  return body["width"] === undefined && body["height"] === undefined ? "move box" : "resize box";
+}
+
 const taskTargets = (id: string) => [`row:t${id}`, `page-title:task/t${id}`, `worker-task:t${id}`, `card-task:t${id}`];
 
 function taskAction(id: string | undefined, body: Record<string, unknown>) {
@@ -64,6 +75,15 @@ const RULES: Rule[] = [
   { method: "PUT", path: /^\/api\/docs\/(.+)$/, aim: m => ({ action: "edit doc", targets: docTargets(m[1] ?? "") }) },
   { method: "POST", path: /^\/api\/docs-folder\/(.+)$/, aim: m => ({ action: "new folder", targets: docTargets(m[1] ?? "") }) },
   { method: "PATCH", path: /^\/api\/docs\/(.+)$/, aim: m => ({ action: "move doc", targets: docTargets(m[1] ?? "") }) },
+  { method: "POST", path: /^\/api\/canvas\/([^/]+)$/, aim: m => ({ action: "new canvas", targets: docTargets(canvasFile(m[1] ?? "")) }) },
+  { method: "POST", path: /^\/api\/canvas\/([^/]+)\/nodes$/, aim: (m, { reply }) => ({ action: "add box", targets: [boxTarget(m[1] ?? "", reply["id"])] }) },
+  { method: "PATCH", path: /^\/api\/canvas\/([^/]+)\/nodes\/([\w-]+)$/, aim: (m, { body }) => ({ action: boxAction(body), targets: [boxTarget(m[1] ?? "", m[2])] }) },
+  { method: "DELETE", path: /^\/api\/canvas\/([^/]+)\/nodes\/([\w-]+)$/, aim: m => ({ action: "delete box", targets: [boxTarget(m[1] ?? "", m[2]), `canvas:plane:${canvasFile(m[1] ?? "")}`] }) },
+  {
+    method: "POST",
+    path: /^\/api\/canvas\/([^/]+)\/nodes\/([\w-]+)\/link$/,
+    aim: (m, { body }) => ({ action: "link", targets: [boxTarget(m[1] ?? "", m[2]), boxTarget(m[1] ?? "", body["to"])] }),
+  },
 ];
 
 const unmapped = (method: string, path: string): Aim => ({ action: `${method} ${path.replace(/^\/api\//, "").replaceAll(/\/[\w-]*\d[\w-]*/g, "/:id")}`, targets: [] });

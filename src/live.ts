@@ -4,6 +4,7 @@ import { markResurfaced } from "./threads/seen";
 import { agentStore, ownChanges, liveStore, movedStore, objectiveStore, nameStore, prStore, type Pr, refreshed, sentryStore, shellStore, signalStore, sourceStore, taskStore, threadStore } from "./store";
 import { isRecord } from "../shared/guards";
 import { cursorFrom, fireCursor } from "./cursors/store";
+import { canvasChanged } from "./views/docs/canvas-api";
 
 type World = { objectives: Objective[]; agents: Agent[]; tasks: Task[]; threads: Thread[]; signals: Signal[]; sentries: SentrySession[]; shells?: Shell[]; names?: Record<string, string>; prs?: Record<string, Pr> };
 type Patch = { from: number; v: number; upsert: Record<string, { id: string | number }[]>; remove: Record<string, string[]>; order: Record<string, string[]>; set: Record<string, unknown> };
@@ -117,6 +118,10 @@ function onWorldMessage(ws: WebSocket, e: MessageEvent) {
   const cursor = isRecord(m) ? cursorFrom(m) : undefined;
   if (cursor) {
     fireCursor(cursor);
+    return;
+  }
+  if (isRecord(m) && m["type"] === "canvas") {
+    canvasChanged(String(m["path"]));
     return;
   }
   if (isRecord(m) && m["type"] === "world" && isWorld(m["world"]) && typeof m["v"] === "number") {

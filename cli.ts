@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { boardVerbs, objectiveVerbs } from "./cli-board";
 import { browserVerbs } from "./cli-browser";
+import { CANVAS_USAGE, canvasVerbs } from "./cli-canvas";
 import { docVerbs } from "./cli-docs";
 import { holdVerbs } from "./cli-holds";
 import { eventVerbs, sessionVerbs } from "./cli-sessions";
@@ -52,6 +53,7 @@ const usage = `usage:
   maxflow thread move <thread id> <objective id>   re-home a thread and its subthreads onto that objective and its routers
   maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
   maxflow docs ls | read <path> | write <path> [text...] | mv <path> <to> | rm <path>   Isaac's docs vault (markdown, git-committed per write; stdin when no text)
+  ${CANVAS_USAGE}   a .canvas in the docs vault, one box per call (agents never clobber a box being typed in)
   maxflow browser open <url> | goto <url>   your own headless Chrome (started on demand, closed after 10 min unused): load a page, print its url and title
   maxflow browser screenshot [path] | read [--ax] | console [--last N]   a PNG (prints its path), the page's text or accessibility tree, its console
   maxflow browser click <selector | visible text> | type <selector | text> <text...> [--enter] | eval <js> | cdp | close   real input events; cdp prints the page's DevTools socket
@@ -80,7 +82,7 @@ const shipVerbs: Verb[] = [
   { matches: (verb) => verb === "install", run: install },
 ];
 
-const VERBS: Verb[] = [...waitVerbs, ...sessionVerbs, ...boardVerbs, ...eventVerbs, ...watchVerbs, ...objectiveVerbs, ...threadVerbs, ...docVerbs, ...holdVerbs, ...browserVerbs, ...shipVerbs];
+const VERBS: Verb[] = [...waitVerbs, ...sessionVerbs, ...boardVerbs, ...eventVerbs, ...watchVerbs, ...objectiveVerbs, ...threadVerbs, ...docVerbs, ...canvasVerbs, ...holdVerbs, ...browserVerbs, ...shipVerbs];
 
 const [verb, ...rest] = process.argv.slice(2);
 const chosen = VERBS.find((v) => v.matches(verb, rest));

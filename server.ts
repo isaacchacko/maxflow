@@ -11,6 +11,7 @@ import { SessionCap, settleTasks, stopAgent, wake } from "./lifecycle";
 import { checkShells } from "./waits";
 import { deliver } from "./delivery";
 import { RESYNC_MS, resync } from "./turns";
+import { canvasRoute } from "./canvas-api";
 import { docsRoute } from "./docs-api";
 import { sizingRoute } from "./sizing";
 import { withCursors } from "./cursors";
@@ -170,6 +171,7 @@ async function mockOrRealWorkKeptOutOfTheRepo() {
 
 const ROUTES: Route[] = [
   async (req, url) => docsRoute(req, url),
+  async (req, url) => canvasRoute(req, url),
   async (req, url) => sizingRoute(req, url),
   async (req, url, path, server) => sessionsWorldRoute(req, url, path, server),
   async (req, url, path) => signalsRoute(req, url, path),

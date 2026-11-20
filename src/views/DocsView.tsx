@@ -3,6 +3,7 @@ import { useInterval, useResource } from "@/lib/effects";
 import { cn, hasText } from "@/lib/utils";
 import { RefChip } from "@/threads/Rich";
 import { type Doc, type DocSummary, loadDoc, loadVault } from "./docs/api";
+import { CanvasPane } from "./docs/Canvas";
 import { useDocEditor } from "./docs/Editor";
 import { Tree } from "./docs/Tree";
 
@@ -45,7 +46,7 @@ const firstToShow = (docs: DocSummary[]) => (docs.find((d) => d.open > 0) ?? doc
 
 function emptyText(vault: { error?: Error; value?: unknown }) {
   if (vault.error) return vault.error.message;
-  return vault.value === undefined ? "Loading…" : "No docs yet. Make one with the new-doc button.";
+  return vault.value === undefined ? "Loading…" : "No docs yet. Make one with the new-doc or new-canvas button.";
 }
 
 export function DocsView({ path }: { path: string | undefined }) {
@@ -60,7 +61,9 @@ export function DocsView({ path }: { path: string | undefined }) {
         </div>
         {vault.value && <Tree vault={vault.value} selected={shown} onChanged={vault.reload} />}
       </aside>
-      {hasText(shown) && vault.value ? (
+      {hasText(shown) && shown.endsWith(".canvas") && vault.value ? (
+        <CanvasPane key={shown} path={shown} />
+      ) : hasText(shown) && vault.value ? (
         <DocPane key={shown} path={shown} vault={vault.value} />
       ) : (
         <p className="p-6 text-sm text-muted-foreground">{emptyText(vault)}</p>
