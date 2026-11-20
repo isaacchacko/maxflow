@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isRecord } from "../shared/guards";
 import { appendStateText, didClaimState, hasState, listState, readGatingStateJson, readStateJson, removeState, stateDirectory, writeStateJson } from "../state";
+import { isWaitingOnReview } from "./approval-score";
 
 const STATE_FILE = "approval-notified.json";
 const BOARD_FILE = "review-board.json";
@@ -75,13 +76,20 @@ async function sendSafely(cfg: Endpoint, n: Note) {
   }
 }
 
+const isApprovedReview = (review: unknown) => isRecord(review) && review["state"] === "APPROVED";
+
 function isAwaitingReviewAt(pr: unknown, sha: string) {
-  return isRecord(pr) && pr["state"] === "OPEN" && pr["headRefOid"] === sha && pr["reviewDecision"] === "REVIEW_REQUIRED";
+  if (!isRecord(pr) || pr["state"] !== "OPEN" || pr["headRefOid"] !== sha) return false;
+  const reviews: unknown = pr["latestReviews"];
+  const approved = Array.isArray(reviews) && reviews.some(isApprovedReview);
+  const decision = pr["reviewDecision"];
+  const merge = pr["mergeStateStatus"];
+  return isWaitingOnReview({ reviewDecision: typeof decision === "string" ? decision : null, ...(typeof merge === "string" && { mergeStateStatus: merge }), approved });
 }
 
 function standingOnGitHub(n: Note): Standing {
   const [repo = "", num = ""] = n.pr.split("#", 2);
-  const r = Bun.spawnSync(["gh", "pr", "view", num, "--repo", repo, "--json", "state,headRefOid,reviewDecision"], { stderr: "pipe" });
+  const r = Bun.spawnSync(["gh", "pr", "view", num, "--repo", repo, "--json", "state,headRefOid,reviewDecision,mergeStateStatus,latestReviews"], { stderr: "pipe" });
   if (r.exitCode !== 0) return "unknown";
   const pr: unknown = JSON.parse(r.stdout.toString());
   return isAwaitingReviewAt(pr, n.sha) ? "waiting" : "moved";

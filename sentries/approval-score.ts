@@ -13,6 +13,12 @@ const UNTESTED_LINES = 150;
 const WIDE_SPREAD = 3;
 const COMPLEXITY_JUMPS = 2;
 
+export type ReviewStanding = { reviewDecision: string | null; mergeStateStatus?: string; approved: boolean };
+
+// constraint: GitHub leaves reviewDecision null on some PRs that main's ruleset still blocks on a review, so a BLOCKED one with no approval waits too
+export const isWaitingOnReview = (s: ReviewStanding) =>
+  s.reviewDecision === "REVIEW_REQUIRED" || ((s.reviewDecision ?? "") === "" && s.mergeStateStatus === "BLOCKED" && !s.approved);
+
 export type FastLane = { eligible: boolean; category: string | null; reasons: string[] };
 export type Signals = {
   base: string; files: number; lines: number; fastLane: FastLane | null;

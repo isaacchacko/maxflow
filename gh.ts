@@ -11,7 +11,7 @@ type Review = { id: string; state: string; body: string; author: Author };
 type Comment = { id: string; body: string; url: string; author: Author };
 export type ThreadComment = Comment & { path: string };
 export type Pr = {
-  number: number; url: string; title: string; state: string; createdAt: string; updatedAt?: string; mergeable: string; reviewDecision: string | null; headRefOid: string; headRefName: string;
+  number: number; url: string; title: string; state: string; createdAt: string; updatedAt?: string; mergeable: string; mergeStateStatus?: string; reviewDecision: string | null; headRefOid: string; headRefName: string;
   author: { __typename: string; login: string } | null; authorAssociation: string;
   commits: { nodes: { commit: { statusCheckRollup: { state: string; contexts: { nodes: CheckContext[] } } | null } }[] };
   reviews: { nodes: Review[] };
@@ -19,7 +19,7 @@ export type Pr = {
   reviewThreads: { nodes: { isResolved: boolean; comments: { nodes: ThreadComment[] } }[] };
 };
 export type Head = {
-  number: number; updatedAt: string; state: string; mergeable: string; reviewDecision: string | null; headRefOid: string;
+  number: number; updatedAt: string; state: string; mergeable: string; mergeStateStatus?: string; reviewDecision: string | null; headRefOid: string;
   commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
 };
 export type PolledPr = { at: number; pr: Pr };
@@ -39,13 +39,13 @@ const PR_NUMBER = /^#?(\d+)$/;
 const PRS_PER_FULL_QUERY = 20;
 const PRS_PER_HEAD_QUERY = 100;
 
-const FIELDS = `number url title state createdAt updatedAt mergeable reviewDecision headRefOid headRefName author { __typename login } authorAssociation
+const FIELDS = `number url title state createdAt updatedAt mergeable mergeStateStatus reviewDecision headRefOid headRefName author { __typename login } authorAssociation
   commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
     __typename ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }
   reviews(last: 30) { nodes { id state body author { login } } }
   comments(last: 30) { nodes { id body url author { login } } }
   reviewThreads(last: 50) { nodes { isResolved comments(last: 10) { nodes { id body path url author { login } } } } }`;
-const HEAD = `number updatedAt state mergeable reviewDecision headRefOid commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
+const HEAD = `number updatedAt state mergeable mergeStateStatus reviewDecision headRefOid commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
 
 export const rateLimit = { wasHit: false };
 

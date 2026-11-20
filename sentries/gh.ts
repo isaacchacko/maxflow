@@ -86,7 +86,7 @@ function probes(body: string) {
   return runs.map((r) => r.trim().slice(0, 80)).toSorted((a, b) => b.length - a.length).slice(0, 5);
 }
 
-const signature = (p: Head | Pr) => [p.updatedAt, p.state, p.mergeable, p.reviewDecision, p.headRefOid, ciStateOf(p)].join(" ");
+const signature = (p: Head | Pr) => [p.updatedAt, p.state, p.mergeable, p.mergeStateStatus, p.reviewDecision, p.headRefOid, ciStateOf(p)].join(" ");
 
 function ciChange(pr: Pr, prev: PrState): Change[] {
   const rollup = rollupOf(pr);

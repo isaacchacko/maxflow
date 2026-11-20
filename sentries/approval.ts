@@ -9,7 +9,7 @@ import { appendStateText, hasState, readGatingStateJson, stateDirectory, writeSt
 import { compose, isCommentingOn, post, type Posted } from "./approval-comment";
 import { config, enqueue, flush, type Note } from "./approval-notify";
 import { runReview, type Lens, type LensReview, type Reviewing } from "./approval-review";
-import { changesOf, isFastLane, isReviewableCode, signalsOf, tierOf, type FastLane, type Scored, type Signals } from "./approval-score";
+import { changesOf, isFastLane, isReviewableCode, isWaitingOnReview, signalsOf, tierOf, type FastLane, type Scored, type Signals } from "./approval-score";
 import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("approval");
@@ -36,7 +36,7 @@ type Head = {
   why?: string; tier?: number; reasons?: string[]; signals?: Signals; lenses?: string[]; reviews?: LensReview[];
   started?: number; finished?: number; handed?: number;
 };
-type State = { heads: Record<string, Head>; rounds: Record<string, number>; comments: Record<string, Posted> };
+type State = { heads: Record<string, Head>; rounds: Record<string, number>; comments: Record<string, Posted>; threadsAsked: Record<string, string> };
 type QueueRow = { pr: string; stage: string; sessions: { id: string }[] };
 type PrMeta = { isDraft: boolean; baseRefName: string; body: string | null };
 
@@ -48,7 +48,7 @@ function readJson<T>(name: string, fallback: T, isWanted: (value: unknown) => va
   return readGatingStateJson(name, isWanted) ?? fallback;
 }
 
-const state: State = { heads: {}, rounds: {}, comments: {}, ...readJson(STATE_FILE, {}, isPartialState) };
+const state: State = { heads: {}, rounds: {}, comments: {}, threadsAsked: {}, ...readJson(STATE_FILE, {}, isPartialState) };
 const save = () => {
   writeStateJson(STATE_FILE, state);
 };
@@ -59,9 +59,13 @@ const me = run(["gh", "api", "user", "--jq", ".login"]);
 const readQueue = () => readJson("review-queue.json", [], isQueue);
 const shortSha = (h: Head) => h.sha.slice(0, 8);
 
+const isApproved = (pr: Pr) => pr.reviews.nodes.some((r) => r.state === "APPROVED");
+const unresolvedThreads = (pr: Pr) => pr.reviewThreads.nodes.filter((t) => !t.isResolved).length;
+
 function isAwaitingApproval(key: string, pr: Pr, drafts: Set<string>) {
   const ci = ciStateOf(pr);
-  return pr.author?.login === me && pr.state === "OPEN" && pr.reviewDecision === "REVIEW_REQUIRED" && ci !== "FAILURE" && ci !== "ERROR" && !drafts.has(key);
+  const waits = isWaitingOnReview({ reviewDecision: pr.reviewDecision, mergeStateStatus: pr.mergeStateStatus, approved: isApproved(pr) });
+  return pr.author?.login === me && pr.state === "OPEN" && waits && ci !== "FAILURE" && ci !== "ERROR" && !drafts.has(key);
 }
 
 function waiting() {
@@ -188,15 +192,26 @@ async function handBack(key: string, h: Head) {
     log(`${key}: findings again after ${MAX_ROUNDS} rounds; left for a human`);
     return;
   }
-  const ask = findingsAsk(h, rounds);
+  log(`${key}: findings (round ${rounds}) to ${await tellOwner(key, h.url, findingsAsk(h, rounds))}`);
+}
+
+async function tellOwner(key: string, url: string, ask: string) {
   const owner = readQueue().find((q) => q.pr === key)?.sessions[0]?.id;
-  const reviewSentry = await reviewSentryId();
-  const to = owner ?? reviewSentry;
+  const to = owner ?? (await reviewSentryId());
   const text = owner === undefined
-    ? `[maxflow approval] ${h.url} has no session. Get these findings to its chat as in your job 1 (revive the chat that opened it, or start one on its branch), verbatim, and tell it to fix and push:\n\n${ask}`
+    ? `[maxflow approval] ${url} has no session. Get this to its chat as in your job 1 (revive the chat that opened it, or start one on its branch), verbatim, and tell it to act on it:\n\n${ask}`
     : `[maxflow approval] ${ask}`;
   if (to !== "") await didNotify(to, text);
-  log(`${key}: findings (round ${rounds}) to ${owner ?? `the review sentry ${to === "" ? "(not found)" : to}`}`);
+  return owner ?? `the review sentry ${to === "" ? "(not found)" : to}`;
+}
+
+const threadsAsk = (h: Head, open: number) =>
+  `The approval sentry's review of ${h.url} at ${shortSha(h)} passed, but ${open} review thread(s) are unresolved, and main's ruleset blocks the merge until every thread is resolved, approval or not. Fix or answer each one and resolve it; Liudvikas is asked to approve once none are left.`;
+
+async function askToResolveThreads(key: string, h: Head, open: number) {
+  state.threadsAsked[key] = h.sha;
+  save();
+  log(`${key}@${shortSha(h)}: passed with ${open} unresolved thread(s); held, asked ${await tellOwner(key, h.url, threadsAsk(h, open))}`);
 }
 
 async function handBackAndSave(key: string, h: Head) {
@@ -319,12 +334,19 @@ const note = (key: string, h: Head): Note => ({
   ...(h.signals && { codeOwnedPaths: h.signals.owned }),
 });
 
-function actOnReviewed(live: Map<string, string>) {
+function actOnPassed(key: string, h: Head, pr: Pr) {
+  void comment(key, h);
+  const open = unresolvedThreads(pr);
+  if (open === 0) enqueue(note(key, h));
+  else if (state.threadsAsked[key] !== h.sha && hasState(WRITE_SWITCH)) void askToResolveThreads(key, h, open);
+}
+
+function actOnReviewed(live: Map<string, Pr>) {
   for (const [key, h] of Object.entries(state.heads)) {
-    if (h.status !== "done" || live.get(key) !== h.sha) continue;
+    const pr = live.get(key);
+    if (h.status !== "done" || pr?.headRefOid !== h.sha) continue;
     if (isPassed(h)) {
-      enqueue(note(key, h));
-      void comment(key, h);
+      actOnPassed(key, h, pr);
     } else if (h.handed === undefined && hasState(WRITE_SWITCH)) {
       void handBackAndSave(key, h);
     }
@@ -335,9 +357,12 @@ function tick() {
   queueNewHeads();
   startQueued();
   save();
-  const live = new Map(waiting().map(({ key, pr }) => [key, pr.headRefOid]));
+  const live = new Map(waiting().map(({ key, pr }) => [key, pr]));
   actOnReviewed(live);
-  void flush((n) => live.get(n.pr) === n.sha);
+  void flush((n) => {
+    const pr = live.get(n.pr);
+    return pr?.headRefOid === n.sha && unresolvedThreads(pr) === 0;
+  });
 }
 
 const mode = hasState(WRITE_SWITCH) ? "handing findings to the PRs' agents" : `shadow mode (touch ${join(dirname(OUT_DIR), WRITE_SWITCH)} to act)`;
