@@ -1,12 +1,10 @@
 import { prRows } from "./prs";
-import { type Route, exactly, firstAnswer, jsonBody, textOf } from "./route-kit";
+import { type Route, exactly, firstAnswer, isIsaacsBrowser, jsonBody, textOf } from "./route-kit";
 
 const PR_KEY = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
 
-const isIsaacsClick = (req: Request) => req.headers.get("sec-fetch-site") === "same-origin" && !req.headers.has("x-maxflow-from");
-
 async function mergeAsIsaac(req: Request): Promise<Response> {
-  if (!isIsaacsClick(req)) return new Response("only Isaac merges, from the PR view", { status: 403 });
+  if (!isIsaacsBrowser(req)) return new Response("only Isaac merges, from the PR view", { status: 403 });
   const key = textOf(await jsonBody(req), "pr") ?? "";
   const [, repo = "", n = ""] = PR_KEY.exec(key) ?? [];
   const isListed = prRows().some((r) => r.pr === key && r.ended === null);
