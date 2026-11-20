@@ -3,7 +3,7 @@ import { publish } from "./bus";
 import { CLI } from "./instance";
 import { type Session, isSentry } from "./sessions";
 import type { Feed, Message, Objective, Thread } from "./model";
-import { live, objectives, saveThreads, threads } from "./stores";
+import { isLive, objectives, saveThreads, threads } from "./stores";
 import { dispatch, funnel, live_thread, routersOf } from "./lifecycle";
 import { ISAAC_IN_THREAD, ancestors, mentionsIn, message, pathTitle, postIn, schedulePause, sessionless, tellMembers, unforge, unpause } from "./threads";
 import { feedPosts, feedToFunnel, sizeFirst, slackChannels } from "./routing";
@@ -61,7 +61,7 @@ function hisInboxMessageForTheFunnelToRoute(text: string): Response {
   });
   t.signal = ev.seq;
   threads.push(t);
-  tellMembers(t, first, [funnel()].filter(live));
+  tellMembers(t, first, [funnel()].filter(isLive));
   saveThreads();
   return Response.json(t, { status: 201 });
 }

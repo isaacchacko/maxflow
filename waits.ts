@@ -4,7 +4,7 @@ import { publish } from "./bus";
 import { scoped, tmuxName } from "./tmux";
 import { type Session, type Wait, sessions } from "./sessions";
 import type { Shell } from "./model";
-import { live, saveThreads, threads } from "./stores";
+import { isLive, saveThreads, threads } from "./stores";
 import { createSession, endWait, screen, setArchived, setWait, tellWaiters, threadOf, waitLabel, isWaitingOn } from "./lifecycle";
 import { isFilled, isRecord } from "./shared/guards";
 
@@ -100,7 +100,7 @@ function endWaitsOnShell(x: Shell, end: NonNullable<Shell["end"]>) {
 }
 function closeFinishedCommandPanes() {
   for (const x of shells)
-    if (x.kind === "cmd" && x.end && Date.now() - x.end.at > FINISHED_COMMAND_PANE_KEEP_MS && live(sessions.get(x.id))) scoped("kill-session", "-t", tmuxName(x.id));
+    if (x.kind === "cmd" && x.end && Date.now() - x.end.at > FINISHED_COMMAND_PANE_KEEP_MS && isLive(sessions.get(x.id))) scoped("kill-session", "-t", tmuxName(x.id));
 }
 export function checkShells() {
   let hasChanged = false;
@@ -117,7 +117,7 @@ export function checkShells() {
 }
 function paneShell(s: Session, desc: string, pane: string): Shell | string {
   const o = sessions.get(pane);
-  if (!o || o === s || !live(o)) return `no other running session ${pane}`;
+  if (!o || o === s || !isLive(o)) return `no other running session ${pane}`;
   return addShell({ id: o.id, desc, owner: s.id, kind: "pane", cwd: o.cwd, at: Date.now() });
 }
 function pidShell(s: Session, desc: string, pid: number): Shell | string {

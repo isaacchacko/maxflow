@@ -9,7 +9,7 @@ import { patch } from "./patch";
 import { type Session, sessions } from "./sessions";
 import { isRecord, stringOr } from "./shared/guards";
 import { peekStateJson, writeStateJson } from "./state";
-import { live, saveTasks, saveThreads, tasks, threads } from "./stores";
+import { isLive, saveTasks, saveThreads, tasks, threads } from "./stores";
 import { headline, mentionsIn, message, unforge, unpause } from "./threads";
 import { tmuxAsync, tmuxName } from "./tmux";
 
@@ -257,7 +257,7 @@ export function startRouter(o: Objective, scope: string, request?: string) {
 }
 
 export async function acceptTrust(s: Session) {
-  for (let i = 0; i < TRUST_DIALOG_POLLS && live(s); i++) {
+  for (let i = 0; i < TRUST_DIALOG_POLLS && isLive(s); i++) {
     await Bun.sleep(1000);
     const text = screen(s, 0);
     // constraint: Claude Code's folder trust dialog opens on "No, exit", so Down then Enter accepts it

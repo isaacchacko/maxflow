@@ -5,7 +5,7 @@ import { BASE, DIR, ARE_AGENTS_INERT, INERT_CWD, INSTANCE, MAX_SESSIONS } from "
 import { TMUX, launchable, named, paneEnv, respawn, scoped, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
 import { type ClaudeState, type Role, type Session, type Wait, chatOf, isAgent, isSentry, sessions } from "./sessions";
 import { type Signal, type Source, TASK_STATUSES, type Task, type TaskEdit, type Thread } from "./model";
-import { live, saveTasks, tasks, threads } from "./stores";
+import { isLive, saveTasks, tasks, threads } from "./stores";
 import { patch } from "./patch";
 import { isFilled } from "./shared/guards";
 
@@ -100,8 +100,8 @@ function targetOf(source: Source, text: string, from?: Session) {
   if (from) return from.name.replace(/^sentry:/, "");
   return source === "isaac" ? "chat" : "maxflow";
 }
-export const isReachable = (s?: Session): s is Session => live(s) && isAgent(s);
-export const funnel = () => sessions.values().find((s) => s.name === "sentry:funnel" && isSentry(s) && live(s));
+export const isReachable = (s?: Session): s is Session => isLive(s) && isAgent(s);
+export const funnel = () => sessions.values().find((s) => s.name === "sentry:funnel" && isSentry(s) && isLive(s));
 export function routersOf(objective: string): Session[] {
   const all = sessions.values().filter((s) => isReachable(s) && s.role?.role === "router" && s.role.objective === objective).toArray();
   const own = all.filter((s) => s.role?.merged !== true);
@@ -112,7 +112,7 @@ export const newerRouterOnScope = (s: Session, pool: Session[] = routersOf(s.rol
   pool.find((x) => x !== s && x.role?.scope === s.role?.scope && x.createdAt > s.createdAt);
 
 type Dispatch = { text: string; source?: Source; from?: Session; to?: Session[]; objective?: string; target?: string; deliver?: string | ((seq: number) => string); typed?: boolean };
-const recipientsOf = (objective: string | undefined) => (isFilled(objective) ? routersOf(objective) : [funnel()].filter(live));
+const recipientsOf = (objective: string | undefined) => (isFilled(objective) ? routersOf(objective) : [funnel()].filter(isLive));
 function deliveredText(m: Dispatch, source: Source, seq: number) {
   const text = typeof m.deliver === "function" ? m.deliver(seq) : (m.deliver ?? m.text);
   const isHisOwnTypedWords = source === "isaac" && (m.deliver === undefined || m.deliver === "");

@@ -4,7 +4,7 @@ import { onReply } from "./restrictions-enforce";
 import { loadRestrictions, type Restriction } from "./restrictions";
 import { type Session, isAgent, isSentry, sessions } from "./sessions";
 import type { Message, Thread } from "./model";
-import { live, names, objectives, saveThreads, threads } from "./stores";
+import { isLive, names, objectives, saveThreads, threads } from "./stores";
 import { DEFAULT_AFTER_H } from "./intro";
 import { patch } from "./patch";
 import { isFilled } from "./shared/guards";
@@ -110,7 +110,7 @@ function handHisPost(t: Thread, m: Message, woke: string) {
   const front = funnel();
   if (front && to.length === 0) tellFunnelNobodyOwns(t, m, woke, front);
   else handToOwner(t, m, woke, to);
-  tellMembers(t, m, to.length > 0 ? to : [front].filter(live), woke);
+  tellMembers(t, m, to.length > 0 ? to : [front].filter(isLive), woke);
   if (to.length > 0) patch(t, { pending: { routers: to.map((s) => s.id), since: Date.now() } });
   for (const s of to) s.handed = t.id;
   answered(t);

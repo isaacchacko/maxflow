@@ -6,7 +6,7 @@ import type { Message, Objective, Signal, Source, Task, Thread } from "./model";
 import { SENTRY_USES } from "./sentry-uses";
 import { type Session, isAgent, isSentry, sessions } from "./sessions";
 import { isFilled, isRecord } from "./shared/guards";
-import { live, names, objectives, rememberNames, tasks, threads } from "./stores";
+import { isLive, names, objectives, rememberNames, tasks, threads } from "./stores";
 import { shells } from "./waits";
 import {
   agentState,
@@ -105,7 +105,7 @@ function deliveryToEach(d: Signal, ids: string[]) {
   return Object.fromEntries(
     ids.map((id) => {
       const s = sessions.get(id);
-      if (!live(s)) return [id, "gone"];
+      if (!isLive(s)) return [id, "gone"];
       return [id, s.inbox.some((t) => t.includes(head)) ? "queued" : "delivered"];
     }),
   );
@@ -316,7 +316,7 @@ const sentryRows = () =>
     .map((s) => ({
       id: s.id,
       name: s.name.replace(/^sentry:/, ""),
-      running: live(s),
+      running: isLive(s),
       agent: isAgent(s),
       status: status(s),
       lastOutputAt: Math.floor(s.lastOutputAt / SENTRY_OUTPUT_ROUNDING_SO_EACH_LINE_PRINTED_ISNT_RESENT_TO_EVERY_TAB_MS) * SENTRY_OUTPUT_ROUNDING_SO_EACH_LINE_PRINTED_ISNT_RESENT_TO_EVERY_TAB_MS,
@@ -328,7 +328,7 @@ const sentryRows = () =>
 
 function namesOfEndedSessions() {
   rememberNames();
-  return Object.fromEntries(Object.entries(names).filter(([id]) => !live(sessions.get(id))));
+  return Object.fromEntries(Object.entries(names).filter(([id]) => !isLive(sessions.get(id))));
 }
 
 const prsThePollerSees = () => Object.fromEntries(Object.entries(ghStatus()).map(([key, { pr }]) => [key.toLowerCase(), { title: pr.title, state: pr.state.toLowerCase() }]));
@@ -336,9 +336,9 @@ const prsThePollerSees = () => Object.fromEntries(Object.entries(ghStatus()).map
 export async function world() {
   const all = sessions
     .values()
-    .filter((s) => s.role !== undefined || live(s))
+    .filter((s) => s.role !== undefined || isLive(s))
     .toArray();
-  const agents = all.filter((s) => isAgent(s) && !isSentry(s) && live(s));
+  const agents = all.filter((s) => isAgent(s) && !isSentry(s) && isLive(s));
   const unrouted = agents.filter((s) => isUnrouted(s));
   const shownTasksSinceTheyAreAllThePageCanLookUp = tasks.filter((t) => t.status !== "dropped");
   const agentsShown = agentRows(agents, unrouted, shownTasksSinceTheyAreAllThePageCanLookUp);

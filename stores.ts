@@ -4,7 +4,7 @@ import type { Objective, Task, Thread, Todo } from "./model";
 
 const THREADS_WRITE_DEBOUNCE_MS = 200;
 
-export const live = (s?: Session): s is Session => s?.exitCode === null;
+export const isLive = (s?: Session): s is Session => s?.exitCode === null;
 export const objectives = objectivesTable.read() as Objective[];
 export const saveObjectives = () => objectivesTable.write(objectives);
 export const threads = threadsTable.read() as Thread[];
