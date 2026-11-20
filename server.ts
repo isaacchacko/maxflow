@@ -59,17 +59,23 @@ const RESTART_FOR_NEW_SOURCE_AFTER_MS = 500;
 type Route = (req: Request, url: URL, path: string, server: Server<WsData>) => Promise<Response | undefined>;
 type Upgrade = { response: Response | undefined };
 
-const answersOk = async (url: string, init?: RequestInit) =>
-  fetch(url, { ...init, signal: AbortSignal.timeout(PEER_ANSWERS_WITHIN_MS) }).then(
-    (r) => r.ok,
-    () => false,
-  );
+async function isAnsweringOk(url: string, init?: RequestInit) {
+  try {
+    const r = await fetch(url, { ...init, signal: AbortSignal.timeout(PEER_ANSWERS_WITHIN_MS) });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
 
 // constraint: panes in the live maxflow carry its port, so a plain `bun server.ts` run from one would adopt and respawn the live sessions
-if (IS_LIVE && (await answersOk(`${BASE}/api/sessions`))) {
+async function refuseToRunBesideTheLiveMaxflow() {
+  if (!IS_LIVE || !(await isAnsweringOk(`${BASE}/api/sessions`))) return;
   console.error(`the live maxflow is already running on ${BASE}; run ./dev.sh for a dev instance`);
   process.exit(1);
 }
+
+await refuseToRunBesideTheLiveMaxflow();
 adoptSessionsThatOutlivedTheLastServer();
 startSentriesAndKeepThemUp();
 loadSavedDrafts();
@@ -100,11 +106,19 @@ for (const s of sessions.values()) {
 }
 keepGoingAheadOnUnansweredDefaults();
 
-const logResyncFailure = (error: unknown) => {
-  console.error("resync", error);
-};
-setTimeout(() => void resync().catch(logResyncFailure), FIRST_RESYNC_AFTER_MS);
-setInterval(() => void resync().catch(logResyncFailure), RESYNC_MS);
+async function resyncAndReportFailure() {
+  try {
+    await resync();
+  } catch (error) {
+    console.error("resync", error);
+  }
+}
+setTimeout(() => {
+  void resyncAndReportFailure();
+}, FIRST_RESYNC_AFTER_MS);
+setInterval(() => {
+  void resyncAndReportFailure();
+}, RESYNC_MS);
 
 const delivery = { isRunning: false };
 async function deliverToEverySession() {
@@ -116,7 +130,9 @@ async function deliverToEverySession() {
     delivery.isRunning = false;
   }
 }
-setInterval(() => void deliverToEverySession(), DELIVERY_MS);
+setInterval(() => {
+  void deliverToEverySession();
+}, DELIVERY_MS);
 
 function isSameOrigin(req: Request) {
   const origin = req.headers.get("origin");
@@ -127,7 +143,7 @@ function isSameOrigin(req: Request) {
 
 // constraint: while we're down the health sentry serves its panic page on our port, and hands the port back when asked
 for (let i = 0; i < PANIC_RELEASE_TRIES; i++) {
-  if (!(await answersOk(`http://${HOST}:${String(PORT)}/__panic/release`, { method: "POST" }))) break;
+  if (!(await isAnsweringOk(`http://${HOST}:${String(PORT)}/__panic/release`, { method: "POST" }))) break;
   await Bun.sleep(PANIC_RELEASE_RETRY_MS);
 }
 
@@ -206,4 +222,5 @@ function restartIfNewSourceFile(file: string | null) {
 watch(`${DIR}/src`, { recursive: true }, (_, file) => {
   restartIfNewSourceFile(file);
 });
-for (const f of new Bun.Glob("**/*.{ts,tsx,css}").scanSync(`${DIR}/src`)) known.add(`${DIR}/src/${f}`);
+const sourceFiles = new Bun.Glob("**/*.{ts,tsx,css}").scanSync(`${DIR}/src`);
+for (const f of sourceFiles) known.add(`${DIR}/src/${f}`);

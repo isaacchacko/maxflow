@@ -14,7 +14,7 @@ const LONGEST_RESPAWN_BACKOFF_MS = 30 * 60_000;
 const UP_THIS_LONG_RESETS_BACKOFF_MS = 10 * 60_000;
 const SENTRY_PREFIX_LENGTH = "sentry:".length;
 
-const sentrySource = (file: string) => new URL(`./sentries/${file}`, import.meta.url).pathname;
+const sentrySource = (file: string) => new URL(`sentries/${file}`, import.meta.url).pathname;
 const agentWithBrief = (name: string) => `exec claude --permission-mode bypassPermissions --append-system-prompt "$(cat "${sentrySource(`${name}.md`)}")"`;
 
 function registerAgentSentriesWithFeedsLoggedAside() {
@@ -29,7 +29,7 @@ function markSentry(s: Session) {
 }
 
 function markSentriesStartedBeforeTheFlagByNameAndScript() {
-  for (const s of sessions.values()) if (s.sentry !== true && s.name in SENTRIES && s.cmd.join(" ").includes(sentrySource(""))) markSentry(s);
+  for (const s of sessions.values()) if (s.sentry !== true && Object.hasOwn(SENTRIES, s.name) && s.cmd.join(" ").includes(sentrySource(""))) markSentry(s);
 }
 
 function sentriesWantedByMaxflowSentriesEnv(): [string, string[]][] {

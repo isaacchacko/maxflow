@@ -35,7 +35,7 @@ function processTreeOf(pid: number, table: ProcessTable): number[] {
 const isCheckedAgent = (s: Session | undefined): s is Session => s !== undefined && !isSentry(s) && isAgent(s) && s.exitCode === null;
 
 function checkPane(line: string, table: ProcessTable) {
-  const [name = "", pid = ""] = line.split(" ");
+  const [name = "", pid = ""] = line.split(" ", 2);
   const s = sessions.get(name.replace(/^mf-/, ""));
   if (pid === "" || !isCheckedAgent(s)) return;
   const isClaudeUp = processTreeOf(Number(pid), table).some((p) => CLAUDE_COMMAND_LINE.test(table.commandLineOf.get(p) ?? ""));
@@ -46,13 +46,20 @@ function checkPane(line: string, table: ProcessTable) {
 
 async function checkClaudeRunsInEachAgentPane() {
   const table = await readProcessTable();
-  for (const line of (await tmuxAsync("list-panes", "-a", "-F", "#{session_name} #{pane_pid}")).out.split("\n")) checkPane(line, table);
+  const panes = await tmuxAsync("list-panes", "-a", "-F", "#{session_name} #{pane_pid}");
+  for (const line of panes.out.split("\n")) checkPane(line, table);
+}
+
+async function checkClaudeAndReportFailure() {
+  try {
+    await checkClaudeRunsInEachAgentPane();
+  } catch (error) {
+    console.error("checkClaude", error);
+  }
 }
 
 export function keepCheckingClaudeRunsInEachAgentPane() {
   setInterval(() => {
-    checkClaudeRunsInEachAgentPane().catch((error: unknown) => {
-      console.error("checkClaude", error);
-    });
+    void checkClaudeAndReportFailure();
   }, CLAUDE_CHECK_MS);
 }

@@ -3,7 +3,8 @@ import { threads } from "./stores";
 import { patch } from "./patch";
 import type { Message, Thread } from "./model";
 
-type Source = "slack" | "github";
+type External = NonNullable<Message["ext"]>;
+type Source = External["source"];
 type SlackStore = { uidByName: Map<string, string>; rawTextByTs: Map<string, string> };
 type Handoff = { who: string; where: string; source: Source; links: string[]; before: string; now: string };
 
@@ -17,7 +18,7 @@ const SLACK_PERMALINK_TS = /\/p(\d+)/;
 
 const isHandoffText = (m: Message) => m.ext === undefined && m.from !== "isaac" && HANDOFF_HEAD.test(m.text) && HANDOFF_SOURCE_LINK.test(m.text);
 const unquote = (text: string) => text.replaceAll(/^> ?/gm, "").trim();
-const permalinkTs = (link: string | undefined) => SLACK_PERMALINK_TS.exec(link ?? "")?.[1] ?? "";
+const permalinkTs = (link = "") => SLACK_PERMALINK_TS.exec(link)?.[1] ?? "";
 const freshMessageId = () => `m-${crypto.randomUUID().slice(0, 6)}`;
 
 function readSlackStore(): SlackStore {
@@ -38,7 +39,7 @@ function readSlackStore(): SlackStore {
 }
 
 function sourceOf(t: Thread, m: Message): Source {
-  const isSlack = t.feed === undefined ? /\.slack\.com\//.test(m.text) : t.feed.source === "slack";
+  const isSlack = t.feed === undefined ? m.text.includes(".slack.com/") : t.feed.source === "slack";
   return isSlack ? "slack" : "github";
 }
 
@@ -52,18 +53,24 @@ function handoffOf(t: Thread, m: Message): Handoff | undefined {
   return { who, where, source: sourceOf(t, m), links: rest.match(LINK_LINES) ?? [t.feed?.link ?? ""], before, now };
 }
 
+function contextExt(h: Handoff, store: SlackStore, quoted: string): External {
+  const isHis = quoted.startsWith("Isaac (him");
+  const name = isHis ? "Isaac" : quoted;
+  const uid = h.source === "slack" ? store.uidByName.get(name) : undefined;
+  const user = h.source === "github" && !isHis ? name : uid;
+  return { source: h.source, name, ...(user !== undefined && user !== "" && { user }), link: h.links[0] ?? "", where: h.where, context: true, ...(isHis && { own: true as const }) };
+}
+
+function contextMessage(m: Message, h: Handoff, store: SlackStore, quote: string): Message | undefined {
+  const [, quoted = "", said = ""] = CONTEXT_QUOTE.exec(quote) ?? [];
+  const text = unquote(said);
+  if (text === "") return undefined;
+  return { id: freshMessageId(), from: "feed", at: m.at, text, ext: contextExt(h, store, quoted) };
+}
+
 function contextMessages(m: Message, h: Handoff, store: SlackStore): Message[] {
   const quotes = h.before.replace(/^Before it[^\n]*\n/, "").split(/\n(?=> \*\*)/).filter((x) => x.trim() !== "");
-  return quotes.flatMap((quote) => {
-    const [, quoted = "", said = ""] = CONTEXT_QUOTE.exec(quote) ?? [];
-    const text = unquote(said);
-    if (text === "") return [];
-    const isHis = quoted.startsWith("Isaac (him");
-    const name = isHis ? "Isaac" : quoted;
-    const uid = h.source === "slack" ? store.uidByName.get(name) : undefined;
-    const user = h.source === "github" && !isHis ? name : uid;
-    return [{ id: freshMessageId(), from: "feed", at: m.at, text, ext: { source: h.source, name, ...(user !== undefined && user !== "" && { user }), link: h.links[0] ?? "", where: h.where, context: true, ...(isHis && { own: true as const }) } }];
-  });
+  return quotes.map((quote) => contextMessage(m, h, store, quote)).filter((said) => said !== undefined);
 }
 
 function newMessages(m: Message, h: Handoff, store: SlackStore): Message[] {

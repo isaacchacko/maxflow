@@ -35,7 +35,8 @@ export function backfillExternalSignals() {
 }
 
 function recordHisCommentsFromTheWholeLog() {
-  for (const line of readStateText(EVENT_LOG)?.split("\n") ?? []) {
+  const lines = readStateText(EVENT_LOG)?.split("\n") ?? [];
+  for (const line of lines) {
     if (!line.includes('"who":"the user')) continue;
     const e: unknown = JSON.parse(line);
     if (isRecord(e) && typeof e["topic"] === "string" && typeof e["at"] === "number") recordUserComment(e["topic"].split("/").at(-1), e["data"], e["at"]);

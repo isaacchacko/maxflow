@@ -23,12 +23,8 @@ function prStateIn(answer: unknown, alias: string): string | undefined {
 
 function notFoundPathsIn(answer: unknown): Set<string> {
   const errors: unknown[] = isRecord(answer) && Array.isArray(answer["errors"]) ? answer["errors"] : [];
-  return new Set(
-    errors.filter(isRecord).flatMap((e) => {
-      const path: unknown = e["path"];
-      return e["type"] === "NOT_FOUND" && Array.isArray(path) ? [path.join(".")] : [];
-    }),
-  );
+  const paths: unknown[] = errors.filter(isRecord).filter((e) => e["type"] === "NOT_FOUND").map((e) => e["path"]);
+  return new Set(paths.filter((path) => Array.isArray(path)).map((path) => path.join(".")));
 }
 
 function shownPrsByRepo(): Map<string, ShownPr[]> {
@@ -43,7 +39,7 @@ function shownPrsByRepo(): Map<string, ShownPr[]> {
 }
 
 async function askGithubForStates(repo: string, prs: ShownPr[]): Promise<unknown> {
-  const [owner = "", name = ""] = repo.split("/");
+  const [owner = "", name = ""] = repo.split("/", 2);
   const q = `query { r: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${prs.map((pr) => `p${pr.number}: pullRequest(number: ${pr.number}) { state }`).join(" ")} } }`;
   const gh = Bun.spawn(["gh", "api", "graphql", "-f", `query=${q}`], { stdout: "pipe", stderr: "ignore" });
   return parsedAnswer(await new Response(gh.stdout).text());
@@ -61,8 +57,16 @@ async function refreshPrStates() {
   }
 }
 
+async function refreshPrStatesKeepingThemOnFailure() {
+  try {
+    await refreshPrStates();
+  } catch {
+    // constraint: a gh or network failure leaves every shown PR's state as it was
+  }
+}
+
 export function keepPrStatesFresh() {
   setInterval(() => {
-    refreshPrStates().catch(() => undefined);
+    void refreshPrStatesKeepingThemOnFailure();
   }, PR_STATES_REFRESH_MS);
 }

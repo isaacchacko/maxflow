@@ -44,13 +44,13 @@ export function retireCommandFields() {
 }
 
 const storedId = (m: Message): unknown => Reflect.get(m, "id");
-const lacksId = (m: Message) => {
+const hasStoredId = (m: Message) => {
   const id = storedId(m);
-  return typeof id !== "string" || id === "";
+  return typeof id === "string" && id !== "";
 };
 
 export function giveMessagesFromBeforeSubthreadsIds() {
-  if (!threads.some((t) => t.messages.some(lacksId))) return;
+  if (threads.every((t) => t.messages.every(hasStoredId))) return;
   for (const t of threads)
     for (const m of t.messages) {
       const id = storedId(m);
