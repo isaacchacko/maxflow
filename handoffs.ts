@@ -76,10 +76,12 @@ const isNaming = (t: Thread, id: string) =>
   t.mergedInto === undefined && (t.routers.includes(id) || t.members?.includes(id) === true || t.pending?.routers.includes(id) === true || t.asks?.session === id);
 
 function renameIn(t: Thread, old: string, fresh: string) {
-  t.routers = without(t.routers, old, fresh);
-  if (t.members) t.members = without(t.members, old, fresh);
-  if (t.pending) t.pending.routers = without(t.pending.routers, old, fresh);
-  if (t.asks?.session === old) t.asks.session = fresh;
+  patch(t, {
+    routers: without(t.routers, old, fresh),
+    ...(t.members && { members: without(t.members, old, fresh) }),
+    ...(t.pending && { pending: { ...t.pending, routers: without(t.pending.routers, old, fresh) } }),
+    ...(t.asks?.session === old && { asks: { ...t.asks, session: fresh } }),
+  });
 }
 
 function moveThreadsStillNaming(old: Session, fresh: Session, line: string) {
