@@ -26,41 +26,48 @@ function boxOf(body: Record<string, unknown>): Edit {
   return Object.fromEntries([...strings, ...numbers]) as Edit;
 }
 
-async function nodeAction(req: Request, path: string, id: string, rest: string | undefined, author: string) {
+type Call = { req: Request; path: string; rest: string | undefined; author: string };
+
+async function boxAction({ req, path, author }: Call, id: string, verb: string | undefined) {
   const body = req.method === "DELETE" ? {} : await bodyOf(req);
-  if (rest === "typing" && req.method === "POST") {
+  if (verb === "typing" && req.method === "POST") {
     markTyping(path, id);
     return { typing: id };
   }
-  if (rest === "link" && req.method === "POST") return linkNode(path, id, { text: stringOr(body["text"]), to: stringOr(body["to"]), near: typeof body["at"] === "number" ? body["at"] : 0 }, author);
-  if (rest !== undefined) return undefined;
+  if (verb === "link" && req.method === "POST") return linkNode(path, id, { text: stringOr(body["text"]), to: stringOr(body["to"]), near: typeof body["at"] === "number" ? body["at"] : 0 }, author);
+  if (verb !== undefined) return;
   if (req.method === "PATCH") return editNode(path, id, boxOf(body), author);
   if (req.method === "DELETE") return removeNode(path, id);
-  return undefined;
 }
 
-async function canvasAction(req: Request, path: string, rest: string | undefined, author: string) {
+async function canvasAction(call: Call) {
+  const { req, path, rest, author } = call;
   if (rest === undefined && req.method === "GET") return readCanvas(path);
   if (rest === undefined && req.method === "POST") return createCanvas(path);
   if (rest === "nodes" && req.method === "POST") return addNode(path, boxOf(await bodyOf(req)), author);
-  const node = /^nodes\/([\w-]+)(?:\/(\w+))?$/.exec(rest ?? "");
-  return node?.[1] === undefined ? undefined : nodeAction(req, path, node[1], node[2], author);
+  const box = /^nodes\/([\w-]+)(?:\/(\w+))?$/.exec(rest ?? "");
+  if (box?.[1] === undefined) return;
+  return boxAction(call, box[1], box[2]);
+}
+
+function failed(error: unknown) {
+  if (error instanceof CanvasConflict) return Response.json(error.node, { status: 409 });
+  const message = error instanceof Error ? error.message : String(error);
+  return new Response(message, { status: message.startsWith("no ") ? 404 : 400 });
 }
 
 const USAGE = "GET or POST /api/canvas/<path>; POST <path>/nodes {text,x,y,width?,height?}; PATCH <path>/nodes/<id> {text?,base?,find?,replace?,append?,x?,y?,width?,height?}; POST <path>/nodes/<id>/typing; DELETE <path>/nodes/<id>; POST <path>/nodes/<id>/link {text,to,at?}";
 
-// the server owns each canvas and writes one box at a time, so an agent's edit never clobbers the box Isaac is typing in
 export async function canvasRoute(req: Request, url: URL): Promise<Response | undefined> {
   const m = /^\/api\/canvas\/([^/]+)(?:\/(.+))?$/.exec(url.pathname);
-  if (m?.[1] === undefined) return undefined;
+  if (m?.[1] === undefined) return;
   const author = sessions.get(req.headers.get("x-maxflow-from") ?? "")?.id ?? "isaac";
   try {
-    const done = await canvasAction(req, decodeURIComponent(m[1]), m[2], author);
+    const done = await canvasAction({ req, path: decodeURIComponent(m[1]), rest: m[2], author });
     if (done === undefined) return new Response(USAGE, { status: 400 });
-    return Response.json(done, { status: req.method === "POST" && m[2]?.includes("/") !== true ? 201 : 200 });
+    const isNew = req.method === "POST" && m[2]?.includes("/") !== true;
+    return Response.json(done, { status: isNew ? 201 : 200 });
   } catch (error) {
-    if (error instanceof CanvasConflict) return Response.json(error.node, { status: 409 });
-    const message = error instanceof Error ? error.message : String(error);
-    return new Response(message, { status: message.startsWith("no ") ? 404 : 400 });
+    return failed(error);
   }
 }

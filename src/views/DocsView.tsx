@@ -2,7 +2,7 @@ import { MessageSquarePlus } from "lucide-react";
 import { useInterval, useResource } from "@/lib/effects";
 import { cn, hasText } from "@/lib/utils";
 import { RefChip } from "@/threads/Rich";
-import { type Doc, type DocSummary, loadDoc, loadVault } from "./docs/api";
+import { type Doc, type DocSummary, loadDoc, loadVault, type Vault } from "./docs/api";
 import { CanvasPane } from "./docs/Canvas";
 import { useDocEditor } from "./docs/Editor";
 import { Tree } from "./docs/Tree";
@@ -49,6 +49,12 @@ function emptyText(vault: { error?: Error; value?: unknown }) {
   return vault.value === undefined ? "Loading…" : "No docs yet. Make one with the new-doc or new-canvas button.";
 }
 
+function Shown({ path, vault }: { path: string | undefined; vault: { error?: Error; value?: Vault } }) {
+  if (!hasText(path) || !vault.value) return <p className="p-6 text-sm text-muted-foreground">{emptyText(vault)}</p>;
+  if (path.endsWith(".canvas")) return <CanvasPane key={path} path={path} />;
+  return <DocPane key={path} path={path} vault={vault.value} />;
+}
+
 export function DocsView({ path }: { path: string | undefined }) {
   const vault = useResource("docs", loadVault);
   useInterval(vault.reload, VAULT_CHECK_MS);
@@ -61,13 +67,7 @@ export function DocsView({ path }: { path: string | undefined }) {
         </div>
         {vault.value && <Tree vault={vault.value} selected={shown} onChanged={vault.reload} />}
       </aside>
-      {hasText(shown) && shown.endsWith(".canvas") && vault.value ? (
-        <CanvasPane key={shown} path={shown} />
-      ) : hasText(shown) && vault.value ? (
-        <DocPane key={shown} path={shown} vault={vault.value} />
-      ) : (
-        <p className="p-6 text-sm text-muted-foreground">{emptyText(vault)}</p>
-      )}
+      <Shown path={shown} vault={vault} />
     </div>
   );
 }

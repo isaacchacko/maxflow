@@ -113,17 +113,17 @@ function patch(w: World, p: Patch): World {
   return Object.assign(next, p.set) as World;
 }
 
+function isSideMessage(m: unknown) {
+  if (!isRecord(m)) return false;
+  const cursor = cursorFrom(m);
+  if (cursor) fireCursor(cursor);
+  if (m["type"] === "canvas" && typeof m["path"] === "string") canvasChanged(m["path"]);
+  return cursor !== undefined || m["type"] === "canvas";
+}
+
 function onWorldMessage(ws: WebSocket, e: MessageEvent) {
   const m: unknown = JSON.parse(String(e.data));
-  const cursor = isRecord(m) ? cursorFrom(m) : undefined;
-  if (cursor) {
-    fireCursor(cursor);
-    return;
-  }
-  if (isRecord(m) && m["type"] === "canvas") {
-    canvasChanged(String(m["path"]));
-    return;
-  }
+  if (isSideMessage(m)) return;
   if (isRecord(m) && m["type"] === "world" && isWorld(m["world"]) && typeof m["v"] === "number") {
     live.world = m["world"];
     live.version = m["v"];

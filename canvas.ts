@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { DOCS_DIR, saveFile, vaultPath } from "./docs";
 import { mergeText } from "./shared/merge-text";
 
-// JSON Canvas (jsoncanvas.org), the format Obsidian opens too; `author` is ours: who made or last edited the box
+// constraint: the file is JSON Canvas (jsoncanvas.org), which Obsidian opens too; author, who made or last edited a box, is our only addition
 export type CanvasNode = { id: string; type: "text"; text: string; x: number; y: number; width: number; height: number; color?: string; author?: string };
 export type Canvas = { nodes: CanvasNode[]; edges: { id: string; fromNode: string; toNode: string }[] };
 export type Box = Partial<Pick<CanvasNode, "text" | "x" | "y" | "width" | "height" | "color">>;
@@ -26,8 +26,8 @@ const newId = () => crypto.randomUUID().replaceAll("-", "").slice(0, 16);
 const linkTo = (id: string) => new RegExp(String.raw`\[([^\]]*)\]\(#${id}\)`, "g");
 
 function parsed(text: string): Canvas {
-  const raw = JSON.parse(text === "" ? "{}" : text) as Partial<Canvas>;
-  return { nodes: (raw.nodes ?? []).filter((n) => n.type === "text"), edges: raw.edges ?? [] };
+  const raw = JSON.parse(text === "" ? "{}" : text) as { nodes?: (Omit<CanvasNode, "type"> & { type: string })[]; edges?: Canvas["edges"] };
+  return { nodes: (raw.nodes ?? []).filter((n): n is CanvasNode => n.type === "text"), edges: raw.edges ?? [] };
 }
 
 function heldAt(path: string): Held {
@@ -44,11 +44,11 @@ function heldAt(path: string): Held {
   return now;
 }
 
-function save(path: string, h: Held) {
-  saveFile(path, `${JSON.stringify(h.canvas, null, "\t")}\n`);
-  h.mtimeMs = statSync(join(DOCS_DIR, path)).mtimeMs;
-  h.rev += 1;
-  for (const listener of changeListeners) listener(path, h.rev);
+function save(path: string, was: Held) {
+  saveFile(path, `${JSON.stringify(was.canvas, null, "\t")}\n`);
+  const now = { ...was, mtimeMs: statSync(join(DOCS_DIR, path)).mtimeMs, rev: was.rev + 1 };
+  held.set(path, now);
+  for (const listener of changeListeners) listener(path, now.rev);
 }
 
 function nodeIn(h: Held, id: string) {
@@ -91,7 +91,6 @@ const TYPING_MS = 5000;
 const typingUntil = new Map<string, number>();
 const typingKey = (path: string, id: string) => `${canvasPath(path)}\n${id}`;
 
-// his browser beats this while a box is open in its editor, so an agent can't replace that box's text wholesale under him
 export const markTyping = (path: string, id: string) => typingUntil.set(typingKey(path, id), Date.now() + TYPING_MS);
 const isTyping = (path: string, id: string) => (typingUntil.get(typingKey(path, id)) ?? 0) > Date.now();
 
@@ -101,7 +100,6 @@ function wholeText(path: string, node: CanvasNode, edit: Edit & { text: string }
   return edit.text;
 }
 
-// find/replace and append apply to the text as it is now, so they merge with anyone's typing; whole text merges only when it says what it started from (base)
 function newText(path: string, node: CanvasNode, edit: Edit, author: string) {
   if (typeof edit.find === "string") {
     if (edit.find === "" || !node.text.includes(edit.find)) throw new Error(`"${edit.find}" isn't in box ${node.id}`);
@@ -135,16 +133,17 @@ export function removeNode(path: string, id: string) {
 }
 
 function unlinkedAt(text: string, phrase: string, near: number) {
-  const links = [...text.matchAll(/\[[^\]]*\]\([^)]*\)/g)].map((m) => [m.index, m.index + m[0].length] as const);
+  const links = text
+    .matchAll(/\[[^\]]*\]\([^)]*\)/g)
+    .map((m) => [m.index, m.index + m[0].length] as const)
+    .toArray();
   const found: number[] = [];
   for (let at = text.indexOf(phrase); at !== -1; at = text.indexOf(phrase, at + 1)) {
-    if (!links.some(([start, end]) => at < end && at + phrase.length > start)) found.push(at);
+    if (links.every(([start, end]) => at >= end || at + phrase.length <= start)) found.push(at);
   }
   return found.toSorted((a, b) => Math.abs(a - near) - Math.abs(b - near))[0] ?? -1;
 }
 
-// a link lives in the markdown as [phrase](#target), so it survives any edit around it
-// near picks which occurrence when the phrase appears more than once: the one closest to that character offset
 export function linkNode(path: string, from: string, { text: phrase, to, near = 0 }: { text: string; to: string; near?: number }, author: string) {
   const inVault = canvasPath(path);
   const h = heldAt(inVault);

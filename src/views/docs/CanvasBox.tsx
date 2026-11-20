@@ -1,8 +1,9 @@
 import { Link2, Trash2 } from "lucide-react";
-import { createContext, use, useEffect, useRef } from "react";
+import { createContext, use } from "react";
 import ReactMarkdown, { type Components, defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AgentFace } from "@/components/AgentFace";
+import { useInterval } from "@/lib/effects";
 import { cn, hasText } from "@/lib/utils";
 import { md } from "@/threads/rich/components";
 import { type CanvasNode, markTyping } from "./canvas-api";
@@ -60,7 +61,6 @@ function LinkSpan({ href = "", children }: { href?: string | undefined; children
   );
 }
 
-// a link to another box is [text](#<box id>); any other link stays an ordinary one
 const COMPONENTS: Components = { ...md, a: ({ href, children }) =>
     href?.startsWith("#") === true ? (
       <LinkSpan href={href}>{children}</LinkSpan>
@@ -98,48 +98,32 @@ function selectedIn(body: HTMLElement, from: string): { selected: Selected; rect
   return { selected: { from, text, near: before.toString().length }, rect: range.getBoundingClientRect() };
 }
 
-function useTypingBeat(path: string, id: string) {
-  useEffect(() => {
-    const beat = () => {
-      markTyping(path, id).catch(() => undefined);
-    };
-    beat();
-    const timer = setInterval(beat, TYPING_BEAT_MS);
-    return () => clearInterval(timer);
-  }, [path, id]);
-}
-
 function Editor({ node }: { node: CanvasNode }) {
   const { path, type, finish, startLink } = useActions();
-  const area = useRef<HTMLTextAreaElement>(null);
-  useTypingBeat(path, node.id);
-  useEffect(() => {
-    const el = area.current;
-    el?.focus();
-    el?.setSelectionRange(el.value.length, el.value.length);
-  }, []);
-  const linkSelection = () => {
-    const el = area.current;
-    if (!el || el.selectionStart === el.selectionEnd) return;
+  useInterval(async () => markTyping(path, node.id), TYPING_BEAT_MS);
+  const linkSelection = (el: HTMLTextAreaElement) => {
+    if (el.selectionStart === el.selectionEnd) return;
     const raw = el.value.slice(el.selectionStart, el.selectionEnd);
     const text = raw.trim();
     startLink({ from: node.id, text, near: el.selectionStart + raw.indexOf(text) });
   };
+  const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const isMod = e.metaKey || e.ctrlKey;
+    if (e.key === "Escape" || (e.key === "Enter" && isMod)) e.currentTarget.blur();
+    if (e.key !== "k" || !isMod) return;
+    e.preventDefault();
+    linkSelection(e.currentTarget);
+  };
   return (
     <textarea
-      ref={area}
+      autoFocus
+      onFocus={(e) => e.currentTarget.setSelectionRange(e.currentTarget.value.length, e.currentTarget.value.length)}
       data-agent={`canvas:editor:${node.id}`}
       value={node.text}
       placeholder="Write in markdown…"
       onChange={(e) => type(node.id, e.target.value)}
       onBlur={() => finish(node.id)}
-      onKeyDown={(e) => {
-        if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) e.currentTarget.blur();
-        if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
-          e.preventDefault();
-          linkSelection();
-        }
-      }}
+      onKeyDown={onKey}
       className="min-h-0 flex-1 resize-none bg-transparent px-3 pb-2 font-mono text-[13px] leading-relaxed outline-none"
     />
   );

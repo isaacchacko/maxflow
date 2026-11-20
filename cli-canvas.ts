@@ -9,16 +9,19 @@ const numberAt = (args: string[], i: number) => {
 };
 const oneLine = (text: string) => (text.length > 80 ? `${text.slice(0, 79)}…` : text).replaceAll("\n", " ⏎ ");
 
+const boxLine = (n: Record<string, unknown>) => `${str(n, "id")}  @${str(n, "x")},${str(n, "y")} ${str(n, "width")}x${str(n, "height")}  ${oneLine(str(n, "text"))}`;
+
 async function show(args: string[]) {
-  const shown = replyOf(await call(at(argAt(args, 1))));
+  const url = at(argAt(args, 1));
+  const shown = replyOf(await call(url));
   console.log(`${str(shown, "path")}  rev ${str(shown, "rev")}`);
-  for (const n of listAt(replyOf(shown["canvas"]), "nodes").map(replyOf)) {
-    console.log(`${str(n, "id")}  @${str(n, "x")},${str(n, "y")} ${str(n, "width")}x${str(n, "height")}  ${oneLine(str(n, "text"))}`);
-  }
+  const nodes = listAt(replyOf(shown["canvas"]), "nodes");
+  for (const node of nodes) console.log(boxLine(replyOf(node)));
 }
 
 async function create(args: string[]) {
-  console.log(str(await send(at(argAt(args, 1)), "POST"), "path"));
+  const made = await send(at(argAt(args, 1)), "POST");
+  console.log(str(made, "path"));
 }
 
 async function add(args: string[]) {
