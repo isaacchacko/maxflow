@@ -1,15 +1,16 @@
+import { yarnEnv } from "./shared/legacy-maxflow";
 import { BASE } from "./instance";
 import { isRecord } from "./shared/guards";
 
 export const base = BASE;
 const CLI_FETCH_TIMEOUT_MS = 60_000;
 export const timeout = () => AbortSignal.timeout(CLI_FETCH_TIMEOUT_MS);
-export const mySession = () => process.env["MAXFLOW_SESSION"];
+export const mySession = () => yarnEnv("SESSION");
 export const isBlank = (value: string | undefined) => value === undefined || value === "";
 export const isTruthy: (value: unknown) => boolean = Boolean;
 
 const session = mySession();
-export const caller = session === undefined || session === "" ? undefined : { "x-maxflow-from": session };
+export const caller = session === undefined || session === "" ? undefined : { "x-yarn-from": session };
 const callerHeaders = caller && { headers: caller };
 
 export type Verb = { matches: (verb: string | undefined, args: string[]) => boolean; run: (args: string[]) => Promise<void> | void };
@@ -42,7 +43,7 @@ export const replyOf = (value: unknown): Reply => (isRecord(value) ? value : {})
 export const str = (reply: Reply, key: string) => String(reply[key]);
 
 export function listOf(value: unknown): unknown[] {
-  if (!Array.isArray(value)) throw new TypeError(`expected a list from maxflow, got ${JSON.stringify(value)}`);
+  if (!Array.isArray(value)) throw new TypeError(`expected a list from yarn, got ${JSON.stringify(value)}`);
   return value;
 }
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
+import { yarnEnv } from "../shared/legacy-maxflow";
 import { gateRefusal } from "../merge-gate";
 import { type Person, type Restriction, doesMatch, loadRestrictions, resolve } from "../restrictions";
 
 type HookInput = { tool_name?: unknown; tool_input?: unknown; cwd?: unknown };
 type Verdict = { decision: string; reason?: string };
 
-const session = process.env["MAXFLOW_SESSION"];
+const session = yarnEnv("SESSION");
 if (session === undefined || session === "") process.exit(0);
 
 function hookInput(value: unknown): HookInput {
@@ -38,9 +39,9 @@ async function loadPeopleOf() {
 
 async function askServerToEnforce(body: { session: string }) {
   try {
-    return await fetch(`http://localhost:${process.env["MAXFLOW_PORT"] ?? 4949}/api/restrictions/enforce`, {
+    return await fetch(`http://localhost:${yarnEnv("PORT") ?? 4949}/api/restrictions/enforce`, {
       method: "POST",
-      headers: { "x-maxflow-from": body.session },
+      headers: { "x-yarn-from": body.session },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(3000),
     });

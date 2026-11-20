@@ -25,7 +25,7 @@ async function startObjectiveWithARouter(req: Request): Promise<Response> {
 function handTheRestToAnEarlierRouter(r: Session, o: Objective, scope: string) {
   const role = r.role;
   if (role?.scope === "Whole objective") setRole(r, { ...role, scope: "Rest of the objective" });
-  dispatch({ to: [r], target: o.id, text: `[maxflow] The user split the objective "${o.title}": a new router now owns "${scope}". Your scope is now: ${String(r.role?.scope)}. Hand it anything of yours that falls in that scope.` });
+  dispatch({ to: [r], target: o.id, text: `[yarn] The user split the objective "${o.title}": a new router now owns "${scope}". Your scope is now: ${String(r.role?.scope)}. Hand it anything of yours that falls in that scope.` });
 }
 
 async function splitOffANewRouterForTheScope(req: Request, o: Objective): Promise<Response> {

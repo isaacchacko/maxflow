@@ -1,3 +1,4 @@
+import { renamedSource } from "./shared/legacy-maxflow";
 import { type Event, query } from "./bus";
 import { hasBrowser } from "./browsers";
 import { DIR } from "./instance";
@@ -181,7 +182,7 @@ function internalSignalRow(e: Event, d: Signal, r: Route | undefined): SignalRow
   return {
     id: `s${String(e.seq)}`,
     seq: e.seq,
-    source: d.source,
+    source: renamedSource(d.source),
     at: iso(e.at),
     target: d.target,
     text: d.text,
@@ -287,7 +288,7 @@ function movedStub(t: Thread) {
   };
 }
 
-const messageRow = (m: Message) => ({ id: m.id, from: m.from, at: iso(m.at), text: m.text, ...(m.nudge !== undefined && { nudge: m.nudge }), ...(m.wake === true && { wake: true }), ...(m.ext && { ext: m.ext }) });
+const messageRow = (m: Message) => ({ id: m.id, from: renamedSource(m.from), at: iso(m.at), text: m.text, ...(m.nudge !== undefined && { nudge: m.nudge }), ...(m.wake === true && { wake: true }), ...(m.ext && { ext: m.ext }) });
 
 function openAsk(t: Thread) {
   if (t.asks === undefined || t.paused !== undefined || t.resolved !== undefined) return {};

@@ -1,3 +1,4 @@
+import { seqOf } from "./shared/legacy-maxflow";
 import { readFileSync } from "node:fs";
 import { argAt, base, call, caller, fail, flag, hasArg, isBlank, isTruthy, mySession, positional, post, replies, replyOf, str, timeout, type Reply, type Verb } from "./cli-shared";
 
@@ -96,7 +97,7 @@ const hasRole = (s: Around | undefined): s is Around & { role: Role } => s?.role
 async function agentsAround(args: string[]) {
   const all = (await sessionList()).map(aroundOf);
   const me = all.find((s) => s.id === mySession());
-  if (!hasRole(me)) fail("who works only inside a maxflow agent with a role (router or worker)");
+  if (!hasRole(me)) fail("who works only inside a yarn agent with a role (router or worker)");
   const live = all.filter(hasRole).filter((s) => s.running && s.id !== me.id && s.role.objective === me.role.objective && isBlank(s.role.handedTo));
   const picker = pickerFor(me, argAt(args, 0));
   if (!picker) fail("who router|parent|workers|objective");
@@ -117,7 +118,7 @@ async function publish(args: string[]) {
 
 async function subscribe(args: string[]) {
   const topic = encodeURIComponent(argAt(args, 0));
-  let after = flag(args, "--since") ?? String((await fetch(`${base}/api/events?topic=${topic}&after=now`, { signal: timeout() })).headers.get("x-maxflow-seq"));
+  let after = flag(args, "--since") ?? String(seqOf(await fetch(`${base}/api/events?topic=${topic}&after=now`, { signal: timeout() })));
   const deadline = Date.now() + Number(flag(args, "--timeout") ?? Infinity);
   for (;;) {
     const wait = Math.min(deadline - Date.now(), 240_000);
@@ -139,11 +140,11 @@ async function printScreen(args: string[]) {
 
 async function handOver(args: string[]) {
   const me = mySession();
-  if (isBlank(me)) fail("handoff works only inside a maxflow agent");
+  if (isBlank(me)) fail("handoff works only inside a yarn agent");
   const note = readFileSync(argAt(args, 0), "utf8").trim();
   if (note === "") fail(`${argAt(args, 0)} is empty`);
   await post(`/api/sessions/${me}/handoff`, { note });
-  console.log("noted: when this turn ends, maxflow starts the fresh agent with your note and moves your work to it. End your turn now, without a new wait.");
+  console.log("noted: when this turn ends, yarn starts the fresh agent with your note and moves your work to it. End your turn now, without a new wait.");
 }
 
 export const sessionVerbs: Verb[] = [

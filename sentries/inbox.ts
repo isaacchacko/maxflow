@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { seqOf } from "../shared/legacy-maxflow";
 import { BASE as base } from "../instance";
 import { isRecord } from "../shared/guards";
 import { peekStateJson, readGatingStateJson, readStateText, writeStateJson } from "../state";
@@ -98,7 +99,7 @@ async function isServerUp() {
 
 async function currentSeq() {
   const res = await fetch(`${base}/api/events?topic=none&after=now`, { signal: AbortSignal.timeout(FETCH_MS) });
-  return Number(res.headers.get("x-maxflow-seq") ?? 0);
+  return Number(seqOf(res) ?? 0);
 }
 
 async function nextEvents() {

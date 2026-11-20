@@ -199,7 +199,7 @@ export const objectives: Objective[] = [
   },
   {
     id: "board",
-    title: "maxflow board",
+    title: "yarn board",
     taskIds: ["t5"],
     events: [{ from: "router", at: "Nov 14", text: "PR state on cards shipped. Nothing else queued." }],
     page: [
@@ -266,7 +266,7 @@ export const threads: Thread[] = [
     title: "Board notes",
     objectiveId: "board",
     routerIds: ["r-board"],
-    messages: [{ from: "r-board", at: "2026-11-14T16:10", text: "[[agent:mf-3]] merged [#42](https://github.com/acme/maxflow/pull/42). Nothing queued." }],
+    messages: [{ from: "r-board", at: "2026-11-14T16:10", text: "[[agent:mf-3]] merged [#42](https://github.com/acme/yarn/pull/42). Nothing queued." }],
   },
   {
     id: "th-reviews",

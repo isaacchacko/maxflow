@@ -114,7 +114,7 @@ async function handToChatThatPosted(key: string, line: string) {
   if (!session) return null;
   run([CLI, "slack", "watch", key, "--session", session.id]);
   await post(`/api/sessions/${session.id}/notify`, {
-    text: `[maxflow inbox] A new message in a Slack thread you posted in, which no session was watching: ${line} Whole thread: ${CLI} slack read ${key}. It's on the user's board; act on it if it's yours to answer or fix, and never post as him without his say-so.`,
+    text: `[yarn inbox] A new message in a Slack thread you posted in, which no session was watching: ${line} Whole thread: ${CLI} slack read ${key}. It's on the user's board; act on it if it's yours to answer or fix, and never post as him without his say-so.`,
   });
   return session.id;
 }

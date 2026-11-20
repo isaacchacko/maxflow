@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { yarnEnv } from "../shared/legacy-maxflow";
 import { BASE as base } from "../instance";
 import { readStateJson, stateDirectory, writeStateJson } from "../state";
 import { takeOver } from "./singleton";
@@ -11,9 +12,9 @@ const FIRST_CHARS = Number(process.env["RENAME_FIRST_CHARS"] ?? 400);
 const EVERY_CHARS = Number(process.env["RENAME_EVERY_CHARS"] ?? 4000);
 const MODEL = process.env["RENAME_MODEL"] ?? "haiku";
 const API_TIMEOUT_MS = 30_000;
-const HEADERS_SO_THE_GRAPH_DRAWS_THIS_SENTRY = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
+const HEADERS_SO_THE_GRAPH_DRAWS_THIS_SENTRY = { "x-yarn-from": yarnEnv("SESSION") ?? "" };
 
-const SYSTEM = `You title terminal sessions in a sidebar. Given a session's recent screen, reply with only its title: 3 to 7 words naming the topic the session owns, e.g. "PRO-6201 safety stock dismissals" or "maxflow gh sentry". Name the ticket, PR, bug or feature when the screen shows one. Write a noun phrase, not a verb phrase ("stalled CI on PRs 12194, 12192", not "Kicking stalled CI"). Never describe status, progress or the current step: no "fixing", "waiting on CI", "testing", "done". If the current title still names the right topic, reply with it unchanged. No quotes, no trailing period. If the screen shows no work yet (only a startup banner, an empty prompt, a bare shell), reply SKIP.`;
+const SYSTEM = `You title terminal sessions in a sidebar. Given a session's recent screen, reply with only its title: 3 to 7 words naming the topic the session owns, e.g. "PRO-6201 safety stock dismissals" or "yarn gh sentry". Name the ticket, PR, bug or feature when the screen shows one. Write a noun phrase, not a verb phrase ("stalled CI on PRs 12194, 12192", not "Kicking stalled CI"). Never describe status, progress or the current step: no "fixing", "waiting on CI", "testing", "done". If the current title still names the right topic, reply with it unchanged. No quotes, no trailing period. If the screen shows no work yet (only a startup banner, an empty prompt, a bare shell), reply SKIP.`;
 
 type Session = { id: string; name: string; cmd: string[]; cwd: string; running: boolean; sentry: boolean };
 type Mark = { lastSet?: string; pinned?: boolean };

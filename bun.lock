@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "maxflow",
+      "name": "yarn",
       "dependencies": {
         "@codemirror/autocomplete": "6.19.0",
         "@codemirror/commands": "6.9.0",

@@ -1,3 +1,4 @@
+import { yarnEnv } from "../shared/legacy-maxflow";
 import { BASE } from "../instance";
 import { loadRestrictions, resolve, type Restriction } from "../restrictions";
 import { isRecord } from "../shared/guards";
@@ -45,11 +46,11 @@ export async function mayApprove(pr: string, list: Restriction[] = loadRestricti
   const { mode, restriction } = resolve(list, { tool: "Bash", input: { command: approveCommand(pr) } });
   if (mode === "allow") return { decision: "allow" };
   if (mode === "deny") return { decision: "deny", reason: `"${restriction?.label ?? "pr-approve"}" is set to deny` };
-  const session = process.env["MAXFLOW_SESSION"] ?? "";
-  if (session === "") return { decision: "deny", reason: "no MAXFLOW_SESSION to ask the restrictions as" };
+  const session = yarnEnv("SESSION") ?? "";
+  if (session === "") return { decision: "deny", reason: "no YARN_SESSION to ask the restrictions as" };
   try {
     const res = await fetch(`${BASE}/api/restrictions/enforce`, {
-      method: "POST", headers: { "x-maxflow-from": session },
+      method: "POST", headers: { "x-yarn-from": session },
       body: JSON.stringify({ tool: "Bash", input: { command: approveCommand(pr) } }),
       signal: AbortSignal.timeout(ENFORCE_TIMEOUT_MS),
     });

@@ -1,3 +1,4 @@
+import { bothEnvNames } from "./shared/legacy-maxflow";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { CLI, DIR, ARE_AGENTS_INERT, INSTANCE, PORT, TMUX_SCOPE, TMUX_SOCKET } from "./instance";
@@ -8,15 +9,26 @@ const MAX_INLINE_COMMAND_CHARS = 8000;
 const OPTION_WRITES_PER_BATCH = 100;
 
 // constraint: Claude Code's CLAUDECODE/CLAUDE_CODE_*/CLAUDE_PID markers make a child claude think it is a subagent
-const CLAUDE_MARKERS_AND_SERVICE_ONLY_ENV = /^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT|MAXFLOW_SENTRIES$)/;
-const childEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !CLAUDE_MARKERS_AND_SERVICE_ONLY_ENV.test(k)));
+const CLAUDE_MARKERS = /^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT)/;
+const SERVICE_ONLY_ENV = bothEnvNames("SENTRIES");
+const childEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !CLAUDE_MARKERS.test(k) && !SERVICE_ONLY_ENV.includes(k)));
 export const termEnv = { LANG: "en_US.UTF-8", ...childEnv, TERM: "xterm-256color", COLORTERM: "truecolor" };
 
 export const TMUX = ["tmux", "-L", TMUX_SOCKET, "-f", new URL("tmux.conf", import.meta.url).pathname];
 export const tmuxName = (id: string) => `mf-${id}`;
 // constraint: bin/agent's gh refuses merges, so an agent's script that runs gh pr merge is stopped too, not only its Bash calls the hook reads
 const AGENT_PATH = `${DIR}/bin/agent:${process.env["PATH"] ?? ""}`;
-export const paneEnv = (id: string) => ["-e", `PATH=${AGENT_PATH}`, "-e", `MAXFLOW_SESSION=${id}`, "-e", `MAXFLOW_PORT=${PORT}`, "-e", `MAXFLOW_INSTANCE=${INSTANCE}`, "-e", `MAXFLOW_STATE=${stateDisplayPath("")}`, "-e", `MAXFLOW_CLI=${CLI}`, "-e", `MAXFLOW_DIR=${DIR}`];
+export const bothEnvs = (name: string, value: string) => bothEnvNames(name).flatMap((key) => ["-e", `${key}=${value}`]);
+export const paneEnv = (id: string) => [
+  "-e",
+  `PATH=${AGENT_PATH}`,
+  ...bothEnvs("SESSION", id),
+  ...bothEnvs("PORT", String(PORT)),
+  ...bothEnvs("INSTANCE", INSTANCE),
+  ...bothEnvs("STATE", stateDisplayPath("")),
+  ...bothEnvs("CLI", CLI),
+  ...bothEnvs("DIR", DIR),
+];
 
 export function tmux(...args: string[]) {
   const r = Bun.spawnSync([...TMUX, ...args], { env: termEnv, timeout: TMUX_SYNC_TIMEOUT_MS });
@@ -90,7 +102,7 @@ export const named = (id: string, cmd: string[]) => {
 export function launchable(id: string, cmd: string[]) {
   const launched = named(id, cmd);
   if (launched.join(" ").length < MAX_INLINE_COMMAND_CHARS) return launched;
-  const script = `${tmpdir()}/maxflow-launch-${id}.sh`;
+  const script = `${tmpdir()}/yarn-launch-${id}.sh`;
   writeFileSync(script, `rm -f "$0"\nexec ${launched.map((a) => `'${a.replaceAll("'", `'\\''`)}'`).join(" ")}\n`);
   return ["sh", script];
 }

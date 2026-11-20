@@ -16,7 +16,7 @@ const isPatch = (value: unknown): value is Patch =>
   isRecord(value) && typeof value["from"] === "number" && typeof value["v"] === "number" && isRecord(value["upsert"]) && isRecord(value["remove"]) && isRecord(value["order"]) && isRecord(value["set"]);
 
 const SOURCE_SENTRY: Partial<Record<Sentry["id"], string>> = { gh: "gh", slack: "slack" };
-const LABEL: Record<Sentry["id"], string> = { isaac: "You", gh: "GitHub", slack: "Slack", agent: "Agents", sentry: "Sentries", maxflow: "yarn" };
+const LABEL: Record<Sentry["id"], string> = { isaac: "You", gh: "GitHub", slack: "Slack", agent: "Agents", sentry: "Sentries", yarn: "yarn" };
 const EVERY: Partial<Record<Sentry["id"], string>> = { gh: "30s", slack: "60s" };
 const SERVER_DOWN_MISSES_BEFORE_RELOAD = 2;
 

@@ -1,3 +1,4 @@
+import { callerOf } from "./shared/legacy-maxflow";
 import { sessions } from "./sessions";
 import { isRecord, stringOr } from "./shared/guards";
 import { threads } from "./stores";
@@ -236,7 +237,7 @@ type Answer<S> = (req: Request, server: S) => Promise<Response | undefined>;
 
 // constraint: world patches go out 100ms+ after a publish, so this event reaches the tab first and it can hold the change for the cursor
 export const withCursors = <S>(answer: Answer<S>) => async (req: Request, server: S) => {
-  const agent = sessions.get(req.headers.get("x-maxflow-from") ?? "");
+  const agent = sessions.get(callerOf(req));
   const isAction = agent !== undefined && req.method !== "GET" && RULES.some(r => r.method === req.method && r.path.test(new URL(req.url).pathname));
   const sent = isAction ? req.clone() : undefined;
   const res = await answerClaimingCanvas(sent ? new URL(req.url).pathname : undefined, async () => answer(req, server));

@@ -90,8 +90,8 @@ export function handOff(old: Session, oldRole: Role, to: Session) {
     t.routers = [...t.routers.filter((id) => id !== old.id && id !== to.id), to.id];
     if (t.pending?.routers.includes(old.id) === true) t.pending.routers = [...t.pending.routers.filter((id) => id !== old.id && id !== to.id), to.id];
     if (t.asks?.session === old.id) t.asks.session = to.id;
-    t.messages.push(message("maxflow", `Handed from [[agent:${old.id}]] to [[agent:${to.id}]], which answers here from now on.`));
-    publish(`thread/${t.id}`, { thread: t.id, from: "maxflow" });
+    t.messages.push(message("yarn", `Handed from [[agent:${old.id}]] to [[agent:${to.id}]], which answers here from now on.`));
+    publish(`thread/${t.id}`, { thread: t.id, from: "yarn" });
   }
   saveThreads();
   publish(`handoff/${old.id}`, { from: old.id, to: to.id, objective: oldRole.objective, threads: handed.map((t) => t.id) });
@@ -99,7 +99,7 @@ export function handOff(old: Session, oldRole: Role, to: Session) {
 }
 export function askOldRouterToBriefTheNew(old: Session, oldRole: Role, to: Session, handed: Thread[]) {
   const handedList = handed.length > 0 ? ` (${handed.map((t) => t.id).join(", ")})` : "";
-  dispatch({ to: [old], target: to.id, text: `[maxflow] You handed objective ${oldRole.objective} to the new router ${to.id}. Its threads${handedList} and your workers are its now, and his messages there go to it alone; each thread shows the hand-off, so don't post there or announce it. Tell ${to.id} what it needs with \`${CLI} notify ${to.id} '<text>'\`, then end with \`${CLI} wait done\`.` });
+  dispatch({ to: [old], target: to.id, text: `[yarn] You handed objective ${oldRole.objective} to the new router ${to.id}. Its threads${handedList} and your workers are its now, and his messages there go to it alone; each thread shows the hand-off, so don't post there or announce it. Tell ${to.id} what it needs with \`${CLI} notify ${to.id} '<text>'\`, then end with \`${CLI} wait done\`.` });
 }
 const HANDS_TO_ANOTHER = /\b(pass(?:ed|ing)?|hand(?:ed|ing)?(?: (?:it|this))?(?: off| over)?|forward(?:ed|ing)?|relay(?:ed|ing)?|routed|gave|given|giving)\b[^.\n]{0,40}\bto\b|\b(?:takes?|taking|took) over\b|\bnew router\b/i;
 export function relayRefusal(t: Thread, from: Session, text: string): string | undefined {
@@ -111,6 +111,6 @@ export function relayRefusal(t: Thread, from: Session, text: string): string | u
     .map((m) => sessions.get(m[1] ?? ""))
     .find((s): s is Session => s !== undefined && s !== from && s.role?.role === "router");
   return otherRouter !== undefined && from.role?.role === "router" && HANDS_TO_ANOTHER.test(text)
-    ? `This hands ${t.id} to ${otherRouter.id}, and maxflow shows hand-offs in the thread itself; ${otherRouter.id} answers him. Post what you found or did, without the hand-off, or nothing.`
+    ? `This hands ${t.id} to ${otherRouter.id}, and yarn shows hand-offs in the thread itself; ${otherRouter.id} answers him. Post what you found or did, without the hand-off, or nothing.`
     : undefined;
 }

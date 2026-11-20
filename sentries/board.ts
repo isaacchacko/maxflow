@@ -69,7 +69,7 @@ async function openFeedThreadOf(boardThread: string) {
   return thread === undefined || Boolean(thread.resolved) ? undefined : thread.id;
 }
 
-async function feedToMaxflow(event: BoardEvent, config: BoardConfig) {
+async function feedToYarn(event: BoardEvent, config: BoardConfig) {
   const text = feedText(event, config);
   const open = await openFeedThreadOf(event.thread);
   if (open !== undefined) {
@@ -92,7 +92,7 @@ async function take(event: BoardEvent, config: BoardConfig) {
     state.published = event.cursor;
     writeStateJson(STATE_FILE, state);
   }
-  if (isFed(event, config)) await feedToMaxflow(event, config);
+  if (isFed(event, config)) await feedToYarn(event, config);
   state.cursor = event.cursor;
   writeStateJson(STATE_FILE, state);
 }

@@ -51,7 +51,7 @@ export function contextNotes(text: string, who = "") {
 
 export function contextBlock(text: string, who?: string) {
   const notes = contextNotes(text, who);
-  return notes.length > 0 ? `\n[maxflow] What the context sentry's notes (${CONTEXT_FILE}) hold on the people and topics in it:\n${notes.join("\n")}` : "";
+  return notes.length > 0 ? `\n[yarn] What the context sentry's notes (${CONTEXT_FILE}) hold on the people and topics in it:\n${notes.join("\n")}` : "";
 }
 
 export type SlackSaid = { at: number; who: string; where: string; text: string; link: string };
@@ -84,7 +84,7 @@ function relatedLine(m: SlackSaid, threadOf?: (link: string) => string | undefin
 export function relatedBlock(text: string, who: string | undefined, day: SlackSaid[], threadOf?: (link: string) => string | undefined) {
   const hits = relatedSlack(text, who, day);
   if (hits.length === 0) return "";
-  return `\n[maxflow] Said on Slack in the last day by others, sharing "${[...new Set(hits.flatMap((h) => h.on))].join('", "')}" with it (likely the same thing; join them):\n${hits.map(({ m }) => relatedLine(m, threadOf)).join("\n")}`;
+  return `\n[yarn] Said on Slack in the last day by others, sharing "${[...new Set(hits.flatMap((h) => h.on))].join('", "')}" with it (likely the same thing; join them):\n${hits.map(({ m }) => relatedLine(m, threadOf)).join("\n")}`;
 }
 
 const slackDisplayText = (text: string) =>

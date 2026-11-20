@@ -72,14 +72,14 @@ async function isAnsweringOk(url: string, init?: RequestInit) {
   }
 }
 
-// constraint: panes in the live maxflow carry its port, so a plain `bun server.ts` run from one would adopt and respawn the live sessions
-async function refuseToRunBesideTheLiveMaxflow() {
+// constraint: panes in the live yarn carry its port, so a plain `bun server.ts` run from one would adopt and respawn the live sessions
+async function refuseToRunBesideTheLiveYarn() {
   if (!IS_LIVE || !(await isAnsweringOk(`${BASE}/api/sessions`))) return;
-  console.error(`the live maxflow is already running on ${BASE}; run ./dev.sh for a dev instance`);
+  console.error(`the live yarn is already running on ${BASE}; run ./dev.sh for a dev instance`);
   process.exit(1);
 }
 
-await refuseToRunBesideTheLiveMaxflow();
+await refuseToRunBesideTheLiveYarn();
 adoptSessionsThatOutlivedTheLastServer();
 startSentriesAndKeepThemUp();
 loadSavedDrafts();
@@ -214,7 +214,7 @@ Bun.serve<WsData>({
   websocket: websocketHandlers,
 });
 
-console.log(`maxflow listening on http://localhost:${String(PORT)}`);
+console.log(`yarn listening on http://localhost:${String(PORT)}`);
 const git = Bun.spawn(["git", "-C", DIR, "rev-parse", "--short", "HEAD"], { stdout: "pipe" });
 publish("server/start", { pid: process.pid, commit: (await new Response(git.stdout).text()).trim() });
 writeStateText("server.pid", String(process.pid));

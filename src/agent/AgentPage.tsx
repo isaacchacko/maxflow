@@ -46,7 +46,7 @@ const sleepLine = "hidden max-w-[32rem] min-w-0 shrink-[2] truncate text-sm whit
 function SleepOrWait({ agent }: { agent: Agent }) {
   if (hasText(agent.handedTo))
     return (
-      <span data-agent="agent-handed-to" title="Its context was filling up, so maxflow moved its role, threads, task, watches and wait to a fresh agent, and messages sent to it go there" className={sleepLine}>
+      <span data-agent="agent-handed-to" title="Its context was filling up, so yarn moved its role, threads, task, watches and wait to a fresh agent, and messages sent to it go there" className={sleepLine}>
         Handed off to{" "}
         <a href={`#agent/${agent.handedTo}`} className="font-mono hover:underline">
           {agent.handedTo}

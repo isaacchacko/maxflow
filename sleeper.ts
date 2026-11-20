@@ -16,7 +16,7 @@ function showLastScreen() {
 }
 
 showLastScreen();
-process.stdout.write(`${DIM}[maxflow] asleep: claude is stopped to free memory. Type to wake it.${RESET}\n`);
+process.stdout.write(`${DIM}[yarn] asleep: claude is stopped to free memory. Type to wake it.${RESET}\n`);
 
 const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: "❯ " });
 rl.prompt();

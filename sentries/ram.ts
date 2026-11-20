@@ -125,7 +125,7 @@ async function tick() {
     await Bun.sleep(GRACE_MS);
     signalEach(pids.filter(isAlive), "SIGKILL");
 
-    const text = `[maxflow ram sentry] I killed \`${cmd}\` (pid ${root.pid}): it held ${gb(rss)}, ${pct.toFixed(1)}% of this machine's RAM, which every other agent shares. Don't run test, lint, typecheck or build suites locally. Commit and push to your PR (open it with \`gh pr create\` if there is none) so they run on the Blacksmith CI runners, then read the result with \`gh pr checks\` and \`gh run view --log-failed\`. A quick lint of a single file you just edited is fine.`;
+    const text = `[yarn ram sentry] I killed \`${cmd}\` (pid ${root.pid}): it held ${gb(rss)}, ${pct.toFixed(1)}% of this machine's RAM, which every other agent shares. Don't run test, lint, typecheck or build suites locally. Commit and push to your PR (open it with \`gh pr create\` if there is none) so they run on the Blacksmith CI runners, then read the result with \`gh pr checks\` and \`gh run view --log-failed\`. A quick lint of a single file you just edited is fine.`;
     await post(`/api/sessions/${agent.id}/notify`, { text });
     await post("/api/events", { topic: `ram/killed/${agent.id}`, data: { pid: root.pid, cmd, rss, pct } });
   }

@@ -1,3 +1,4 @@
+import { noSessionEnv } from "../shared/legacy-maxflow";
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,8 +22,8 @@ afterEach(async () => {
   for (const stub of running.splice(0)) await stub.stop();
 });
 
-function startSentryAgainstStubMaxflow({ watches, sessions, refusedEvents }: { watches: object[]; sessions: object[]; refusedEvents: number }): Stub {
-  const home = mkdtempSync(join(tmpdir(), "maxflow-gh-commit-"));
+function startSentryAgainstStubYarn({ watches, sessions, refusedEvents }: { watches: object[]; sessions: object[]; refusedEvents: number }): Stub {
+  const home = mkdtempSync(join(tmpdir(), "yarn-gh-commit-"));
   const instance = `ci-${crypto.randomUUID().slice(0, 6)}`;
   const state = join(home, `.maxflow-v2-${instance}`);
   mkdirSync(state, { recursive: true });
@@ -32,7 +33,7 @@ function startSentryAgainstStubMaxflow({ watches, sessions, refusedEvents }: { w
   writeFileSync(join(bin, "gh"), FAKE_GH);
   chmodSync(join(bin, "gh"), 0o755);
   const events: Stub["events"] = [];
-  const maxflow = Bun.serve({
+  const yarn = Bun.serve({
     port: 0,
     async fetch(req) {
       const path = new URL(req.url).pathname;
@@ -41,11 +42,11 @@ function startSentryAgainstStubMaxflow({ watches, sessions, refusedEvents }: { w
       const { topic } = (await req.json()) as { topic: string };
       const status = events.filter((e) => e.topic === topic).length < refusedEvents ? 503 : 200;
       events.push({ topic, status });
-      return new Response(status === 503 ? "maxflow is down" : "ok", { status });
+      return new Response(status === 503 ? "yarn is down" : "ok", { status });
     },
   });
   const sentry = Bun.spawn(["bun", join(import.meta.dir, "../sentries/gh.ts")], {
-    env: { ...process.env, HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}`, MAXFLOW_INSTANCE: instance, MAXFLOW_PORT: String(maxflow.port), MAXFLOW_SESSION: "", GH_SENTRY_INTERVAL: "300", GH_STRANDED_CI_WAIT_MS: "60000" },
+    env: { ...process.env, HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}`, YARN_INSTANCE: instance, YARN_PORT: String(yarn.port), ...noSessionEnv(), GH_SENTRY_INTERVAL: "300", GH_STRANDED_CI_WAIT_MS: "60000" },
     stdout: "ignore",
     stderr: "ignore",
   });
@@ -55,7 +56,7 @@ function startSentryAgainstStubMaxflow({ watches, sessions, refusedEvents }: { w
     stop: async () => {
       sentry.kill();
       await sentry.exited;
-      await maxflow.stop(true);
+      await yarn.stop(true);
       rmSync(home, { recursive: true, force: true });
     },
   };
@@ -69,9 +70,9 @@ async function until(isDone: () => boolean, ms: number) {
 
 const watchedCommits = (stub: Stub) => (JSON.parse(readFileSync(join(stub.home, "gh-commit-watch.json"), "utf8")) as { key: string }[]).map((w) => w.key);
 
-describe("0e988876: its wait on ci:<sha> never ended though CI on b7e72a2 passed while maxflow restarted for a deploy", () => {
-  test("a CI event maxflow refuses (503 while it restarts) keeps the watch, and the next poll announces it again", async () => {
-    const stub = startSentryAgainstStubMaxflow({ watches: [{ key: COMMIT, sessions: ["0e988876"], at: Date.now() }], sessions: [], refusedEvents: 1 });
+describe("0e988876: its wait on ci:<sha> never ended though CI on b7e72a2 passed while yarn restarted for a deploy", () => {
+  test("a CI event yarn refuses (503 while it restarts) keeps the watch, and the next poll announces it again", async () => {
+    const stub = startSentryAgainstStubYarn({ watches: [{ key: COMMIT, sessions: ["0e988876"], at: Date.now() }], sessions: [], refusedEvents: 1 });
     await until(() => stub.events.some((e) => e.status === 200), 15_000);
     expect(stub.events.filter((e) => e.topic === TOPIC).map((e) => e.status)).toEqual([503, 200]);
     await until(() => watchedCommits(stub).length === 0, 5000);
@@ -80,7 +81,7 @@ describe("0e988876: its wait on ci:<sha> never ended though CI on b7e72a2 passed
 
   test("a ci:<sha> wait past the stranded age with no watch behind it is checked again and announced", async () => {
     const wait = { kind: "ci", ref: COMMIT, at: Date.now() - 120_000 };
-    const stub = startSentryAgainstStubMaxflow({ watches: [], sessions: [{ id: "0e988876", name: "agent", cwd: "/", running: false, sentry: false, links: [], pending: 0, status: "idle", blocked: null, wait }], refusedEvents: 0 });
+    const stub = startSentryAgainstStubYarn({ watches: [], sessions: [{ id: "0e988876", name: "agent", cwd: "/", running: false, sentry: false, links: [], pending: 0, status: "idle", blocked: null, wait }], refusedEvents: 0 });
     await until(() => stub.events.length > 0, 15_000);
     expect(stub.events).toEqual([{ topic: TOPIC, status: 200 }]);
   }, 30_000);

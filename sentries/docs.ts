@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { yarnEnv } from "../shared/legacy-maxflow";
 import { watch } from "node:fs";
 import { join } from "node:path";
 import { CLI, BASE as base } from "../instance";
@@ -12,7 +13,7 @@ if (import.meta.main) takeOver("docs");
 const QUIET_MS = Number(process.env["DOCS_QUIET_MS"] ?? 15_000);
 const RETRY_MS = 600_000;
 const STATE_FILE = "docs-sentry.json";
-const headers = { "content-type": "application/json", "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
+const headers = { "content-type": "application/json", "x-yarn-from": yarnEnv("SESSION") ?? "" };
 
 type Told = Record<string, number>;
 const isTold = (value: unknown): value is Told => typeof value === "object" && value !== null && Object.values(value).every((at) => typeof at === "number");
@@ -35,7 +36,7 @@ async function didNotify(id: string, text: string) {
 
 function asked(path: string, t: CommentThread) {
   const said = t.entries.map((e) => `${e.who}: ${e.text}`).join("\n  ");
-  return `[maxflow docs] Isaac commented in ${join(DOCS_DIR, path)} (line ${String(t.line)}):\n  ${said}\nDo what his last word asks: edit the doc directly, then answer under his comment with a nested callout of your own, signed with your session name, e.g.\n> > [!reply] <your name>\n> > <what you changed, or your answer>\nLeave his comment in place; he deletes the thread once it's settled. Your edits are committed for you (\`${CLI} docs write\` commits at once).`;
+  return `[yarn docs] Isaac commented in ${join(DOCS_DIR, path)} (line ${String(t.line)}):\n  ${said}\nDo what his last word asks: edit the doc directly, then answer under his comment with a nested callout of your own, signed with your session name, e.g.\n> > [!reply] <your name>\n> > <what you changed, or your answer>\nLeave his comment in place; he deletes the thread once it's settled. Your edits are committed for you (\`${CLI} docs write\` commits at once).`;
 }
 
 async function didWake(doc: DocSummary, t: CommentThread) {

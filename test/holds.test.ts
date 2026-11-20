@@ -1,3 +1,4 @@
+import { noSessionEnv } from "../shared/legacy-maxflow";
 import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -5,10 +6,10 @@ import { join } from "node:path";
 import { prKeyOf } from "../holds";
 
 const root = join(import.meta.dir, "..");
-const home = mkdtempSync(join(tmpdir(), "maxflow-holds-"));
+const home = mkdtempSync(join(tmpdir(), "yarn-holds-"));
 const stateDir = join(home, ".maxflow-v2-holdstest");
 mkdirSync(stateDir, { recursive: true });
-const env = { ...process.env, HOME: home, MAXFLOW_INSTANCE: "holdstest", MAXFLOW_PORT: "1", MAXFLOW_SESSION: "" };
+const env = { ...process.env, HOME: home, YARN_INSTANCE: "holdstest", YARN_PORT: "1", ...noSessionEnv() };
 
 afterAll(() => {
   rmSync(home, { recursive: true, force: true });
@@ -38,5 +39,5 @@ test("hold, holds and unhold stand the sentries down on one PR and back up", () 
 
 test("an unreadable holds file holds every PR instead of none", () => {
   writeFileSync(join(stateDir, "pr-holds.json"), "{oops");
-  expect(JSON.parse(heldOn("dryft-ai/app#7"))).toMatchObject({ by: "maxflow" });
+  expect(JSON.parse(heldOn("dryft-ai/app#7"))).toMatchObject({ by: "yarn" });
 });

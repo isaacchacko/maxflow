@@ -5,7 +5,7 @@ const PAGES = new Map([
   ["sentries", "Sentries"],
 ]);
 
-const SCREENSHOT_LINE = /^\[maxflow · screenshot\] (.*)$/m;
+const SCREENSHOT_LINE = /^\[(?:yarn|maxflow) · screenshot\] (.*)$/m;
 const PAGE_PART = /^page (.*)$/;
 const PAGE_HASH = /^`#?([\w-]+)`$/;
 const MESSAGE_PART = /^message from (.+?) at [\d:]+/;

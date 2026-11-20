@@ -83,7 +83,7 @@ function tellAskerWhereTheQuestionMoved(s: Session, q: Question, t: Thread) {
   dispatch({
     to: [s],
     target: t.id,
-    text: `[maxflow] Questions are threads now. Your question q${String(q.id)} moved into thread ${t.id} in the user's inbox, flagged as waiting on him; his reply there is typed into your prompt and ends your wait. ${waitAdvice} Answer him with \`${CLI} thread post ${t.id} '<text>'\`, and ask him anything new with \`${CLI} ask\`, which opens a thread.`,
+    text: `[yarn] Questions are threads now. Your question q${String(q.id)} moved into thread ${t.id} in the user's inbox, flagged as waiting on him; his reply there is typed into your prompt and ends your wait. ${waitAdvice} Answer him with \`${CLI} thread post ${t.id} '<text>'\`, and ask him anything new with \`${CLI} ask\`, which opens a thread.`,
   });
 }
 

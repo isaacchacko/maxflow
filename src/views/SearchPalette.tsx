@@ -32,7 +32,7 @@ const chipKeys: ChipKey[] = ["is", "from", "state", "status", "in"];
 const isChipKey = (key: string | undefined): key is ChipKey => chipKeys.some(k => k === key);
 
 const kindIcon: Record<Kind, typeof User> = { event: Hash, objective: Waypoints, router: Network, agent: User, thread: MessagesSquare };
-const sourceIcon: Record<string, typeof User> = { isaac: User, gh: GitPullRequest, slack: Hash, agent: Bot, sentry: Radar, maxflow: Waypoints };
+const sourceIcon: Record<string, typeof User> = { isaac: User, gh: GitPullRequest, slack: Hash, agent: Bot, sentry: Radar, yarn: Waypoints };
 
 function valuesFor(key: ChipKey, objectiveIds: string[]) {
   return key === "in" ? objectiveIds : fixedValues[key];

@@ -14,7 +14,7 @@ import { crewOf, layoutStructure, threadsBesideFirstRouter } from "./routing/lay
 import { hitsWithWholeRoutes, searchNodes, shownBy } from "./routing/nodes";
 import { Column, GAP, Placed, VIEWS, counted, isFadedAt, paneOfSnapSharingTheAgentsSlot, useCardHeights, useViewport, type Stage } from "./routing/stage";
 
-const ALL_SOURCES: Source[] = ["isaac", "gh", "slack", "agent", "sentry", "maxflow"];
+const ALL_SOURCES: Source[] = ["isaac", "gh", "slack", "agent", "sentry", "yarn"];
 const VIEW_OF_KIND: Record<Kind, number> = { event: 0, objective: 1, router: 1, agent: 2, thread: 3 };
 const PAN = [
   { step: -1, Icon: ChevronLeft, label: "Previous view" },

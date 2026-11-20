@@ -6,11 +6,11 @@ import { backgroundSubagents } from "../background";
 import { startServerWithoutSentries, stopByPidAndSocket, throwawayInstance, waitUntilAnswering, withTimeout } from "./throwaway-instance";
 
 const BORDER = "─".repeat(20);
-const fakeClaudeDir = mkdtempSync(join(tmpdir(), "maxflow-fake-claude-"));
+const fakeClaudeDir = mkdtempSync(join(tmpdir(), "yarn-fake-claude-"));
 writeFileSync(join(fakeClaudeDir, "claude"), `#!/bin/sh\nstty -echo\nwhile true; do clear; printf '${BORDER}\\n❯ \\n${BORDER}\\n'; read -r _; done\n`);
 chmodSync(join(fakeClaudeDir, "claude"), 0o755);
 
-const instance = throwawayInstance("maxflow-no-silent-sleep-");
+const instance = throwawayInstance("yarn-no-silent-sleep-");
 const server = startServerWithoutSentries(instance, { PATH: `${fakeClaudeDir}:${process.env["PATH"] ?? ""}` });
 
 afterAll(async () => {
@@ -81,7 +81,7 @@ describe("th-7d528b: a lint coordinator asleep on its subagents was killed with 
     const { id, transcript } = await agentWithTranscript("coordinator");
     appendFileSync(transcript, launched("a1061da1a2f9127af"));
 
-    expect((await send(`/api/sessions/${id}/await`, { kind: "ci", ref: "isaac/maxflow#51" })).status).toBe(200);
+    expect((await send(`/api/sessions/${id}/await`, { kind: "ci", ref: "isaac/yarn#51" })).status).toBe(200);
     await Bun.sleep(SETTLE_MS);
     expect(await isClaudeStopped(id)).toBe(false);
     expect((await rowOf(id))?.sleepHeld?.what).toEqual(["1 subagent"]);
@@ -98,15 +98,15 @@ describe("th-9942f7: an agent put to sleep says so where he looks", () => {
   test("its thread shows it asleep and what wakes it, and the world shows it asleep", async () => {
     await waitUntilAnswering(instance, server);
     const { id, thread } = await routerHandedHisMessage("obj-sleep", "ship #52");
-    expect((await send(`/api/sessions/${id}/await`, { kind: "ci", ref: "isaac/maxflow#52", why: "CI on #52, then deploy" })).status).toBe(200);
+    expect((await send(`/api/sessions/${id}/await`, { kind: "ci", ref: "isaac/yarn#52", why: "CI on #52, then deploy" })).status).toBe(200);
     await Bun.sleep(SETTLE_MS);
 
     const row = await rowOf(id);
     expect(row?.state).toBe("asleep");
-    expect(row?.sleep?.wakes).toBe("CI finishes on isaac/maxflow#52");
+    expect(row?.sleep?.wakes).toBe("CI finishes on isaac/yarn#52");
     const t = await threadOf(thread);
-    expect(t?.asleep.map((a) => [a.sessionId, a.name, a.wakes])).toEqual([[id, "router", "CI finishes on isaac/maxflow#52"]]);
-    expect(t?.messages.some((m) => m.from === "maxflow")).toBe(false);
+    expect(t?.asleep.map((a) => [a.sessionId, a.name, a.wakes])).toEqual([[id, "router", "CI finishes on isaac/yarn#52"]]);
+    expect(t?.messages.some((m) => m.from === "yarn")).toBe(false);
   }, 30_000);
 
   test("an agent put to sleep with his message unanswered posts loudly in the thread", async () => {
@@ -115,7 +115,7 @@ describe("th-9942f7: an agent put to sleep says so where he looks", () => {
     await Bun.sleep(SETTLE_MS);
 
     expect((await rowOf(id))?.state).toBe("asleep");
-    const loud = (await threadOf(thread))?.messages.find((m) => m.from === "maxflow");
+    const loud = (await threadOf(thread))?.messages.find((m) => m.from === "yarn");
     expect(loud?.text).toContain("was put to sleep with work still open");
     expect(loud?.text).toContain("has no answer");
   }, 30_000);

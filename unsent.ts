@@ -1,3 +1,4 @@
+import { isStamped } from "./shared/legacy-maxflow";
 const COLLAPSED_PASTE = /^\[Pasted text #\d+ \+(\d+) lines?\]$/;
 
 const withoutWhitespace = (text: string) => text.replaceAll(/\s+/g, "");
@@ -14,7 +15,7 @@ function messagesInCollapsedPaste(inbox: string[], pastedNewlines: number) {
 }
 
 function messagesTypedInBox(inbox: string[], box: string) {
-  if (!box.trimStart().startsWith("[maxflow")) return 0;
+  if (!isStamped(box.trimStart())) return 0;
   const shown = withoutWhitespace(box);
   for (let n = inbox.length; n > 0; n--) if (withoutWhitespace(inbox.slice(0, n).join("\n")) === shown) return n;
   return inbox.length > 0 ? 1 : 0;

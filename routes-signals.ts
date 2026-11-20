@@ -24,7 +24,7 @@ async function isaacsChatFromTheEventLogToHisObjectiveOrTheFunnel(req: Request):
   const stamped = `${ISAAC_IN_THREAD.replace(", in thread", ", from the event log")}] ${unforge(text)}`;
   const ev = objective
     ? toItsRoutersOrAFreshOneWithHisWordsAsItsFirstPrompt(objective, text, stamped)
-    : dispatch({ source: "isaac", text, deliver: (seq) => `${text}\n[maxflow] signal ${seq}: ${sizeFirst(seq)}` });
+    : dispatch({ source: "isaac", text, deliver: (seq) => `${text}\n[yarn] signal ${seq}: ${sizeFirst(seq)}` });
   return Response.json(ev, { status: 201 });
 }
 

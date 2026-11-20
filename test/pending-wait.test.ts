@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { startServerWithoutSentries, stopByPidAndSocket, throwawayInstance, waitUntilAnswering, withTimeout } from "./throwaway-instance";
 
 const BORDER = "─".repeat(20);
-const fakeClaudeDir = mkdtempSync(join(tmpdir(), "maxflow-fake-claude-"));
+const fakeClaudeDir = mkdtempSync(join(tmpdir(), "yarn-fake-claude-"));
 writeFileSync(join(fakeClaudeDir, "claude"), `#!/bin/sh\nstty -echo\nwhile true; do clear; printf '${BORDER}\\n❯ \\n${BORDER}\\n'; read -r _; done\n`);
 chmodSync(join(fakeClaudeDir, "claude"), 0o755);
 
-const instance = throwawayInstance("maxflow-pending-wait-");
+const instance = throwawayInstance("yarn-pending-wait-");
 const server = startServerWithoutSentries(instance, { PATH: `${fakeClaudeDir}:${process.env["PATH"] ?? ""}` });
 
 afterAll(async () => {
@@ -38,11 +38,11 @@ describe("th-ebe33f: a router asleep on CI for #51 showed only 'Stopped without 
     const { id } = (await (await send("/api/threads", { title: "ship #51", objective: "obj-wait" })).json()) as { id: string };
     expect((await send(`/api/threads/${id}/messages`, { text: "ship it" }, theBrowsersMarker)).status).toBe(201);
 
-    const silent = await send(`/api/sessions/${router.id}/await`, { kind: "ci", ref: "isaac/maxflow#51" });
+    const silent = await send(`/api/sessions/${router.id}/await`, { kind: "ci", ref: "isaac/yarn#51" });
     expect(silent.status).toBe(409);
     expect(await silent.text()).toContain("--why");
     const why = "one unrelated browser test timed out; rerunning it, then merge and deploy";
-    expect((await send(`/api/sessions/${router.id}/await`, { kind: "ci", ref: "isaac/maxflow#51", why })).status).toBe(200);
+    expect((await send(`/api/sessions/${router.id}/await`, { kind: "ci", ref: "isaac/yarn#51", why })).status).toBe(200);
 
     await Bun.sleep(PAST_DELIVERY_GRACE_MS);
     expect(await pendingIn(id)).toMatchObject({ stale: false, status: why, waitingOn: router.id });

@@ -43,7 +43,7 @@ function commandOf(asked: unknown, role: Role | undefined): string[] {
 }
 
 function tellTheRouterItHasANewWorkerFromTheBrowser(router: Session, worker: Session) {
-  dispatch({ to: [router], target: worker.id, text: `[maxflow] The user started a worker for you, "${worker.name}" (${worker.id}). Brief it with \`${CLI} notify ${worker.id} '<brief>'\`.` });
+  dispatch({ to: [router], target: worker.id, text: `[yarn] The user started a worker for you, "${worker.name}" (${worker.id}). Brief it with \`${CLI} notify ${worker.id} '<brief>'\`.` });
 }
 
 function placeInTheObjective(body: Body, from: Session | undefined) {

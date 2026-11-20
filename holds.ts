@@ -19,7 +19,7 @@ export function prKeyOf(ref: string, repoHere: () => string): string | undefined
 }
 
 // constraint: a hold gates outward actions, so an unreadable file holds every PR rather than none
-const UNREADABLE: Hold = { at: 0, by: "maxflow", why: `${HOLDS_FILE} is unreadable, so every PR is held until it's fixed` };
+const UNREADABLE: Hold = { at: 0, by: "yarn", why: `${HOLDS_FILE} is unreadable, so every PR is held until it's fixed` };
 
 function read(): Holds | undefined {
   const all = peekStateJson(HOLDS_FILE);

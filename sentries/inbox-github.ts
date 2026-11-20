@@ -103,7 +103,7 @@ async function startReviewSession(name: string, dir: string) {
 }
 
 const reviewerBrief = (pr: ReviewPr) =>
-  `[maxflow inbox] You are a review agent for ${pr.url} ("${pr.title}" by ${pr.author}), which requests the user's review. It was picked for a careful read because it ${String(pr.risk)}. This folder is a detached worktree of its head. Read the diff (gh pr diff ${pr.url}) and the code around it, and look for correctness bugs and data-safety risks: migrations, ERP/SAP writes, infra, auth. Make no GitHub or Slack writes at all: no comments, reviews, approvals, reviewer requests or pushes. End your turn with your findings ranked by severity, each with file:line and a one-line fix, then a verdict (approve, approve with nits, or request changes) the user can act on, then run \`${CLI} wait done\`.`;
+  `[yarn inbox] You are a review agent for ${pr.url} ("${pr.title}" by ${pr.author}), which requests the user's review. It was picked for a careful read because it ${String(pr.risk)}. This folder is a detached worktree of its head. Read the diff (gh pr diff ${pr.url}) and the code around it, and look for correctness bugs and data-safety risks: migrations, ERP/SAP writes, infra, auth. Make no GitHub or Slack writes at all: no comments, reviews, approvals, reviewer requests or pushes. End your turn with your findings ranked by severity, each with file:line and a one-line fix, then a verdict (approve, approve with nits, or request changes) the user can act on, then run \`${CLI} wait done\`.`;
 
 async function hasRoomForReviewer() {
   const live = new Set((await fetchSessions()).filter((s) => s.running).map((s) => s.id));

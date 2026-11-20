@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { yarnEnv, seqOf } from "../shared/legacy-maxflow";
 import { fetchSessions, isOwnComment, links, prNumber, repoOfKey, REVIEW_WATCH, writeWatches, type Link, type Session, type Watch } from "../gh";
 import { holdOn } from "../holds";
 import { BASE as base } from "../instance";
@@ -13,8 +14,8 @@ if (import.meta.main) takeOver("review");
 const QUEUE_FILE = "review-queue.json";
 const BOARD_FILE = "review-board.json";
 const INTERVAL_MS = Number(process.env["REVIEW_SENTRY_INTERVAL"] ?? 120_000);
-const caller = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
-const agent = process.env["MAXFLOW_SESSION"] ?? "";
+const caller = { "x-yarn-from": yarnEnv("SESSION") ?? "" };
+const agent = yarnEnv("SESSION") ?? "";
 const NOTIFY_TIMEOUT_MS = 30_000;
 const EVENTS_GRACE_MS = 30_000;
 const UI_LOOKUP_BATCH = 25;
@@ -136,7 +137,7 @@ function stage(pr: Pr) {
 }
 
 async function tellSession(id: string, text: string) {
-  return fetch(`${base}/api/sessions/${id}/notify`, { method: "POST", headers: caller, body: JSON.stringify({ text: `[maxflow review] ${text}` }), signal: AbortSignal.timeout(NOTIFY_TIMEOUT_MS) });
+  return fetch(`${base}/api/sessions/${id}/notify`, { method: "POST", headers: caller, body: JSON.stringify({ text: `[yarn review] ${text}` }), signal: AbortSignal.timeout(NOTIFY_TIMEOUT_MS) });
 }
 
 async function notify(text: string) {
@@ -222,7 +223,7 @@ function isLeftAloneForAHold(pr: Pr) {
   const held = holdOn(keyOf(pr));
   if (held === undefined) return false;
   if (pr.autoMergeRequest) disarm(pr);
-  logAction(keyOf(pr), `held by ${held.by}: no retarget, branch update or owner nudges until \`maxflow unhold ${keyOf(pr)}\``);
+  logAction(keyOf(pr), `held by ${held.by}: no retarget, branch update or owner nudges until \`yarn unhold ${keyOf(pr)}\``);
   return true;
 }
 
@@ -368,7 +369,7 @@ async function tick() {
   const moved = stageMoves(queue);
   refill(stages, queue.map((q): [string, string] => [q.pr, q.stage]));
   refill(titles, queue.map((q): [string, string] => [q.pr, q.title]));
-  if (isFirst) await notify(`Feed up: ${queue.length} open PRs staged in $MAXFLOW_STATE/${QUEUE_FILE}. Build the queue.`);
+  if (isFirst) await notify(`Feed up: ${queue.length} open PRs staged in $YARN_STATE/${QUEUE_FILE}. Build the queue.`);
   else if (moved.length > 0) await notify(`Stage changes: ${moved.join("; ")}.`);
   process.title = `review feed (${queue.length} PRs)`;
 }
@@ -391,7 +392,7 @@ function unheard(e: Event) {
 async function latestSeq() {
   try {
     const res = await fetch(`${base}/api/events?topic=gh/**&after=now`, { signal: AbortSignal.timeout(NOTIFY_TIMEOUT_MS) });
-    return res.headers.get("x-maxflow-seq") ?? "0";
+    return seqOf(res) ?? "0";
   } catch {
     return "0";
   }

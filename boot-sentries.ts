@@ -1,3 +1,4 @@
+import { yarnEnv } from "./shared/legacy-maxflow";
 import { publish } from "./bus";
 import { DIR } from "./instance";
 import { stateDisplayPath } from "./state";
@@ -32,8 +33,8 @@ function markSentriesStartedBeforeTheFlagByNameAndScript() {
   for (const s of sessions.values()) if (s.sentry !== true && Object.hasOwn(SENTRIES, s.name) && s.cmd.join(" ").includes(sentrySource(""))) markSentry(s);
 }
 
-function sentriesWantedByMaxflowSentriesEnv(): [string, string[]][] {
-  const noneAllOrCommaList = process.env["MAXFLOW_SENTRIES"] ?? "1";
+function sentriesWantedByYarnSentriesEnv(): [string, string[]][] {
+  const noneAllOrCommaList = yarnEnv("SENTRIES") ?? "1";
   if (noneAllOrCommaList === "0") return [];
   return Object.entries(SENTRIES).filter(([n]) => noneAllOrCommaList === "1" || noneAllOrCommaList.split(",").includes(n.slice(SENTRY_PREFIX_LENGTH)));
 }
@@ -58,7 +59,7 @@ function respawnWithBackoffIfDown(name: string, cmd: string[]) {
 export function startSentriesAndKeepThemUp() {
   registerAgentSentriesWithFeedsLoggedAside();
   markSentriesStartedBeforeTheFlagByNameAndScript();
-  const wanted = sentriesWantedByMaxflowSentriesEnv();
+  const wanted = sentriesWantedByYarnSentriesEnv();
   for (const [name, cmd] of wanted) {
     if (isSentryUp(name)) continue;
     markSentry(createSession(name, cmd, DIR));

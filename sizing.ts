@@ -1,3 +1,4 @@
+import { callerOf } from "./shared/legacy-maxflow";
 import { publish } from "./bus";
 import { CLI, DIR } from "./instance";
 import { createSession, editTask } from "./lifecycle";
@@ -46,13 +47,13 @@ function todaysDigest() {
 
 function noteInDigest(line: string) {
   const digest = todaysDigest();
-  digest.messages.push(message("maxflow", line));
+  digest.messages.push(message("yarn", line));
   delete digest.resolved;
   return digest;
 }
 
 function noteInThread(about: Thread, line: string) {
-  about.messages.push(message("maxflow", `FYI: ${line}`));
+  about.messages.push(message("yarn", `FYI: ${line}`));
   return about;
 }
 
@@ -82,7 +83,7 @@ function letGo(threadId: string | undefined, why: string) {
 
 const whereToAnswer = (h: Handoff) => (h.thread ? `answer him in thread ${h.thread.id}` : `answer him in a thread you open with \`${CLI} thread new '<title>' '<text>'\``);
 const directBrief = (h: Handoff) =>
-  `\n[maxflow] You are a direct worker: the funnel sized this as one concrete ask, so it has no objective, no router and no board task of its own. Do it, and ${whereToAnswer(h)}. If it turns out to need several pieces or more than a day, promote yourself with \`${CLI} promote '<objective title: the outcome, a few words>'\`: you become the router of a new objective that holds this thread. When it is done, run \`${CLI} wait done\`.`;
+  `\n[yarn] You are a direct worker: the funnel sized this as one concrete ask, so it has no objective, no router and no board task of its own. Do it, and ${whereToAnswer(h)}. If it turns out to need several pieces or more than a day, promote yourself with \`${CLI} promote '<objective title: the outcome, a few words>'\`: you become the router of a new objective that holds this thread. When it is done, run \`${CLI} wait done\`.`;
 
 function attachToThread(thread: Thread, worker: Session) {
   Object.assign(thread, { routers: [worker.id], pending: { routers: [worker.id], since: Date.now() } });
@@ -170,13 +171,13 @@ async function noteSentryFyi(req: Request, from: Session | undefined) {
 }
 
 async function promoteCaller(req: Request, from: Session | undefined) {
-  if (!from) return new Response("promote works only from a maxflow agent", { status: 400 });
+  if (!from) return new Response("promote works only from a yarn agent", { status: 400 });
   return promote(from, (await bodyOf<{ title: string }>(req)).title);
 }
 
 export async function sizingRoute(req: Request, url: URL): Promise<Response | undefined> {
   if (req.method !== "POST") return;
-  const from = sessions.get(req.headers.get("x-maxflow-from") ?? "");
+  const from = sessions.get(callerOf(req));
   const sized = /^\/api\/signals\/(\d+)\/size$/.exec(url.pathname);
   if (sized) return size(Number(sized[1]), await bodyOf<SizeBody>(req));
   if (url.pathname === "/api/promote") return promoteCaller(req, from);

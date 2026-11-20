@@ -85,7 +85,7 @@ export type Agent = {
 };
 export type Wait = { kind: string; ref: string; at: number; desc?: string };
 export type Shell = { id: string; desc: string; owner: string; kind: "cmd" | "pane" | "pid"; cmd?: string; cwd?: string; pid?: number; at: number; end?: { at: number; code: number | null; tail: string } };
-export type Source = "isaac" | "gh" | "slack" | "agent" | "sentry" | "maxflow";
+export type Source = "isaac" | "gh" | "slack" | "agent" | "sentry" | "yarn";
 
 export type Signal = {
   id: string;

@@ -1,3 +1,4 @@
+import { noSessionEnv } from "../shared/legacy-maxflow";
 import { join } from "node:path";
 import { isRecord } from "../shared/guards";
 import { recordSentryPost } from "../sentry-posts";
@@ -90,7 +91,7 @@ export async function compose(key: string, title: string): Promise<string | null
   const last = heads.at(-1);
   if (last === undefined) return null;
   const outDir = stateDirectory(OUT_NAME);
-  const env = { ...process.env, GH_CONFIG_DIR: join(outDir, "no-gh"), GH_TOKEN: "", GITHUB_TOKEN: "", MAXFLOW_SESSION: "" };
+  const env = { ...process.env, GH_CONFIG_DIR: join(outDir, "no-gh"), GH_TOKEN: "", GITHUB_TOKEN: "", ...noSessionEnv() };
   const proc = Bun.spawn(["claude", "-p", facts(title, last, heads.slice(0, -1)), "--model", MODEL, "--output-format", "json", "--system-prompt", BRIEF,
     "--tools", ""], { cwd: outDir, env, stdout: "pipe", stderr: "pipe" });
   const timer = setTimeout(() => proc.kill(), WRITE_TIMEOUT_MS);

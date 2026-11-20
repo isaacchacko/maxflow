@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { yarnEnv, seqOf } from "../shared/legacy-maxflow";
 import { BASE } from "../instance";
 import { candidatesAt, JevCallError, jevConfig, ROUTE_PROMPT, routeObjective, settledLabel, SIZE_PROMPT, sizeRequest, type Choice, type JevConfig, type ObjectiveRow, type ThreadRow } from "../jev";
 import { appendStateText, objectivesTable, readStateJson, threadsTable, writeStateJson } from "../state";
@@ -10,7 +11,7 @@ const STATE_FILE = "jev-state.json";
 const LOG_FILE = "jev-shadow.jsonl";
 const WAIT_MS = 60_000;
 const SHADOWED = "signal-*/*";
-const HEADERS_SO_THE_GRAPH_DRAWS_THIS_SENTRY = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
+const HEADERS_SO_THE_GRAPH_DRAWS_THIS_SENTRY = { "x-yarn-from": yarnEnv("SESSION") ?? "" };
 
 type BusEvent = { seq: number; at: number; topic: string; data: Record<string, unknown> };
 
@@ -23,7 +24,7 @@ function isBusEvent(value: unknown): value is BusEvent {
 async function events(topic: string, after: number | "now", wait = 0) {
   const res = await fetch(`${BASE}/api/events?topic=${topic}&after=${String(after)}&wait=${String(wait)}`, { headers: HEADERS_SO_THE_GRAPH_DRAWS_THIS_SENTRY, signal: AbortSignal.timeout(wait + 15_000) });
   const body: unknown = await res.json();
-  return { list: Array.isArray(body) ? body.filter(isBusEvent) : [], seq: Number(res.headers.get("x-maxflow-seq") ?? 0) };
+  return { list: Array.isArray(body) ? body.filter(isBusEvent) : [], seq: Number(seqOf(res) ?? 0) };
 }
 
 async function signalOf(event: BusEvent, config: JevConfig) {

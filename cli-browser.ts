@@ -6,14 +6,14 @@ const BROWSER_TIMEOUT_MS = 60_000;
 
 function ownSession() {
   const session = mySession();
-  if (session === undefined || session === "") fail("browser verbs drive your own browser, so they run inside a yarn session ($MAXFLOW_SESSION is unset)");
+  if (session === undefined || session === "") fail("browser verbs drive your own browser, so they run inside a yarn session ($YARN_SESSION is unset)");
   return session;
 }
 
 async function ask(verb: string, body: Record<string, unknown> = {}): Promise<Response> {
   const res = await fetch(`${base}/api/browsers/${ownSession()}/${verb}`, { method: "POST", headers: caller ?? {}, body: JSON.stringify(body), signal: AbortSignal.timeout(BROWSER_TIMEOUT_MS) });
   if (!res.ok) fail(`browser ${verb}: ${await res.text()}`);
-  const news = res.headers.get("x-maxflow-browser-news");
+  const news = res.headers.get("x-yarn-browser-news");
   if (news !== null) console.error(`(${news})`);
   return res;
 }

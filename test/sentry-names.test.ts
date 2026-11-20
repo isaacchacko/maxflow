@@ -26,7 +26,7 @@ test("every sentry has a SENTRY_USES description, and every description a sentry
   try {
     const read = Bun.spawnSync(["bun", "-e", 'console.log(JSON.stringify(Object.keys((await import("./sentry-uses")).SENTRY_USES))); process.exit(0)'], {
       cwd: root,
-      env: { ...process.env, HOME: home, MAXFLOW_INSTANCE: "sentry-names", MAXFLOW_PORT: "1" },
+      env: { ...process.env, HOME: home, YARN_INSTANCE: "sentry-names", YARN_PORT: "1" },
     });
     const described = JSON.parse(read.stdout.toString()) as string[];
     expect(SENTRY_NAMES.filter((n) => !described.includes(n))).toEqual([]);

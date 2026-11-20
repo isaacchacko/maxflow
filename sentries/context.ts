@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { yarnEnv, seqOf } from "../shared/legacy-maxflow";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BASE as base } from "../instance";
@@ -37,15 +38,15 @@ const state: State = { seq: 0, seen: [], pending: [], firstAt: 0, sweptAt: 0, ..
 const save = () => {
   writeStateJson(STATE_FILE, state);
 };
-const caller = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
+const caller = { "x-yarn-from": yarnEnv("SESSION") ?? "" };
 const log = (line: string) => {
   console.log(`${new Date().toLocaleTimeString()}  ${line}`);
 };
 const notify = async (text: string) =>
-  fetch(`${base}/api/sessions/${String(process.env["MAXFLOW_SESSION"])}/notify`, {
+  fetch(`${base}/api/sessions/${String(yarnEnv("SESSION"))}/notify`, {
     method: "POST",
     headers: caller,
-    body: JSON.stringify({ text: `[maxflow context] ${text}` }),
+    body: JSON.stringify({ text: `[yarn context] ${text}` }),
     signal: AbortSignal.timeout(FETCH_MS),
   });
 const short = (text: string, n: number) => {
@@ -116,8 +117,8 @@ async function flush(isFirst: boolean) {
   const { body, conversations } = digestBody();
   const count = state.pending.length;
   const head = isFirst
-    ? `First notice: the last day of his Slack, ${count} messages. Build $MAXFLOW_STATE/context.md from it.`
-    : `${count} new Slack message${count > 1 ? "s" : ""}. Update $MAXFLOW_STATE/context.md.`;
+    ? `First notice: the last day of his Slack, ${count} messages. Build $YARN_STATE/context.md from it.`
+    : `${count} new Slack message${count > 1 ? "s" : ""}. Update $YARN_STATE/context.md.`;
   writeFileSync(DIGEST_FILE, `${head}\n\n${body}\n`);
   const text = body.length > NOTIFY_CHARS ? `${head} The whole digest is in ${DIGEST_FILE}; it starts:\n\n${body.slice(0, NOTIFY_CHARS)}…` : `${head}\n\n${body}`;
   const res = await notify(text);
@@ -144,7 +145,7 @@ function replaySlackEventsOfLastDay(me: string) {
 
 async function firstNoticeReachingBackADay(me: string) {
   const res = await fetch(`${base}/api/events?topic=none&after=now`, { signal: AbortSignal.timeout(FETCH_MS) });
-  state.seq = Number(res.headers.get("x-maxflow-seq") ?? 0);
+  state.seq = Number(seqOf(res) ?? 0);
   replaySlackEventsOfLastDay(me);
   sweepWhatNoEventCarried(me, Date.now() - BACKFILL_MS);
   state.sweptAt = Date.now();

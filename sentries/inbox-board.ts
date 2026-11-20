@@ -1,9 +1,10 @@
+import { yarnEnv } from "../shared/legacy-maxflow";
 import { BASE as base } from "../instance";
 import { isRecord } from "../shared/guards";
 import { state } from "./inbox-state";
 
 export const FETCH_MS = 30_000;
-const caller = { "x-maxflow-from": process.env["MAXFLOW_SESSION"] ?? "" };
+const caller = { "x-yarn-from": yarnEnv("SESSION") ?? "" };
 
 export const log = (line: string) => {
   console.log(`${new Date().toLocaleTimeString()}  ${line}`);

@@ -18,7 +18,7 @@ if (import.meta.main) takeOver("approval");
 const STATE_FILE = "approval-state.json";
 const OUT_NAME = "approval";
 const OUT_DIR = stateDirectory(OUT_NAME);
-const SCRATCH_DIR = join(tmpdir(), "maxflow-approval");
+const SCRATCH_DIR = join(tmpdir(), "yarn-approval");
 const WRITE_SWITCH = "approval-write";
 const TICK_MS = Number(process.env["APPROVAL_TICK_MS"] ?? 2 * 60_000);
 const MAX_REVIEWS = 2;
@@ -215,8 +215,8 @@ async function tellOwner(key: string, url: string, ask: string) {
   const owner = readQueue().find((q) => q.pr === key)?.sessions[0]?.id;
   const to = owner ?? (await reviewSentryId());
   const text = owner === undefined
-    ? `[maxflow approval] ${url} has no session. Get this to its chat as in your job 1 (revive the chat that opened it, or start one on its branch), verbatim, and tell it to act on it:\n\n${ask}`
-    : `[maxflow approval] ${ask}`;
+    ? `[yarn approval] ${url} has no session. Get this to its chat as in your job 1 (revive the chat that opened it, or start one on its branch), verbatim, and tell it to act on it:\n\n${ask}`
+    : `[yarn approval] ${ask}`;
   if (to !== "") await didNotify(to, text);
   return owner ?? `the review sentry ${to === "" ? "(not found)" : to}`;
 }
@@ -369,7 +369,7 @@ async function sendNits(key: string, h: Head) {
   Object.assign(h, { nitsSent: Date.now() });
   save();
   const owner = readQueue().find((q) => q.pr === key)?.sessions[0]?.id;
-  if (owner !== undefined) await didNotify(owner, `[maxflow approval] ${nitsAsk(h)}`);
+  if (owner !== undefined) await didNotify(owner, `[yarn approval] ${nitsAsk(h)}`);
   log(`${key}@${shortSha(h)}: ${nits(h).length} nit(s) ${owner === undefined ? "logged only, no session" : `to ${owner}`}`);
 }
 

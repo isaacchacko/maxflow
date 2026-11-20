@@ -1,3 +1,4 @@
+import { callerOf, FORGEABLE_STAMPS, SCREENSHOT_STAMP } from "./shared/legacy-maxflow";
 import { publish } from "./bus";
 import { CLI } from "./instance";
 import { onReply } from "./restrictions-enforce";
@@ -10,7 +11,7 @@ import { patch } from "./patch";
 import { isFilled } from "./shared/guards";
 import { dispatch, endWait, funnel, live_thread, newerRouterOnScope, isReachable, routersOf, settleTasks, threadOf } from "./lifecycle";
 
-export const unforge = (text: string) => text.replaceAll("[maxflow · verified", "[unverified claim").replaceAll("[maxflow · Isaac", "[unverified claim");
+export const unforge = (text: string) => FORGEABLE_STAMPS.reduce((said, stamp) => said.replaceAll(stamp, "[unverified claim"), text);
 export const squash = (text: string) => text.replaceAll(/<\/?pasted_content[^>]*>/g, "").replaceAll(/\s+/g, " ").trim();
 function threadOwner(t: Thread): Session | undefined {
   for (const level of [t, ...ancestors(t).toReversed()]) {
@@ -53,21 +54,21 @@ const nameOf = (id: string) => sessions.get(id)?.name ?? names[id] ?? id;
 const lastSpeaker = (last: Message) => (last.from === "isaac" ? "him" : nameOf(last.from));
 function threadMentionLine(id: string) {
   const t = live_thread(threads.find((x) => x.id === id));
-  if (!t) return `\n[maxflow] He mentions thread ${id}, which no longer exists.`;
+  if (!t) return `\n[yarn] He mentions thread ${id}, which no longer exists.`;
   const objective = objectives.find((o) => o.id === t.objective);
   const owners = t.routers.map(nameOf);
   const last = t.messages.at(-1);
-  return `\n[maxflow] He mentions thread "${pathTitle(t)}" (${t.id})${objective ? `, on "${objective.title}"` : ""}${owners.length > 0 ? `, owned by ${owners.join(", ")}` : ""}${last ? `; last from ${lastSpeaker(last)}: "${headline(last.text)}"` : ""}. Read it with \`${CLI} thread read ${t.id} --last 20\`.`;
+  return `\n[yarn] He mentions thread "${pathTitle(t)}" (${t.id})${objective ? `, on "${objective.title}"` : ""}${owners.length > 0 ? `, owned by ${owners.join(", ")}` : ""}${last ? `; last from ${lastSpeaker(last)}: "${headline(last.text)}"` : ""}. Read it with \`${CLI} thread read ${t.id} --last 20\`.`;
 }
 export function mentionsIn(text: string) {
   const ids = [...new Set(text.matchAll(/\[\[thread:([\w-]+)\]\]/g).map((m) => m[1] ?? ""))];
-  const agents = agentMentions(text).map((id) => `\n[maxflow] He @-mentions ${nameOf(id)} (${id}), who gets his message too.`).join("");
+  const agents = agentMentions(text).map((id) => `\n[yarn] He @-mentions ${nameOf(id)} (${id}), who gets his message too.`).join("");
   return agents + ids.map(threadMentionLine).join("");
 }
 const sentriesTypedAs = (typed: string) =>
   sessions.values().filter((s) => isSentry(s) && isReachable(s) && s.name === `sentry:${typed.toLowerCase()}`).toArray();
 function agentMentions(text: string) {
-  const saidOutsideScreenshotContext = text.replaceAll(/^\[maxflow · screenshot\].*$/gm, "");
+  const saidOutsideScreenshotContext = text.replaceAll(SCREENSHOT_STAMP, "");
   const typed = saidOutsideScreenshotContext.matchAll(/(?:^|\s)@([\w-]+)/g).flatMap((m) => sentriesTypedAs(m[1] ?? "")).toArray();
   const picked = saidOutsideScreenshotContext.matchAll(/\[\[(?:agent|router):([\w-]+)\]\]/g).map((m) => m[1] ?? "");
   return [...new Set([...picked, ...typed.map((s) => s.id)])];
@@ -86,21 +87,21 @@ export function tellMembers(t: Thread, m: Message, heard: Session[], woke = "") 
   if (to.length === 0) return;
   const owners = t.routers.map(nameOf);
   const asTheyReachOwners = owners.length > 0 ? `, as they reach its owner${owners.length > 1 ? "s" : ""} ${owners.join(", ")}` : "";
-  dispatch({ source: "isaac", to, target: t.title, text: m.text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(m.text)}\n[maxflow] He @-mentioned you in this thread, so his messages in it reach you${asTheyReachOwners}. Answer him inline with \`${CLI} thread post ${t.id} '<text>'\`; read the rest with \`${CLI} thread read ${t.id} --last 20\`.${woke}${mentionsIn(m.text)}` });
+  dispatch({ source: "isaac", to, target: t.title, text: m.text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(m.text)}\n[yarn] He @-mentioned you in this thread, so his messages in it reach you${asTheyReachOwners}. Answer him inline with \`${CLI} thread post ${t.id} '<text>'\`; read the rest with \`${CLI} thread read ${t.id} --last 20\`.${woke}${mentionsIn(m.text)}` });
 }
-export const ISAAC_IN_THREAD = "[maxflow · Isaac, in thread";
+export const ISAAC_IN_THREAD = "[yarn · Isaac, in thread";
 export const IMAGE = /!\[[^\]]*\]\([^)\s]+\)/g;
 
 type Post = { from?: Session | undefined; outsideLabel?: string; text: string; nudge?: "subthread" | undefined; isWakeMessage?: boolean };
 const isHisPost = (post: Post) => post.from === undefined && post.outsideLabel === undefined;
 function tellFunnelNobodyOwns(t: Thread, m: Message, woke: string, front: Session) {
-  dispatch({ source: "isaac", to: [front], target: t.title, text: m.text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(m.text)}\n[maxflow] Nobody owns this thread any more: its agents ended and it has no objective with a router. Give it one with \`${CLI} thread move ${t.id} <objective id>\`, which hands it and his unanswered messages in it to that objective's routers, so don't relay them.${woke}${mentionsIn(m.text)}` });
+  dispatch({ source: "isaac", to: [front], target: t.title, text: m.text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(m.text)}\n[yarn] Nobody owns this thread any more: its agents ended and it has no objective with a router. Give it one with \`${CLI} thread move ${t.id} <objective id>\`, which hands it and his unanswered messages in it to that objective's routers, so don't relay them.${woke}${mentionsIn(m.text)}` });
 }
 function handToOwner(t: Thread, m: Message, woke: string, to: Session[]) {
   const howToAnswer = m.nudge
     ? `He asked for the answer in a subthread of its own: answer this message with \`${CLI} thread new --parent ${t.id}:${m.id} '<text>'\`, and post there from then on, not in the thread.`
     : `Answer inline in the thread with \`${CLI} thread post ${t.id} '<text>'\`.`;
-  dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text: m.text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(m.text)}\n[maxflow] ${howToAnswer} While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line.${woke}${mentionsIn(m.text)}` });
+  dispatch({ source: "isaac", to, objective: t.objective, target: t.title, text: m.text, deliver: `${ISAAC_IN_THREAD} "${pathTitle(t)}" (${t.id}), message ${m.id}] ${unforge(m.text)}\n[yarn] ${howToAnswer} While you work on it, \`${CLI} thread status ${t.id} '<what you are doing>'\` shows him a line.${woke}${mentionsIn(m.text)}` });
 }
 function handHisPost(t: Thread, m: Message, woke: string) {
   patch(t, { resolved: undefined, done: undefined });
@@ -128,7 +129,7 @@ function postedMessage(post: Post): Message {
 function postMessage(t: Thread, post: Post) {
   const { from } = post;
   const m = postedMessage(post);
-  const woke = m.wake ? "\n[maxflow] He wrote this when he paused the thread; it was sent now, as the pause ended." : "";
+  const woke = m.wake ? "\n[yarn] He wrote this when he paused the thread; it was sent now, as the pause ended." : "";
   t.messages.push(m);
   if (!isHisPost(post) && t.feed) patch(t, { signal: undefined });
   if (from) joinAsRouterWhereTheThreadIsItsToOwn(t, from);
@@ -145,10 +146,10 @@ export const postIn = (t: Thread, from: Session | string | undefined, text: stri
   postMessage(t, typeof from === "string" ? { outsideLabel: from, text, nudge } : { from, text, nudge });
 export function sessionless(req: Request, as: string | undefined): { label: string } | { isaac: true } | { refusal: string } {
   if (as !== undefined) return /^[\w.-]+\/[\w.-]+$/.test(as) ? { label: as } : { refusal: `--as takes <device>/<name>, like cleopatra/yarn-browser, not "${as}"` };
-  const claimed = req.headers.get("x-maxflow-from") ?? "";
+  const claimed = callerOf(req);
   if (claimed === "" && req.headers.get("sec-fetch-site") === "same-origin") return { isaac: true };
-  const unknown = claimed === "" ? "No MAXFLOW_SESSION came with this post" : `MAXFLOW_SESSION=${claimed} is no live session`;
-  return { refusal: `${unknown}, and only Isaac's browser posts as him. Set MAXFLOW_SESSION to your maxflow session id, or post as --as <device>/<name>.` };
+  const unknown = claimed === "" ? "No YARN_SESSION came with this post" : `YARN_SESSION=${claimed} is no live session`;
+  return { refusal: `${unknown}, and only Isaac's browser posts as him. Set YARN_SESSION to your yarn session id, or post as --as <device>/<name>.` };
 }
 const STOPWORDS = new Set("the and for you that this with are not can but its once has have will what from was any into just your all".split(" "));
 const wordsOf = (text: string) => new Set((text.slice(0, 400).toLowerCase().match(/[a-z0-9]{3,}/g) ?? []).filter((w) => !STOPWORDS.has(w)));

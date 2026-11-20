@@ -1,7 +1,7 @@
 import { relative, sep } from "node:path";
 import { AST_NODE_TYPES, ESLintUtils, type TSESLint, type TSESTree } from "@typescript-eslint/utils";
 
-export const createRule = ESLintUtils.RuleCreator((name) => `https://github.com/isaacchacko/maxflow/blob/feat/v2/lint/rules/${name}.ts`);
+export const createRule = ESLintUtils.RuleCreator((name) => `https://github.com/isaacchacko/yarn/blob/feat/v2/lint/rules/${name}.ts`);
 
 export type Area = "src" | "shared" | "sentries" | "hooks" | "scripts" | "test" | "fixtures" | "lint" | "root";
 const AREAS = new Set<string>(["src", "shared", "sentries", "hooks", "scripts", "test", "fixtures", "lint"]);

@@ -1,15 +1,16 @@
+import { yarnEnv } from "./shared/legacy-maxflow";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { IS_LIVE } from "./instance";
 import { stateDirectory } from "./state";
 
-const CHOSEN_DIR = process.env["MAXFLOW_DOCS"];
+const CHOSEN_DIR = yarnEnv("DOCS");
 const IS_HIS_VAULT = IS_LIVE && CHOSEN_DIR === undefined;
 export const DOCS_DIR = CHOSEN_DIR ?? (IS_LIVE ? join(homedir(), "Docs") : stateDirectory("docs"));
 const OBSIDIAN_REGISTRY = join(homedir(), "Library/Application Support/obsidian/obsidian.json");
 const ISAAC = "isaac";
-const AGENT_EMAIL = "docs@maxflow.local";
+const AGENT_EMAIL = "docs@yarn.local";
 
 export type Entry = { who: string; text: string };
 export type CommentThread = { line: number; entries: Entry[]; isOpen: boolean };
@@ -68,7 +69,7 @@ export function didCommit(paths: string[], message: string, author = ISAAC) {
   if (known.length === 0) return false;
   git(["add", "-A", "--", ...known]);
   if (git(["diff", "--cached", "--name-only"]).trim() === "") return false;
-  git(["commit", "-q", "-m", message], { GIT_AUTHOR_NAME: author, GIT_AUTHOR_EMAIL: AGENT_EMAIL, GIT_COMMITTER_NAME: "maxflow", GIT_COMMITTER_EMAIL: AGENT_EMAIL });
+  git(["commit", "-q", "-m", message], { GIT_AUTHOR_NAME: author, GIT_AUTHOR_EMAIL: AGENT_EMAIL, GIT_COMMITTER_NAME: "yarn", GIT_COMMITTER_EMAIL: AGENT_EMAIL });
   return true;
 }
 

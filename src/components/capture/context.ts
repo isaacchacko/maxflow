@@ -46,5 +46,5 @@ export function whereTheShotWasTaken(rect: Rect, overlay: Element | null) {
   const link = linkNear(el, message);
   if (link && !isSameEntity(link, page?.kind, page?.id) && !isSameEntity(link, "agent", message?.dataset["from"])) parts.push(`pointing at ${chip(link.kind, link.id)}`);
   parts.push(...elementPart(el));
-  return `[maxflow · screenshot] ${parts.join(" · ")}`;
+  return `[yarn · screenshot] ${parts.join(" · ")}`;
 }

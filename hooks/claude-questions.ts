@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { yarnEnv } from "../shared/legacy-maxflow";
 import { readFileSync } from "node:fs";
 
 type HookInput = {
@@ -22,18 +23,18 @@ function asObject(value: unknown): object {
   return typeof value === "object" && value !== null ? value : {};
 }
 
-const session = process.env["MAXFLOW_SESSION"];
+const session = yarnEnv("SESSION");
 if (session === undefined || session === "") process.exit(0);
 const input: HookInput = asObject(JSON.parse(await Bun.stdin.text()));
-const cli = process.env["MAXFLOW_CLI"] ?? new URL("../cli.ts", import.meta.url).pathname;
-const askThroughAThreadInHisInbox = `ask only for a decision truly his, and decide the rest yourself. Run \`${cli} ask '<question>' [--default '<rec>']\`, which opens a thread in his inbox flagged as waiting on him and prints its id. Make it stand on its own (what you found, the options, your recommendation; --default only when the step is reversible), keep working on whatever doesn't hang on the answer, then \`${cli} wait thread:<id>\`; his reply is typed into your prompt as a [maxflow] message`;
+const cli = yarnEnv("CLI") ?? new URL("../cli.ts", import.meta.url).pathname;
+const askThroughAThreadInHisInbox = `ask only for a decision truly his, and decide the rest yourself. Run \`${cli} ask '<question>' [--default '<rec>']\`, which opens a thread in his inbox flagged as waiting on him and prints its id. Make it stand on its own (what you found, the options, your recommendation; --default only when the step is reversible), keep working on whatever doesn't hang on the answer, then \`${cli} wait thread:<id>\`; his reply is typed into your prompt as a [yarn] message`;
 
 function denyAskUserQuestion(): never {
   console.log(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: `In maxflow nobody watches this dialog. Ask him in a thread instead: ${askThroughAThreadInHisInbox}.`,
+      permissionDecisionReason: `In yarn nobody watches this dialog. Ask him in a thread instead: ${askThroughAThreadInHisInbox}.`,
     },
   }));
   process.exit(0);
@@ -51,9 +52,9 @@ function agentNameOf(to: string) {
 
 async function postToPeer(target: string, text: string, from: string) {
   try {
-    return await fetch(`http://localhost:${process.env["MAXFLOW_PORT"] ?? 4949}/api/sessions/${target}/peer`, {
+    return await fetch(`http://localhost:${yarnEnv("PORT") ?? 4949}/api/sessions/${target}/peer`, {
       method: "POST",
-      headers: { "x-maxflow-from": from },
+      headers: { "x-yarn-from": from },
       body: JSON.stringify({ text }),
       signal: AbortSignal.timeout(10_000),
     });
@@ -68,7 +69,7 @@ async function wasQueuedForAnAsleepAgent(res: Response | null) {
   return isObject(body) && Boolean(body["queued"]);
 }
 
-async function logSendMessageInMaxflowsEventLog(from: string) {
+async function logSendMessageInYarnsEventLog(from: string) {
   const toolInput = isObject(input.tool_input) ? input.tool_input : {};
   const target = /^mf-([\w-]+)/.exec(agentNameOf(textOf(toolInput["to"])))?.[1];
   const text = textOf(toolInput["message"]);
@@ -77,7 +78,7 @@ async function logSendMessageInMaxflowsEventLog(from: string) {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: `Delivered another way: mf-${target} was asleep, so maxflow queued your message and is waking it. Don't resend. Its reply reaches you as a message.`,
+      permissionDecisionReason: `Delivered another way: mf-${target} was asleep, so yarn queued your message and is waking it. Don't resend. Its reply reaches you as a message.`,
     },
   }));
 }
@@ -121,7 +122,7 @@ function sendBackATurnEndingOnAQuestion() {
 if (input.hook_event_name === "PreToolUse" && input.tool_name === "AskUserQuestion") denyAskUserQuestion();
 
 if (input.hook_event_name === "PreToolUse" && input.tool_name === "SendMessage") {
-  await logSendMessageInMaxflowsEventLog(session);
+  await logSendMessageInYarnsEventLog(session);
   process.exit(0);
 }
 

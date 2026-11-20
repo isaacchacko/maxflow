@@ -31,7 +31,7 @@ export function LinkRow({ icon: Icon, label, detail, href }: { icon: typeof User
   );
 }
 
-export const sourceIcon = { isaac: User, gh: GitPullRequest, slack: Hash, agent: Bot, sentry: Radar, maxflow: Waypoints };
+export const sourceIcon = { isaac: User, gh: GitPullRequest, slack: Hash, agent: Bot, sentry: Radar, yarn: Waypoints };
 
 export const stateOrder: AgentState[] = ["working", "waiting", "idle", "asleep"];
 

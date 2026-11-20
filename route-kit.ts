@@ -1,3 +1,4 @@
+import { callerOf } from "./shared/legacy-maxflow";
 import { homedir } from "node:os";
 import { sessions } from "./sessions";
 import { isRecord } from "./shared/guards";
@@ -61,9 +62,9 @@ export function textsOf(body: Body, key: string): string[] | undefined {
 
 export const expandHome = (path: string) => path.replace(/^~(?=\/|$)/, () => homedir());
 
-export const sender = (req: Request) => sessions.get(req.headers.get("x-maxflow-from") ?? "");
+export const sender = (req: Request) => sessions.get(callerOf(req));
 
 export const isFromTheBrowser = (req: Request) => req.headers.get("user-agent")?.includes("Mozilla") === true;
 
-// constraint: an agent's request carries x-maxflow-from, and only a page the server served sends same-origin; Isaac-only actions (merging a PR) check both
-export const isIsaacsBrowser = (req: Request) => (req.headers.get("x-maxflow-from") ?? "") === "" && req.headers.get("sec-fetch-site") === "same-origin";
+// constraint: an agent's request carries x-yarn-from, and only a page the server served sends same-origin; Isaac-only actions (merging a PR) check both
+export const isIsaacsBrowser = (req: Request) => callerOf(req) === "" && req.headers.get("sec-fetch-site") === "same-origin";

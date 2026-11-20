@@ -21,7 +21,7 @@ function goAheadWithDefault(t: Thread, session: string, dflt: string) {
   publish(`thread/${t.id}`, { thread: t.id, from: session });
   const s = sessions.get(session);
   if (isLive(s))
-    dispatch({ to: [s], target: t.id, text: `[maxflow] Thread ${t.id} went ${String(DEFAULT_AFTER_H)}h without his answer, so go ahead with your recommendation, which you marked reversible: "${dflt}". The thread now says you did, so he can overrule it there.` });
+    dispatch({ to: [s], target: t.id, text: `[yarn] Thread ${t.id} went ${String(DEFAULT_AFTER_H)}h without his answer, so go ahead with your recommendation, which you marked reversible: "${dflt}". The thread now says you did, so he can overrule it there.` });
 }
 
 export function keepGoingAheadOnUnansweredDefaults() {

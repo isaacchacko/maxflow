@@ -17,7 +17,7 @@ describe("the merge gate blocks every way an agent merges", () => {
     "curl -X PUT -H \"Authorization: token $(gh auth token)\" https://api.github.com/repos/Dryft-AI/app/pulls/12/merge",
     "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
     "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
-    "gh api -X POST repos/isaacchacko/maxflow/merges -f base=master -f head=fix",
+    "gh api -X POST repos/isaacchacko/yarn/merges -f base=master -f head=fix",
     "curl -X POST localhost:4949/api/prs/merge -d '{\"pr\":\"dryft-ai/app#1\"}'",
     "git push origin HEAD:master",
     "git push origin main",
@@ -34,7 +34,7 @@ describe("the merge gate blocks every way an agent merges", () => {
     "git push origin feat/v2",
     "git merge origin/feat/v2",
     "git rebase origin/main",
-    "maxflow notify 09ee4563 'the merge button posts to /api/prs/merge'",
+    "yarn notify 09ee4563 'the merge button posts to /api/prs/merge'",
   ])("allows %s", (command) => {
     expect(isMergeCommand(command)).toBe(false);
   });

@@ -21,7 +21,7 @@ function refIn(match: RegExpExecArray | null): Ref | undefined {
   return { kind, id: decodeURIComponent(match[2] ?? "") };
 }
 
-function MaxflowChip({ href }: { href: string }) {
+function YarnChip({ href }: { href: string }) {
   const ref = refIn(REF_LINK.exec(href) ?? APP_LINK.exec(href));
   if (ref) return <RefChip r={ref} />;
   const pr = PR_LINK.exec(href) ?? GITHUB_PR.exec(href);
@@ -36,10 +36,10 @@ function SlackChannelChip({ href }: { href: string }) {
   return <SlackChip href={`https://dryftai.slack.com/archives/${channel}`} name={hasText(name) ? decodeURIComponent(name) : undefined} />;
 }
 
-const isMaxflowChip = (href: string) => [REF_LINK, APP_LINK, PR_LINK, GITHUB_PR, LINEAR_LINK, LINEAR_ISSUE].some(pattern => pattern.test(href));
+const isYarnChip = (href: string) => [REF_LINK, APP_LINK, PR_LINK, GITHUB_PR, LINEAR_LINK, LINEAR_ISSUE].some(pattern => pattern.test(href));
 
 function Link({ href = "", children }: { href?: string | undefined; children?: React.ReactNode }) {
-  if (isMaxflowChip(href)) return <MaxflowChip href={href} />;
+  if (isYarnChip(href)) return <YarnChip href={href} />;
   if (href.startsWith("slackuser:")) return <SlackUser id={href.slice(10)}>{children}</SlackUser>;
   if (href.startsWith("slackchan:")) return <SlackChannelChip href={href} />;
   if (slackLink(href)) return <SlackChip href={href} />;

@@ -3,8 +3,8 @@ import { asOf, candidatesAt, funnelPick, JevCallError, NEW_OBJECTIVE, routeObjec
 
 const objectives = new Map<string, ObjectiveRow>(
   [
-    { id: "dev", title: "maxflow development", at: 100 },
-    { id: "dup", title: "maxflow images", at: 200, closed: true, mergedInto: "dev" },
+    { id: "dev", title: "yarn development", at: 100 },
+    { id: "dup", title: "yarn images", at: 200, closed: true, mergedInto: "dev" },
     { id: "later", title: "festo templates", at: 500 },
     { id: "early", title: "old twin", at: 50, closed: true, mergedInto: "later" },
     { id: "done", title: "finished", at: 10, closed: true },
@@ -39,7 +39,7 @@ test("routeObjective asks one choice over the candidates plus new and reads Jev'
   expect(answer.choice).toBe("dev");
   expect(answer.confidence).toBe(0.53);
   expect(answer.usage).toEqual({ input: 120, output: 0 });
-  expect(asked).toMatchObject({ model: "fake", state: "add vim motions to threads", questions: { pick: { type: "choice", criteria: { dev: "maxflow development" } } } });
+  expect(asked).toMatchObject({ model: "fake", state: "add vim motions to threads", questions: { pick: { type: "choice", criteria: { dev: "yarn development" } } } });
 });
 
 test("a refused call carries its status and never the key", async () => {

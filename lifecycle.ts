@@ -8,7 +8,7 @@ import { type Signal, type Source, TASK_STATUSES, type Task, type TaskEdit, type
 import { isLive, saveTasks, tasks, threads } from "./stores";
 import { patch } from "./patch";
 import { isFilled } from "./shared/guards";
-import { postAsMaxflow, threadsItIsOn, workLeftOpenAtSleep, workStillRunningInside } from "./sleep";
+import { postAsYarn, threadsItIsOn, workLeftOpenAtSleep, workStillRunningInside } from "./sleep";
 
 const SCROLLBACK_BYTES = 2 * 1024 * 1024;
 const ESC = "\u{1B}";
@@ -55,7 +55,7 @@ type PaneOptions = { chatId?: string | undefined; role?: Role | undefined; cols?
 export function createSession(name: string, cmd: string[], cwd: string, { chatId, role, cols = 120, rows = 34 }: PaneOptions = {}): Session {
   const running = sessions.values().filter((s) => s.exitCode === null && s.sentry !== true).toArray().length;
   if (running >= MAX_SESSIONS && !name.startsWith("sentry:"))
-    throw new SessionCap(`dev instance "${INSTANCE}" already runs ${running} sessions, its cap; end some, or raise MAXFLOW_MAX_SESSIONS`);
+    throw new SessionCap(`dev instance "${INSTANCE}" already runs ${running} sessions, its cap; end some, or raise YARN_MAX_SESSIONS`);
   // constraint: claude finds a resumed chat's transcript by its cwd, so only a new inert claude moves to INERT_CWD
   const paneCwd = isNewInertClaude(cmd) ? INERT_CWD : cwd;
   if (isNewInertClaude(cmd)) mkdirSync(paneCwd, { recursive: true });
@@ -89,7 +89,7 @@ export function enqueue(s: Session, text: string) {
   wake(s);
 }
 function sourceOf(from?: Session): Source {
-  if (!from) return "maxflow";
+  if (!from) return "yarn";
   if (!isSentry(from)) return "agent";
   if (from.name === "sentry:gh") return "gh";
   return from.name === "sentry:slack" ? "slack" : "sentry";
@@ -99,7 +99,7 @@ function targetOf(source: Source, text: string, from?: Session) {
   if (pr) return `${(pr[1] ?? "").split("/", 2)[1] ?? ""}#${pr[2] ?? ""}`;
   if (source === "slack") return /#[\w-]+/.exec(text)?.[0] ?? "slack";
   if (from) return from.name.replace(/^sentry:/, "");
-  return source === "isaac" ? "chat" : "maxflow";
+  return source === "isaac" ? "chat" : "yarn";
 }
 export const isReachable = (s?: Session): s is Session => isLive(s) && isAgent(s);
 export const funnel = () => sessions.values().find((s) => s.name === "sentry:funnel" && isSentry(s) && isLive(s));
@@ -179,9 +179,9 @@ function raiseIfWorkLeftOpen(s: Session) {
   const open = workLeftOpenAtSleep(s);
   if (open.length === 0) return;
   const text = `⚠ ${s.name} (${s.id}) was put to sleep with work still open: ${open.join("; ")}. Nothing will pick this up on its own: wake it from its agent page or answer it.`;
-  for (const t of threadsItIsOn(s)) postAsMaxflow(t, text);
+  for (const t of threadsItIsOn(s)) postAsYarn(t, text);
   const owner = [sessions.get(s.role?.parent ?? ""), ...routersOf(s.role?.objective ?? ""), funnel()].find((x): x is Session => isReachable(x) && x !== s);
-  if (owner) dispatch({ to: [owner], target: s.name, text: `[maxflow] ${text} Wake it (\`${CLI} send ${s.id} '<what to do>'\`) or take its work over.` });
+  if (owner) dispatch({ to: [owner], target: s.name, text: `[yarn] ${text} Wake it (\`${CLI} send ${s.id} '<what to do>'\`) or take its work over.` });
   publish(`health/agent/${s.id}`, { session: s.id, name: s.name, open });
 }
 export function resumeAgent(s: Session) {
@@ -209,7 +209,7 @@ export function endWait(s: Session, why?: string) {
   if (!was) return;
   setWait(s);
   if (s.archived === true) setArchived(s, false);
-  if (isFilled(why)) dispatch({ to: [s], target: waitLabel(was), text: `[maxflow] Your wait on ${waitLabel(was)} is over: ${why}${why.endsWith("```") ? "" : "."}` });
+  if (isFilled(why)) dispatch({ to: [s], target: waitLabel(was), text: `[yarn] Your wait on ${waitLabel(was)} is over: ${why}${why.endsWith("```") ? "" : "."}` });
 }
 
 export function tellWaiters(on: Session, what: string) {

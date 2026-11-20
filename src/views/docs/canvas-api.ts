@@ -4,7 +4,7 @@ export type CanvasNode = { id: string; type: "text"; text: string; x: number; y:
 export type Box = Partial<Pick<CanvasNode, "text" | "x" | "y" | "width" | "height">>;
 export type Link = { text: string; to: string; near: number };
 
-export const CANVAS_CHANGED = "maxflow:canvas-changed";
+export const CANVAS_CHANGED = "yarn:canvas-changed";
 export function canvasChanged(path: string) {
   dispatchEvent(new CustomEvent(CANVAS_CHANGED, { detail: path }));
 }
