@@ -179,10 +179,10 @@ export function linkNode(path: string, from: string, { text: phrase, to, near = 
 }
 
 export function proposeText(path: string, id: string, text: string, author: string) {
+  if (author === ISAAC) throw new Error("isaac edits his boxes directly");
   const inVault = canvasPath(path);
   const h = heldAt(inVault);
   const node = nodeIn(h, id);
-  if (author === ISAAC) throw new Error("isaac edits his boxes directly");
   if (!isHis(node)) throw new Error(`box ${id} isn't isaac's: edit it directly`);
   if (text.trim() === "" || text === node.text) throw new Error("a proposal must change the box's text");
   node.proposal = { text, base: node.text, author, at: Date.now() };
@@ -191,14 +191,13 @@ export function proposeText(path: string, id: string, text: string, author: stri
 }
 
 export function settleProposal(path: string, id: string, isAccepted: boolean, author: string) {
-  const inVault = canvasPath(path);
-  const h = heldAt(inVault);
   if (author !== ISAAC) throw new Error("only isaac accepts or rejects a proposal");
-  const node = nodeIn(h, id);
+  const inVault = canvasPath(path);
+  const node = nodeIn(heldAt(inVault), id);
   const { proposal } = node;
   if (!proposal) throw new Error(`box ${id} has no proposal`);
   Reflect.deleteProperty(node, "proposal");
   if (isAccepted) Object.assign(node, { text: mergeText(proposal.base, proposal.text, node.text) ?? proposal.text, author: ISAAC });
-  save(inVault, h, { author, kind: isAccepted ? "accept" : "reject", id, proposal });
+  save(inVault, heldAt(inVault), { author, kind: isAccepted ? "accept" : "reject", id, proposal });
   return node;
 }
