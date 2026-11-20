@@ -33,6 +33,7 @@ describe("the merge gate blocks every way an agent merges", () => {
     "git push origin feat/v2",
     "git merge origin/feat/v2",
     "git rebase origin/main",
+    "maxflow notify 09ee4563 'the merge button posts to /api/prs/merge'",
   ])("allows %s", (command) => {
     expect(isMergeCommand(command)).toBe(false);
   });
