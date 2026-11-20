@@ -114,6 +114,7 @@ export default defineConfig(
       "unicorn/no-await-expression-member": "off",
       "unicorn/numeric-separators-style": ["error", { onlyIfContainsSeparator: true }],
       "unicorn/prefer-ternary": "off",
+      "unicorn/prefer-simple-condition-first": "off",
       "unicorn/filename-case": ["error", { cases: { kebabCase: true, pascalCase: true, camelCase: true } }],
     },
   },
