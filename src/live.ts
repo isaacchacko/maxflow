@@ -5,6 +5,7 @@ import { agentStore, ownChanges, liveStore, loadTodos, movedStore, objectiveStor
 import { isRecord } from "../shared/guards";
 import { cursorFrom, fireCursor } from "./cursors/store";
 import { canvasChanged } from "./views/docs/canvas-api";
+import { timelinesChanged } from "./views/timelines/api";
 import { claim, heldKeys, isHeld, onLand, onRelease } from "./cursors/holds";
 import { reloadResource } from "@/lib/effects";
 
@@ -161,7 +162,8 @@ function isSideMessage(m: unknown) {
   const cursor = cursorFrom(m);
   if (cursor) fireCursor(cursor);
   if (m["type"] === "canvas" && typeof m["path"] === "string") canvasChangedWhenItsCursorLands(m["path"], m["claimed"] === true);
-  return cursor !== undefined || m["type"] === "canvas";
+  if (m["type"] === "timelines") timelinesChanged();
+  return cursor !== undefined || m["type"] === "canvas" || m["type"] === "timelines";
 }
 
 function onWorldMessage(ws: WebSocket, e: MessageEvent) {
