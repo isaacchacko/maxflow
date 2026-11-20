@@ -36,16 +36,20 @@ async function now(args: string[]) {
   console.log(file);
 }
 
+function listInside(path: string) {
+  const inside = listTimelines(path);
+  if (inside.length === 0) fail(`no timeline at ${path}; \`maxflow timeline ls\` lists them`);
+  console.log(`${path} holds no events itself; its timelines:`);
+  for (const x of inside) console.log(`  ${x.path}  (${String(x.events)} events)`);
+}
+
 function read(args: string[]) {
   const [, path = ""] = positional(args, ["--last"]);
   if (path === "") fail(USAGE);
   const last = Number(flag(args, "--last") ?? DEFAULT_LAST);
   const t = readTimeline(path, Number.isNaN(last) ? DEFAULT_LAST : last);
   if (t.now === undefined && t.total === 0) {
-    const inside = listTimelines(path);
-    if (inside.length === 0) fail(`no timeline at ${path}; \`maxflow timeline ls\` lists them`);
-    console.log(`${path} holds no events itself; its timelines:`);
-    for (const x of inside) console.log(`  ${x.path}  (${String(x.events)} events)`);
+    listInside(path);
     return;
   }
   console.log(`# ${t.path}/now.txt\n${t.now?.trim() ?? "(no now.txt yet: write one with `maxflow timeline now`)"}\n`);
@@ -54,8 +58,9 @@ function read(args: string[]) {
 }
 
 function ls(args: string[]) {
-  for (const t of listTimelines(argAt(args, 1))) {
-    const state = t.now?.trim().split("\n")[0] ?? "";
+  const timelines = listTimelines(argAt(args, 1));
+  for (const t of timelines) {
+    const [state = ""] = (t.now ?? "").trim().split("\n", 1);
     console.log(`${t.path}  ${String(t.events)} events${t.latest === undefined ? "" : `, latest ${t.latest.slice(0, 20)}`}${state === "" ? "" : `\n    now: ${state}`}`);
   }
 }

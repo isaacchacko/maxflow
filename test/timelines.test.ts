@@ -3,7 +3,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-process.env["MAXFLOW_TIMELINES"] = join(mkdtempSync(join(tmpdir(), "maxflow-timelines-")), "Timelines");
+const scratch = mkdtempSync(join(tmpdir(), "maxflow-timelines-"));
+process.env["MAXFLOW_TIMELINES"] = join(scratch, "Timelines");
 process.env["MAXFLOW_TIMELINES_REMOTE"] = "";
 const t = await import("../timelines");
 t.ensureTimelines();

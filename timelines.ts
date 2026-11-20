@@ -69,7 +69,7 @@ export function timelineDir(path: string) {
 export const stampOf = (at: Date) => `${at.toISOString().slice(0, 19).replaceAll(":", "-")}Z`;
 const safeTitle = (title: string) =>
   title
-    .replaceAll(/[/\\:\0-\x1f]/g, " ")
+    .replaceAll(/[/\\:]|\p{Cc}/gu, " ")
     .replaceAll(/\s+/g, " ")
     .trim()
     .slice(0, 100);
@@ -102,7 +102,7 @@ function eventsIn(dir: string) {
   return readdirSync(full, { withFileTypes: true })
     .filter((e) => e.isFile() && isEventFile(e.name))
     .map((e) => e.name)
-    .sort(byTime);
+    .toSorted(byTime);
 }
 
 export function readTimeline(path: string, last: number) {
@@ -126,25 +126,27 @@ export function listTimelines(prefix = "") {
   if (!existsSync(join(TIMELINES_DIR, start)) || !statSync(join(TIMELINES_DIR, start)).isDirectory()) return [];
   const found: Timeline[] = [];
   walk(start, (dir, files) => {
-    const events = files.filter(isEventFile).sort(byTime);
+    const events = files.filter(isEventFile).toSorted(byTime);
     if (events.length === 0 && !files.includes(NOW)) return;
     found.push({ path: dir, events: events.length, latest: events.at(-1), now: readIfThere(join(TIMELINES_DIR, dir, NOW)) });
   });
-  return found.sort((a, b) => a.path.localeCompare(b.path));
+  return found.toSorted((a, b) => a.path.localeCompare(b.path));
 }
 
 export function findEvents(words: string[]) {
   const wanted = words.map((w) => w.toLowerCase());
   const hits: { file: string; line: string }[] = [];
   walk("", (dir, files) => {
-    for (const name of files.filter((f) => f.endsWith(".txt"))) {
+    for (const name of files) {
+      if (!name.endsWith(".txt")) continue;
       const file = join(dir, name);
       const text = readFileSync(join(TIMELINES_DIR, file), "utf8");
       const haystack = `${file}\n${text}`.toLowerCase();
-      if (!wanted.every((w) => haystack.includes(w))) continue;
-      const line = text.split("\n").find((l) => wanted.some((w) => l.toLowerCase().includes(w))) ?? text.split("\n")[0] ?? "";
+      if (wanted.some((w) => !haystack.includes(w))) continue;
+      const lines = text.split("\n");
+      const line = lines.find((l) => wanted.some((w) => l.toLowerCase().includes(w))) ?? lines[0] ?? "";
       hits.push({ file, line: line.trim() });
     }
   });
-  return hits.sort((a, b) => a.file.localeCompare(b.file));
+  return hits.toSorted((a, b) => a.file.localeCompare(b.file));
 }
