@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { cn, hasText } from "@/lib/utils";
 import { useJson } from "./load";
-import { HOVER_OUTLINE, InnerStat, SectionHead, ShadeKey, Tile, short, type Peek, type Stats } from "./parts";
+import { Ago, HOVER_OUTLINE, InnerStat, SectionHead, ShadeKey, Skeleton, SkeletonTile, SkeletonTiles, Tile, short, type Peek, type Stats } from "./parts";
 import { CountTiles, GhNote, GhTrendTiles, RepoPicker, RhythmTile, ThroughputTile, YarnNote } from "./sections";
 
-type Calendar = { at: number; total: number; days: { date: string; count: number }[]; error?: string };
+type Calendar = { at: number; total: number; days: { date: string; count: number }[]; error?: string; refreshing?: boolean };
 type Day = Calendar["days"][number];
 
 const MONTH = new Intl.DateTimeFormat(undefined, { month: "short", timeZone: "UTC" });
@@ -90,7 +90,17 @@ function ContributionCalendar({ cal, onDay }: { cal: Calendar; onDay: (date: str
   const weeks = weeksFromSunday(cal.days);
   const columns = { gridTemplateColumns: `auto repeat(${weeks.length}, var(--cell))` };
   return (
-    <Tile label="Contributions in the last year" value={cal.total.toLocaleString()} peek={peek} delta={<span className="text-[13px] font-medium text-[var(--viz-text-3)]">every repo, private ones counted as GitHub does</span>}>
+    <Tile
+      label="Contributions in the last year"
+      value={cal.total.toLocaleString()}
+      peek={peek}
+      delta={
+        <span className="truncate text-[13px] font-medium text-[var(--viz-text-3)]">
+          every repo, private ones counted as GitHub does · updated <Ago at={cal.at} />
+          {cal.refreshing === true && " · refreshing…"}
+        </span>
+      }
+    >
       <CalendarFacts cal={cal} weeks={weeks} />
       <div className="-mt-2 flex flex-col gap-1">
         <div className="flex items-center justify-between">
@@ -131,42 +141,76 @@ function ContributionCalendar({ cal, onDay }: { cal: Calendar; onDay: (date: str
   );
 }
 
-export function Overview({ stats, picked, onRepo, onWeek, live }: { stats: Stats; picked?: string | undefined; onRepo: (r: string) => void; onWeek: (k: string) => void; live: boolean }) {
-  const cal = useJson<Calendar>(live ? "/api/stats/calendar" : undefined);
+function CalendarSkeleton() {
+  return (
+    <SkeletonTile chart={false}>
+      <div className="-mx-2 grid grid-cols-2 gap-2 sm:flex">
+        {Array.from({ length: 4 }, (_, i) => (
+          <Skeleton key={i} className="h-[3.875rem] flex-1 rounded-[10px]" />
+        ))}
+      </div>
+      <Skeleton className="h-[7.5rem] w-full lg:h-40" />
+    </SkeletonTile>
+  );
+}
+
+function CalendarSection({ live, onWeek }: { live: boolean; onWeek: (k: string) => void }) {
+  const cal = useJson<Calendar>(live ? "/api/stats/calendar" : undefined, c => c.refreshing === true);
+  if (cal.value && cal.value.days.length > 0) return <ContributionCalendar cal={cal.value} onDay={onWeek} />;
+  const error = cal.error ?? cal.value?.error;
+  if (!hasText(error)) return <CalendarSkeleton />;
+  return (
+    <Tile label="Contributions in the last year" value="–">
+      <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{error}</p>
+    </Tile>
+  );
+}
+
+const GH_TILES = "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5";
+
+function GitHubSection({ stats, picked, onRepo, onWeek }: { stats: Stats | undefined; picked?: string | undefined; onRepo: (r: string) => void; onWeek: (k: string) => void }) {
+  const isWaiting = stats === undefined || stats.gh.now.pending === true;
+  return (
+    <section>
+      <SectionHead title="GitHub this week">
+        {stats ? <RepoPicker stats={stats} picked={picked} onRepo={onRepo} /> : <Skeleton className="h-6 w-40" />}
+        {stats && !isWaiting && <GhNote stats={stats} />}
+        {stats?.gh.now.pending === true && <span className="text-xs text-[var(--viz-text-2)]">asking GitHub…</span>}
+      </SectionHead>
+      {isWaiting ? (
+        <div className={GH_TILES}>
+          <SkeletonTiles count={5} />
+        </div>
+      ) : (
+        <GhTrendTiles stats={stats} onWeek={onWeek} keys={["commits", "opened", "merged", "reviews"]} />
+      )}
+    </section>
+  );
+}
+
+function YarnSection({ stats }: { stats: Stats | undefined }) {
+  return (
+    <section>
+      <SectionHead title="What yarn turned out">{stats && <YarnNote stats={stats} />}</SectionHead>
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">{stats ? <CountTiles stats={stats} ids={["resolved", "prsMerged", "started", "said"]} /> : <SkeletonTiles count={4} />}</div>
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+          {stats ? <RhythmTile stats={stats} className="lg:col-span-3" /> : <SkeletonTile chart="h-52" className="lg:col-span-3" />}
+          {stats ? <ThroughputTile stats={stats} className="lg:col-span-2" /> : <SkeletonTile chart="h-52" className="lg:col-span-2" />}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function Overview({ stats, picked, onRepo, onWeek, live }: { stats: Stats | undefined; picked?: string | undefined; onRepo: (r: string) => void; onWeek: (k: string) => void; live: boolean }) {
   return (
     <>
       <section>
-        {cal.value && cal.value.days.length > 0 ? (
-          <ContributionCalendar cal={cal.value} onDay={onWeek} />
-        ) : (
-          <Tile label="Contributions in the last year" value={hasText(cal.error) ? "–" : "…"}>
-            <p className={cn("mt-2 text-xs", hasText(cal.error) || hasText(cal.value?.error) ? "text-rose-600 dark:text-rose-400" : "text-[var(--viz-text-2)]")}>
-              {cal.error ?? cal.value?.error ?? "Asking GitHub…"}
-            </p>
-          </Tile>
-        )}
+        <CalendarSection live={live} onWeek={onWeek} />
       </section>
-      <section>
-        <SectionHead title="GitHub this week">
-          <RepoPicker stats={stats} picked={picked} onRepo={onRepo} />
-          <GhNote stats={stats} />
-        </SectionHead>
-        <GhTrendTiles stats={stats} onWeek={onWeek} keys={["commits", "opened", "merged", "reviews"]} />
-      </section>
-      <section>
-        <SectionHead title="What yarn turned out">
-          <YarnNote stats={stats} />
-        </SectionHead>
-        <div className="flex flex-col gap-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <CountTiles stats={stats} ids={["resolved", "prsMerged", "started", "said"]} />
-          </div>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
-            <RhythmTile stats={stats} className="lg:col-span-3" />
-            <ThroughputTile stats={stats} className="lg:col-span-2" />
-          </div>
-        </div>
-      </section>
+      <GitHubSection stats={stats} picked={picked} onRepo={onRepo} onWeek={onWeek} />
+      <YarnSection stats={stats} />
     </>
   );
 }

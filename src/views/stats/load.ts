@@ -3,7 +3,7 @@ import { useLatest } from "@/lib/effects";
 import { hasText } from "@/lib/utils";
 
 type Loaded<T> = { value?: T; error?: string; loading: boolean };
-type Entry<T> = { snap: Loaded<T>; at: number; listeners: Set<() => void>; timer?: ReturnType<typeof setTimeout>; shouldLookAgain?: (value: T) => boolean };
+type Entry<T> = { snap: Loaded<T>; at: number; listeners: Set<() => void>; timer?: ReturnType<typeof setTimeout>; isLookAgainDue?: boolean; shouldLookAgain?: (value: T) => boolean };
 const entries = new Map<string, Entry<unknown>>();
 const NOTHING: Loaded<never> = { loading: false };
 const STALE_MS = 60_000;
@@ -29,6 +29,7 @@ async function load(url: string) {
   const entry = entries.get(url);
   if (!entry) return;
   entry.snap = { ...entry.snap, loading: true };
+  entry.isLookAgainDue = false;
   notify(entry);
   try {
     entry.snap = { value: await fetchJson(url), loading: false };
@@ -41,6 +42,7 @@ async function load(url: string) {
   if (entry.snap.value !== undefined && entry.shouldLookAgain?.(entry.snap.value) === true) {
     entry.timer = setTimeout(() => {
       if (entry.listeners.size > 0) void load(url);
+      else entry.isLookAgainDue = true;
     }, LOOK_AGAIN_MS);
   }
 }
@@ -55,7 +57,7 @@ export function useJson<T>(url: string | undefined, shouldLookAgain?: (value: T)
       if (!entry) return () => null;
       entry.shouldLookAgain = value => latestShouldLookAgain.current?.(value) === true;
       entry.listeners.add(listener);
-      if (!entry.snap.loading && Date.now() - entry.at > STALE_MS) void load(url);
+      if (!entry.snap.loading && (entry.isLookAgainDue === true || Date.now() - entry.at > STALE_MS)) void load(url);
       return () => {
         entry.listeners.delete(listener);
       };

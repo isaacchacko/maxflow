@@ -3,7 +3,7 @@ import { cn, hasText } from "@/lib/utils";
 import { Jev } from "./Jev";
 import { useJson } from "./load";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AXIS_TICK, Segmented, SectionHead, StageBars, Tile, indexOf, short, weekday } from "./parts";
+import { AXIS_TICK, Segmented, SectionHead, SkeletonTile, SkeletonTiles, StageBars, Tile, indexOf, short, weekday } from "./parts";
 
 type Group = {
   id: string;
@@ -289,11 +289,35 @@ function ByModelAndObjective({ d, measure }: { d: AgentStats; measure: Measure }
   );
 }
 
+function UsageSkeleton() {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <SkeletonTiles count={4} chart="h-4" />
+      </div>
+      <SkeletonTile chart="h-56" />
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <SkeletonTiles count={2} chart="h-48" />
+      </div>
+      <SkeletonTile chart="h-80" />
+    </div>
+  );
+}
+
 export function Agents({ live, days, onDays }: { live: boolean; days: number; onDays: (n: number) => void }) {
   const [measure, setMeasure] = useState<Measure>("cost");
   const data = useJson<AgentStats>(live ? `/api/stats/agents?days=${days}` : undefined, d => d.scanning);
   const d = data.value;
-  if (!d) return <p className={cn("text-sm", hasText(data.error) ? "text-rose-600 dark:text-rose-400" : "text-[var(--viz-text-2)]")}>{data.error ?? "Reading Claude Code's transcripts…"}</p>;
+  if (!d)
+    return (
+      <section>
+        <SectionHead title="Usage">
+          <span className={cn("text-xs", hasText(data.error) ? "text-rose-600 dark:text-rose-400" : "text-[var(--viz-text-2)]")}>{data.error ?? "reading Claude Code's transcripts…"}</span>
+          <UsageToggles measure={measure} onMeasure={setMeasure} days={days} onDays={onDays} />
+        </SectionHead>
+        {!hasText(data.error) && <UsageSkeleton />}
+      </section>
+    );
   const hasNoYarnAgent = d.groups.every(g => g.kind !== "agent");
   return (
     <>

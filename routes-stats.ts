@@ -1,5 +1,6 @@
 import { agents, calendar, health, stats } from "./stats";
 import { jev } from "./stats-jev";
+import { briefResources, resources } from "./stats-resources";
 import { type Session, sessions } from "./sessions";
 import type { SessionInfo } from "./stats-health";
 import { TODO_STATES, type Todo } from "./model";
@@ -74,9 +75,10 @@ async function editOrDeleteTodo(req: Request, _url: URL, match: RegExpExecArray)
 
 const ROUTES: Route[] = [
   exactly("GET", "/api/todos", () => Response.json(todos)),
-  exactly("GET", "/api/stats", async (_req, url) => Response.json(await stats(url.searchParams.get("week") ?? undefined, url.searchParams.get("repo") ?? undefined))),
+  exactly("GET", "/api/stats", (_req, url) => Response.json(stats(url.searchParams.get("week") ?? undefined, url.searchParams.get("repo") ?? undefined))),
   exactly("GET", "/api/stats/calendar", async () => Response.json(await calendar())),
   exactly("GET", "/api/stats/health", () => Response.json(health(sessionInfos()))),
+  exactly("GET", "/api/stats/resources", (_req, url) => Response.json(url.searchParams.has("brief") ? briefResources() : (resources() ?? null))),
   exactly("GET", "/api/stats/jev", (_req, url) => Response.json(jev(url.searchParams.get("days")))),
   exactly("GET", "/api/stats/agents", (_req, url) => Response.json(agentsSeen(url))),
   exactly("POST", "/api/todos", addTodo),

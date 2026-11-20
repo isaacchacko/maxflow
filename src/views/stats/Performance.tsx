@@ -2,7 +2,8 @@ import { useState } from "react";
 import { cn, hasText } from "@/lib/utils";
 import { useJson } from "./load";
 import { Distributions } from "./charts";
-import { Columns, SectionHead, Tile, duration, short, sum, weekday, type Peek, type Stats } from "./parts";
+import { Columns, SectionHead, SkeletonTile, SkeletonTiles, Tile, duration, short, sum, weekday, type Peek, type Stats } from "./parts";
+import { ResourcesSection } from "./Resources";
 import { LatencyTiles, YarnNote } from "./sections";
 
 type Budget = { used: number; limit: number; remaining: number; reset: number };
@@ -206,28 +207,51 @@ function HealthSection({ h }: { h: Health }) {
   );
 }
 
-export function Performance({ stats, live }: { stats: Stats; live: boolean }) {
-  const health = useJson<Health>(live ? "/api/stats/health" : undefined);
+function HealthSkeleton() {
   return (
-    <>
-      <section>
-        <SectionHead title="How long each step takes">
-          <YarnNote stats={stats} />
-        </SectionHead>
-        <div className="flex flex-col gap-3">
+    <section>
+      <SectionHead title="Server health" />
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <SkeletonTiles count={2} chart="h-4" />
+          <SkeletonTile chart="h-5" className="sm:col-span-2" />
+        </div>
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+          <SkeletonTile chart="h-80" className="lg:col-span-3" />
+          <SkeletonTile chart="h-80" className="lg:col-span-2" />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StepsSection({ stats }: { stats: Stats | undefined }) {
+  return (
+    <section>
+      <SectionHead title="How long each step takes">{stats && <YarnNote stats={stats} />}</SectionHead>
+      <div className="flex flex-col gap-3">
+        {stats ? (
           <Tile label="Every sample this week on one log axis" value="">
             <Distributions latencies={stats.yarn.latencies} before={stats.yarnBefore} />
           </Tile>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <LatencyTiles stats={stats} />
-          </div>
-        </div>
-      </section>
-      {health.value ? (
-        <HealthSection h={health.value} />
-      ) : (
-        <p className={cn("text-sm", hasText(health.error) ? "text-rose-600 dark:text-rose-400" : "text-[var(--viz-text-2)]")}>{health.error ?? "Checking the server…"}</p>
-      )}
+        ) : (
+          <SkeletonTile chart="h-64" />
+        )}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">{stats ? <LatencyTiles stats={stats} /> : <SkeletonTiles count={4} />}</div>
+      </div>
+    </section>
+  );
+}
+
+export function Performance({ stats, live }: { stats: Stats | undefined; live: boolean }) {
+  const health = useJson<Health>(live ? "/api/stats/health" : undefined);
+  return (
+    <>
+      <ResourcesSection live={live} />
+      <StepsSection stats={stats} />
+      {health.value && <HealthSection h={health.value} />}
+      {!health.value && hasText(health.error) && <p className="text-sm text-rose-600 dark:text-rose-400">{health.error}</p>}
+      {!health.value && !hasText(health.error) && <HealthSkeleton />}
     </>
   );
 }

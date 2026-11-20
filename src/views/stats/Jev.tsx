@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { cn, hasText } from "@/lib/utils";
 import { useJson } from "./load";
-import { Columns, InnerStat, SectionHead, Segmented, StageBars, Tile, duration, short, weekday, type Peek } from "./parts";
+import { Columns, InnerStat, SectionHead, Segmented, SkeletonTiles, StageBars, Tile, duration, short, weekday, type Peek } from "./parts";
 
 type Pick = { id: string; title: string };
 type JevStats = {
@@ -153,7 +153,18 @@ function Disagreements({ d, question, onQuestion }: { d: JevStats; question: Que
 }
 
 function JevBody({ d, error, question, onQuestion }: { d: JevStats | undefined; error: string | undefined; question: QuestionId; onQuestion: (q: QuestionId) => void }) {
-  if (!d) return <p className={cn("text-sm", hasText(error) ? "text-rose-600 dark:text-rose-400" : "text-[var(--viz-text-2)]")}>{error ?? "Reading Jev's log…"}</p>;
+  if (!d && hasText(error)) return <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>;
+  if (!d)
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <SkeletonTiles count={4} chart={false} />
+        </div>
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+          <SkeletonTiles count={3} chart="h-28" />
+        </div>
+      </div>
+    );
   if (d.since === undefined) return <p className={NOTE}>Jev hasn't been asked anything yet.</p>;
   return (
     <div className="flex flex-col gap-3">

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { NativeSelect } from "@/components/ui/native-select";
 import { cn, hasText } from "@/lib/utils";
 import { Heatmap, Stages, inJourneyOrder } from "./charts";
-import { COUNT, Columns, Segmented, DAY_KEY, DAY_MS, Delta, GH, HOUR, LATENCY, Tile, duration, hourLabel, median, quantile, short, sum, useIsStillBefore, weekday, type Count, type Counts, type Latency, type Peek, type Stats } from "./parts";
+import { Ago, COUNT, Columns, Segmented, DAY_KEY, DAY_MS, Delta, GH, HOUR, LATENCY, Tile, duration, hourLabel, median, quantile, short, sum, useIsStillBefore, weekday, type Count, type Counts, type Latency, type Peek, type Stats } from "./parts";
 
 export function RepoPicker({ stats, picked, onRepo }: { stats: Stats; picked?: string | undefined; onRepo: (repo: string) => void }) {
   return (
@@ -20,7 +20,8 @@ export function GhNote({ stats }: { stats: Stats }) {
   const { now, trend } = stats.gh;
   return (
     <span className="text-xs text-[var(--viz-text-2)]">
-      checked {new Date(now.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+      updated <Ago at={now.at} />
+      {now.refreshing === true && " · refreshing…"}
       {trend.pending && " · filling in earlier weeks…"}
       {hasText(now.error) && <span className="text-rose-600 dark:text-rose-400"> · last fetch failed{now.counts ? ", showing older numbers" : ""}</span>}
     </span>

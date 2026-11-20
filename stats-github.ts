@@ -9,6 +9,7 @@ import { DAY_MS, addDays, mondayToSundayWeek, type Week } from "./stats-week";
 export const DEFAULT_REPO = "Dryft-AI/app";
 const CLONES: Record<string, string> = { "Dryft-AI/app": join(homedir(), "app"), "isaacchacko/yarn": DIR };
 const GH_CACHE = "stats-github.json";
+const CALENDAR_CACHE = "stats-calendar.json";
 const GH_FRESH_MS = 15 * 60_000;
 const SEARCH_INDEX_SETTLED_MS = 60 * 60_000;
 const REPO_LIST_TTL_MS = 6 * 3_600_000;
@@ -18,24 +19,30 @@ const GH_TIMEOUT_MS = 30_000;
 const RETRY_DELAYS_MS = [3000, 10_000];
 const MAX_MERGED_PAGES = 5;
 const TREND_WEEKS = 12;
+const RETRY_AFTER_FAILURE_MS = 60_000;
 
 type Counts = { commits: number; opened: number; merged: number; closed: number; reviews: number; requested: number; added: number; deleted: number };
-export type GhWeek = { at: number; final: boolean; counts?: Counts; commitTimes?: number[]; error?: string };
-export type Calendar = { at: number; total: number; days: { date: string; count: number }[]; error?: string };
+export type GhWeek = { at: number; final: boolean; counts?: Counts; commitTimes?: number[]; error?: string; pending?: boolean; refreshing?: boolean };
+export type Calendar = { at: number; total: number; days: { date: string; count: number }[]; error?: string; refreshing?: boolean };
 type Viewer = { login: string; id: string };
 
 const isGhWeek = (value: unknown) => isRecord(value) && typeof value["at"] === "number" && typeof value["final"] === "boolean";
 const isGhCache = (value: unknown): value is Record<string, GhWeek> => isRecord(value) && Object.values(value).every(isGhWeek);
+const isCalendar = (value: unknown): value is Calendar => isRecord(value) && typeof value["at"] === "number" && typeof value["total"] === "number" && Array.isArray(value["days"]);
+const FALLBACK_REPOS = [DEFAULT_REPO, ...Object.keys(CLONES).filter((r) => r !== DEFAULT_REPO)];
 
 const ghCache: Record<string, GhWeek> = readStateJson(GH_CACHE, isGhCache) ?? {};
 const inflight = new Map<string, Promise<GhWeek>>();
+const failures = new Map<string, { at: number; error: string }>();
 const memo: {
   viewer: Promise<Viewer> | undefined;
-  repoList: { at: number; repos: Promise<string[]> } | undefined;
+  repoList: { at: number; repos: string[] } | undefined;
+  repoLoad: Promise<void> | undefined;
   calendar: Calendar | undefined;
   calendarLoad: Promise<Calendar> | undefined;
+  calendarFailedAt: number;
   trendQueue: Promise<void>;
-} = { viewer: undefined, repoList: undefined, calendar: undefined, calendarLoad: undefined, trendQueue: Promise.resolve() };
+} = { viewer: undefined, repoList: undefined, repoLoad: undefined, calendar: readStateJson(CALENDAR_CACHE, isCalendar), calendarLoad: undefined, calendarFailedAt: 0, trendQueue: Promise.resolve() };
 
 const hasError = (cached: { error?: string }) => cached.error !== undefined && cached.error !== "";
 
@@ -99,22 +106,22 @@ function reposFromReply(d: unknown) {
 async function lookUpRepos() {
   const since = new Date(Date.now() - 90 * DAY_MS).toISOString().slice(0, 10);
   try {
-    return reposFromReply(
+    const repos = reposFromReply(
       await retried(`query { search(type: ISSUE, first: 100, query: "is:pr involves:@me updated:>=${since}") { nodes { ... on PullRequest { repository { nameWithOwner } } } }
     viewer { repositoriesContributedTo(first: 50, includeUserRepositories: true, orderBy: { field: PUSHED_AT, direction: DESC }) { nodes { nameWithOwner } } } }`),
     );
+    memo.repoList = { at: Date.now(), repos };
   } catch (error) {
     console.error(`stats: listing his repos failed: ${errorMessage(error)}`);
-    memo.repoList = undefined;
-    return [DEFAULT_REPO, ...Object.keys(CLONES).filter((r) => r !== DEFAULT_REPO)];
+  } finally {
+    memo.repoLoad = undefined;
   }
 }
 
-export async function reposByRecentWork(): Promise<string[]> {
-  if (memo.repoList && Date.now() - memo.repoList.at < REPO_LIST_TTL_MS) return memo.repoList.repos;
-  const repos = lookUpRepos();
-  memo.repoList = { at: Date.now(), repos };
-  return repos;
+export function reposByRecentWork(): string[] {
+  const known = memo.repoList;
+  if (known === undefined || Date.now() - known.at >= REPO_LIST_TTL_MS) memo.repoLoad ??= lookUpRepos();
+  return known?.repos ?? FALLBACK_REPOS;
 }
 
 type WeekQuery = { repo: string; w: Week; range: string; clone: string | undefined };
@@ -191,9 +198,11 @@ async function fetchAndCache(repo: string, w: Week, key: string, hit: GhWeek | u
     const r = await fetchGh(repo, w);
     ghCache[key] = r;
     writeStateJson(GH_CACHE, ghCache);
+    failures.delete(key);
     return r;
   } catch (error) {
     const message = errorMessage(error);
+    failures.set(key, { at: Date.now(), error: message });
     console.error(`stats: GitHub fetch for ${repo} week ${w.key} failed: ${message}`);
     return hit ? { ...hit, error: message } : { at: Date.now(), final: false, error: message };
   } finally {
@@ -201,17 +210,33 @@ async function fetchAndCache(repo: string, w: Week, key: string, hit: GhWeek | u
   }
 }
 
+function refresh(repo: string, w: Week, key: string) {
+  const running = inflight.get(key);
+  if (running) return running;
+  const p = fetchAndCache(repo, w, key, ghCache[key]);
+  inflight.set(key, p);
+  return p;
+}
+
+const isFresh = (hit: GhWeek | undefined): hit is GhWeek => hit !== undefined && !hasError(hit) && (hit.final || Date.now() - hit.at < GH_FRESH_MS);
+
 export async function gh(repo: string, w: Week): Promise<GhWeek> {
   const key = `${repo} ${w.key}`;
   const hit = ghCache[key];
-  if (hit && !hasError(hit) && (hit.final || Date.now() - hit.at < GH_FRESH_MS)) return hit;
-  const hasNotStarted = w.from > Date.now();
-  if (hasNotStarted) return { at: Date.now(), final: false };
-  const running = inflight.get(key);
-  if (running) return running;
-  const p = fetchAndCache(repo, w, key, hit);
-  inflight.set(key, p);
-  return p;
+  if (isFresh(hit)) return hit;
+  if (w.from > Date.now()) return { at: Date.now(), final: false };
+  return refresh(repo, w, key);
+}
+
+export function ghNow(repo: string, w: Week): GhWeek {
+  const key = `${repo} ${w.key}`;
+  const hit = ghCache[key];
+  if (isFresh(hit)) return hit;
+  if (w.from > Date.now()) return { at: Date.now(), final: false };
+  const failure = failures.get(key);
+  if (failure && Date.now() - failure.at < RETRY_AFTER_FAILURE_MS) return { ...(hit ?? { at: failure.at, final: false }), error: failure.error };
+  void refresh(repo, w, key);
+  return hit ? { ...hit, refreshing: true } : { at: Date.now(), final: false, pending: true };
 }
 
 async function fetchAfter(previous: Promise<void>, repo: string, w: Week) {
@@ -238,9 +263,11 @@ function calendarFromReply(d: unknown): Calendar {
 async function loadCalendar(): Promise<Calendar> {
   try {
     memo.calendar = calendarFromReply(await retried(`query { viewer { contributionsCollection { contributionCalendar { totalContributions weeks { contributionDays { date contributionCount } } } } } }`));
+    writeStateJson(CALENDAR_CACHE, memo.calendar);
     return memo.calendar;
   } catch (error) {
     const message = errorMessage(error);
+    memo.calendarFailedAt = Date.now();
     console.error(`stats: contribution calendar failed: ${message}`);
     return memo.calendar ? { ...memo.calendar, error: message } : { at: Date.now(), total: 0, days: [], error: message };
   } finally {
@@ -251,6 +278,7 @@ async function loadCalendar(): Promise<Calendar> {
 export async function calendar(): Promise<Calendar> {
   const cached = memo.calendar;
   if (cached && !hasError(cached) && Date.now() - cached.at < CALENDAR_TTL_MS) return cached;
+  if (cached && memo.calendarLoad === undefined && Date.now() - memo.calendarFailedAt < RETRY_AFTER_FAILURE_MS) return cached;
   memo.calendarLoad ??= loadCalendar();
-  return memo.calendarLoad;
+  return cached ? { ...cached, refreshing: true } : memo.calendarLoad;
 }

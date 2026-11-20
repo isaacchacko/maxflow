@@ -4,7 +4,7 @@ import { useNow } from "@/lib/effects";
 import { cn, hasText } from "@/lib/utils";
 
 export type Counts = { commits: number; opened: number; merged: number; closed: number; reviews: number; requested: number; added: number; deleted: number };
-export type GhWeek = { at: number; final: boolean; counts?: Counts; commitTimes?: number[]; error?: string };
+export type GhWeek = { at: number; final: boolean; counts?: Counts; commitTimes?: number[]; error?: string; pending?: boolean; refreshing?: boolean };
 export type Latency = { id: string; samples: { at: number; ms: number }[] };
 export type Count = { id: string; days: number[]; at: number[] };
 export type YarnWeek = { since: number; latencies: Latency[]; counts: Count[] };
@@ -300,4 +300,43 @@ export function SectionHead({ title, children }: { title: string; children?: Rea
       {children}
     </div>
   );
+}
+
+export function Skeleton({ className }: { className?: string }) {
+  return <div aria-hidden className={cn("skeleton", className)} />;
+}
+
+export function SkeletonTile({ chart = "h-28", className, children }: { chart?: string | false; className?: string; children?: ReactNode }) {
+  return (
+    <section aria-busy className={cn("flex min-w-0 flex-col gap-4 rounded-2xl bg-[var(--viz-tile)] px-4 pt-4 pb-3", className)}>
+      <div className="flex flex-col gap-0.5">
+        <Skeleton className="h-5 w-28" />
+        <div className="flex min-h-[2.125rem] items-center">
+          <Skeleton className="h-7 w-20" />
+        </div>
+      </div>
+      {chart !== false && <Skeleton className={cn("w-full", chart)} />}
+      {children}
+    </section>
+  );
+}
+
+export function SkeletonTiles({ count, chart, className }: { count: number; chart?: string | false; className?: string }) {
+  return (
+    <>
+      {Array.from({ length: count }, (_, i) => (
+        <SkeletonTile key={i} chart={chart} className={className} />
+      ))}
+    </>
+  );
+}
+
+function ago(ms: number) {
+  if (ms < 10_000) return "just now";
+  return `${duration(ms)} ago`;
+}
+
+export function Ago({ at }: { at: number }) {
+  const now = useNow(t => (t - at < 60_000 ? 5000 : 30_000));
+  return <span title={new Date(at).toLocaleString()}>{ago(Math.max(0, now - at))}</span>;
 }

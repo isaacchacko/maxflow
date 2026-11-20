@@ -209,6 +209,13 @@
   background-image: linear-gradient(100deg, color-mix(in oklab, var(--muted-foreground) 55%, transparent) 30%, var(--muted-foreground) 50%, color-mix(in oklab, var(--muted-foreground) 55%, transparent) 70%);
   animation: shimmer 2.6s linear infinite;
 }
+/* A placeholder block the size of what will load into it: the track colour, with a lighter band sweeping across. */
+.skeleton {
+  border-radius: 6px; background-size: 300% 100%; background-position: 120% center;
+  background-image: linear-gradient(100deg, var(--viz-track) 38%, color-mix(in oklab, var(--viz-track) 45%, var(--viz-tile)) 50%, var(--viz-track) 62%);
+  animation: shimmer 1.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
 .shimmer * { color: inherit; }
 .shimmer code { background: none; padding: 0; }
 /* In-progress marks, after BoardUI's (docs/face-motion.md): a 3×3 grid of dots lit by a passing wave or a turning sweep, five

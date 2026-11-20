@@ -45,7 +45,7 @@ function statsQuery(weekKey: string | undefined, repo: string | undefined) {
   return query;
 }
 
-const isTrendStillFilling = (s: Stats) => s.gh.trend.pending;
+const isGitHubStillFilling = (s: Stats) => s.gh.trend.pending || s.gh.now.pending === true || s.gh.now.refreshing === true || s.gh.before.pending === true;
 
 function WeekRange({ from }: { from: string }) {
   const range = `${short(from)} – ${short(addDays(from, 6))}`;
@@ -90,13 +90,12 @@ type WeekBodyProps = {
 
 function WeekBody({ tab, stats, error, isLive, repo, onRepo, onWeek }: WeekBodyProps) {
   if (!stats && hasText(error)) return <p className="text-sm text-rose-600 dark:text-rose-400">Couldn't load stats: {error}</p>;
-  if (!stats) return <p className="text-sm text-muted-foreground">Counting…</p>;
   if (tab === "performance") return <Performance stats={stats} live={isLive} />;
   return <Overview stats={stats} picked={repo} onRepo={onRepo} onWeek={onWeek} live={isLive} />;
 }
 
 function useWeekStats(isWeekTab: boolean, isLive: boolean, query: URLSearchParams) {
-  const week = useJson<Stats>(isLive && isWeekTab ? `/api/stats?${query}` : undefined, isTrendStillFilling);
+  const week = useJson<Stats>(isLive && isWeekTab ? `/api/stats?${query}` : undefined, isGitHubStillFilling);
   const [lastShown, setLastShown] = useState<Stats>();
   if (week.value !== undefined && week.value !== lastShown) setLastShown(week.value);
   const stats = week.value ?? lastShown;
