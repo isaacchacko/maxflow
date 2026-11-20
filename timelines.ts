@@ -5,8 +5,7 @@ import { IS_LIVE } from "./instance";
 import { stateDirectory } from "./state";
 
 export const TIMELINES_DIR = process.env["MAXFLOW_TIMELINES"] ?? (IS_LIVE ? join(homedir(), "Timelines") : stateDirectory("timelines"));
-// constraint: yarn's merge gate refuses a push to main in any repo, this one too, until Isaac says otherwise (th-13b801)
-export const TIMELINES_REMOTE = process.env["MAXFLOW_TIMELINES_REMOTE"] ?? "";
+export const TIMELINES_REMOTE = process.env["MAXFLOW_TIMELINES_REMOTE"] ?? (IS_LIVE ? "https://github.com/isaacchacko/timelines.git" : "");
 export const NOW = "now.txt";
 const AGENT_EMAIL = "timelines@maxflow.local";
 const LOCK_RETRIES = 20;
