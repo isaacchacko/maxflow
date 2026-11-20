@@ -194,12 +194,16 @@ function workerAskRefusal(s: Session): Response | undefined {
   return new Response(`Workers don't ask Isaac: ask your router "${router.name}" (${router.id}, \`${CLI} who router\`) with SendMessage to mf-${router.id} or \`${CLI} notify ${router.id} '<question>'\`. It decides, or asks him itself.`, { status: 403 });
 }
 
-async function openAThreadWaitingOnHim(req: Request): Promise<Response> {
-  const body = await jsonBody(req);
+function askerOrRefusal(req: Request): Session | Response {
   const s = sender(req);
   if (!s) return new Response("ask from inside a maxflow session ($MAXFLOW_SESSION)", { status: 400 });
-  const refusal = workerAskRefusal(s);
-  if (refusal) return refusal;
+  return workerAskRefusal(s) ?? s;
+}
+
+async function openAThreadWaitingOnHim(req: Request): Promise<Response> {
+  const body = await jsonBody(req);
+  const s = askerOrRefusal(req);
+  if (s instanceof Response) return s;
   const text = textOf(body, "text")?.trim() ?? "";
   if (text === "") return new Response("text required", { status: 400 });
   const [re, dflt] = [textOf(body, "re")?.trim(), textOf(body, "default")?.trim()];
