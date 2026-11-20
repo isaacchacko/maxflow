@@ -7,7 +7,7 @@ export type Session = {
   cwd: string;
   createdAt: number;
   lastOutputAt: number;
-  proc: Subprocess;
+  proc?: Subprocess;
   chunks: Uint8Array[];
   bytes: number;
   clients: Set<ServerWebSocket<WsData>>;

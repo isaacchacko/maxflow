@@ -8,14 +8,17 @@ export const isLive = (s?: Session): s is Session => s?.exitCode === null;
 export const objectives = objectivesTable.read() as Objective[];
 export const saveObjectives = () => objectivesTable.write(objectives);
 export const threads = threadsTable.read() as Thread[];
-export let threadsDirty: ReturnType<typeof setTimeout> | undefined;
-export const writeThreads = () => {
-  clearTimeout(threadsDirty);
-  threadsDirty = undefined;
+const threadsWrite: { pending: ReturnType<typeof setTimeout> | undefined } = { pending: undefined };
+const writeThreads = () => {
+  clearTimeout(threadsWrite.pending);
+  threadsWrite.pending = undefined;
   threadsTable.write(threads);
 };
 export const saveThreads = () => {
-  threadsDirty ??= setTimeout(writeThreads, THREADS_WRITE_DEBOUNCE_MS);
+  threadsWrite.pending ??= setTimeout(writeThreads, THREADS_WRITE_DEBOUNCE_MS);
+};
+export const flushPendingThreads = () => {
+  if (threadsWrite.pending !== undefined) writeThreads();
 };
 export const names = namesTable.all();
 export function rememberNames() {

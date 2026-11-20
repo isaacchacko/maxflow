@@ -80,7 +80,7 @@ export function onEvent(topic: string, payload: unknown, from?: Session) {
 }
 const USER_COMMENTS = "user-comments.json";
 const userComments: UserComment[] = (() => { try { return (peekStateJson(USER_COMMENTS) as UserComment[] | undefined) ?? []; } catch { return []; } })();
-export const seedUserComments = userComments.length === 0;
+export const shouldSeedUserComments = userComments.length === 0;
 export function recordUserComment(kind: string | undefined, payload: unknown, at: number) {
   if (kind !== "comment" && kind !== "thread") return;
   const data: EventData = isRecord(payload) ? payload : {};

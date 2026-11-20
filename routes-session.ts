@@ -187,7 +187,7 @@ function kill(s: Session): Response {
   sessions.delete(s.id);
   inboxesTable.delete(s.id);
   tmux("kill-session", "-t", tmuxName(s.id));
-  s.proc.kill();
+  s.proc?.kill();
   for (const ws of s.clients) ws.close();
   return new Response(null, { status: 204 });
 }

@@ -15,7 +15,8 @@ const BUILD_WHILE_A_TAB_FOLLOWS_EVERY_MS = 2000;
 const GET_REUSES_A_BUILD_UNDER_MS = 1000;
 type Built = { v: number; at: number; w: World; json?: string; items: Record<string, Map<string, string>>; order: Record<string, string>; rest: Record<string, string> };
 type Patch = { upsert: Record<string, unknown[]>; remove: Record<string, string[]>; order: Record<string, string[]>; set: Record<string, unknown> };
-export let built: Built | undefined;
+const latest: { built: Built | undefined } = { built: undefined };
+export const latestBuild = () => latest.built;
 const worldBuild: { isDirty: boolean; building: Promise<Built> | undefined; timer: ReturnType<typeof setTimeout> | undefined; lastBuildAt: number } = {
   isDirty: true,
   building: undefined,
@@ -74,7 +75,7 @@ function sendPatch(from: number, v: number, patch: Patch) {
 
 async function buildWorld(): Promise<Built> {
   const w = await world();
-  const previous = built;
+  const previous = latest.built;
   const { items, order, patch: collectionPatch } = collectionsOf(w, previous);
   const { rest, set } = restOf(w, previous);
   const patch: Patch = { ...collectionPatch, set };
@@ -83,7 +84,8 @@ async function buildWorld(): Promise<Built> {
     return previous;
   }
   const from = previous?.v;
-  built = { v: (from ?? 0) + 1, at: Date.now(), w, items, order, rest };
+  const built = { v: (from ?? 0) + 1, at: Date.now(), w, items, order, rest };
+  latest.built = built;
   if (from !== undefined && worldClients.size > 0) sendPatch(from, built.v, patch);
   return built;
 }
@@ -118,6 +120,7 @@ function scheduleWorld() {
 
 export async function freshWorld() {
   if (worldBuild.building !== undefined) await worldBuild.building;
+  const built = latest.built;
   return built && !worldBuild.isDirty && Date.now() - built.at < GET_REUSES_A_BUILD_UNDER_MS ? built : rebuildWorld();
 }
 onPublish.add(() => {
