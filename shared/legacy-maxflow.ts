@@ -24,3 +24,9 @@ export const SCREENSHOT_STAMP = /^\[(?:yarn|maxflow) · screenshot\].*$/gm;
 export const renamedSource = <T extends string>(source: T) => (source === "maxflow" ? "yarn" : source);
 
 export const noSessionEnv = () => Object.fromEntries(bothEnvNames("SESSION").map((key) => [key, ""]));
+
+export const LEGACY_STATE_DIR = ".maxflow-v2";
+
+export const LEGACY_CHECKOUT = "maxflow-v2";
+
+export const LEGACY_SERVICE = { mac: "com.isaacchacko.maxflow-v2", linux: "maxflow-v2.service", log: "/tmp/maxflow-v2.log" };

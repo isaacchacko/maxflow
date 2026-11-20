@@ -25,7 +25,7 @@ afterEach(async () => {
 function startSentryAgainstStubYarn({ watches, sessions, refusedEvents }: { watches: object[]; sessions: object[]; refusedEvents: number }): Stub {
   const home = mkdtempSync(join(tmpdir(), "yarn-gh-commit-"));
   const instance = `ci-${crypto.randomUUID().slice(0, 6)}`;
-  const state = join(home, `.maxflow-v2-${instance}`);
+  const state = join(home, `.yarn-v2-${instance}`);
   mkdirSync(state, { recursive: true });
   writeFileSync(join(state, "gh-commit-watch.json"), JSON.stringify(watches));
   const bin = join(home, "bin");

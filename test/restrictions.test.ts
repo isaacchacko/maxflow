@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { doesMatch, invalid, resolve, SEED, type Call, type Restriction } from "../restrictions";
 import { commandStarts, shellText } from "../restrictions-shell";
+import { dirname, join } from "node:path";
 import { DIR } from "../instance";
 
 const verdict = (command: string) => resolve(SEED, { tool: "Bash", input: { command } });
@@ -93,6 +94,7 @@ describe("the seed catalog", () => {
   test("edits under the live checkout are denied, and nothing else is", () => {
     expect(judged({ tool: "Edit", input: { file_path: `${DIR}/server.ts` } })).toEqual(["deny", "edit-live"]);
     expect(judged({ tool: "NotebookEdit", input: { notebook_path: `${DIR}/a.ipynb` } })).toEqual(["deny", "edit-live"]);
+    expect(judged({ tool: "Edit", input: { file_path: join(dirname(DIR), "maxflow-v2", "server.ts") } })).toEqual(["deny", "edit-live"]);
     expect(judged({ tool: "Write", input: { file_path: `${DIR}-topic/server.ts` } })).toEqual(["allow", undefined]);
     expect(judged({ tool: "Read", input: { file_path: `${DIR}/server.ts` } })).toEqual(["allow", undefined]);
   });

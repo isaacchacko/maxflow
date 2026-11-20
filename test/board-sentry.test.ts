@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 const home = mkdtempSync(join(tmpdir(), "yarn-board-sentry-"));
 const name = `ci-${crypto.randomUUID().slice(0, 6)}`;
-const stateDir = join(home, `.maxflow-v2-${name}`);
+const stateDir = join(home, `.yarn-v2-${name}`);
 mkdirSync(stateDir);
 const calls = join(home, "tail-calls.jsonl");
 

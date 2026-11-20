@@ -1,9 +1,11 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { LEGACY_CHECKOUT } from "../shared/legacy-maxflow";
 
 const HOOKS = import.meta.dir;
 const SETTINGS = join(homedir(), ".claude/settings.json");
+const LEGACY_HOOKS = join(HOOKS, "../..", LEGACY_CHECKOUT, "hooks");
 const state = (s: string) => `${HOOKS}/claude-state.sh ${s}`;
 const questions = `${HOOKS}/claude-questions.ts`;
 const restrictions = `${HOOKS}/restrictions.ts`;
@@ -32,9 +34,12 @@ function readSettings(): Settings {
   return parsed;
 }
 
+const movedOffLegacyCheckout = (command: string) => (command.startsWith(`${LEGACY_HOOKS}/`) ? HOOKS + command.slice(LEGACY_HOOKS.length) : command);
+
 export function installHooks() {
   const settings = readSettings();
   const hooks = (settings.hooks ??= {});
+  for (const h of Object.values(hooks).flat().flatMap((e) => e.hooks)) h.command = movedOffLegacyCheckout(h.command);
   const otherYarnsHook = Object.values(hooks).flat().flatMap((e) => e.hooks).find((h) => /claude-(intro|state)\.sh/.test(h.command) && !h.command.startsWith(HOOKS));
   if (otherYarnsHook) return `hooks: left as they are, another yarn's are installed (${otherYarnsHook.command.split(" ", 1)[0] ?? ""})`;
   let added = 0;

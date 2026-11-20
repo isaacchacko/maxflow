@@ -43,7 +43,7 @@ describe("a restart between pasting an inbox message and its Enter leaves the pa
     expect(notified.status).toBe(202);
     for (const end = Date.now() + 20_000; !existsSync(enterReachedClaude) && Date.now() < end; ) await Bun.sleep(250);
     expect(existsSync(enterReachedClaude)).toBe(true);
-    const db = new Database(join(instance.home, `.maxflow-v2-${instance.name}`, "yarn.db"), { readonly: true });
+    const db = new Database(join(instance.home, `.yarn-v2-${instance.name}`, "yarn.db"), { readonly: true });
     const storedInboxARestartWouldRead = () => db.query("SELECT data FROM inboxes WHERE key = ?").get(id);
     for (const end = Date.now() + 10_000; storedInboxARestartWouldRead() !== null && Date.now() < end; ) await Bun.sleep(250);
     expect(storedInboxARestartWouldRead()).toBeNull();

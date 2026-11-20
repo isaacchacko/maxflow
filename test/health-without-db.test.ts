@@ -9,7 +9,7 @@ const PAGE_DEADLINE_MS = 15_000;
 const instance = `nodb-${crypto.randomUUID().slice(0, 6)}`;
 const port = 20_000 + Math.floor(Math.random() * 20_000);
 const home = mkdtempSync(join(tmpdir(), "yarn-health-nodb-"));
-mkdirSync(join(home, `.maxflow-v2-${instance}`, "yarn.db"), { recursive: true });
+mkdirSync(join(home, `.yarn-v2-${instance}`, "yarn.db"), { recursive: true });
 
 // constraint: a CI runner is a systemd service, and INVOCATION_ID would make the sentry start tmux through systemd-run --user
 const { INVOCATION_ID, ...envOutsideSystemd } = process.env;

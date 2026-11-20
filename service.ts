@@ -1,16 +1,20 @@
-import { yarnEnv } from "./shared/legacy-maxflow";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { LEGACY_SERVICE, yarnEnv } from "./shared/legacy-maxflow";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 import { DIR } from "./instance";
 
-export const LOG = "/tmp/maxflow-v2.log";
 const IS_MAC = process.platform === "darwin";
-export const LABEL = IS_MAC ? "com.isaacchacko.maxflow-v2" : "maxflow-v2.service";
-const LAUNCHD_PLIST = join(homedir(), "Library/LaunchAgents", `${LABEL}.plist`);
-const SYSTEMD_UNIT = join(homedir(), ".config/systemd/user", LABEL);
+const YARN_SERVICE = { mac: "com.isaacchacko.yarn", linux: "yarn.service", log: "/tmp/yarn.log" };
+const fileOf = (label: string) => (IS_MAC ? join(homedir(), "Library/LaunchAgents", `${label}.plist`) : join(homedir(), ".config/systemd/user", label));
+const labelOf = (service: typeof YARN_SERVICE) => (IS_MAC ? service.mac : service.linux);
+const isOnlyLegacyInstalled = !existsSync(fileOf(labelOf(YARN_SERVICE))) && existsSync(fileOf(labelOf(LEGACY_SERVICE)));
+const INSTALLED = isOnlyLegacyInstalled ? LEGACY_SERVICE : YARN_SERVICE;
+export const LOG = INSTALLED.log;
+export const LABEL = labelOf(INSTALLED);
 const LAUNCHD_DOMAIN = `gui/${String(userInfo().uid)}`;
-const LAUNCHD_SERVICE = `${LAUNCHD_DOMAIN}/${LABEL}`;
+const launchdService = (label: string) => `${LAUNCHD_DOMAIN}/${label}`;
+const LAUNCHD_SERVICE = launchdService(LABEL);
 
 // constraint: systemctl --user needs the user's bus, which a shell outside the login session (ssh, tmux started elsewhere) may not carry
 const env = { ...process.env, XDG_RUNTIME_DIR: process.env["XDG_RUNTIME_DIR"] ?? `/run/user/${String(userInfo().uid)}` };
@@ -37,7 +41,7 @@ export function status() {
 }
 
 export function checkout() {
-  const file = IS_MAC ? LAUNCHD_PLIST : SYSTEMD_UNIT;
+  const file = fileOf(LABEL);
   if (!existsSync(file)) return;
   return (IS_MAC ? /<key>WorkingDirectory<\/key><string>([^<]+)</ : /^WorkingDirectory=(.+)$/m).exec(readFileSync(file, "utf8"))?.[1];
 }
@@ -46,13 +50,21 @@ export const restartCommand = IS_MAC ? `launchctl kickstart -k gui/$(id -u)/${LA
 
 const LAUNCHD_BOOTOUT_POLLS = 20;
 
+function bootoutLaunchd(label: string) {
+  run(["launchctl", "bootout", launchdService(label)]);
+  // constraint: launchctl bootout returns before the old job is gone, and bootstrapping over it fails with an I/O error
+  for (let i = 0; i < LAUNCHD_BOOTOUT_POLLS && run(["launchctl", "print", launchdService(label)]).ok; i++) Bun.sleepSync(250);
+}
+
 function installLaunchd(bun: string, path: string, sentriesToRun: string) {
-  mkdirSync(join(LAUNCHD_PLIST, ".."), { recursive: true });
+  const label = YARN_SERVICE.mac;
+  const plist = fileOf(label);
+  mkdirSync(join(plist, ".."), { recursive: true });
   /* eslint-disable unicorn/prefer-https -- Apple's plist DOCTYPE system identifier is this exact http URL; launchd matches it as text */
-  writeFileSync(LAUNCHD_PLIST, `<?xml version="1.0" encoding="UTF-8"?>
+  writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>${LABEL}</string>
+  <key>Label</key><string>${label}</string>
   <key>ProgramArguments</key><array><string>${bun}</string><string>server.ts</string></array>
   <key>WorkingDirectory</key><string>${DIR}</string>
   <key>EnvironmentVariables</key><dict><key>PATH</key><string>${path}</string>${sentriesToRun ? `<key>YARN_SENTRIES</key><string>${sentriesToRun}</string>` : ""}</dict>
@@ -60,20 +72,21 @@ function installLaunchd(bun: string, path: string, sentriesToRun: string) {
   <key>KeepAlive</key><true/>
   <!-- Stopping the server must leave its tmux sessions (every agent, the health sentry, a Chrome started from a pane) running. -->
   <key>AbandonProcessGroup</key><true/>
-  <key>StandardOutPath</key><string>${LOG}</string>
-  <key>StandardErrorPath</key><string>${LOG}</string>
+  <key>StandardOutPath</key><string>${YARN_SERVICE.log}</string>
+  <key>StandardErrorPath</key><string>${YARN_SERVICE.log}</string>
 </dict></plist>
 `);
   /* eslint-enable unicorn/prefer-https */
-  run(["launchctl", "bootout", LAUNCHD_SERVICE]);
-  // constraint: launchctl bootout returns before the old job is gone, and bootstrapping over it fails with an I/O error
-  for (let i = 0; i < LAUNCHD_BOOTOUT_POLLS && run(["launchctl", "print", LAUNCHD_SERVICE]).ok; i++) Bun.sleepSync(250);
-  return run(["launchctl", "bootstrap", LAUNCHD_DOMAIN, LAUNCHD_PLIST]);
+  for (const old of [LEGACY_SERVICE.mac, label]) bootoutLaunchd(old);
+  rmSync(fileOf(LEGACY_SERVICE.mac), { force: true });
+  return run(["launchctl", "bootstrap", LAUNCHD_DOMAIN, plist]);
 }
 
 function installSystemd(bun: string, path: string, sentriesToRun: string) {
-  mkdirSync(join(SYSTEMD_UNIT, ".."), { recursive: true });
-  writeFileSync(SYSTEMD_UNIT, `[Unit]
+  const label = YARN_SERVICE.linux;
+  const unit = fileOf(label);
+  mkdirSync(join(unit, ".."), { recursive: true });
+  writeFileSync(unit, `[Unit]
 Description=yarn v2
 
 [Service]
@@ -84,14 +97,16 @@ ${sentriesToRun ? `Environment=YARN_SENTRIES=${sentriesToRun}\n` : ""}Restart=al
 RestartSec=2
 # Stopping the server must leave its tmux sessions (every agent, and the health sentry) running.
 KillMode=process
-StandardOutput=append:${LOG}
-StandardError=append:${LOG}
+StandardOutput=append:${YARN_SERVICE.log}
+StandardError=append:${YARN_SERVICE.log}
 
 [Install]
 WantedBy=default.target
 `);
+  if (existsSync(fileOf(LEGACY_SERVICE.linux))) run(["systemctl", "--user", "disable", "--now", LEGACY_SERVICE.linux]);
+  rmSync(fileOf(LEGACY_SERVICE.linux), { force: true });
   run(["systemctl", "--user", "daemon-reload"]);
-  return run(["systemctl", "--user", "enable", "--now", LABEL]);
+  return run(["systemctl", "--user", "enable", "--now", label]);
 }
 
 export function install(sentriesToRun = yarnEnv("SENTRIES") ?? "") {

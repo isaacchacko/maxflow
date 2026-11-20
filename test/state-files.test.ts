@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const home = mkdtempSync(join(tmpdir(), "yarn-state-"));
-mkdirSync(join(home, ".maxflow-v2-statetest"), { recursive: true });
+mkdirSync(join(home, ".yarn-v2-statetest"), { recursive: true });
 
 afterAll(() => {
   rmSync(home, { recursive: true, force: true });

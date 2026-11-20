@@ -1,4 +1,6 @@
+import { dirname, join } from "node:path";
 import { DIR } from "./instance";
+import { LEGACY_CHECKOUT } from "./shared/legacy-maxflow";
 import type { Exception, Mode, Reach, Restriction } from "./shared/restrictions-types";
 
 const SLACK = "mcp__claude_ai_Slack__";
@@ -7,6 +9,10 @@ const M365 = "mcp__claude_ai_Microsoft_365__";
 
 type BuiltinHead = [id: string, action: string, label: string, mode: Mode];
 type PersonReach = [reaches: Reach, forPerson: string];
+
+const asPathPrefix = (dir: string) => `^${dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/`;
+// constraint: the live checkout moved off its maxflow-v2 path and left a symlink there, so an edit through either path reaches it
+export const LIVE_CHECKOUT_PATHS = [...new Set([DIR, join(dirname(DIR), LEGACY_CHECKOUT)])].map(asPathPrefix);
 
 const builtin = ([id, action, label, mode]: BuiltinHead, match: Restriction["match"], note: string, reach?: PersonReach): Restriction => ({
   id,
@@ -95,7 +101,7 @@ export const SEED: Restriction[] = [
   builtin(["delete-files", "delete", "Delete files recursively", "allow"], { bash: ["\\brm\\s+(-\\S*[rR]|--recursive)"], tools: [`${M365}sharepoint_delete_item`] }, ""),
   builtin(["delete-branches", "delete", "Delete a branch", "allow"], { bash: ["\\bgit\\s+branch\\s+(-D|--delete|-d)\\b", "\\bgit\\s+push\\b.*(--delete|\\s:\\S)"] }, ""),
   builtin(["delete-mail", "delete", "Trash or delete mail", "ask"], { tools: [`${GMAIL}trash_(message|thread)`, `${M365}outlook_(trash_thread|batch_delete_messages)`] }, ""),
-  builtin(["edit-live", "yarn", "Edit the live yarn checkout", "deny"], { tools: ["Edit", "Write", "MultiEdit", "NotebookEdit"], paths: [`^${DIR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/`] },
+  builtin(["edit-live", "yarn", "Edit the live yarn checkout", "deny"], { tools: ["Edit", "Write", "MultiEdit", "NotebookEdit"], paths: LIVE_CHECKOUT_PATHS },
     "Live runs only committed code: change yarn in your own worktree, push to feat/v2, and ship it with cli.ts deploy."),
   builtin(["kill-processes", "processes", "Kill processes by pattern", "deny"], { bash: ["\\bpkill\\b", "\\bkillall\\b", "\\blsof\\b.*\\|\\s*xargs\\s+kill"] },
     "They match the live yarn, other agents' work and his Chrome. Kill a PID you started."),

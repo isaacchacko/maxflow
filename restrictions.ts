@@ -63,6 +63,7 @@ function followingCatalog(kept: Restriction, builtin: Restriction): Restriction 
   const words = CATALOG_WORDS[builtin.id];
   if (words !== undefined) Object.assign(next, words);
   if (builtin.id === "mallory-phone" && next.label === "Mallory to his phone") next.label = builtin.label;
+  if (builtin.id === "edit-live") next.match = builtin.match;
   return next;
 }
 

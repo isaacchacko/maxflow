@@ -7,10 +7,10 @@ export default createRule({
   name: "state-dir-in-state",
   meta: {
     type: "problem",
-    docs: { description: "Only state.ts reaches into ~/.maxflow-v2" },
+    docs: { description: "Only state.ts reaches into ~/.yarn-v2" },
     messages: {
       stateDir:
-        "Only state.ts touches STATE_DIR (~/.maxflow-v2): it owns yarn.db and the JSON stores not moved yet. Use its functions instead: a table (threadsTable, tasksTable, ...) for a moved store, readStateJson/writeStateJson/appendStateText/removeState for a file that stays a file. Add one there if none fits.",
+        "Only state.ts touches STATE_DIR (~/.yarn-v2): it owns yarn.db and the JSON stores not moved yet. Use its functions instead: a table (threadsTable, tasksTable, ...) for a moved store, readStateJson/writeStateJson/appendStateText/removeState for a file that stays a file. Add one there if none fits.",
     },
     schema: [],
     defaultOptions: [],

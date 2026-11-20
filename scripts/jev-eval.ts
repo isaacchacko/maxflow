@@ -62,7 +62,7 @@ const answers = new Map(
 );
 
 if (shouldRun) {
-  if (config === undefined) throw new Error("no Jev configured: set JEV_URL (and JEV_API_KEY for hosted) in ~/.maxflow-v2/jev.env");
+  if (config === undefined) throw new Error("no Jev configured: set JEV_URL (and JEV_API_KEY for hosted) in ~/.yarn-v2/jev.env");
   const unsent = [...sources].filter((source) => !config.sources.has(source));
   if (unsent.length > 0) throw new Error(`JEV_SOURCES does not clear ${unsent.join(", ")} for sending; only ${[...config.sources].join(", ")} may leave the machine`);
   for (const e of examples) {

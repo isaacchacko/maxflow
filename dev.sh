@@ -4,7 +4,7 @@
 #   ./dev.sh                    serve on http://localhost:4948 (YARN_PORT, YARN_INSTANCE and YARN_SENTRIES=1 to change)
 #   curl localhost:<port>/api/instance  {instance, port, pid}: which instance answers on a port
 #   ./dev.sh --seed             the same, first filling its state with fixtures/seed.ts (threads, objectives, tasks, todos)
-#   ./dev.sh gc                 delete the ~/.maxflow-v2-<instance> dirs of instances that aren't running
+#   ./dev.sh gc                 delete the ~/.yarn-v2-<instance> (or older ~/.maxflow-v2-<instance>) dirs of instances that aren't running
 #   ./dev.sh stop <instance>    stop that dev server, by its pid file only
 #   ./dev.sh kill <instance>    end its tmux sessions
 #   ./dev.sh reset <instance>   end them and delete its state dir
@@ -28,7 +28,9 @@ export YARN_INSTANCE="${YARN_INSTANCE:-dev}" YARN_PORT YARN_SENTRIES="${YARN_SEN
 # Started from inside a live yarn pane, these would point at the live session.
 unset YARN_SESSION MAXFLOW_SESSION
 socket="maxflow-v2-$YARN_INSTANCE"
-state="$HOME/.maxflow-v2-$YARN_INSTANCE"
+state="$HOME/.yarn-v2-$YARN_INSTANCE"
+# A dev instance made before the rename to yarn keeps its old state dir.
+[ -d "$state" ] || [ ! -d "$HOME/.maxflow-v2-$YARN_INSTANCE" ] || state="$HOME/.maxflow-v2-$YARN_INSTANCE"
 # Only the pid this instance wrote, and only while that process still carries this instance's tag, so a reused pid is left alone.
 stop() {
   pid=$(cat "$state/server.pid" 2>/dev/null) || return 0
@@ -36,11 +38,12 @@ stop() {
   rm -f "$state/server.pid"
 }
 # An instance is running while its server pid is alive (any process: a reused pid is kept rather than risked) or its tmux
-# socket still holds sessions. The live state dir is ~/.maxflow-v2, which the glob never matches.
+# socket still holds sessions. The live state dir is ~/.yarn-v2 (once ~/.maxflow-v2), which the globs never match.
 gc() {
-  for dir in "$HOME"/.maxflow-v2-*; do
+  for dir in "$HOME"/.yarn-v2-* "$HOME"/.maxflow-v2-*; do
     [ -d "$dir" ] || continue
-    name=${dir#"$HOME"/.maxflow-v2-}
+    name=${dir#"$HOME"/.yarn-v2-}
+    name=${name#"$HOME"/.maxflow-v2-}
     pid=$(cat "$dir/server.pid" 2>/dev/null) || pid=
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "keep $name: server pid $pid is alive"
     elif tmux -L "maxflow-v2-$name" list-sessions >/dev/null 2>&1; then echo "keep $name: tmux -L maxflow-v2-$name has sessions"
@@ -64,6 +67,6 @@ if [ "$1" = --seed ]; then
   pid=$(cat "$state/server.pid" 2>/dev/null) && kill -0 "$pid" 2>/dev/null && { echo "yarn $YARN_INSTANCE is running (pid $pid); ./dev.sh stop $YARN_INSTANCE first" >&2; exit 1; }
   bun fixtures/seed.ts "$state"
 fi
-echo "yarn $YARN_INSTANCE: http://localhost:$YARN_PORT (tmux -L $socket, state ~/.maxflow-v2-$YARN_INSTANCE)"
+echo "yarn $YARN_INSTANCE: http://localhost:$YARN_PORT (tmux -L $socket, state $state)"
 # The tag marks this process in ps as this dev instance's server, never the live one.
 exec bun server.ts --yarn-dev="$YARN_INSTANCE"

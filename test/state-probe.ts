@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { isRecord } from "../shared/guards";
 import { peekStateJson, readGatingStateJson, readStateJson } from "../state";
 
-const probeDir = join(process.env["HOME"] ?? "", ".maxflow-v2-statetest");
+const probeDir = join(process.env["HOME"] ?? "", ".yarn-v2-statetest");
 
 const put = (name: string, text: string) => {
   writeFileSync(join(probeDir, name), text);

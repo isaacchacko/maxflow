@@ -7,7 +7,7 @@ import { prKeyOf } from "../holds";
 
 const root = join(import.meta.dir, "..");
 const home = mkdtempSync(join(tmpdir(), "yarn-holds-"));
-const stateDir = join(home, ".maxflow-v2-holdstest");
+const stateDir = join(home, ".yarn-v2-holdstest");
 mkdirSync(stateDir, { recursive: true });
 const env = { ...process.env, HOME: home, YARN_INSTANCE: "holdstest", YARN_PORT: "1", ...noSessionEnv() };
 

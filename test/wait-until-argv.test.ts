@@ -12,7 +12,7 @@ afterAll(async () => {
 
 const shellsOf = (owner: string) => {
   type Shell = { owner: string; cmd?: string; end?: { code: number | null; tail: string } };
-  const file = join(instance.home, `.maxflow-v2-${instance.name}`, "shells.json");
+  const file = join(instance.home, `.yarn-v2-${instance.name}`, "shells.json");
   return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Shell[]).filter((x) => x.owner === owner) : [];
 };
 
