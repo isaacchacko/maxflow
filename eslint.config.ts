@@ -2,7 +2,6 @@ import js from "@eslint/js";
 import comments from "@eslint-community/eslint-plugin-eslint-comments/configs";
 import reactHooks from "eslint-plugin-react-hooks";
 import unicorn from "eslint-plugin-unicorn";
-import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
 import { yarn } from "./lint/plugin";
 
@@ -15,7 +14,8 @@ const CHILD_PROCESS = [
   { name: "node:child_process", message: CHILD_PROCESS_MESSAGE },
 ];
 
-export default defineConfig(
+// eslint-disable-next-line @typescript-eslint/no-deprecated -- ESLint's defineConfig rejects typescript-eslint RuleModule types, which the yarn plugin's rules are; tseslint.config takes them
+export default tseslint.config(
   { ignores: ["node_modules/**", "src/components/ui/**", "**/*.d.ts"] },
   { linterOptions: { reportUnusedDisableDirectives: "error", reportUnusedInlineConfigs: "error" } },
   js.configs.recommended,
