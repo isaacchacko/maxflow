@@ -31,7 +31,8 @@ function keep(id: string, record: Sent) {
   const ids = Object.keys(sent);
   const kept = Object.fromEntries(ids.slice(-SENT_KEPT).map((x) => [x, sent[x]]));
   writeStateJson(SENT_FILE, kept);
-  if (ids.length > SENT_KEPT) for (const old of ids.slice(0, ids.length - SENT_KEPT)) Reflect.deleteProperty(sent, old);
+  const dropped = ids.slice(0, Math.max(0, ids.length - SENT_KEPT));
+  for (const old of dropped) Reflect.deleteProperty(sent, old);
 }
 
 export const boardUrl = agentBoardUrl;

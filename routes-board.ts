@@ -2,7 +2,7 @@ import { type BoardPost, handOver, replyOnBoard } from "./board-bus";
 import { isSentry } from "./sessions";
 import { type Route, exactly, firstAnswer, jsonBody, sender, textOf } from "./route-kit";
 
-const orUnknown = (value: string | undefined) => value ?? "?";
+const orUnknown = (value = "?") => value;
 
 async function handOverFromTheSentry(req: Request): Promise<Response> {
   const from = sender(req);
