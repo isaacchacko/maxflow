@@ -2,7 +2,7 @@ import { isRecord } from "../shared/guards";
 import { readStateJson, writeStateJson } from "../state";
 
 export const HISTORY_FILE = "pr-history.json";
-const DAY_MS = 24 * 3600_000;
+const DAY_MS = 24 * 3_600_000;
 const ENDED_KEPT_MS = 14 * DAY_MS;
 const CLOSED_LOOKBACK_MS = 3 * DAY_MS;
 
@@ -32,7 +32,7 @@ const keyOf = (pr: Closed) => `${pr.repository.nameWithOwner}#${pr.number}`.toLo
 function mergeSessions(was: SessionOn[], now: SessionOn[]) {
   const byId = new Map(was.map((s) => [s.id, s]));
   for (const s of now) byId.set(s.id, s);
-  return [...byId.values()];
+  return byId.values().toArray();
 }
 
 function recordOpen(history: Map<string, PrHistory>, q: Open, at: string) {

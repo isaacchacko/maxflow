@@ -15,18 +15,19 @@ export type PrRow = {
 };
 
 export const PRS_URL = "/api/prs";
-export const keepLooking = () => true;
+export const shouldKeepLooking = () => true;
 const ENDED_STAGES = new Set(["merged", "closed"]);
 const STAGE_TONE: Record<string, string> = {
   merged: "text-ok", approved: "text-ok", merging: "text-ok", "needs reviewer": "text-new", "in review": "text-new",
   "ci failing": "text-destructive", conflict: "text-destructive", "changes requested": "text-destructive", closed: "text-muted-foreground", draft: "text-muted-foreground",
 };
 
+const VERDICT_TONE: Record<string, string> = { passed: "text-ok", findings: "text-warn" };
 const label = (pr: string) => pr.replace(/^[^/]+\//, "");
 
 function ApprovalChip({ a }: { a: Approval | null }) {
   if (!a) return null;
-  const tone = a.verdict === "passed" ? "text-ok" : a.verdict === "findings" ? "text-warn" : "text-muted-foreground";
+  const tone = VERDICT_TONE[a.verdict] ?? "text-muted-foreground";
   return (
     <span className={cn("shrink-0 text-xs", tone)} title={`approval sentry ${a.verdict} on ${a.sha.slice(0, 8)}${a.current === false ? " (an older head)" : ""}`}>
       review {a.verdict.split(":", 1)[0]}{a.findings.length > 0 && ` (${a.findings.length})`}{a.current === false && " · old head"}
@@ -145,7 +146,7 @@ function Section({ title, rows, hint }: { title: string; rows: PrRow[]; hint?: s
 }
 
 export function PrsView() {
-  const { value, error } = useJson<PrRow[]>(PRS_URL, keepLooking);
+  const { value, error } = useJson<PrRow[]>(PRS_URL, shouldKeepLooking);
   const rows = value ?? [];
   const open = rows.filter(r => !ENDED_STAGES.has(r.stage));
   const ready = open.filter(r => r.ready);

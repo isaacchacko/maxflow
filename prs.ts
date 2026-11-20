@@ -5,13 +5,13 @@ import { watchedStateFile } from "./state";
 import { tasks } from "./stores";
 import { judged } from "./world-session";
 
-const HOUR_MS = 3600_000;
+const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 const FINDINGS_SHOWN = 12;
 const STAGE_ORDER = ["merging", "approved", "needs reviewer", "in review", "ci running", "changes requested", "ci failing", "conflict", "draft", "merged", "closed"];
 const APPROVED = new Set(["approved", "merging"]);
 const GREEN = new Set([...APPROVED, "needs reviewer", "in review"]);
-const OWN_REPOS_WITHOUT_APPROVAL_RULES = /^isaacchacko\//;
+const OWN_REPOS_WITHOUT_APPROVAL_RULES = "isaacchacko/";
 const NEEDS_AN_AGENT = new Set(["ci failing", "conflict", "changes requested"]);
 
 type SessionOn = { id: string; name: string | undefined };
@@ -68,42 +68,66 @@ function sessionsOf(key: string, url: string, known: SessionOn[]) {
     const s = sessions.get(id);
     if (!s) return [];
     const isLive = s.archived !== true || (s.wait !== undefined && s.wait.kind !== "done");
-    return [{ id, name: s.name, live: isLive, wait: s.wait ? `${s.wait.kind}:${s.wait.ref}` : null }];
+    return { id, name: s.name, live: isLive, wait: s.wait ? `${s.wait.kind}:${s.wait.ref}` : null };
   });
 }
 
 const tasksOf = (url: string) =>
   tasks.filter((t: Task) => t.links.some((u) => u.toLowerCase() === url.toLowerCase())).map((t) => ({ id: t.id, title: t.title, status: t.status }));
 
-const isMergeableStage = (key: string, stage: string) => (OWN_REPOS_WITHOUT_APPROVAL_RULES.test(key) ? GREEN : APPROVED).has(stage);
+const isMergeableStage = (key: string, stage: string) => (key.startsWith(OWN_REPOS_WITHOUT_APPROVAL_RULES) ? GREEN : APPROVED).has(stage);
 
 const hours = (ms: number) => (ms >= DAY_MS ? `${Math.round(ms / DAY_MS)}d` : `${Math.round(ms / HOUR_MS)}h`);
 
-function stuckWhy(row: Omit<PrRow, "stuck">): string | null {
-  const still = Date.now() - row.since;
-  const a = row.approval;
-  if (NEEDS_AN_AGENT.has(row.stage) && !row.sessions.some((s) => s.live)) return `${row.stage} and no live agent on it`;
-  if (a?.verdict === "findings" && a.current === true && a.at !== null && Date.now() - a.at > HOUR_MS) return `approval findings sent ${hours(Date.now() - a.at)} ago, no new push`;
-  if (a?.verdict === "passed" && a.current === true && row.unresolved > 0) return `approval passed, ${row.unresolved} unresolved review thread(s) block it`;
-  if (row.stage === "draft" && still > 3 * DAY_MS) return `draft for ${hours(still)}`;
-  if (row.stage !== "draft" && still > DAY_MS) return `no stage change in ${hours(still)}`;
+const isWithoutLiveAgent = (row: Omit<PrRow, "stuck">) => NEEDS_AN_AGENT.has(row.stage) && row.sessions.every((s) => !s.live);
+const isOnCurrentHead = (a: PrApproval | null, verdict: string): a is PrApproval => a?.verdict === verdict && a.current === true;
+
+function approvalStuck(a: PrApproval | null, unresolved: number): string | null {
+  const findingsAge = Date.now() - (a?.at ?? Date.now());
+  if (isOnCurrentHead(a, "findings") && findingsAge > HOUR_MS) return `approval findings sent ${hours(findingsAge)} ago, no new push`;
+  if (isOnCurrentHead(a, "passed") && unresolved > 0) return `approval passed, ${unresolved} unresolved review thread(s) block it`;
   return null;
 }
 
-function rowOf(key: string, queued: QueueEntry | undefined, history: History | undefined, polled: PolledPr | undefined): PrRow {
-  const url = queued?.url ?? history?.url ?? "";
+function idleStuck(stage: string, since: number): string | null {
+  const still = Date.now() - since;
+  if (stage === "draft") return still > 3 * DAY_MS ? `draft for ${hours(still)}` : null;
+  return still > DAY_MS ? `no stage change in ${hours(still)}` : null;
+}
+
+function stuckWhy(row: Omit<PrRow, "stuck">): string | null {
+  if (isWithoutLiveAgent(row)) return `${row.stage} and no live agent on it`;
+  return approvalStuck(row.approval, row.unresolved) ?? idleStuck(row.stage, row.since);
+}
+
+type Basis = Pick<PrRow, "url" | "title" | "stage" | "moves" | "since" | "created" | "ended"> & { known: SessionOn[] };
+
+function openBasis(q: QueueEntry, history: History | undefined): Basis {
   const moves = history?.moves ?? [];
-  const stage = queued?.stage ?? history?.ended?.state ?? moves.at(-1)?.stage ?? "unknown";
+  const since = Date.parse(moves.at(-1)?.at ?? q.updated);
+  return { url: q.url, title: q.title, stage: q.stage, moves, since, created: Date.parse(q.created), ended: null, known: [...q.sessions, ...(history?.sessions ?? [])] };
+}
+
+function endedBasis(h: History): Basis {
+  const stage = h.ended?.state ?? h.moves.at(-1)?.stage ?? "unknown";
+  const ended = h.ended ? Date.parse(h.ended.at) : null;
+  return { url: h.url, title: h.title, stage, moves: h.moves, since: Date.parse(h.moves.at(-1)?.at ?? h.created), created: Date.parse(h.created), ended, known: h.sessions };
+}
+
+function rowOf(key: string, basis: Basis, polled: PolledPr | undefined, isOpen: boolean): PrRow {
+  const { known, ...shown } = basis;
   const unresolved = unresolvedOf(polled);
   const row = {
-    pr: key, url, title: queued?.title ?? history?.title ?? "", stage, moves,
-    since: Date.parse(moves.at(-1)?.at ?? queued?.updated ?? history?.created ?? ""), created: Date.parse(queued?.created ?? history?.created ?? ""),
-    ended: history?.ended && !queued ? Date.parse(history.ended.at) : null,
-    sessions: sessionsOf(key, url, [...(queued?.sessions ?? []), ...(history?.sessions ?? [])]), tasks: tasksOf(url),
+    pr: key, ...shown, sessions: sessionsOf(key, basis.url, known), tasks: tasksOf(basis.url),
     approval: approvalOf(key, polled), failing: failingChecks(polled), unresolved,
-    ready: queued !== undefined && isMergeableStage(key, stage) && unresolved === 0,
+    ready: isOpen && isMergeableStage(key, basis.stage) && unresolved === 0,
   };
-  return { ...row, stuck: queued ? stuckWhy(row) : null };
+  return { ...row, stuck: isOpen ? stuckWhy(row) : null };
+}
+
+function basisOf(queued: QueueEntry | undefined, history: History | undefined): Basis | undefined {
+  if (queued) return openBasis(queued, history);
+  return history ? endedBasis(history) : undefined;
 }
 
 const rank = (stage: string) => (STAGE_ORDER.includes(stage) ? STAGE_ORDER.indexOf(stage) : STAGE_ORDER.length);
@@ -114,6 +138,9 @@ export function prRows(): PrRow[] {
   const polled = readStatus();
   const keys = new Set([...queue.keys(), ...Object.keys(history)]);
   return [...keys]
-    .map((key) => rowOf(key, queue.get(key), history[key], polled[key]))
+    .flatMap((key) => {
+      const basis = basisOf(queue.get(key), history[key]);
+      return basis ? rowOf(key, basis, polled[key], queue.has(key)) : [];
+    })
     .toSorted((a, b) => rank(a.stage) - rank(b.stage) || (b.ended ?? b.since) - (a.ended ?? a.since));
 }

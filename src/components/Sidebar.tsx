@@ -12,10 +12,11 @@ import { agentStore, setPinned, setPinOrder, taskStore, threadStore } from "@/st
 import { closePane, openPane } from "@/threads/pane";
 import { unseenDeep, useSeen } from "@/threads/seen";
 import { isRecord } from "../../shared/guards";
-import { keepLooking, PRS_URL, type PrRow } from "@/views/PrsView";
+import { shouldKeepLooking, PRS_URL, type PrRow } from "@/views/PrsView";
 import { useJson } from "@/views/stats/load";
 
 const KEY = "yarn-sidebar";
+const useReadyToMerge = () => useJson<PrRow[]>(PRS_URL, shouldKeepLooking).value?.filter(r => r.ready).length ?? 0;
 const RAIL = 52;
 const DEFAULT_WIDTH = 216;
 type Saved = { width: number; pinned: boolean };
@@ -191,7 +192,7 @@ export function Sidebar({ view }: { view: string }) {
 
   const tops = threads.filter(t => !hasText(t.parentId) && !t.resolved && !t.paused);
   const needsYou = tops.filter(t => t.asks).length;
-  const readyToMerge = useJson<PrRow[]>(PRS_URL, keepLooking).value?.filter(r => r.ready).length ?? 0;
+  const readyToMerge = useReadyToMerge();
   const unread = tops.filter(t => unseenDeep(t, threads) > 0).length;
   const pins = threads.filter(t => t.pinned).toSorted((a, b) => (a.pinned?.order ?? 0) - (b.pinned?.order ?? 0));
   const dropPin = (onto: string) => (dragged: string) => {
