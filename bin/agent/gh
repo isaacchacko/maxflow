@@ -1,8 +1,12 @@
 #!/bin/sh
 # yarn's merge gate for agent panes, behind the PreToolUse hook: it also catches a merge run from a script the hook never reads
 here=$(cd "$(dirname "$0")" && pwd)
+gate_is_on() {
+  [ -n "$MAXFLOW_STATE" ] && grep -Eq '"on" *: *true' "$MAXFLOW_STATE/merge-gate.json" 2>/dev/null
+}
 refuse() {
-  echo "gh: blocked by yarn's merge gate: Isaac is the last step before any PR merges, so no agent merges a PR or arms auto-merge. Leave it green and approved; he merges it from his PR queue." >&2
+  gate_is_on || return 0
+  echo "gh: blocked by yarn's merge gate: Isaac has it on, so he is the last step before any PR merges and no agent merges a PR or arms auto-merge. It is his switch alone (the PRs tab, or Restrictions). Leave the PR green and approved; he merges it." >&2
   exit 1
 }
 if [ "$1" = pr ] && [ "$2" = merge ]; then

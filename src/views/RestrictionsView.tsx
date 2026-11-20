@@ -7,6 +7,7 @@ import type { Restriction } from "../../shared/restrictions-types";
 import { ActionRow, type RowProps } from "./restrictions/ActionRow";
 import { deleteRestriction, loadRestrictions, patchRestriction, postRestriction } from "./restrictions/api";
 import { Advanced } from "./restrictions/CustomEditor";
+import { MergeGateSwitch } from "./MergeGateSwitch";
 import { MODES } from "./restrictions/look";
 import { PeopleList } from "./restrictions/PeopleList";
 
@@ -96,6 +97,7 @@ function RuleSection({ title, rules, list, row }: { title: string; rules: Restri
   return (
     <section className="mb-6">
       <h2 className="mb-1 px-2.5 text-[13px] font-medium text-muted-foreground">{title}</h2>
+      {rules.some(r => r.id === "pr-merge") && <div className="px-2.5 pb-2"><MergeGateSwitch /></div>}
       <ol className="flex flex-col divide-y">
         {rules.map(r => (
           <ActionRow key={r.id} r={r} exceptions={list.filter(o => o.parent === r.id)} {...row} />

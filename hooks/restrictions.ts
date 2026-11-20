@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { isMergeCall, MERGE_REFUSAL } from "../merge-gate";
+import { gateRefusal } from "../merge-gate";
 import { type Person, type Restriction, doesMatch, loadRestrictions, resolve } from "../restrictions";
 
 type HookInput = { tool_name?: unknown; tool_input?: unknown; cwd?: unknown };
@@ -61,8 +61,9 @@ const deny = (reason: string) => {
   console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } }));
 };
 
-if (isMergeCall(call.tool, call.input)) {
-  deny(MERGE_REFUSAL);
+const refusal = gateRefusal(call.tool, call.input);
+if (refusal !== undefined) {
+  deny(refusal);
   process.exit(0);
 }
 

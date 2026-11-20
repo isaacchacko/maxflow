@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ago } from "@/threads/Replies";
 import { useJson } from "@/views/stats/load";
+import { MergeGateSwitch } from "./MergeGateSwitch";
 
 type Feedback = { at: number; url: string; body: string; toldNames: string[]; replied: number | null; pushed: number | null };
 type Finding = { path: string; line: number; severity: string; body: string };
@@ -178,6 +179,7 @@ export function PrsView() {
         <GitPullRequest className="size-4" />
         {open.length} open, {ended.length} merged or closed in the last 14 days
         {error !== undefined && <span className="text-destructive">· {error}</span>}
+        <span className="ml-auto"><MergeGateSwitch /></span>
       </header>
       <Section title="Ready for you to merge" rows={ready} hint="green, approved where the repo needs it, no open threads" />
       <Section title="Stuck" rows={stuck} />

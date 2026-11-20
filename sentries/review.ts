@@ -2,6 +2,7 @@
 import { fetchSessions, isOwnComment, links, prNumber, repoOfKey, REVIEW_WATCH, writeWatches, type Link, type Session, type Watch } from "../gh";
 import { holdOn } from "../holds";
 import { BASE as base } from "../instance";
+import { mergeGate } from "../merge-gate";
 import { isRecord } from "../shared/guards";
 import { peekStateJson, readStateJson, writeStateJson } from "../state";
 import { recordHistory } from "./review-history";
@@ -42,8 +43,9 @@ const LANDING_FIELDS = `id number url title body isDraft mergeable reviewDecisio
   baseRef { associatedPullRequests(states: MERGED, first: 1) { totalCount } } latestReviews(first: 20) { nodes { state submittedAt } }`;
 const UI_FILE = /frontend\/.*\.(tsx|css)$/;
 const UI_TEST_FILE = /\.(test|stories)\.tsx$/;
-const LANDING = "Ready for you to merge";
-const OLD_LANDING = "Approved, not merged (the feed is landing these)";
+const GATED_LANDING = "Ready for you to merge";
+const ESCALATE_MS = 30 * 60_000;
+const LANDING = "Approved, not merged (the feed is landing these)";
 const STUCK_IDLE_MS = 60_000;
 const NEVER_MERGE = /never[- ]merge|do not merge|don'?t merge|not for merge|^one-off/i;
 
@@ -176,7 +178,7 @@ async function wake(pr: Pr, owners: string[], problem: string) {
   if (woken.has(tag)) return;
   woken.add(tag);
   const reachable = owners.filter((id) => !isUnreachable(id));
-  const fix = `merge ${pr.repository.defaultBranchRef.name} into ${pr.headRefName}, resolve, and push; then it waits for Isaac to merge it`;
+  const fix = `merge ${pr.repository.defaultBranchRef.name} into ${pr.headRefName}, resolve, and push; ${mergeGate().on ? "then it waits for Isaac to merge it" : "auto-merge takes it from there"}`;
   for (const id of reachable) await tellSession(id, `${label(key)} is approved but ${problem}: ${fix}. ${pr.url}`);
   if (reachable.length > 0) {
     logAction(key, `asked ${reachable.join(", ")} to fix: ${problem}`);
@@ -202,10 +204,18 @@ async function updateBranch(pr: Pr, owners: string[], main: string) {
   if (!r.ok) await wake(pr, owners, `behind ${main} and GitHub can't update the branch`);
 }
 
-// constraint: Isaac is the last step before any PR merges, so the feed never merges; it takes back auto-merge an agent armed before that rule
+// constraint: with Isaac's merge gate on he is the last step before any PR merges, so the feed takes back auto-merge an agent armed
 function disarm(pr: Pr) {
   const r = gh(["pr", "merge", String(pr.number), "-R", pr.repository.nameWithOwner, "--disable-auto"]);
   logAction(keyOf(pr), r.ok ? "turned off auto-merge: Isaac merges it himself" : `turning off auto-merge failed: ${r.err}`);
+}
+
+// constraint: GitHub won't arm auto-merge on a PR that can merge right now, so that one merges directly
+function merge(pr: Pr) {
+  const isClean = pr.mergeStateStatus === "CLEAN";
+  const r = gh(["pr", "merge", String(pr.number), "-R", pr.repository.nameWithOwner, ...(isClean ? [] : ["--auto"]), "--squash"]);
+  const done = isClean ? "merged" : "armed auto-merge";
+  logAction(keyOf(pr), r.ok ? done : `merge failed: ${r.err}`);
 }
 
 function isLeftAloneForAHold(pr: Pr) {
@@ -227,8 +237,11 @@ async function land(pr: Pr, owners: string[]) {
     await wake(pr, owners, `conflicts with ${main}`);
     return;
   }
-  if (pr.autoMergeRequest) disarm(pr);
+  const isGateOn = mergeGate().on;
+  if (isGateOn && pr.autoMergeRequest) disarm(pr);
   if (pr.mergeStateStatus === "BEHIND") await updateBranch(pr, owners, main);
+  if (isGateOn || isCiFailing(ciOf(pr)) || pr.autoMergeRequest) return;
+  merge(pr);
 }
 
 function trackReachability(sessions: Session[]) {
@@ -248,8 +261,18 @@ const isTiedTo = (l: Link, pr: Pr) => l.repo === pr.repository.nameWithOwner.toL
 
 const isFixNeeded = (pr: Pr) => pr.mergeStateStatus === "DIRTY" || pr.mergeable === "CONFLICTING" || isCiFailing(ciOf(pr));
 
+const approvedAtOf = (pr: Pr) => Math.max(...pr.latestReviews.nodes.filter((r) => r.state === "APPROVED").map((r) => Date.parse(r.submittedAt)), 0);
+
+function stillOpenWhy(pr: Pr) {
+  const approvedAt = approvedAtOf(pr);
+  if (mergeGate().on || approvedAt === 0 || Date.now() - approvedAt <= ESCALATE_MS) return "";
+  return `approved ${Math.round((Date.now() - approvedAt) / 60_000)} min ago and still open (GitHub: ${pr.mergeStateStatus.toLowerCase()})`;
+}
+
 function whyEscalated(pr: Pr, own: string[]) {
-  return isFixNeeded(pr) && holdOn(keyOf(pr)) === undefined && own.length > 0 && own.every((id) => isUnreachable(id)) ? `owner ${own.join(", ")} isn't taking messages` : "";
+  if (holdOn(keyOf(pr)) !== undefined) return "";
+  const isUnowned = (isFixNeeded(pr) || !mergeGate().on) && own.length > 0 && own.every((id) => isUnreachable(id));
+  return [stillOpenWhy(pr), isUnowned ? `owner ${own.join(", ")} isn't taking messages` : ""].filter((reason) => reason !== "").join("; ");
 }
 
 async function escalateOnce(pr: Pr, key: string, why: string) {
@@ -279,11 +302,11 @@ async function landOne(pr: Pr, ties: Link[], live: Set<string>): Promise<Landing
 
 function writeLandingBoard(items: LandingItem[]) {
   const sorted = items.toSorted((a, b) => Number(b.why !== "") - Number(a.why !== ""));
-  const landing = sorted.length === 0 ? [] : [{ title: LANDING, items: sorted.map(({ why, ...item }) => item) }];
+  const landing = sorted.length === 0 ? [] : [{ title: mergeGate().on ? GATED_LANDING : LANDING, items: sorted.map(({ why, ...item }) => item) }];
   const board = readStateJson(BOARD_FILE, isRecord) ?? {};
   const sections: unknown = board["sections"];
   const list: unknown[] = Array.isArray(sections) ? sections : [];
-  const rest = list.filter((section) => !(isRecord(section) && (section["title"] === LANDING || section["title"] === OLD_LANDING)));
+  const rest = list.filter((section) => !(isRecord(section) && (section["title"] === LANDING || section["title"] === GATED_LANDING)));
   writeStateJson(BOARD_FILE, { ...board, sections: [...landing, ...rest] });
 }
 

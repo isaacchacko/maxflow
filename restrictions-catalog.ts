@@ -76,7 +76,7 @@ export const SEED: Restriction[] = [
   builtin(["pr-approve", "approve", "Approve a PR", "allow"], { bash: ["\\bgh\\s+pr\\s+review\\b.*(--approve|\\s-a\\b)"] },
     "An agent that read the diff and found it good approves a teammate's PR, as him; an outsider's asks first.", ["github", "Approve {name's} PRs"]),
   builtin(["pr-merge", "merge", "Merge a PR or arm auto-merge", "allow"], { bash: ["\\bgh\\s+pr\\s+merge\\b", "\\bgh\\s+api\\b.*/pulls/\\d+/merge"], tools: ["mcp__linear__merge_diff"] },
-    "Isaac merges every PR himself: yarn's merge gate blocks agents from merging or arming auto-merge whatever this is set to.", ["github", "Merge {name's} PRs"]),
+    "While Isaac's merge gate is on, agents never merge or arm auto-merge, whatever this is set to; with it off, this applies.", ["github", "Merge {name's} PRs"]),
   builtin(["pr-reviewers", "reviewers", "Request a reviewer", "deny"], { bash: ["\\bgh\\s+pr\\s+(edit|create)\\b.*--(add-)?reviewer\\b", "\\bgh\\s+api\\b.*/requested_reviewers"] },
     "Only he requests reviewers, whoever they are, so it is never set per person."),
   builtin(["pr-open-close", "pr", "Open or close a PR", "allow"], { bash: ["\\bgh\\s+pr\\s+(create|close|reopen)\\b"] }, ""),

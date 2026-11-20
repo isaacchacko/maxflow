@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { isMergeCall } from "../merge-gate";
+import { gateRefusal, isMergeCall, MERGE_REFUSAL, SWITCH_REFUSAL } from "../merge-gate";
 
 const isMergeCommand = (command: string) => isMergeCall("Bash", { command });
 
@@ -45,8 +45,39 @@ describe("the merge gate blocks every way an agent merges", () => {
   });
 });
 
-describe("no sentry merges", () => {
-  test.each(["sentries/review.ts", "sentries/approval.ts", "sentries/approval-notify.ts", "sentries/gh.ts"])("%s never merges or arms auto-merge", (file) => {
+describe("the gate is Isaac's switch", () => {
+  const on = { on: true, at: 1 };
+  const off = { on: false, at: 1 };
+  const bashCall = (command: string) => ({ command });
+
+  test("on, a merge is refused; off, it goes through to the restrictions", () => {
+    expect(gateRefusal("Bash", bashCall("gh pr merge 12 --squash"), on)).toBe(MERGE_REFUSAL);
+    expect(gateRefusal("Bash", bashCall("gh pr merge 12 --squash"), off)).toBeUndefined();
+    expect(gateRefusal("Bash", bashCall("gh pr view 12"), on)).toBeUndefined();
+  });
+
+  test.each([
+    ["Bash", bashCall("echo '{\"on\":false}' > ~/.maxflow-v2/merge-gate.json")],
+    ["Bash", bashCall("rm ~/.maxflow-v2/merge-gate.json")],
+    ["Bash", bashCall("curl -X POST localhost:4949/api/merge-gate -d '{\"on\":true}'")],
+    ["Write", { file_path: "/Users/isaac/.maxflow-v2/merge-gate.json", content: "{}" }],
+  ])("no agent flips it either way: %s %p", (tool, input) => {
+    expect(gateRefusal(tool, input, off)).toBe(SWITCH_REFUSAL);
+    expect(gateRefusal(tool, input, on)).toBe(SWITCH_REFUSAL);
+  });
+
+  test("an agent may read it", () => {
+    expect(gateRefusal("Bash", bashCall("curl -s localhost:$MAXFLOW_PORT/api/merge-gate"), on)).toBeUndefined();
+  });
+
+  test("the review feed merges only behind the gate", () => {
+    const text = readFileSync(new URL("../sentries/review.ts", import.meta.url), "utf8");
+    expect(text).toContain("if (isGateOn || isCiFailing(ciOf(pr)) || pr.autoMergeRequest) return;");
+  });
+});
+
+describe("no other sentry merges", () => {
+  test.each(["sentries/approval.ts", "sentries/approval-notify.ts", "sentries/gh.ts"])("%s never merges or arms auto-merge", (file) => {
     const text = (() => {
       try {
         return readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
