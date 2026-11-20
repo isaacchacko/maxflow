@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import { isDeploying, noteRestartAnswered, noteRestartBegins } from "./deploy-restart";
 import { fetchCommitCi, isFailed, repoOf } from "./gh";
-import { BASE, LIVE } from "./instance";
+import { BASE, IS_LIVE } from "./instance";
 import { LOG, checkout, restartCommand } from "./service";
 import { isRecord } from "./shared/guards";
 import { deployLock, readStateJson, writeStateText } from "./state";
@@ -224,7 +224,7 @@ function failOnLoss(before: Session[] | undefined, after: Session[], killed: Set
 }
 
 export async function deploy() {
-  if (!LIVE) fail("a dev instance runs from its own checkout; deploy ships the live yarn");
+  if (!IS_LIVE) fail("a dev instance runs from its own checkout; deploy ships the live yarn");
   const live = checkout() ?? fail("no service is installed; run cli.ts install from the live checkout");
   await takeDeployLock();
   const target = fastForwardTarget(live);

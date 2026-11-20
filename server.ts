@@ -2,12 +2,12 @@ import type { Server } from "bun";
 import { existsSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { inboxesTable, slackMessagesTable, writeStateJson } from "./state";
 import { publish } from "./bus";
-import { BASE, CLI, DIR, INSTANCE, LIVE, PORT, STATE_DIR } from "./instance";
+import { BASE, CLI, DIR, INSTANCE, IS_LIVE, PORT, STATE_DIR } from "./instance";
 import app from "./src/index.html";
 import { TMUX, flushOptions, setOption, termEnv, tmux, tmuxAsync, tmuxName } from "./tmux";
 import { type Session, type Wait, type WsData, isAgent, isSentry, sessions } from "./sessions";
 import type { Message, Thread } from "./model";
-import { live, saveThreads, tasks, threads, threadsDirty, writeThreads } from "./stores";
+import { isLive, saveThreads, tasks, threads, threadsDirty, writeThreads } from "./stores";
 import { DEFAULT_AFTER_H, DEFAULT_AFTER_MS } from "./intro";
 import { SessionCap, attachViewer, createSession, derive, dispatch, push, setClaudeState, setWait, settleTasks, stopAgent, wake } from "./lifecycle";
 import { checkShells } from "./waits";
@@ -74,7 +74,7 @@ function adoptSessions() {
 }
 // Panes in the live maxflow carry its port, so a plain `bun server.ts` run from one would otherwise adopt and respawn the live sessions.
 // The health sentry's panic page answers 503, so a server started while live is down still takes over.
-if (LIVE && (await fetch(`${BASE}/api/sessions`).then((r) => r.ok, () => false)))
+if (IS_LIVE && (await fetch(`${BASE}/api/sessions`).then((r) => r.ok, () => false)))
   console.error(`the live maxflow is already running on ${BASE}; run ./dev.sh for a dev instance`), process.exit(1);
 adoptSessions();
 // The agent sentries are claude agents; a fed one runs its feed beside it, logging out of the way of its screen.
@@ -277,7 +277,7 @@ function migrateQuestions() {
     saveThreads();
     publish(`thread/${t.id}`, { thread: t.id, from: q.session, asks: true });
     if (s?.wait?.kind === ("q" as Wait["kind"]) && s.wait.ref.replace(/^q/, "") === String(q.id)) setWait(s, { ...s.wait, kind: "thread", ref: t.id });
-    if (s && live(s)) dispatch({ to: [s], target: t.id, text: `[maxflow] Questions are threads now. Your question q${q.id} moved into thread ${t.id} in the user's inbox, flagged as waiting on him; his reply there is typed into your prompt and ends your wait. ${s.wait?.kind === "thread" && s.wait.ref === t.id ? `Your wait is now thread:${t.id}.` : `Wait on it with \`${CLI} wait thread:${t.id}\`.`} Answer him with \`${CLI} thread post ${t.id} '<text>'\`, and ask him anything new with \`${CLI} ask\`, which opens a thread.` });
+    if (s && isLive(s)) dispatch({ to: [s], target: t.id, text: `[maxflow] Questions are threads now. Your question q${q.id} moved into thread ${t.id} in the user's inbox, flagged as waiting on him; his reply there is typed into your prompt and ends your wait. ${s.wait?.kind === "thread" && s.wait.ref === t.id ? `Your wait is now thread:${t.id}.` : `Wait on it with \`${CLI} wait thread:${t.id}\`.`} Answer him with \`${CLI} thread post ${t.id} '<text>'\`, and ask him anything new with \`${CLI} ask\`, which opens a thread.` });
   }
 }
 setTimeout(migrateQuestions, 5_000);
@@ -301,7 +301,7 @@ setInterval(() => {
     saveThreads();
     publish(`thread/${t.id}`, { thread: t.id, from: a.session });
     const s = sessions.get(a.session);
-    if (s && live(s)) dispatch({ to: [s], target: t.id, text: `[maxflow] Thread ${t.id} went ${DEFAULT_AFTER_H}h without his answer, so go ahead with your recommendation, which you marked reversible: "${a.default}". The thread now says you did, so he can overrule it there.` });
+    if (s && isLive(s)) dispatch({ to: [s], target: t.id, text: `[maxflow] Thread ${t.id} went ${DEFAULT_AFTER_H}h without his answer, so go ahead with your recommendation, which you marked reversible: "${a.default}". The thread now says you did, so he can overrule it there.` });
   }
 }, 60_000);
 setTimeout(() => void resync().catch((e) => console.error("resync", e)), 10_000);

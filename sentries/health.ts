@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { BASE as base, LIVE, TMUX_SOCKET } from "../instance";
+import { BASE as base, IS_LIVE, TMUX_SOCKET } from "../instance";
 import { deployRestartUnderway } from "../deploy-restart";
 import { LOG, isLoaded, restartCommand, status as serviceStatus } from "../service";
 import { isRecord } from "../shared/guards";
@@ -21,7 +21,7 @@ import { takeOver } from "./singleton";
 
 if (import.meta.main) takeOver("health");
 
-if (!LIVE && !IS_WATCHING_DEV_AS_IF_LIVE) {
+if (!IS_LIVE && !IS_WATCHING_DEV_AS_IF_LIVE) {
   console.log("health sentry: not the live maxflow, nothing to watch");
   process.exit(0);
 }

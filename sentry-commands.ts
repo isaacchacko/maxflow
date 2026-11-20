@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { DIR, LIVE } from "./instance";
+import { DIR, IS_LIVE } from "./instance";
 import { paneEnv, respawn } from "./tmux";
 import { type Session, chatOf } from "./sessions";
 import { writeStateText } from "./state";
@@ -7,7 +7,7 @@ import { LIVE_ONLY_SENTRIES, PLAIN_SENTRIES } from "./sentry-names";
 import { isFilled, isRecord } from "./shared/guards";
 
 export const SENTRIES: Record<string, string[]> = Object.fromEntries(
-  PLAIN_SENTRIES.filter((n) => LIVE || !LIVE_ONLY_SENTRIES.has(n)).map((n) => [`sentry:${n}`, [process.execPath, new URL(`sentries/${n}.ts`, import.meta.url).pathname]]),
+  PLAIN_SENTRIES.filter((n) => IS_LIVE || !LIVE_ONLY_SENTRIES.has(n)).map((n) => [`sentry:${n}`, [process.execPath, new URL(`sentries/${n}.ts`, import.meta.url).pathname]]),
 );
 
 const isTextPart = (part: unknown): part is { type: "text"; text: string } => isRecord(part) && part["type"] === "text" && typeof part["text"] === "string";

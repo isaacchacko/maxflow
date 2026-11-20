@@ -1,12 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import { LIVE } from "./instance";
+import { IS_LIVE } from "./instance";
 import { stateDirectory } from "./state";
 
 const CHOSEN_DIR = process.env["MAXFLOW_DOCS"];
-const IS_HIS_VAULT = LIVE && CHOSEN_DIR === undefined;
-export const DOCS_DIR = CHOSEN_DIR ?? (LIVE ? join(homedir(), "Docs") : stateDirectory("docs"));
+const IS_HIS_VAULT = IS_LIVE && CHOSEN_DIR === undefined;
+export const DOCS_DIR = CHOSEN_DIR ?? (IS_LIVE ? join(homedir(), "Docs") : stateDirectory("docs"));
 const OBSIDIAN_REGISTRY = join(homedir(), "Library/Application Support/obsidian/obsidian.json");
 const ISAAC = "isaac";
 const AGENT_EMAIL = "docs@maxflow.local";
