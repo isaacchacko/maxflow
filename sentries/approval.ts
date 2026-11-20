@@ -23,6 +23,8 @@ const WRITE_SWITCH = "approval-write";
 const TICK_MS = Number(process.env["APPROVAL_TICK_MS"] ?? 2 * 60_000);
 const MAX_REVIEWS = 2;
 const DRAFT_RECHECK_MS = 30 * 60_000;
+const RETRY_MS = 10 * 60_000;
+const MAX_ATTEMPTS = 3;
 const MAX_ROUNDS = 3;
 const NOTIFY_TIMEOUT_MS = 30_000;
 const HIGH_COMPLEXITY = 15;
@@ -35,11 +37,11 @@ const CSV_CELL = /("[^"]*"|[^,]+)/g;
 type Head = {
   sha: string; url: string; title: string; author: string; status: "queued" | "reviewing" | "done" | "skipped" | "failed";
   why?: string; tier?: number; reasons?: string[]; signals?: Signals; lenses?: string[]; reviews?: LensReview[];
-  started?: number; finished?: number; handed?: number;
+  started?: number; finished?: number; handed?: number; attempts?: number; nitsSent?: number;
 };
 type State = { heads: Record<string, Head>; rounds: Record<string, number>; comments: Record<string, Posted>; threadsAsked: Record<string, string> };
 type QueueRow = { pr: string; stage: string; sessions: { id: string }[] };
-type PrMeta = { isDraft: boolean; baseRefName: string; body: string | null };
+type PrMeta = { isDraft: boolean; baseRefName: string; body: string | null; comments?: { author: { login: string } | null; body: string }[] };
 
 const isPartialState = (value: unknown): value is Partial<State> => isRecord(value);
 const isQueue = (value: unknown): value is QueueRow[] => Array.isArray(value) && value.every((q) => isRecord(q) && typeof q["pr"] === "string");
@@ -234,9 +236,12 @@ async function handBackAndSave(key: string, h: Head) {
 }
 
 function prMeta(repo: string, n: string) {
-  const parsed: unknown = JSON.parse(run(["gh", "pr", "view", n, "-R", repo, "--json", "isDraft,baseRefName,body"]) || "null");
+  const parsed: unknown = JSON.parse(run(["gh", "pr", "view", n, "-R", repo, "--json", "isDraft,baseRefName,body,comments"]) || "null");
   return isPrMeta(parsed) ? parsed : null;
 }
+
+const LINEAR_LINKBACK = "<!-- linear-linkback -->";
+const ticketOf = (meta: PrMeta) => (meta.comments ?? []).filter((c) => c.author?.login === "linear" && c.body.includes(LINEAR_LINKBACK)).map((c) => c.body.replaceAll(/<[^>]+>/g, "")).join("\n\n");
 
 function checkoutHead(clone: string, repo: string, n: string, sha: string) {
   const dir = join(homedir(), "Worktrees", `approval-${repo.split("/", 2)[1] ?? ""}-${n}`);
@@ -249,10 +254,11 @@ async function reviewInTurn(reviewing: Reviewing, lenses: Lens[], reviews: LensR
   for (const lens of lenses) reviews.push(await runReview(reviewing, lens));
 }
 
-type Checkout = Pick<Reviewing, "dir" | "pr" | "body"> & { clone: string; ref: string };
+type Checkout = Pick<Reviewing, "dir" | "pr" | "body" | "ticket"> & { clone: string; ref: string };
 
-async function reviewHead(key: string, h: Head, { dir, pr, body, clone, ref }: Checkout) {
+async function reviewHead(key: string, h: Head, { dir, pr, body, ticket, clone, ref }: Checkout) {
   const base = run(["git", "-C", dir, "merge-base", ref, "HEAD"]);
+  const landedSince = Number(run(["git", "-C", dir, "rev-list", "--count", `${base}..${ref}`])) || 0;
   const scored = score(clone, dir, ref, base);
   const lenses: Lens[] = scored.tier >= 2 ? ["correctness", "design"] : ["full"];
   Object.assign(h, scored, { lenses });
@@ -261,7 +267,7 @@ async function reviewHead(key: string, h: Head, { dir, pr, body, clone, ref }: C
   const reviews: LensReview[] = [];
   Object.assign(h, { reviews });
   const ghlessDir = stateDirectory(join(OUT_NAME, "no-gh"));
-  await reviewInTurn({ dir, pr, body, key, head: h, scored, ghlessDir }, lenses, reviews);
+  await reviewInTurn({ dir, pr, body, key, head: h, scored, ghlessDir, baseRef: ref, landedSince, ticket }, lenses, reviews);
 }
 
 async function work(key: string, h: Head, pr: Pr | undefined): Promise<Head> {
@@ -269,14 +275,14 @@ async function work(key: string, h: Head, pr: Pr | undefined): Promise<Head> {
   const clone = cloneOf(repo);
   if (clone === undefined) return Object.assign(h, { status: "skipped" as const, why: `no clone of ${repo}` });
   const meta = prMeta(repo, n);
-  if (meta === null) return Object.assign(h, { status: "failed" as const, why: "gh pr view failed" });
+  if (meta === null) return Object.assign(h, { status: "failed" as const, why: "gh pr view failed", finished: Date.now() });
   if (meta.isDraft) return Object.assign(h, { status: "skipped" as const, why: "draft", finished: Date.now() });
   const ref = `origin/${meta.baseRefName}`;
   run(["git", "-C", clone, "fetch", "-q", "origin", meta.baseRefName, `pull/${n}/head`]);
   const dir = checkoutHead(clone, repo, n, h.sha);
-  if (run(["git", "-C", dir, "rev-parse", "HEAD"]) !== h.sha) return Object.assign(h, { status: "failed" as const, why: "worktree not at head" });
+  if (run(["git", "-C", dir, "rev-parse", "HEAD"]) !== h.sha) return Object.assign(h, { status: "failed" as const, why: "worktree not at head", finished: Date.now() });
   try {
-    await reviewHead(key, h, { dir, pr, body: meta.body ?? "", clone, ref });
+    await reviewHead(key, h, { dir, pr, body: meta.body ?? "", ticket: ticketOf(meta), clone, ref });
     Object.assign(h, { status: "done", finished: Date.now() });
   } catch (error) {
     Object.assign(h, { status: "failed", why: String(error).slice(0, 300), finished: Date.now() });
@@ -310,14 +316,17 @@ async function comment(key: string, h: Head) {
 
 const active = new Set<string>();
 
+// constraint: a review fails on passing trouble (gh pr view refused, the model answering in prose), so a failed head is tried again a few times
+const isRetryDue = (h: Head) => h.status === "failed" && (h.attempts ?? 1) < MAX_ATTEMPTS && Date.now() - (h.finished ?? 0) > RETRY_MS;
 const isDraftRecheckDue = (h: Head | undefined) => h?.status === "skipped" && h.why === "draft" && Date.now() - (h.finished ?? 0) > DRAFT_RECHECK_MS;
 
 function queueNewHeads() {
   for (const { key, pr } of waiting()) {
     const h = state.heads[key];
     if (active.has(key)) continue;
-    if (h?.sha === pr.headRefOid && h.status !== "reviewing" && !isDraftRecheckDue(h)) continue;
-    state.heads[key] = { sha: pr.headRefOid, url: pr.url, title: pr.title, author: pr.author?.login ?? "?", status: "queued", started: Date.now() };
+    if (h?.sha === pr.headRefOid && h.status !== "reviewing" && !isDraftRecheckDue(h) && !isRetryDue(h)) continue;
+    const attempts = h?.sha === pr.headRefOid && h.status === "failed" ? (h.attempts ?? 1) + 1 : 1;
+    state.heads[key] = { sha: pr.headRefOid, url: pr.url, title: pr.title, author: pr.author?.login ?? "?", status: "queued", started: Date.now(), attempts };
   }
 }
 
@@ -348,8 +357,23 @@ const note = (key: string, h: Head): Note => ({
   ...(h.signals && { codeOwnedPaths: h.signals.owned }),
 });
 
+const nits = (h: Head) => (h.reviews ?? []).flatMap((r) => r.comments).filter((c) => c.severity === "nit");
+
+const nitsAsk = (h: Head) =>
+  `The approval sentry's review of ${h.url} at ${shortSha(h)} passed; the approval doesn't wait on these optional nits. Fix the ones that are real and quick in this PR before Isaac merges it (a new head is reviewed again), and skip the rest. If one is in fact a bug, fix it.\n${nits(h).map((c) => `- ${c.path}:${c.line} ${c.body}${suggested(c.suggestion, "\n  suggestion: ")}`).join("\n")}`;
+
+// constraint: nits used to stop at the log, and some were real bugs that took a follow-up PR (#13046 then #13049), so a passed head's nits reach its own session; with no session they aren't worth reviving a chat for
+async function sendNits(key: string, h: Head) {
+  h.nitsSent = Date.now();
+  save();
+  const owner = readQueue().find((q) => q.pr === key)?.sessions[0]?.id;
+  if (owner !== undefined) await didNotify(owner, `[maxflow approval] ${nitsAsk(h)}`);
+  log(`${key}@${shortSha(h)}: ${nits(h).length} nit(s) ${owner === undefined ? "logged only, no session" : `to ${owner}`}`);
+}
+
 function actOnPassed(key: string, h: Head, pr: Pr) {
   void comment(key, h);
+  if (h.nitsSent === undefined && nits(h).length > 0 && hasState(WRITE_SWITCH)) void sendNits(key, h);
   const open = unresolvedThreads(pr);
   if (open === 0) enqueue(note(key, h));
   else if (state.threadsAsked[key] !== h.sha && hasState(WRITE_SWITCH)) void askToResolveThreads(key, h, open);

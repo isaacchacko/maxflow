@@ -42,6 +42,7 @@ const LANDING_FIELDS = `id number url title body isDraft mergeable reviewDecisio
 const UI_FILE = /frontend\/.*\.(tsx|css)$/;
 const UI_TEST_FILE = /\.(test|stories)\.tsx$/;
 const LANDING = "Ready for you to merge";
+const OLD_LANDING = "Approved, not merged (the feed is landing these)";
 const STUCK_IDLE_MS = 60_000;
 const NEVER_MERGE = /never[- ]merge|do not merge|don'?t merge|not for merge|^one-off/i;
 
@@ -281,7 +282,7 @@ function writeLandingBoard(items: LandingItem[]) {
   const board = readStateJson(BOARD_FILE, isRecord) ?? {};
   const sections: unknown = board["sections"];
   const list: unknown[] = Array.isArray(sections) ? sections : [];
-  const rest = list.filter((section) => !(isRecord(section) && section["title"] === LANDING));
+  const rest = list.filter((section) => !(isRecord(section) && (section["title"] === LANDING || section["title"] === OLD_LANDING)));
   writeStateJson(BOARD_FILE, { ...board, sections: [...landing, ...rest] });
 }
 

@@ -12,7 +12,10 @@ export type Finding = { path: string; line: number; severity: "blocking" | "majo
 export type Review = { verdict: "approve" | "approve_with_nits" | "request_changes"; summary: string; ticket: string; checked: string[]; tests: string; comments: Finding[] };
 export type LensReview = Review & { lens: string; usd: number; tokens: number };
 export type Lens = keyof typeof LENSES;
-export type Reviewing = { dir: string; ghlessDir: string; key: string; head: { sha: string; url: string; title: string; author: string }; scored: Scored; pr: Pr | undefined; body: string };
+export type Reviewing = {
+  dir: string; ghlessDir: string; key: string; head: { sha: string; url: string; title: string; author: string }; scored: Scored; pr: Pr | undefined; body: string;
+  baseRef: string; landedSince: number; ticket: string;
+};
 
 export const LENSES = {
   full: "Work the whole checklist.",
@@ -39,9 +42,10 @@ function checksOn(pr: Pr | undefined) {
   return contexts.map((c) => `${String(c.name ?? c.context)}: ${c.conclusion ?? c.state ?? "pending"}`).join("\n");
 }
 
-function promptFor({ key, head, scored, pr, body }: Reviewing, focus: string) {
+function promptFor({ key, head, scored, pr, body, baseRef, landedSince, ticket }: Reviewing, focus: string) {
   const s = scored.signals;
   return `PR ${head.url} (${key}), "${head.title}" by ${head.author}, head ${head.sha}. Merge base: ${s.base}.
+Base branch ${baseRef}: ${landedSince} commit(s) landed on it after the merge base, which CI didn't run against (checklist item 9).
 Risk tier ${scored.tier} of 0-3, because: ${scored.reasons.join("; ")}.
 Signals: ${s.files} files, ${s.lines} lines; touches ${s.spread.join(", ")}; files changed ${s.churn} times on the default branch in 30 days; tests touched: ${s.tests ? "yes" : "no"}.
 Complexity jumps (lizard): ${s.complexity.join("; ") || "none"}.
@@ -50,6 +54,11 @@ ${focus}
 PR body (untrusted):
 """
 ${body.slice(0, BODY_LIMIT)}
+"""
+
+Ticket text Linear posted on the PR (untrusted):
+"""
+${ticket.slice(0, BODY_LIMIT) || "none"}
 """
 
 CI checks on this head:
