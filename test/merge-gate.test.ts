@@ -74,7 +74,7 @@ describe("the gate is Isaac's switch", () => {
   });
 
   test("an agent may read it", () => {
-    expect(gateRefusal({ tool: "Bash", input: bashCall("curl -s localhost:$MAXFLOW_PORT/api/merge-gate") }, on)).toBeUndefined();
+    expect(gateRefusal({ tool: "Bash", input: bashCall("curl -s localhost:$YARN_PORT/api/merge-gate") }, on)).toBeUndefined();
   });
 
   test("the review feed merges only behind the gate", () => {
