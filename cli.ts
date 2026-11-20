@@ -7,6 +7,7 @@ import { holdVerbs } from "./cli-holds";
 import { eventVerbs, sessionVerbs } from "./cli-sessions";
 import { base, type Verb } from "./cli-shared";
 import { threadVerbs } from "./cli-threads";
+import { timelineVerbs } from "./cli-timeline";
 import { waitVerbs } from "./cli-wait";
 import { watchVerbs } from "./cli-watch";
 
@@ -55,6 +56,8 @@ const usage = `usage:
   maxflow page put <objective/ID | task/tN> '<block json>' | maxflow page rm <ref> <block id>
   maxflow docs ls | read <path> | write <path> [text...] | mv <path> <to> | rm <path>   Isaac's docs vault (markdown, git-committed per write; stdin when no text)
   ${CANVAS_USAGE}   a .canvas in the docs vault, one box per call (agents never clobber a box being typed in)
+  maxflow timeline add <path> <title> [text...] | now <path> [text...]   an event on a timeline (stdin when no text), or rewrite its now.txt; committed at once
+  maxflow timeline read <path> [--last N] | ls [prefix] | find <words...>   now.txt then the last N events (default 10), the timelines under a folder, events matching every word
   maxflow browser open <url> | goto <url>   your own headless Chrome (started on demand, closed after 10 min unused): load a page, print its url and title
   maxflow browser screenshot [path] | read [--ax] | console [--last N]   a PNG (prints its path), the page's text or accessibility tree, its console
   maxflow browser click <selector | visible text> | type <selector | text> <text...> [--enter] | eval <js> | cdp | close   real input events; cdp prints the page's DevTools socket
@@ -83,7 +86,7 @@ const shipVerbs: Verb[] = [
   { matches: (verb) => verb === "install", run: install },
 ];
 
-const VERBS: Verb[] = [...waitVerbs, ...sessionVerbs, ...boardVerbs, ...eventVerbs, ...watchVerbs, ...objectiveVerbs, ...threadVerbs, ...docVerbs, ...canvasVerbs, ...holdVerbs, ...browserVerbs, ...shipVerbs];
+const VERBS: Verb[] = [...waitVerbs, ...sessionVerbs, ...boardVerbs, ...eventVerbs, ...watchVerbs, ...objectiveVerbs, ...threadVerbs, ...docVerbs, ...canvasVerbs, ...timelineVerbs, ...holdVerbs, ...browserVerbs, ...shipVerbs];
 
 const [verb, ...rest] = process.argv.slice(2);
 const chosen = VERBS.find((v) => v.matches(verb, rest));
