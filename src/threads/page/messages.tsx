@@ -20,7 +20,7 @@ export function RootMessage({ thread, all, root, actions, messageMenu, onResolve
   const home = thread.parentId ?? thread.id;
   return (
     <RowMenu agent={`msg:${k}`} items={messageMenu(root, k)}>
-      <div data-msg={root.id} data-thread={home} data-row={k} className="group/bar relative">
+      <div data-msg={root.id} data-agent={`message:${root.id}`} data-thread={home} data-row={k} className="group/bar relative">
         <MessageRow from={root.from} at={root.at} text={root.text} ext={root.ext}>
           <MessageMarks message={root} threads={all} thread={home} />
         </MessageRow>
@@ -72,7 +72,7 @@ function ReplyBody({ thread, all, root, replies, i, actions, messageMenu, nav, i
   const lastSaidWhere = (replies.slice(0, i).findLast(x => x.ext !== undefined) ?? root)?.ext?.link;
   return (
     <RowMenu agent={`msg:${k}`} items={messageMenu(m, k)}>
-      <div data-msg={m.id} data-thread={thread.id} data-row={k} className="group/bar relative">
+      <div data-msg={m.id} data-agent={`message:${m.id}`} data-thread={thread.id} data-row={k} className="group/bar relative">
         <MessageRow from={m.from} at={m.at} text={m.text} ext={m.ext} where={m.ext !== undefined && conversationOf(m.ext.link) !== conversationOf(lastSaidWhere)} grouped={isGrouped} className={cn(!isGrouped && i > 0 && "mt-2.5")}>
           <MessageMarks message={m} threads={all} thread={thread.id} />
           {hasReplies(sub) && <Replies t={sub} />}

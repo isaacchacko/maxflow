@@ -35,7 +35,7 @@ function WorkerProperties({ agent, parent, objective, task }: Known) {
       {hasText(agent.scope) && <Row label="Scope">{agent.scope}</Row>}
       {task && (
         <Row label="Task">
-          <a href={`#task/${task.id}`} className="flex min-w-0 items-center gap-1.5 hover:underline">
+          <a href={`#task/${task.id}`} data-agent={`worker-task:${task.id}`} className="flex min-w-0 items-center gap-1.5 hover:underline">
             <span className={cn("size-2 shrink-0 rounded-full", statusColor[task.status])} />
             <span className="truncate">{task.title}</span>
           </a>

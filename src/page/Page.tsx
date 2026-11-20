@@ -67,7 +67,7 @@ export function Page({ pageRef, back }: { pageRef: PageRef; back: string }) {
           <a href={`#${back}`}><ArrowLeft /></a>
         </Button>
         {isObjective ? <Waypoints className="size-5 shrink-0 text-agent" /> : <span className={cn("size-2.5 shrink-0 rounded-full", statusColor[subject.status])} />}
-        <h1 title={title} className="min-w-0 truncate text-xl font-semibold tracking-tight">
+        <h1 title={title} data-agent={`page-title:${pageRef}`} className="min-w-0 truncate text-xl font-semibold tracking-tight">
           {title}
         </h1>
         {isObjective && <Badge variant="outline" className="shrink-0 capitalize">{subject.status}</Badge>}

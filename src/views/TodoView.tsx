@@ -192,7 +192,7 @@ function TodoRow({ todo, from, onMove }: { todo: Todo; from?: string; onMove?: (
     if (hasText(text) && text !== todo.text) void editTodo(todo.id, { text });
   };
   return (
-    <li>
+    <li data-agent={`todo:${todo.id}`}>
       <div className={cn("group relative flex min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm hover:bg-muted/60", isPicking && "bg-muted/60")}>
         <StateBox
           state={todo.state}

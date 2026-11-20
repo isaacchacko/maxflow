@@ -50,7 +50,7 @@ function AgentHeader({ agent, crew, back, isLive }: { agent: Agent; crew: Agent[
         </a>
       </Button>
       <AgentFace id={agent.id} expression={expressionOf(agent.state)} className="size-9 shrink-0" />
-      <h1 title={agent.name ?? agent.id} className={cn("min-w-24 truncate group-data-[fit=glyph]/fit:min-w-12 text-lg", !hasText(agent.name) && "font-mono")}>
+      <h1 title={agent.name ?? agent.id} data-agent={`agent-name:${agent.id}`} className={cn("min-w-24 truncate group-data-[fit=glyph]/fit:min-w-12 text-lg", !hasText(agent.name) && "font-mono")}>
         {agent.name ?? agent.id}
       </h1>
       <Badge variant="outline" className="shrink-0">

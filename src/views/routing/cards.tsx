@@ -109,7 +109,7 @@ export function AgentCard({ w, tasks }: { w: Agent; tasks: Task[] }) {
       </div>
       <Waiting wait={w.wait} className="text-xs text-muted-foreground" />
       {task && (
-        <a href={`#task/${task.id}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 truncate text-xs hover:underline">
+        <a href={`#task/${task.id}`} data-agent={`card-task:${task.id}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 truncate text-xs hover:underline">
           <span className={cn("size-1.5 shrink-0 rounded-full", statusColor[task.status])} />
           {task.title}
         </a>

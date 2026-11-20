@@ -31,7 +31,7 @@ function Breadcrumbs({ ancestors }: { ancestors: Thread[] }) {
 function TitleAndState({ thread }: { thread: Thread }) {
   return (
     <>
-      <h1 title={thread.title} className={cn("min-w-24 truncate group-data-[fit=glyph]/fit:min-w-12 text-xl font-semibold tracking-tight", thread.resolved && "text-muted-foreground")}>
+      <h1 title={thread.title} data-agent={`thread-title:${thread.id}`} className={cn("min-w-24 truncate group-data-[fit=glyph]/fit:min-w-12 text-xl font-semibold tracking-tight", thread.resolved && "text-muted-foreground")}>
         {thread.title}
       </h1>
       {thread.resolved && <span className="hidden shrink-0 text-xs whitespace-nowrap text-muted-foreground md:inline">resolved {when(thread.resolved.at)}</span>}

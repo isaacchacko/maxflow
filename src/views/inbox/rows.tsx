@@ -99,7 +99,7 @@ export function ThreadRow({ t, first, isGrouped, objectives, actions }: ThreadRo
   const hasReplies = t.messages.length > 1 || t.pending !== undefined || isGrouped;
   return (
     <RowMenu agent={t.id} items={actions.menu(t)}>
-      <div data-row={t.id} className={cn("group/row group/bar relative", !isGrouped && "mt-2.5")}>
+      <div data-row={t.id} data-agent={`inbox-row:${t.id}`} className={cn("group/row group/bar relative", !isGrouped && "mt-2.5")}>
         <div className={cn((t.resolved !== undefined || t.paused !== undefined) && "opacity-50")}>
           <ShotScope.Provider value={shotsOf(t.messages)}>
             <MessageRow
