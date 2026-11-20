@@ -118,7 +118,8 @@ async function publish(args: string[]) {
 
 async function subscribe(args: string[]) {
   const topic = encodeURIComponent(argAt(args, 0));
-  let after = flag(args, "--since") ?? String(seqOf(await fetch(`${base}/api/events?topic=${topic}&after=now`, { signal: timeout() })));
+  const now = async () => String(seqOf(await fetch(`${base}/api/events?topic=${topic}&after=now`, { signal: timeout() })));
+  let after = flag(args, "--since") ?? (await now());
   const deadline = Date.now() + Number(flag(args, "--timeout") ?? Infinity);
   for (;;) {
     const wait = Math.min(deadline - Date.now(), 240_000);
