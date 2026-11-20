@@ -33,6 +33,21 @@ function release(keys: string[]) {
   for (const fn of toCall) fn();
 }
 
+const claims = new Map<string, () => void>();
+
+export function claim(key: string, capMs: number) {
+  claims.get(key)?.();
+  claims.set(key, hold([key], capMs));
+}
+
+export function settleClaims(keys: string[]) {
+  for (const key of keys) {
+    const release = claims.get(key);
+    claims.delete(key);
+    release?.();
+  }
+}
+
 export function hold(keys: string[], capMs: number) {
   for (const key of keys) held.set(key, (held.get(key) ?? 0) + 1);
   let isReleased = false;

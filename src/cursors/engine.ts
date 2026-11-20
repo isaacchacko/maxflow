@@ -10,7 +10,7 @@ export type Rig = { root: HTMLElement; arrow: HTMLElement; tip: HTMLElement; car
 type Cursor = { pos: Point | undefined; bend: number; run: number; seenUntil: number; rig?: Rig };
 
 const HOLD_CAP_MS = 1200;
-const FLIGHT_BUDGET_MS = 950;
+const FLIGHT_BUDGET_MS = 750;
 const RIG_WAIT_MS = 250;
 const APPEAR_WAIT_MS = 900;
 const DRIFT = { x: 10, y: 8 };

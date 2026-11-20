@@ -2,9 +2,10 @@ import { addNode, CanvasConflict, createCanvas, type Edit, editNode, linkNode, m
 import { sessions } from "./sessions";
 import { isRecord, stringOr } from "./shared/guards";
 import { worldClients } from "./world";
+import { isCanvasClaimed } from "./cursors";
 
 onCanvasChange((path, rev) => {
-  const msg = JSON.stringify({ type: "canvas", path, rev });
+  const msg = JSON.stringify({ type: "canvas", path, rev, ...(isCanvasClaimed(path) && { claimed: true }) });
   for (const ws of worldClients) ws.sendText(msg);
 });
 

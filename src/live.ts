@@ -5,7 +5,7 @@ import { agentStore, ownChanges, liveStore, loadTodos, movedStore, objectiveStor
 import { isRecord } from "../shared/guards";
 import { cursorFrom, fireCursor } from "./cursors/store";
 import { canvasChanged } from "./views/docs/canvas-api";
-import { heldKeys, isHeld, onLand, onRelease } from "./cursors/holds";
+import { claim, heldKeys, isHeld, onLand, onRelease } from "./cursors/holds";
 import { reloadResource } from "@/lib/effects";
 
 type World = { objectives: Objective[]; agents: Agent[]; tasks: Task[]; threads: Thread[]; signals: Signal[]; sentries: SentrySession[]; shells?: Shell[]; names?: Record<string, string>; prs?: Record<string, Pr> };
@@ -141,28 +141,26 @@ function patch(w: World, p: Patch): World {
   return Object.assign(next, p.set) as World;
 }
 
-const CURSOR_FOLLOWS_A_CANVAS_CHANGE_MS = 150;
+const CLAIM_CAP_MS = 1200;
 
-// constraint: the server sends a canvas change before the cursor event that caused it, so the reload waits a beat to see whether a cursor holds it
-function canvasChangedAfterItsCursor(path: string) {
-  setTimeout(() => {
-    const key = `canvas:${path}`;
-    if (!isHeld(key)) {
-      canvasChanged(path);
-      return;
-    }
-    const stop = onLand(key, () => {
-      stop();
-      canvasChanged(path);
-    });
-  }, CURSOR_FOLLOWS_A_CANVAS_CHANGE_MS);
+function canvasChangedWhenItsCursorLands(path: string, isClaimed: boolean) {
+  const key = `canvas:${path}`;
+  if (isClaimed) claim(key, CLAIM_CAP_MS);
+  if (!isHeld(key)) {
+    canvasChanged(path);
+    return;
+  }
+  const stop = onLand(key, () => {
+    stop();
+    canvasChanged(path);
+  });
 }
 
 function isSideMessage(m: unknown) {
   if (!isRecord(m)) return false;
   const cursor = cursorFrom(m);
   if (cursor) fireCursor(cursor);
-  if (m["type"] === "canvas" && typeof m["path"] === "string") canvasChangedAfterItsCursor(m["path"]);
+  if (m["type"] === "canvas" && typeof m["path"] === "string") canvasChangedWhenItsCursorLands(m["path"], m["claimed"] === true);
   return cursor !== undefined || m["type"] === "canvas";
 }
 

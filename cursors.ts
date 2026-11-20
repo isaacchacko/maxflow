@@ -207,6 +207,22 @@ async function send(agent: { id: string; name: string }, req: Request, sent: Req
   }
 }
 
+const CANVAS_PATH = /^\/api\/canvas\/([^/]+)/;
+const claimedCanvases = new Map<string, number>();
+export const isCanvasClaimed = (file: string) => (claimedCanvases.get(file) ?? 0) > 0;
+
+function claimCanvas(path: string) {
+  const m = CANVAS_PATH.exec(path);
+  if (!m) return;
+  const file = canvasFile(m[1] ?? "");
+  claimedCanvases.set(file, (claimedCanvases.get(file) ?? 0) + 1);
+  return () => {
+    const left = (claimedCanvases.get(file) ?? 1) - 1;
+    if (left > 0) claimedCanvases.set(file, left);
+    else claimedCanvases.delete(file);
+  };
+}
+
 type Answer<S> = (req: Request, server: S) => Promise<Response | undefined>;
 
 // constraint: world patches go out 100ms+ after a publish, so this event reaches the tab first and it can hold the change for the cursor
@@ -214,7 +230,13 @@ export const withCursors = <S>(answer: Answer<S>) => async (req: Request, server
   const agent = sessions.get(req.headers.get("x-maxflow-from") ?? "");
   const isAction = agent !== undefined && req.method !== "GET" && RULES.some(r => r.method === req.method && r.path.test(new URL(req.url).pathname));
   const sent = isAction ? req.clone() : undefined;
-  const res = await answer(req, server);
+  const unclaim = sent && worldClients.size > 0 ? claimCanvas(new URL(req.url).pathname) : undefined;
+  let res: Response | undefined;
+  try {
+    res = await answer(req, server);
+  } finally {
+    unclaim?.();
+  }
   if (!agent || !sent || res?.ok !== true || worldClients.size === 0) return res;
   void send(agent, req, sent, res.clone());
   return res;

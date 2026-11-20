@@ -1,6 +1,7 @@
 import { createStore } from "@/store";
 import { isRecord } from "../../shared/guards";
 import { elementsFor, type Point } from "./geometry";
+import { settleClaims } from "./holds";
 
 export type Gesture = "drag" | "edit" | "create" | "delete";
 export type CursorEvent = { agent: string; name: string; gesture: Gesture; action: string; to: string[]; from?: string[] | undefined; into?: string[] | undefined; carry?: string | undefined; onPlane?: Point | undefined; holds: string[]; at: number };
@@ -42,6 +43,7 @@ export function fireCursor(e: CursorEvent) {
     if (placesOf(e).every(id => elementsFor(id).length === 0)) noteMissed(e);
   }, RENDER_GRACE_MS);
   for (const listener of listeners) listener(e);
+  settleClaims(e.holds);
 }
 
 export function noteMissed(e: CursorEvent) {
