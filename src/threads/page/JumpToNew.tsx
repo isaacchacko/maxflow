@@ -1,11 +1,16 @@
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { useLatest } from "@/lib/effects";
 import { highlight } from "../jump";
 import { NewCount } from "../NewCount";
 
 const rowIn = (scroller: HTMLElement, key: string) => scroller.querySelector<HTMLElement>(`[data-row="${CSS.escape(key)}"]`);
 
-function useNewSpots(threadId: string, newKeys: string[], scrollRef: React.RefObject<HTMLElement | null>) {
+type Props = { threadId: string; newKeys: string[]; scrollRef: React.RefObject<HTMLElement | null>; onSeenThrough: (key: string) => void };
+
+function useNewSpots({ threadId, newKeys, scrollRef, onSeenThrough }: Props) {
+  const met = useRef({ id: threadId, keys: new Set<string>() });
+  const latestSeenThrough = useLatest(onSeenThrough);
   const [spots, setSpots] = useState<{ id: string; of: Record<string, "above" | "below" | "met"> }>({ id: threadId, of: {} });
   if (spots.id !== threadId) setSpots({ id: threadId, of: {} });
   const keys = newKeys.join("\n");
@@ -13,8 +18,17 @@ function useNewSpots(threadId: string, newKeys: string[], scrollRef: React.RefOb
     (el: HTMLElement | null) => {
       const scroller = scrollRef.current;
       if (!el || !scroller || keys === "") return;
+      if (met.current.id !== threadId) met.current = { id: threadId, keys: new Set() };
+      const shown = keys.split("\n").filter(key => rowIn(scroller, key));
+      const markReadThroughFirstUnmet = () => {
+        const firstUnmet = shown.findIndex(key => !met.current.keys.has(key));
+        const through = (firstUnmet === -1 ? shown : shown.slice(0, firstUnmet)).at(-1);
+        if (through !== undefined) latestSeenThrough.current(through);
+      };
       const observer = new IntersectionObserver(
-        entries =>
+        entries => {
+          for (const e of entries) if (e.isIntersecting) met.current.keys.add((e.target as HTMLElement).dataset["row"] ?? "");
+          markReadThroughFirstUnmet();
           setSpots(prev => {
             const of = { ...prev.of };
             for (const e of entries) {
@@ -24,23 +38,25 @@ function useNewSpots(threadId: string, newKeys: string[], scrollRef: React.RefOb
               else of[key] = e.boundingClientRect.top < (e.rootBounds?.top ?? 0) ? "above" : "below";
             }
             return { ...prev, of };
-          }),
+          });
+        },
         { root: scroller, rootMargin: "0px 0px -40px 0px" },
       );
-      for (const key of keys.split("\n")) {
+      for (const key of shown) {
         const row = rowIn(scroller, key);
         if (row) observer.observe(row);
       }
       return () => observer.disconnect();
     },
-    [keys, scrollRef],
+    [keys, threadId, scrollRef, latestSeenThrough],
   );
   const unmet = newKeys.filter(k => spots.of[k] === "above" || spots.of[k] === "below");
   return { watch, unmet, spotOf: (k: string) => spots.of[k] };
 }
 
-export function JumpToNew({ threadId, newKeys, scrollRef }: { threadId: string; newKeys: string[]; scrollRef: React.RefObject<HTMLElement | null> }) {
-  const { watch, unmet, spotOf } = useNewSpots(threadId, newKeys, scrollRef);
+export function JumpToNew(props: Props) {
+  const { scrollRef } = props;
+  const { watch, unmet, spotOf } = useNewSpots(props);
   const first = unmet[0];
   const isUp = first !== undefined && spotOf(first) === "above";
   const jump = () => {

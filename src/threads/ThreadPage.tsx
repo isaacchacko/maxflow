@@ -27,10 +27,10 @@ export { Pending } from "./page/Pending";
 export { resolveOrReopen, ThreadNavContext, threadUp, type ThreadNav } from "./page/nav";
 
 function useNewLine(thread: Thread) {
-  const [line, setLine] = useState<{ id: string; at?: number | undefined }>();
+  const [line, setLine] = useState<{ id: string; at?: number | undefined; isMarkedUnread?: boolean }>();
   if (line?.id !== thread.id) setLine({ id: thread.id, at: firstUnseen(thread) });
   const lineAt = line?.id === thread.id ? line.at : undefined;
-  return { lineAt, setLine };
+  return { lineAt, isMarkedUnread: line?.isMarkedUnread === true, setLine };
 }
 
 function useDetailColumn(isEmbedded: boolean) {
@@ -54,15 +54,13 @@ const NEAR_BOTTOM_PX = 80;
 
 function useBottomWatch(thread: Thread) {
   const bottom = useRef({ id: thread.id, isAtBottom: true });
-  const latest = useLatest({ id: thread.id, count: thread.messages.length });
+  const latest = useLatest(thread.id);
   const watch = useCallback(
     (sentinel: HTMLElement | null) => {
       if (!sentinel) return;
       const observer = new IntersectionObserver(
         ([entry]) => {
-          const isAtBottom = entry?.isIntersecting === true;
-          bottom.current = { id: latest.current.id, isAtBottom };
-          if (isAtBottom) markSeen(latest.current.id, latest.current.count);
+          bottom.current = { id: latest.current, isAtBottom: entry?.isIntersecting === true };
         },
         { root: sentinel.parentElement, rootMargin: `0px 0px ${NEAR_BOTTOM_PX}px 0px` },
       );
@@ -74,25 +72,31 @@ function useBottomWatch(thread: Thread) {
   return { bottom, watch };
 }
 
-function useFollowArrivals(thread: Thread, scrollRef: React.RefObject<HTMLDivElement | null>, bottom: React.RefObject<{ id: string; isAtBottom: boolean }>, holdNewLine: (at: number | undefined) => void) {
+type Arrivals = { bottom: React.RefObject<{ id: string; isAtBottom: boolean }>; hasNewLine: boolean; holdNewLine: (at: number | undefined) => void };
+
+function useFollowArrivals(thread: Thread, scrollRef: React.RefObject<HTMLDivElement | null>, { bottom, hasNewLine, holdNewLine }: Arrivals) {
   const threadId = thread.id;
   const count = thread.messages.length;
   const isOwnLast = thread.messages.at(-1)?.from === "isaac";
   const unseenFrom = firstUnseen(thread);
   const latestHold = useLatest(holdNewLine);
+  const latestHasNewLine = useLatest(hasNewLine);
+  const followed = useRef<string>(undefined);
   return useCallback(
     (end: HTMLElement | null) => {
       if (!end) return;
+      const isArrival = followed.current === threadId;
+      followed.current = threadId;
       const isScrolledUp = bottom.current.id === threadId && !bottom.current.isAtBottom;
-      if (isScrolledUp && !isOwnLast) {
+      if (isArrival && isScrolledUp && !isOwnLast) {
         latestHold.current(unseenFrom);
         return;
       }
-      markSeen(threadId, count);
+      if (isArrival && !latestHasNewLine.current) markSeen(threadId, count);
       const scroller = scrollRef.current;
       if (scroller) scroller.scrollTop = scroller.scrollHeight;
     },
-    [threadId, count, isOwnLast, unseenFrom, scrollRef, bottom, latestHold],
+    [threadId, count, isOwnLast, unseenFrom, scrollRef, bottom, latestHold, latestHasNewLine],
   );
 }
 
@@ -161,20 +165,25 @@ function ThreadMessages({ thread, all, root, replies, firstNew, lineRef, actions
 }
 
 function useThreadMessages(thread: Thread, all: Thread[], nav: ThreadNav, focusComposer: () => void) {
-  const { lineAt, setLine } = useNewLine(thread);
+  const { lineAt, isMarkedUnread, setLine } = useNewLine(thread);
   const root = rootOf(thread, all);
   const replies = repliesOf(thread);
   const actions = messageActions({ thread, all, root, replies, nav, focusComposer });
   const messageMenu = messageMenuFor(thread, actions, at => {
     setSeen(thread.id, at);
-    setLine({ id: thread.id, at });
+    setLine({ id: thread.id, at, isMarkedUnread: true });
   });
   const firstNew = lineAt === undefined ? -1 : replies.findIndex(m => thread.messages.indexOf(m) >= lineAt);
   const newKeys = firstNew < 0 ? [] : replies.slice(firstNew).map((m, i) => keyOf(m, firstNew + i));
   const holdNewLine = (at: number | undefined) => {
     if (lineAt === undefined) setLine({ id: thread.id, at });
   };
-  return { root, replies, actions, messageMenu, firstNew, newKeys, holdNewLine, clearNewLine: () => setLine({ id: thread.id }) };
+  const markReadThrough = (key: string) => {
+    const read = replies.find((m, i) => keyOf(m, i) === key);
+    if (read && !isMarkedUnread) markSeen(thread.id, thread.messages.indexOf(read) + 1);
+  };
+  const newLine = { hasNewLine: lineAt !== undefined, holdNewLine, markReadThrough };
+  return { root, replies, actions, messageMenu, firstNew, newKeys, newLine, clearNewLine: () => setLine({ id: thread.id }) };
 }
 
 type BodyProps = { thread: Thread; all: Thread[]; back: string; isEmbedded: boolean };
@@ -192,8 +201,8 @@ function ThreadBody({ thread, all, back, isEmbedded }: BodyProps) {
   const focusComposer = () => (scrollRef.current?.closest("[data-region]") ?? document).querySelector<HTMLElement>('[data-agent="thread-input"]')?.focus();
   const attachScroll = useLayerScroll(`${isEmbedded ? "pane:" : ""}thread:${thread.id}`, scrollRef, (el, isRestored) => landOnArrival(el, isRestored, lineRef.current, focusComposer));
   const { bottom, watch: watchBottom } = useBottomWatch(thread);
-  const { root, replies, actions, messageMenu, firstNew, newKeys, holdNewLine, clearNewLine } = useThreadMessages(thread, all, nav, focusComposer);
-  const followArrivals = useFollowArrivals(thread, scrollRef, bottom, holdNewLine);
+  const { root, replies, actions, messageMenu, firstNew, newKeys, newLine, clearNewLine } = useThreadMessages(thread, all, nav, focusComposer);
+  const followArrivals = useFollowArrivals(thread, scrollRef, { bottom, ...newLine });
   const selected = useQuotableSelection(scrollRef);
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -207,7 +216,7 @@ function ThreadBody({ thread, all, back, isEmbedded }: BodyProps) {
                 <div key={`${thread.messages.length}:${thread.pending !== undefined}`} ref={followArrivals} />
                 <div ref={watchBottom} />
               </div>
-              <JumpToNew threadId={thread.id} newKeys={newKeys} scrollRef={scrollRef} />
+              <JumpToNew threadId={thread.id} newKeys={newKeys} scrollRef={scrollRef} onSeenThrough={newLine.markReadThrough} />
             </div>
           </ShotScope.Provider>
           <ThreadComposer thread={thread} isEmbedded={isEmbedded} onSent={clearNewLine} />

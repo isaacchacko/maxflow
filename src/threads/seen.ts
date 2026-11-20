@@ -21,16 +21,16 @@ function storeSeen(id: string, count: number) {
   }
 }
 
-export function markSeen(id: string, count: number) {
-  if (count > (seenCount(id) ?? 0)) storeSeen(id, count);
-}
-
 const seenChanges = { count: 0 };
 
 export function setSeen(id: string, count: number) {
   storeSeen(id, count);
   seenChanges.count += 1;
   dispatchEvent(new Event("seen-change"));
+}
+
+export function markSeen(id: string, count: number) {
+  if (count > (seenCount(id) ?? 0)) setSeen(id, count);
 }
 
 export function markRead(t: Thread, all: Thread[]) {
