@@ -14,6 +14,7 @@ import { isFilled, isRecord } from "./shared/guards";
 import { feedOf, feedPostsOf } from "./feed-body";
 import { type Body, type Route, exactly, firstAnswer, jsonBody, matching, sender, textOf, textsOf } from "./route-kit";
 import { isaacRefusal } from "./isaac-auth";
+import { recordIsaacSaid } from "./isaac-words";
 
 type Paused = NonNullable<Thread["paused"]>;
 
@@ -61,6 +62,7 @@ function quotedThreadsLine(text: string, seq: number) {
 }
 
 function hisInboxMessageForTheFunnelToRoute(text: string): Response {
+  recordIsaacSaid(text);
   const first = message("isaac", text);
   const t: Thread = { id: newThreadId(), title: titleOf(text), objective: "", routers: [], messages: [first] };
   const ev = dispatch({

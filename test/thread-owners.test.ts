@@ -21,8 +21,10 @@ afterAll(async () => {
 
 type Agent = { id: string; role?: { role: string; parent?: string; thread?: string }; wait?: { kind: string } | null };
 
+const hisBrowser = { "sec-fetch-site": "same-origin" };
+
 async function send(path: string, body: object, from?: string) {
-  return await fetch(`${instance.base}${path}`, withTimeout({ method: "POST", headers: from === undefined ? {} : { "x-yarn-from": from }, body: JSON.stringify(body) }));
+  return await fetch(`${instance.base}${path}`, withTimeout({ method: "POST", headers: from === undefined ? hisBrowser : { "x-yarn-from": from }, body: JSON.stringify(body) }));
 }
 const json = async <T>(res: Response) => (await res.json()) as T;
 async function agent(id: string) {

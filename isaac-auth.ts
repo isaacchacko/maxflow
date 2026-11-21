@@ -45,6 +45,14 @@ export function isIsaacsBrowser(req: Request) {
   return isEnrolled() ? sessionOf(req) !== undefined : isTheOldBrowserTest(req);
 }
 
+// constraint: a browser can't set headers on a WebSocket, so the terminal sends his token in its URL
+export function isIsaacsSocket(url: URL) {
+  if (!isEnrolled()) return true;
+  const token = url.searchParams.get("t") ?? "";
+  const hash = hashOf(token);
+  return token !== "" && signedIn.some((s) => s.hash === hash && Date.now() - s.at < SESSION_MS);
+}
+
 export function isIsaacsFresh(req: Request) {
   if (!isIsaacsBrowser(req)) return false;
   const session = sessionOf(req);

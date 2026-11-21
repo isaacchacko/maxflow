@@ -8,6 +8,7 @@ import { threads } from "./stores";
 import { readStateJson, writeStateJson } from "./state";
 import { AGENT_BOARD_CONFIG, agentBoardUrl } from "./agent-board-config";
 import { isRecord } from "./shared/guards";
+import { recordIsaacSaid } from "./isaac-words";
 
 const SENT_FILE = "agent-board-sent.json";
 const POST_MS = 5000;
@@ -181,6 +182,7 @@ const isaacSaid = (id: string, channel: string, text: string) =>
   `[yarn · Isaac, on the agent board, message ${id} in ${channel}] ${text}\n[yarn] He wrote this in yarn's Board tab and reads the answer there: reply on the board with \`${CLI} board reply ${id} '<text>'\`.`;
 
 export async function postAsIsaac(where: { channel: string } | { re: string; channel: string }, text: string): Promise<Carried> {
+  recordIsaacSaid(text);
   const posted = await postToBoard({ ...where, text }, "isaac");
   if ("error" in posted) return { via: "direct", error: posted.error };
   const to = AGENT_CHANNEL.exec(where.channel)?.[1];

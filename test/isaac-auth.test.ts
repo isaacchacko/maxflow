@@ -65,3 +65,18 @@ test("no one enrolls a second passkey without him signed in", async () => {
   const res = await send("/api/isaac/enroll/options", {}, aBrowser);
   expect(res.status).toBe(403);
 });
+
+test("typing into an agent, waking it with words and the event-log chat all need his sign-in", async () => {
+  const agent = (await (await send("/api/sessions", { name: "typed-into", cmd: ["claude"], cwd: instance.home }, {})).json()) as { id: string };
+  for (const [path, body] of [
+    [`/api/sessions/${agent.id}/input`, { text: "do the thing", enter: true }],
+    [`/api/sessions/${agent.id}/wake`, { text: "do the thing" }],
+    ["/api/signals", { text: "do the thing" }],
+  ] as const) {
+    const res = await send(path, body, aBrowser);
+    expect([path, res.status]).toEqual([path, 401]);
+  }
+  const signedIn = await send(`/api/sessions/${agent.id}/input`, { keys: ["Escape"] }, { ...aBrowser, "x-yarn-isaac-token": fresh });
+  expect(signedIn.status).toBe(200);
+});
+

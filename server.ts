@@ -30,6 +30,7 @@ import { objectivesRoute } from "./routes-objectives";
 import { sessionRoute } from "./routes-session";
 import { boardRoute } from "./routes-board";
 import { isaacRoute } from "./routes-isaac";
+import { isIsaacsSocket } from "./isaac-auth";
 import { signalsRoute } from "./routes-signals";
 import { threadsRoute } from "./routes-threads";
 import { sessionsWorldRoute } from "./routes-sessions";
@@ -168,7 +169,7 @@ function websocketUpgrade(req: Request, path: string, server: Server<WsData>): U
   const id = /^\/ws\/([\w-]+)$/.exec(path)?.[1];
   if (id === undefined) return undefined;
   if (!sessions.has(id)) return { response: new Response("no such session", { status: 404 }) };
-  return upgraded(server.upgrade(req, { data: { id } }));
+  return upgraded(server.upgrade(req, { data: { id, isIsaac: isIsaacsSocket(new URL(req.url)) } }));
 }
 
 async function mockOrRealWorkKeptOutOfTheRepo() {

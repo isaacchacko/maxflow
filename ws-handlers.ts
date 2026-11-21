@@ -4,6 +4,7 @@ import { type Session, type WsData, sessions } from "./sessions";
 import { latestBuild, openWorld, worldClients } from "./world";
 import { closeViewer, openViewer, viewerAsked } from "./browser-screencast";
 import { patch } from "./patch";
+import { recordIsaacTyped } from "./isaac-words";
 import { isRecord } from "./shared/guards";
 
 type Ws = ServerWebSocket<WsData>;
@@ -45,11 +46,16 @@ function sendWholeWorld(ws: Ws) {
   if (built) ws.sendText(JSON.stringify({ type: "world", v: built.v, world: built.w }));
 }
 
-function typeIntoTerminal(pty: Subprocess, raw: string) {
+function typeIntoTerminal(ws: Ws, pty: Subprocess, raw: string) {
   const input: unknown = JSON.parse(raw);
   if (!isTerminalInput(input)) return;
-  if (input.type === "input") pty.terminal?.write(input.data);
-  else if (input.cols > 0 && input.rows > 0) pty.terminal?.resize(input.cols, input.rows);
+  if (input.type !== "input") {
+    if (input.cols > 0 && input.rows > 0) pty.terminal?.resize(input.cols, input.rows);
+    return;
+  }
+  if (ws.data.isIsaac !== true) return;
+  recordIsaacTyped(ws.data.id, input.data);
+  pty.terminal?.write(input.data);
 }
 
 export const websocketHandlers = {
@@ -76,7 +82,7 @@ export const websocketHandlers = {
       return;
     }
     const pty = ws.data.pty;
-    if (pty?.exitCode === null) typeIntoTerminal(pty, text);
+    if (pty?.exitCode === null) typeIntoTerminal(ws, pty, text);
   },
   close(ws: Ws) {
     if (ws.data.world) {

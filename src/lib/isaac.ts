@@ -10,7 +10,7 @@ export const isaacStore = createStore<IsaacStatus | undefined>(undefined);
 
 const original = globalThis.fetch.bind(globalThis);
 
-function storedToken() {
+export function storedToken() {
   try {
     return localStorage.getItem(TOKEN_KEY) ?? "";
   } catch {

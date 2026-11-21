@@ -3,6 +3,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Base64, ClipboardAddon, type IClipboardProvider } from "@xterm/addon-clipboard";
+import { storedToken } from "@/lib/isaac";
 import { useLatest } from "@/lib/effects";
 
 const ESC = "\u{1B}";
@@ -70,7 +71,7 @@ export function Terminal({ id, onClose }: { id: string; onClose?: () => void }) 
   const mount = useCallback(
     (el: HTMLDivElement) => {
       const { term, fit } = openTerminal(el);
-      const ws = new WebSocket(`ws://${location.host}/ws/${id}`);
+      const ws = new WebSocket(`ws://${location.host}/ws/${id}?t=${encodeURIComponent(storedToken())}`);
       ws.binaryType = "arraybuffer";
       const send = (m: object) => ws.readyState === 1 && ws.send(JSON.stringify(m));
       // constraint: replayed output holds old terminal queries, and xterm's answers to them must not reach the program as input

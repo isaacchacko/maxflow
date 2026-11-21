@@ -7,6 +7,8 @@ import { ISAAC_IN_THREAD, unforge } from "./threads";
 import { reroute, sizeFirst, startRouter, toThreadOwner } from "./routing";
 import { newObjective } from "./objectives";
 import { isFilled } from "./shared/guards";
+import { isaacRefusal } from "./isaac-auth";
+import { recordIsaacSaid } from "./isaac-words";
 import { type Route, exactly, expandHome, firstAnswer, jsonBody, matching, textOf } from "./route-kit";
 
 function toItsRoutersOrAFreshOneWithHisWordsAsItsFirstPrompt(o: Objective, text: string, stamped: string) {
@@ -16,9 +18,12 @@ function toItsRoutersOrAFreshOneWithHisWordsAsItsFirstPrompt(o: Objective, text:
 }
 
 async function isaacsChatFromTheEventLogToHisObjectiveOrTheFunnel(req: Request): Promise<Response> {
+  const refused = isaacRefusal(req, "writes in the event log");
+  if (refused) return refused;
   const body = await jsonBody(req);
   const text = textOf(body, "text")?.trim() ?? "";
   if (text === "") return new Response("text required", { status: 400 });
+  recordIsaacSaid(text);
   const named = textOf(body, "objective");
   const objective = isFilled(named) ? objectives.find((o) => o.id === named) : undefined;
   if (!objective && isFilled(named)) return new Response("no such objective", { status: 404 });

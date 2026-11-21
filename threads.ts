@@ -9,11 +9,12 @@ import { isLive, names, objectives, saveThreads, threads } from "./stores";
 import { DEFAULT_AFTER_H } from "./intro";
 import { patch } from "./patch";
 import { isIsaacsBrowser, NEEDS_HEADER } from "./isaac-auth";
+import { recordIsaacSaid, squash } from "./isaac-words";
+export { squash } from "./isaac-words";
 import { isFilled } from "./shared/guards";
 import { dispatch, endWait, funnel, live_thread, newerRouterOnScope, isReachable, routersOf, settleTasks, threadOf } from "./lifecycle";
 
 export const unforge = (text: string) => FORGEABLE_STAMPS.reduce((said, stamp) => said.replaceAll(stamp, "[unverified claim"), text);
-export const squash = (text: string) => text.replaceAll(/<\/?pasted_content[^>]*>/g, "").replaceAll(/\s+/g, " ").trim();
 function threadOwner(t: Thread): Session | undefined {
   for (const level of [t, ...ancestors(t).toReversed()]) {
     const lastJoined = level.routers.map((id) => sessions.get(id)).findLast(isReachable);
@@ -134,7 +135,10 @@ function postMessage(t: Thread, post: Post) {
   t.messages.push(m);
   if (!isHisPost(post) && t.feed) patch(t, { signal: undefined });
   if (from) joinAsRouterWhereTheThreadIsItsToOwn(t, from);
-  if (isHisPost(post)) handHisPost(t, m, woke);
+  if (isHisPost(post)) {
+    recordIsaacSaid(m.text);
+    handHisPost(t, m, woke);
+  }
   else {
     patch(t, { pending: undefined });
     if (t.paused) patch(t.paused, { posts: (t.paused.posts ?? 0) + 1 });

@@ -39,7 +39,7 @@ export type Session = {
 export type Role = { role: "router" | "worker" | "owner"; objective: string; thread?: string; parent?: string; scope?: string; merged?: boolean; handedTo?: string; handedFrom?: string };
 export type Wait = { kind: "thread" | "approval" | "ci" | "agent" | "slack" | "until" | "done"; ref: string; at: number; desc?: string; awake?: boolean; auto?: boolean };
 export type ClaudeState = "working" | "waiting" | "idle";
-export type WsData = { id: string; pty?: Subprocess; world?: true; browser?: true };
+export type WsData = { id: string; pty?: Subprocess; world?: true; browser?: true; isIsaac?: boolean };
 
 export const sessions = new Map<string, Session>();
 

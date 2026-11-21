@@ -20,6 +20,7 @@ import { askForHandoffNote, completeHandoff, noteHandoff, successorOf } from "./
 import { isFilled } from "./shared/guards";
 import { type Body, type Route, firstAnswer, flagOf, jsonBody, matching, sender, textOf, textsOf } from "./route-kit";
 import { isaacRefusal } from "./isaac-auth";
+import { recordIsaacSaid } from "./isaac-words";
 
 type SessionAct = (req: Request, s: Session, url: URL) => Promise<Response> | Response;
 type Typed = { text: string | undefined; isQueuedForAnIdlePrompt: boolean };
@@ -52,11 +53,17 @@ const nobodyReads = (s: Session) =>
 
 const isTextForAPlainSentry = (s: Session, text: string | undefined) => isFilled(text) && isSentry(s) && !isAgent(s);
 
+// constraint: text typed with no calling session lands in the prompt unstamped, which reads as his own words
+const isHisTyping = (req: Request, s: Session, body: Body) => sender(req) === undefined && isAgent(s) && (isFilled(textOf(body, "text")) || (textsOf(body, "keys") ?? []).length > 0);
+
 async function typeInto(req: Request, s: Session): Promise<Response> {
   const body = await jsonBody(req);
   if (s.exitCode !== null) return new Response("session ended", { status: 409 });
   const text = textOf(body, "text");
   if (isTextForAPlainSentry(s, text)) return nobodyReads(s);
+  const refused = isHisTyping(req, s, body) ? isaacRefusal(req, "types into an agent as himself") : undefined;
+  if (refused) return refused;
+  if (isHisTyping(req, s, body) && isFilled(text)) recordIsaacSaid(text);
   const typed = typedFor(req, s, text, body);
   if ("error" in typed) return new Response(typed.error, { status: 409 });
   touchFrom(req, s, "write");
@@ -73,8 +80,11 @@ async function typeInto(req: Request, s: Session): Promise<Response> {
 }
 
 async function hisWordsTypedIntoAnAsleepPane(req: Request, s: Session): Promise<Response> {
+  const refused = isaacRefusal(req, "wakes an agent with his words");
+  if (refused) return refused;
   const text = trimmedTextOf(await jsonBody(req));
   if (text === "") return new Response("text required", { status: 400 });
+  recordIsaacSaid(text);
   if (s.exitCode !== null) return new Response("session ended", { status: 409 });
   dispatch({ source: "isaac", to: [s], text });
   return Response.json(describe(s));
