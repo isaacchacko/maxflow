@@ -1,5 +1,5 @@
 import { callerOf } from "./shared/legacy-maxflow";
-import { type Session, isSentry, sessions } from "./sessions";
+import { isSentry, sessions } from "./sessions";
 import { VERIFIED } from "./intro";
 import { squash, unforge } from "./threads";
 import { isaacSaidLately } from "./isaac-words";
