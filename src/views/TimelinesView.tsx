@@ -14,7 +14,7 @@ const AUTHOR_WITH_ID = /^(.*) \(([0-9a-f]{8})\)$/;
 
 const goTo = (path: string) => `#timelines/${encodeURI(path)}`;
 const parentOf = (file: string) => file.split("/").slice(0, -1).join("/");
-const withChips = (text: string) => text.replaceAll(BARE_THREAD_ID, "$1[[thread:$2]]");
+const withChips = (text: string) => text.replaceAll("~", String.raw`\~`).replaceAll(BARE_THREAD_ID, "$1[[thread:$2]]");
 const firstLine = (text = "") => text.trim().split("\n", 1)[0] ?? "";
 const agoIfPast = (at: number) => {
   const since = ago(at);
