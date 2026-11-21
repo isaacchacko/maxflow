@@ -27,6 +27,7 @@ import { StatsView } from "@/views/StatsView";
 import { PrsView } from "@/views/PrsView";
 import { TimelinesView } from "@/views/TimelinesView";
 import { BoardView } from "@/views/BoardView";
+import { GraphsView } from "@/views/GraphsView";
 import { Cursors } from "@/cursors/Cursors";
 import { PreviewBanner } from "@/components/PreviewBanner";
 import { CursorPlayground } from "@/cursors/Playground";
@@ -37,6 +38,7 @@ export const views = [
   { id: "prs", label: "PRs" },
   { id: "timelines", label: "Timelines" },
   { id: "board", label: "Board" },
+  { id: "graphs", label: "Graphs" },
   { id: "docs", label: "Docs" },
   { id: "browsers", label: "Browsers" },
   { id: "events", label: "Events" },
@@ -126,13 +128,14 @@ function DetailView({ detail, back }: { detail: Detail; back: ViewId }) {
   return <ThreadPage key={detail.id} id={detail.id} back={back} />;
 }
 
-type PathViewId = "timelines" | "board" | "docs" | "browsers";
-const PATH_VIEWS: ReadonlySet<string> = new Set<PathViewId>(["timelines", "board", "docs", "browsers"]);
+type PathViewId = "timelines" | "board" | "graphs" | "docs" | "browsers";
+const PATH_VIEWS: ReadonlySet<string> = new Set<PathViewId>(["timelines", "board", "graphs", "docs", "browsers"]);
 const isPathView = (view: ViewId): view is PathViewId => PATH_VIEWS.has(view);
 
 function PathView({ view, sub }: { view: PathViewId; sub: string | undefined }) {
   if (view === "timelines") return <TimelinesView path={sub} />;
   if (view === "board") return <BoardView path={sub} />;
+  if (view === "graphs") return <GraphsView id={sub} />;
   if (view === "docs") return <DocsView path={sub} />;
   return <BrowsersView id={sub} />;
 }
