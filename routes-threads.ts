@@ -9,6 +9,7 @@ import { ISAAC_IN_THREAD, ancestors, markDone, mentionsIn, message, pathTitle, p
 import { feedPosts, feedToFunnel, sizeFirst, slackChannels } from "./routing";
 import { mergeThread, subthread, titleOf } from "./objectives";
 import { patch } from "./patch";
+import { areOwnersOn } from "./owners";
 import { isFilled, isRecord } from "./shared/guards";
 import { feedOf, feedPostsOf } from "./feed-body";
 import { type Body, type Route, exactly, firstAnswer, isFromTheBrowser, jsonBody, matching, sender, textOf, textsOf } from "./route-kit";
@@ -49,6 +50,15 @@ async function feedItemNoAgentOwnsToTheFunnel(from: Session, feed: Feed, text: s
   return Response.json(t, { status: 201 });
 }
 
+function quotedThreadsLine(text: string, seq: number) {
+  if (!areOwnersOn()) return "";
+  const ids = new Set(text.matchAll(/\[\[msg:(th-[\w-]+)\//g).map((m) => m[1] ?? ""));
+  const quoted = [...ids].flatMap((id) => live_thread(threads.find((t) => t.id === id)) ?? []);
+  if (quoted.length === 0) return "";
+  const owned = (t: Thread) => (t.routers.length > 0 ? `, owner ${t.routers.join(", ")}` : ", no live owner");
+  return `\n[yarn] He quotes ${quoted.map((t) => `${t.id} "${t.title}"${owned(t)}`).join("; ")}. By default it continues the quoted thread (\`${CLI} route ${seq} --thread ${quoted[0]?.id ?? ""}\`), unless what he asks is about something else.`;
+}
+
 function hisInboxMessageForTheFunnelToRoute(text: string): Response {
   const first = message("isaac", text);
   const t: Thread = { id: newThreadId(), title: titleOf(text), objective: "", routers: [], messages: [first] };
@@ -57,7 +67,7 @@ function hisInboxMessageForTheFunnelToRoute(text: string): Response {
     target: t.title,
     text,
     deliver: (seq) =>
-      `${text}\n[yarn] signal ${seq}, his inbox thread ${t.id}: ${sizeFirst(seq)} His own inbox message is never fyi or ignore, small talk included: whoever takes it answers him in the thread.`,
+      `${text}\n[yarn] signal ${seq}, his inbox thread ${t.id}: ${sizeFirst(seq)} His own inbox message is never fyi or ignore, small talk included: whoever takes it answers him in the thread.${quotedThreadsLine(text, seq)}`,
   });
   t.signal = ev.seq;
   threads.push(t);
