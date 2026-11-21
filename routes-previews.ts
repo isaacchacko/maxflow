@@ -3,6 +3,7 @@ import { peekStateJson } from "./state";
 import { dispatch, live_thread } from "./lifecycle";
 import { PREVIEW_IDLE_MS, VERDICTS, VERDICT_LABELS, type Preview, type Verdict, asPreview, endPreview, isServing, previewDir, previews, readPreview, writePreview } from "./previews";
 import { type Route, firstAnswer, isIsaacsBrowser, jsonBody, matching, exactly, sender, textOf } from "./route-kit";
+import { isaacRefusal } from "./isaac-auth";
 import { sessions } from "./sessions";
 import { threads } from "./stores";
 import { handedThread, postIn } from "./threads";
@@ -59,7 +60,8 @@ function describeForLive(req: Request, _url: URL, match: RegExpExecArray) {
 async function takeVerdict(req: Request, _url: URL, match: RegExpExecArray) {
   const p = previewNamed(match[1] ?? "");
   if (!p) return new Response("no such preview", { status: 404 });
-  if (!isHisBrowser(req)) return new Response("the verdict is Isaac's, from his own browser on yarn", { status: 403 });
+  const refused = isaacRefusal(req, "gives a preview verdict", true);
+  if (refused) return refused;
   const body = await jsonBody(req);
   const verdict = VERDICTS.find((v) => v === textOf(body, "verdict"));
   if (verdict === undefined) return new Response(`verdict must be one of ${VERDICTS.join(", ")}`, { status: 400 });
