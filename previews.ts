@@ -46,7 +46,8 @@ export const asPreview = (p: unknown) => (isRecord(p) && typeof p["name"] === "s
 
 export function readPreview(dir: string): Preview | undefined {
   try {
-    return asPreview(JSON.parse(readFileSync(previewFile(dir), "utf8")));
+    const text = readFileSync(previewFile(dir), "utf8");
+    return asPreview(JSON.parse(text));
   } catch {
     return undefined;
   }
