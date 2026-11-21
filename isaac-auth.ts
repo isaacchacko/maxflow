@@ -117,7 +117,7 @@ export async function enroll(response: unknown, label: string): Promise<{ token:
   const challenge = challengeIn(response);
   if (!takeChallenge("register", challenge)) return { error: "that enrollment expired; start again" };
   const verified = await verifyRegistrationResponse({ response: response as Parameters<typeof verifyRegistrationResponse>[0]["response"], expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP_ID, requireUserVerification: true });
-  if (!verified.verified) return { error: "the passkey didn't verify" };
+  if (!verified.verified || !verified.registrationInfo) return { error: "the passkey didn't verify" };
   const { credential } = verified.registrationInfo;
   passkeys.push({ id: credential.id, publicKey: Buffer.from(credential.publicKey).toString("base64url"), counter: credential.counter, transports: credential.transports ?? [], at: Date.now(), label });
   writeStateJson(PASSKEYS_FILE, passkeys);
