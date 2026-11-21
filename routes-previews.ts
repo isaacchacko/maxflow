@@ -1,4 +1,4 @@
-import { CLI, IS_LIVE } from "./instance";
+import { BASE, CLI, IS_LIVE } from "./instance";
 import { peekStateJson } from "./state";
 import { dispatch, live_thread } from "./lifecycle";
 import { PREVIEW_IDLE_MS, VERDICTS, VERDICT_LABELS, type Preview, type Verdict, asPreview, endPreview, isServing, previewDir, previews, readPreview, writePreview } from "./previews";
@@ -18,6 +18,8 @@ const tellAgent = (p: Preview, text: string) => {
   const agent = sessions.get(p.agent);
   if (agent) dispatch({ to: [agent], target: p.name, text });
 };
+const verdictPage = (p: Preview) => `${p.live}/#preview/${p.name}`;
+const isHisBrowser = (req: Request) => isIsaacsBrowser(req) && req.headers.get("user-agent")?.includes("HeadlessChrome") !== true;
 const postAsThePreview = (p: Preview, text: string) => {
   const t = threadOf(p);
   if (t) postIn(t, `preview/${p.name}`, text);
@@ -35,7 +37,7 @@ async function announce(req: Request, _url: URL, match: RegExpExecArray) {
   postIn(
     t,
     agent,
-    `Preview of \`${p.branch}\` to try: http://localhost:${String(p.port)}\nWhat changed: ${p.what}\nWhat to try: ${p.tryThis}\nThe banner at its top has Ship it, Needs changes and Discard; your verdict comes back to me.`,
+    `Preview of \`${p.branch}\` to try: http://localhost:${String(p.port)}\nWhat changed: ${p.what}\nWhat to try: ${p.tryThis}\nYour verdict (Ship it, Needs changes, Discard), here in yarn: ${verdictPage({ ...p, live: BASE })}`,
   );
   return Response.json({ thread: t.id });
 }
@@ -46,18 +48,26 @@ function nextStep(p: Preview, verdict: Verdict) {
   return `He doesn't want this change: don't deploy it. The preview has stopped; close out the branch and say in the thread what you did with it.`;
 }
 
-async function relayVerdict(req: Request, _url: URL, match: RegExpExecArray) {
+function describeForLive(req: Request, _url: URL, match: RegExpExecArray) {
   const p = previewNamed(match[1] ?? "");
   if (!p) return new Response("no such preview", { status: 404 });
+  const { name, branch, what, tryThis, thread, verdict, port } = p;
+  return Response.json({ name, branch, what, tryThis, thread, verdict, url: `http://localhost:${String(port)}`, isHis: isHisBrowser(req) });
+}
+
+// constraint: the preview server runs the agent's own branch, so his verdict counts only when his browser gives it to live
+async function takeVerdict(req: Request, _url: URL, match: RegExpExecArray) {
+  const p = previewNamed(match[1] ?? "");
+  if (!p) return new Response("no such preview", { status: 404 });
+  if (!isHisBrowser(req)) return new Response("the verdict is Isaac's, from his own browser on yarn", { status: 403 });
   const body = await jsonBody(req);
-  if (textOf(body, "token") !== p.token) return new Response("verdicts come from the preview's own banner", { status: 403 });
   const verdict = VERDICTS.find((v) => v === textOf(body, "verdict"));
   if (verdict === undefined) return new Response(`verdict must be one of ${VERDICTS.join(", ")}`, { status: 400 });
   const note = textOf(body, "note")?.trim() ?? "";
   writePreview({ ...p, verdict: { verdict, note, at: Date.now() } });
   const said = note === "" ? "" : `: "${note}"`;
-  postAsThePreview(p, `Verdict from the preview banner: **${VERDICT_LABELS[verdict]}**${said}`);
-  tellAgent(p, `[yarn · preview verdict] Isaac pressed "${VERDICT_LABELS[verdict]}" on your preview ${p.name} of ${p.branch}${said}.\n[yarn] ${nextStep(p, verdict)}`);
+  postAsThePreview(p, `Isaac's verdict: **${VERDICT_LABELS[verdict]}**${said}`);
+  tellAgent(p, `[yarn · preview verdict] Isaac gave "${VERDICT_LABELS[verdict]}" on your preview ${p.name} of ${p.branch}${said}.\n[yarn] ${nextStep(p, verdict)}`);
   if (verdict !== "changes")
     setTimeout(() => {
       endPreview(p.name);
@@ -84,14 +94,13 @@ export function keepSweepingPreviews() {
 }
 
 const thisPreview = () => (IS_LIVE ? undefined : asPreview(peekStateJson("preview.json")));
-const isHisBrowser = (req: Request) => isIsaacsBrowser(req) && req.headers.get("user-agent")?.includes("HeadlessChrome") !== true;
 const lastSeen = { at: 0 };
 
-function describePreview(req: Request) {
+function describePreview() {
   const p = thisPreview();
   if (!p) return new Response("not a preview", { status: 404 });
-  const { name, branch, what, tryThis, thread, verdict, startedAt } = p;
-  return Response.json({ name, branch, what, tryThis, thread, verdict, startedAt, isHis: isHisBrowser(req) });
+  const { name, branch, what, tryThis } = p;
+  return Response.json({ name, branch, what, tryThis, verdictPage: verdictPage(p) });
 }
 
 function markSeen(req: Request) {
@@ -104,24 +113,15 @@ function markSeen(req: Request) {
   return new Response(null, { status: 204 });
 }
 
-async function sendVerdict(req: Request) {
-  const p = thisPreview();
-  if (!p) return new Response("not a preview", { status: 404 });
-  if (!isHisBrowser(req)) return new Response("the verdict is Isaac's, from his own browser", { status: 403 });
-  const body = await jsonBody(req);
-  const r = await fetch(`${p.live}/api/previews/${p.name}/verdict`, { method: "POST", body: JSON.stringify({ ...body, token: p.token }), signal: AbortSignal.timeout(10_000) });
-  return new Response(await r.text(), { status: r.status, headers: { "content-type": r.headers.get("content-type") ?? "text/plain" } });
-}
-
-type Matched = (req: Request, url: URL, match: RegExpExecArray) => Promise<Response>;
-const onPost = (answer: Matched) => async (req: Request, url: URL, match: RegExpExecArray) => (req.method === "POST" ? answer(req, url, match) : undefined);
+type Matched = (req: Request, url: URL, match: RegExpExecArray) => Promise<Response> | Response;
+const on = (method: string, answer: Matched) => async (req: Request, url: URL, match: RegExpExecArray) => (req.method === method ? answer(req, url, match) : undefined);
 
 const ROUTES: Route[] = [
-  matching(/^\/api\/previews\/(pv-[\w-]+)\/announce$/, onPost(announce)),
-  matching(/^\/api\/previews\/(pv-[\w-]+)\/verdict$/, onPost(relayVerdict)),
+  matching(/^\/api\/previews\/(pv-[\w-]+)\/announce$/, on("POST", announce)),
+  matching(/^\/api\/previews\/(pv-[\w-]+)\/verdict$/, on("POST", takeVerdict)),
+  matching(/^\/api\/previews\/(pv-[\w-]+)$/, on("GET", describeForLive)),
   exactly("GET", "/api/preview", describePreview),
   exactly("POST", "/api/preview/seen", markSeen),
-  exactly("POST", "/api/preview/verdict", sendVerdict),
 ];
 
 export const previewsRoute = async (req: Request, url: URL, path: string) => (path.startsWith("/api/preview") ? firstAnswer(ROUTES, req, url, path) : undefined);

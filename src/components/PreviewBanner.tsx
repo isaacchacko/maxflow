@@ -1,37 +1,50 @@
-import { Eye } from "lucide-react";
+import { ExternalLink, Eye } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { useInterval, useResource } from "@/lib/effects";
+import { useEventListener, useInterval, useResource } from "@/lib/effects";
 import { hasText } from "@/lib/utils";
 import { isRecord } from "../../shared/guards";
 
 type Verdict = "ship" | "changes" | "discard";
-type Preview = { name: string; branch: string; what: string; tryThis: string; isHis: boolean; verdict?: { verdict: Verdict; note: string } };
+type Preview = { name: string; branch: string; what: string; tryThis: string };
+type OnLive = Preview & { url: string; isHis: boolean; verdict?: { verdict: Verdict; note: string } };
+type InPreview = Preview & { verdictPage: string };
 const LABELS: Record<Verdict, string> = { ship: "Ship it", changes: "Needs changes", discard: "Discard" };
 const SEEN_EVERY_MS = 60_000;
 
 const isPreview = (value: unknown): value is Preview => isRecord(value) && typeof value["name"] === "string" && typeof value["branch"] === "string";
+const isInPreview = (value: unknown): value is InPreview => isRecord(value) && typeof value["verdictPage"] === "string" && isPreview(value);
+const isOnLive = (value: unknown): value is OnLive => isRecord(value) && typeof value["url"] === "string" && isPreview(value);
 
-async function loadPreview(): Promise<Preview | null> {
+async function loadThisPreview(): Promise<InPreview | null> {
   const res = await fetch("/api/preview");
   if (!res.ok) return null;
   const answer: unknown = await res.json();
-  if (!isPreview(answer)) return null;
+  if (!isInPreview(answer)) return null;
   document.title = `Preview: ${answer.branch}`;
   return answer;
 }
+
+async function loadPreviewOnLive(name: string): Promise<OnLive | null> {
+  const res = await fetch(`/api/previews/${name}`);
+  if (!res.ok) return null;
+  const answer: unknown = await res.json();
+  return isOnLive(answer) ? answer : null;
+}
+
+const previewInHash = () => /^#preview\/(pv-[\w-]+)$/.exec(location.hash)?.[1];
 
 function markSeenWhileHeLooks() {
   if (document.visibilityState === "visible") void fetch("/api/preview/seen", { method: "POST" });
 }
 
-function Verdicts({ preview }: { preview: Preview }) {
+function Verdicts({ preview }: { preview: OnLive }) {
   const [sent, setSent] = useState<Verdict | undefined>(preview.verdict?.verdict);
   const [isWritingNote, setWritingNote] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string>();
   const send = async (verdict: Verdict) => {
-    const res = await fetch("/api/preview/verdict", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ verdict, note }) });
+    const res = await fetch(`/api/previews/${preview.name}/verdict`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ verdict, note }) });
     if (!res.ok) {
       setError(await res.text());
       return;
@@ -90,8 +103,7 @@ function Verdicts({ preview }: { preview: Preview }) {
   );
 }
 
-function Banner({ preview }: { preview: Preview }) {
-  useInterval(markSeenWhileHeLooks, SEEN_EVERY_MS);
+function Strip({ preview, children }: { preview: Preview; children: React.ReactNode }) {
   return (
     <div data-agent="preview-banner" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs [app-region:no-drag]">
       <span className="flex items-center gap-1.5 font-semibold">
@@ -101,12 +113,39 @@ function Banner({ preview }: { preview: Preview }) {
       <span className="min-w-0 flex-1 truncate" title={`What changed: ${preview.what}\nWhat to try: ${preview.tryThis}`}>
         {preview.what} <span className="text-muted-foreground">· Try: {preview.tryThis}</span>
       </span>
-      <Verdicts preview={preview} />
+      {children}
     </div>
   );
 }
 
+function InThePreview({ preview }: { preview: InPreview }) {
+  useInterval(markSeenWhileHeLooks, SEEN_EVERY_MS);
+  return (
+    <Strip preview={preview}>
+      <a href={preview.verdictPage} target="_blank" rel="noreferrer" className="flex items-center gap-1 font-medium underline-offset-4 hover:underline">
+        Give your verdict in yarn <ExternalLink className="size-3" />
+      </a>
+    </Strip>
+  );
+}
+
+function VerdictOnLive({ name }: { name: string }) {
+  const preview = useResource(`preview/${name}`, async () => loadPreviewOnLive(name)).value;
+  if (!preview) return null;
+  return (
+    <Strip preview={preview}>
+      <a href={preview.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 underline-offset-4 hover:underline">
+        Open the preview <ExternalLink className="size-3" />
+      </a>
+      <Verdicts preview={preview} />
+    </Strip>
+  );
+}
+
 export function PreviewBanner() {
-  const preview = useResource("preview", loadPreview).value;
-  return preview ? <Banner preview={preview} /> : null;
+  const thisPreview = useResource("preview", loadThisPreview).value;
+  const [asked, setAsked] = useState(previewInHash);
+  useEventListener("hashchange", () => setAsked(previewInHash()));
+  if (thisPreview) return <InThePreview preview={thisPreview} />;
+  return asked === undefined ? null : <VerdictOnLive key={asked} name={asked} />;
 }

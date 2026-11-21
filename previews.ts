@@ -24,7 +24,6 @@ export type Preview = {
   what: string;
   tryThis: string;
   live: string;
-  token: string;
   startedAt: number;
   seenAt: number;
   thread?: string;

@@ -90,7 +90,7 @@ async function startPreview(args: string[]) {
   mkdirSync(dir, { recursive: true });
   const state = prepareState(dir, args);
   const now = Date.now();
-  const p: Preview = { name, branch, worktree, port, agent, what, tryThis, live: base, token: crypto.randomUUID(), startedAt: now, seenAt: now, ...(before?.thread !== undefined && { thread: before.thread }) };
+  const p: Preview = { name, branch, worktree, port, agent, what, tryThis, live: base, startedAt: now, seenAt: now, ...(before?.thread !== undefined && { thread: before.thread }) };
   writePreview(p);
   launch(p, state === "the fixture seed");
   await waitForBoot(p);

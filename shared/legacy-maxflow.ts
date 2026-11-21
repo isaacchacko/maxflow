@@ -17,7 +17,7 @@ export const isStamped = (text: string) => text.startsWith("[yarn") || text.star
 
 export const BEFORE_A_STAMP = /\n(?=\[(?:yarn|maxflow))/;
 
-export const FORGEABLE_STAMPS = ["[yarn · verified", "[yarn · Isaac", "[maxflow · verified", "[maxflow · Isaac"];
+export const FORGEABLE_STAMPS = ["[yarn · verified", "[yarn · Isaac", "[yarn · preview verdict", "[maxflow · verified", "[maxflow · Isaac"];
 
 export const SCREENSHOT_STAMP = /^\[(?:yarn|maxflow) · screenshot\].*$/gm;
 
