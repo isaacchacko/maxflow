@@ -118,17 +118,18 @@ function MessageCard({ m, yarn }: { m: BoardMessage; yarn: Vouched }) {
 function Composer({ channel, re, placeholder }: { channel: string; re?: string; placeholder: string }) {
   const [text, setText] = useState("");
   const [state, setState] = useState<{ isSending: boolean; error?: string }>({ isSending: false });
-  const send = () => {
-    if (text.trim() === "") return;
+  const post = async () => {
     setState({ isSending: true });
-    postAsHim({ channel, ...(re !== undefined && { re }), text: text.trim() })
-      .then(() => {
-        setText("");
-        setState({ isSending: false });
-      })
-      .catch((error: unknown) => {
-        setState({ isSending: false, error: String(error) });
-      });
+    try {
+      await postAsHim({ channel, ...(re !== undefined && { re }), text: text.trim() });
+      setText("");
+      setState({ isSending: false });
+    } catch (error) {
+      setState({ isSending: false, error: String(error) });
+    }
+  };
+  const send = () => {
+    if (text.trim() !== "") void post();
   };
   const label = re === undefined ? "Post" : "Reply";
   return (
