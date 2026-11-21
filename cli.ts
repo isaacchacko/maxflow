@@ -4,6 +4,7 @@ import { browserVerbs } from "./cli-browser";
 import { CANVAS_USAGE, canvasVerbs } from "./cli-canvas";
 import { docVerbs } from "./cli-docs";
 import { holdVerbs } from "./cli-holds";
+import { previewVerbs } from "./cli-preview";
 import { eventVerbs, sessionVerbs } from "./cli-sessions";
 import { base, type Verb } from "./cli-shared";
 import { threadVerbs } from "./cli-threads";
@@ -64,6 +65,10 @@ const usage = `usage:
   yarn browser screenshot [path] | read [--ax] | console [--last N]   a PNG (prints its path), the page's text or accessibility tree, its console
   yarn browser click <selector | visible text> | type <selector | text> <text...> [--enter] | eval <js> | cdp | close   real input events; cdp prints the page's DevTools socket
   yarn browser size [phone | tablet | laptop | desktop | WxH]   set the page size (phone 390x844 mobile at 3x, tablet 768x1024, laptop 1280x800, desktop 1920x1080); no size prints the current one
+  yarn preview [--seed | --copy-live] --what '<what changed>' --try '<what to try>' [--thread ID]   from your worktree: run it as a preview for Isaac on a free port
+                                             (--copy-live: a read-only snapshot of live's threads, tasks, objectives and timelines), post the link in your thread,
+                                             and get his verdict from the preview's banner (Ship it, Needs changes, Discard) as a message; again to restart it on new code
+  yarn preview ls | yarn preview stop [name]   the previews on this machine (at most 3 run; each stops after 6h unused) | stop one and delete its state
   yarn deploy                             ship origin's feat/v2 to the live yarn: refuses a dirty live checkout or a commit whose CI check isn't green,
                                              fast-forwards, restarts, checks every session and sentry came back,
                                              and restarts the sentries whose code changed;
@@ -88,7 +93,7 @@ const shipVerbs: Verb[] = [
   { matches: (verb) => verb === "install", run: install },
 ];
 
-const VERBS: Verb[] = [...waitVerbs, ...sessionVerbs, ...boardVerbs, ...eventVerbs, ...watchVerbs, ...objectiveVerbs, ...threadVerbs, ...docVerbs, ...canvasVerbs, ...timelineVerbs, ...holdVerbs, ...browserVerbs, ...shipVerbs];
+const VERBS: Verb[] = [...waitVerbs, ...sessionVerbs, ...boardVerbs, ...eventVerbs, ...watchVerbs, ...objectiveVerbs, ...threadVerbs, ...docVerbs, ...canvasVerbs, ...timelineVerbs, ...holdVerbs, ...previewVerbs, ...browserVerbs, ...shipVerbs];
 
 const [verb, ...rest] = process.argv.slice(2);
 const chosen = VERBS.find((v) => v.matches(verb, rest));

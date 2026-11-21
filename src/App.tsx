@@ -28,6 +28,7 @@ import { PrsView } from "@/views/PrsView";
 import { TimelinesView } from "@/views/TimelinesView";
 import { BoardView } from "@/views/BoardView";
 import { Cursors } from "@/cursors/Cursors";
+import { PreviewBanner } from "@/components/PreviewBanner";
 import { CursorPlayground } from "@/cursors/Playground";
 
 export const views = [
@@ -189,7 +190,9 @@ export function App() {
       <PauseDialog />
       <RaiseDialog />
       <Cursors />
-      <div className="flex h-dvh bg-window [app-region:drag]">
+      <div className="flex h-dvh flex-col bg-window">
+      <PreviewBanner />
+      <div className="flex min-h-0 flex-1 [app-region:drag]">
         <Sidebar view={route.view} />
         <main style={{ marginTop: "max(0.5rem, env(titlebar-area-height, 0px))" }} className="mr-2 mb-2 flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-card [app-region:no-drag]">
         <div data-region="main" className="min-h-0 min-w-0 flex-1">
@@ -197,6 +200,7 @@ export function App() {
         </div>
         <ThreadPane />
         </main>
+      </div>
       </div>
     </TooltipProvider>
   );

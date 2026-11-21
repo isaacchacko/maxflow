@@ -50,6 +50,7 @@ import { keepResurfacingPausedThreads } from "./thread-pauses";
 import { keepCheckingClaudeRunsInEachAgentPane } from "./claude-check";
 import { keepGoingAheadOnUnansweredDefaults } from "./ask-defaults";
 import { websocketHandlers } from "./ws-handlers";
+import { keepSweepingPreviews, previewsRoute } from "./routes-previews";
 
 const HOST = "127.0.0.1";
 const PEER_ANSWERS_WITHIN_MS = 5000;
@@ -115,6 +116,7 @@ for (const s of sessions.values()) {
   else if (s.archived === true) void stopAgent(s);
 }
 keepGoingAheadOnUnansweredDefaults();
+keepSweepingPreviews();
 
 async function resyncAndReportFailure() {
   try {
@@ -191,6 +193,7 @@ const ROUTES: Route[] = [
   async (req, url, path) => filesRoute(req, url, path),
   async (req, url, path) => sessionRoute(req, url, path),
   async (req, url, path) => boardRoute(req, url, path),
+  async (req, url, path) => previewsRoute(req, url, path),
 ];
 
 async function answer(req: Request, server: Server<WsData>): Promise<Response | undefined> {

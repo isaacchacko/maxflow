@@ -174,7 +174,7 @@ function lineage(s: Session) {
   }
   return line;
 }
-function handedThread(s: Session): Thread | undefined {
+export function handedThread(s: Session): Thread | undefined {
   for (const { id, handed } of lineage(s)) {
     const t = openThread(live_thread(threads.find((y) => y.id === handed))) ?? threads.findLast((y) => openThread(y) !== undefined && y.routers.includes(id));
     if (t) return t;
