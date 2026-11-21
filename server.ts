@@ -29,6 +29,7 @@ import { keepPrFeedback } from "./pr-feedback";
 import { objectivesRoute } from "./routes-objectives";
 import { sessionRoute } from "./routes-session";
 import { boardRoute } from "./routes-board";
+import { isaacRoute } from "./routes-isaac";
 import { signalsRoute } from "./routes-signals";
 import { threadsRoute } from "./routes-threads";
 import { sessionsWorldRoute } from "./routes-sessions";
@@ -194,6 +195,7 @@ const ROUTES: Route[] = [
   async (req, url, path) => sessionRoute(req, url, path),
   async (req, url, path) => boardRoute(req, url, path),
   async (req, url, path) => previewsRoute(req, url, path),
+  async (req, url, path) => isaacRoute(req, url, path),
 ];
 
 async function answer(req: Request, server: Server<WsData>): Promise<Response | undefined> {

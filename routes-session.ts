@@ -18,7 +18,8 @@ import { setTranscript } from "./transcripts";
 import { patch } from "./patch";
 import { askForHandoffNote, completeHandoff, noteHandoff, successorOf } from "./handoffs";
 import { isFilled } from "./shared/guards";
-import { type Body, type Route, firstAnswer, flagOf, isFromTheBrowser, jsonBody, matching, sender, textOf, textsOf } from "./route-kit";
+import { type Body, type Route, firstAnswer, flagOf, jsonBody, matching, sender, textOf, textsOf } from "./route-kit";
+import { isaacRefusal } from "./isaac-auth";
 
 type SessionAct = (req: Request, s: Session, url: URL) => Promise<Response> | Response;
 type Typed = { text: string | undefined; isQueuedForAnIdlePrompt: boolean };
@@ -248,8 +249,8 @@ function kill(s: Session): Response {
 async function renameOrArchive(req: Request, s: Session): Promise<Response> {
   const body = await jsonBody(req);
   const isArchived = flagOf(body, "archived");
-  if (isArchived === true && !isFromTheBrowser(req))
-    return new Response(`agents don't archive themselves: run \`${CLI} wait done\` (or wait <kind>:<ref>) and end your turn`, { status: 403 });
+  const refused = isArchived === true ? isaacRefusal(req, `archives sessions; agents don't archive themselves: run \`${CLI} wait done\` (or wait <kind>:<ref>) and end your turn`) : undefined;
+  if (refused) return refused;
   if (isArchived !== undefined) setArchived(s, isArchived);
   const isUnarchivedByHandAwakeUntilItsNextTurnEnds = isArchived === false;
   if (isUnarchivedByHandAwakeUntilItsNextTurnEnds) wake(s);

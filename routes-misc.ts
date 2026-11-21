@@ -8,7 +8,7 @@ import { type Session, isSentry, sessions } from "./sessions";
 import type { Block, Thread } from "./model";
 import { names, saveThreads, threads } from "./stores";
 import { createSession, isReachable, live_thread, routersOf } from "./lifecycle";
-import { ask, enforcing, postIn, sessionless } from "./threads";
+import { ask, enforcing, postIn, refusalOf, sessionless } from "./threads";
 import { describe } from "./world-session";
 import { externalSignal, feedMore } from "./routing";
 import { doesPointAtItself, relayRefusal } from "./objectives";
@@ -20,10 +20,12 @@ import { pageOf } from "./pages";
 import { isFilled, isRecord } from "./shared/guards";
 import { callOf } from "./restriction-draft";
 import { feedPostsOf } from "./feed-body";
-import { type Body, type Route, exactly, firstAnswer, flagOf, isFromTheBrowser, jsonBody, matching, sender, textOf } from "./route-kit";
+import { isaacRefusal } from "./isaac-auth";
+import { type Body, type Route, exactly, firstAnswer, flagOf, jsonBody, matching, sender, textOf } from "./route-kit";
 
 async function reorderPinsAsHeDraggedThem(req: Request): Promise<Response> {
-  if (!isFromTheBrowser(req)) return new Response("pins are Isaac's, from the browser", { status: 403 });
+  const refused = isaacRefusal(req, "orders his pins");
+  if (refused) return refused;
   const asked = (await jsonBody(req))["order"];
   const order: unknown[] | undefined = Array.isArray(asked) ? asked : undefined;
   if (order === undefined) return new Response("order: the pinned thread ids, first to last", { status: 400 });
@@ -64,7 +66,7 @@ async function postInThread(req: Request, _url: URL, match: RegExpExecArray): Pr
   const from = sender(req);
   if (from) return postFromASession(t, from, asked, body);
   const outside = sessionless(req, textOf(body, "as"));
-  if ("refusal" in outside) return new Response(outside.refusal, { status: 403 });
+  if ("refusal" in outside) return refusalOf(outside);
   postIn(t, "label" in outside ? outside.label : undefined, text, nudgeOf(body));
   return Response.json(t, { status: 201 });
 }

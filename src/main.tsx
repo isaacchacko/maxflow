@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { startLive } from "./live";
 import { loadLocalMock } from "./store";
+import { installIsaacFetch } from "./lib/isaac";
 
 // constraint: Bun's HTML bundler would bundle a manifest linked from index.html, so it is linked here, before the awaits
 document.head.append(Object.assign(document.createElement("link"), { rel: "manifest", href: "/manifest.webmanifest" }));
@@ -15,6 +16,7 @@ async function registerServiceWorker() {
   }
 }
 void registerServiceWorker();
+installIsaacFetch();
 
 await startLive();
 await loadLocalMock();

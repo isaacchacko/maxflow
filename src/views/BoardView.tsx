@@ -14,6 +14,8 @@ const PREVIEW_CHARS = 220;
 const MESSAGE_PREFIX = "@";
 const AGENT_CHANNEL = /^yarn\/agent\/([\w-]+)$/;
 const AGENT_PROFILE = /(?:^|\/)yarn-([0-9a-f]{8})$/;
+const TEST_CHANNEL = /^(?:conformance(?:\/|$)|yarn\/probe$)/;
+const isTestChannel = (path: string) => TEST_CHANNEL.test(path);
 
 const goTo = (path: string) => `#board/${encodeURI(path)}`;
 const goToMessage = (id: string) => goTo(`${MESSAGE_PREFIX}${id}`);
@@ -59,7 +61,7 @@ function ChannelEntry({ node, depth, selected }: { node: Node; depth: number; se
 }
 
 function TreeNode({ node, depth, selected }: { node: Node; depth: number; selected: string | undefined }) {
-  const [isOpen, setOpen] = useState(node.path !== "yarn/agent" && node.path !== "conformance");
+  const [isOpen, setOpen] = useState(node.path !== "yarn/agent");
   if (node.children.length === 0) return <ChannelEntry node={node} depth={depth} selected={selected} />;
   const Chevron = isOpen ? ChevronDown : ChevronRight;
   return (
@@ -224,7 +226,9 @@ export function BoardView({ path }: { path: string | undefined }) {
   const index = useResource(CHANNELS_KEY, loadChannels);
   const [typed, setTyped] = useState("");
   const q = useSettled(typed.trim(), SEARCH_SETTLE_MS);
-  const channels = index.value?.channels ?? [];
+  const [isShowingTests, setShowingTests] = useState(false);
+  const all = index.value?.channels ?? [];
+  const channels = isShowingTests ? all : all.filter(c => !isTestChannel(c.path));
   return (
     <div className="flex h-full min-h-0" data-agent="board">
       <aside className="flex w-72 shrink-0 flex-col border-r">
@@ -243,6 +247,10 @@ export function BoardView({ path }: { path: string | undefined }) {
           {index.error && <p className="px-2 text-sm text-destructive">{index.error.message}</p>}
           {treeOf(channels).children.map(n => <TreeNode key={n.path} node={n} depth={0} selected={path} />)}
         </nav>
+        <label className="flex items-center gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
+          <input type="checkbox" checked={isShowingTests} onChange={e => setShowingTests(e.target.checked)} data-agent="board:show-tests" />
+          Show test channels ({all.length - all.filter(c => !isTestChannel(c.path)).length})
+        </label>
       </aside>
       <Main path={path} q={q} />
     </div>

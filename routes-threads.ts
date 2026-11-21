@@ -5,14 +5,15 @@ import { type Session, isSentry } from "./sessions";
 import type { Feed, Message, Objective, Thread } from "./model";
 import { isLive, objectives, saveThreads, threads } from "./stores";
 import { dispatch, funnel, live_thread, routersOf } from "./lifecycle";
-import { ISAAC_IN_THREAD, ancestors, markDone, mentionsIn, message, pathTitle, postIn, schedulePause, sessionless, squash, tellMembers, unforge, unpause } from "./threads";
+import { ISAAC_IN_THREAD, ancestors, markDone, mentionsIn, message, pathTitle, postIn, refusalOf, schedulePause, sessionless, squash, tellMembers, unforge, unpause } from "./threads";
 import { feedPosts, feedToFunnel, sizeFirst, slackChannels } from "./routing";
 import { mergeThread, subthread, titleOf } from "./objectives";
 import { patch } from "./patch";
 import { areOwnersOn } from "./owners";
 import { isFilled, isRecord } from "./shared/guards";
 import { feedOf, feedPostsOf } from "./feed-body";
-import { type Body, type Route, exactly, firstAnswer, isFromTheBrowser, jsonBody, matching, sender, textOf, textsOf } from "./route-kit";
+import { type Body, type Route, exactly, firstAnswer, jsonBody, matching, sender, textOf, textsOf } from "./route-kit";
+import { isaacRefusal } from "./isaac-auth";
 
 type Paused = NonNullable<Thread["paused"]>;
 
@@ -96,7 +97,7 @@ async function threadFromASession(from: Session, text: string, body: Body): Prom
 
 function threadFromOutsideAnySession(req: Request, text: string, body: Body): Response {
   const outside = text === "" ? undefined : sessionless(req, textOf(body, "as"));
-  if (outside !== undefined && "refusal" in outside) return new Response(outside.refusal, { status: 403 });
+  if (outside !== undefined && "refusal" in outside) return refusalOf(outside);
   const parent = body["parent"];
   if (isRecord(parent)) return firstReplyInASubthread(parent, text, outside !== undefined && "label" in outside ? outside.label : undefined);
   return outside !== undefined && "isaac" in outside ? hisInboxMessageForTheFunnelToRoute(text) : threadInAnObjective(undefined, body);
@@ -278,7 +279,8 @@ async function isaacsOwnThreadEditFromTheBrowser(req: Request, _url: URL, match:
   if (req.method !== "PATCH") return undefined;
   const t = threadAt(match);
   if (!t) return new Response("no such thread", { status: 404 });
-  if (!isFromTheBrowser(req)) return new Response("resolving or pausing a thread is Isaac's, from the browser: answer in it and leave it to him", { status: 403 });
+  const refused = isaacRefusal(req, "resolves, pauses or pins a thread; answer in it and leave that to him");
+  if (refused) return refused;
   const body = await jsonBody(req);
   if (Object.hasOwn(body, "pinned")) return pinAtTheEndOfHisPins(t, body["pinned"]);
   if (Object.hasOwn(body, "paused")) return pauseOrUnpause(t, body["paused"]);

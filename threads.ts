@@ -8,6 +8,7 @@ import type { Message, Thread } from "./model";
 import { isLive, names, objectives, saveThreads, threads } from "./stores";
 import { DEFAULT_AFTER_H } from "./intro";
 import { patch } from "./patch";
+import { isIsaacsBrowser, NEEDS_HEADER } from "./isaac-auth";
 import { isFilled } from "./shared/guards";
 import { dispatch, endWait, funnel, live_thread, newerRouterOnScope, isReachable, routersOf, settleTasks, threadOf } from "./lifecycle";
 
@@ -144,10 +145,13 @@ function postMessage(t: Thread, post: Post) {
 }
 export const postIn = (t: Thread, from: Session | string | undefined, text: string, nudge?: "subthread") =>
   postMessage(t, typeof from === "string" ? { outsideLabel: from, text, nudge } : { from, text, nudge });
-export function sessionless(req: Request, as: string | undefined): { label: string } | { isaac: true } | { refusal: string } {
+type Refusal = { refusal: string; signIn?: true };
+export const refusalOf = (r: Refusal) => new Response(r.refusal, { status: r.signIn ? 401 : 403, headers: r.signIn ? { [NEEDS_HEADER]: "sign-in" } : {} });
+export function sessionless(req: Request, as: string | undefined): { label: string } | { isaac: true } | Refusal {
   if (as !== undefined) return /^[\w.-]+\/[\w.-]+$/.test(as) ? { label: as } : { refusal: `--as takes <device>/<name>, like cleopatra/yarn-browser, not "${as}"` };
   const claimed = callerOf(req);
-  if (claimed === "" && req.headers.get("sec-fetch-site") === "same-origin") return { isaac: true };
+  if (claimed === "" && isIsaacsBrowser(req)) return { isaac: true };
+  if (claimed === "" && req.headers.get("sec-fetch-site") === "same-origin") return { refusal: "only Isaac posts as himself: sign in with his passkey first", signIn: true };
   const unknown = claimed === "" ? "No YARN_SESSION came with this post" : `YARN_SESSION=${claimed} is no live session`;
   return { refusal: `${unknown}, and only Isaac's browser posts as him. Set YARN_SESSION to your yarn session id, or post as --as <device>/<name>.` };
 }

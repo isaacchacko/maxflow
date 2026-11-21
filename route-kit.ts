@@ -64,7 +64,5 @@ export const expandHome = (path: string) => path.replace(/^~(?=\/|$)/, () => hom
 
 export const sender = (req: Request) => sessions.get(callerOf(req));
 
-export const isFromTheBrowser = (req: Request) => req.headers.get("user-agent")?.includes("Mozilla") === true;
 
-// constraint: an agent's request carries x-yarn-from, and only a page the server served sends same-origin; Isaac-only actions (merging a PR) check both
-export const isIsaacsBrowser = (req: Request) => callerOf(req) === "" && req.headers.get("sec-fetch-site") === "same-origin";
+export { isIsaacsBrowser } from "./isaac-auth";

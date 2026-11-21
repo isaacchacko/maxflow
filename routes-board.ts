@@ -2,7 +2,8 @@ import { type BoardPost, boardUrl, handOver, postAsIsaac, postedBy, readBoard, r
 import { isRecord } from "./shared/guards";
 import { worldClients } from "./world";
 import { isSentry } from "./sessions";
-import { type Route, exactly, firstAnswer, isIsaacsBrowser, jsonBody, sender, textOf } from "./route-kit";
+import { type Route, exactly, firstAnswer, jsonBody, sender, textOf } from "./route-kit";
+import { isaacRefusal } from "./isaac-auth";
 
 const orUnknown = (value = "?") => value;
 
@@ -77,7 +78,8 @@ async function thread(url: URL): Promise<Response> {
 }
 
 async function postFromHisBrowser(req: Request): Promise<Response> {
-  if (!isIsaacsBrowser(req)) return new Response("only Isaac, from his browser, posts as himself", { status: 403 });
+  const refused = isaacRefusal(req, "posts on the board as himself");
+  if (refused) return refused;
   const body = await jsonBody(req);
   const [channel, re, text] = [textOf(body, "channel"), textOf(body, "re"), textOf(body, "text")?.trim()];
   if (channel === undefined || text === undefined || text === "") return new Response("channel and text required", { status: 400 });

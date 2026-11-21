@@ -1,11 +1,13 @@
 import { mergeGate, setMergeGate } from "./merge-gate";
 import { prRows } from "./prs";
-import { type Route, exactly, firstAnswer, flagOf, isIsaacsBrowser, jsonBody, textOf } from "./route-kit";
+import { type Route, exactly, firstAnswer, flagOf, jsonBody, textOf } from "./route-kit";
+import { isaacRefusal } from "./isaac-auth";
 
 const PR_KEY = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
 
 async function mergeAsIsaac(req: Request): Promise<Response> {
-  if (!isIsaacsBrowser(req)) return new Response("only Isaac merges, from the PR view", { status: 403 });
+  const refused = isaacRefusal(req, "merges", true);
+  if (refused) return refused;
   const key = textOf(await jsonBody(req), "pr") ?? "";
   const [, repo = "", n = ""] = PR_KEY.exec(key) ?? [];
   const isListed = prRows().some((r) => r.pr === key && r.ended === null);
@@ -16,7 +18,8 @@ async function mergeAsIsaac(req: Request): Promise<Response> {
 }
 
 async function flipTheGate(req: Request): Promise<Response> {
-  if (!isIsaacsBrowser(req)) return new Response("only Isaac flips the merge gate, from his browser", { status: 403 });
+  const refused = isaacRefusal(req, "flips the merge gate", true);
+  if (refused) return refused;
   const on = flagOf(await jsonBody(req), "on");
   return on === undefined ? new Response("on: true or false", { status: 400 }) : Response.json(setMergeGate(on));
 }
