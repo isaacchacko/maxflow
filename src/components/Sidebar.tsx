@@ -1,4 +1,4 @@
-import { CircleCheckBig, FileText, GitPullRequest, Globe, History, MessagesSquare, ShieldCheck, X, type LucideIcon } from "lucide-react";
+import { CircleCheckBig, FileText, GitPullRequest, Globe, History, MessagesSquare, Radio, ShieldCheck, X, type LucideIcon } from "lucide-react";
 import { AgentFace, type Expression } from "@/components/AgentFace";
 import { Dots } from "@/components/Working";
 import type { Thread } from "@/mock";
@@ -220,6 +220,7 @@ export function Sidebar({ view }: { view: string }) {
           <Entry view="inbox" label="Threads" icon={MessagesSquare} count={unread} active={view === "inbox"} open={isOpen} />
           <Entry view="prs" label="PRs" icon={GitPullRequest} count={readyToMerge} warn active={view === "prs"} open={isOpen} />
           <Entry view="timelines" label="Timelines" icon={History} count={0} active={view === "timelines"} open={isOpen} />
+          <Entry view="board" label="Board" icon={Radio} count={0} active={view === "board"} open={isOpen} />
           <Entry view="docs" label="Docs" icon={FileText} count={0} active={view === "docs"} open={isOpen} />
           <Entry view="browsers" label="Browsers" icon={Globe} count={browsing} active={view === "browsers"} open={isOpen} />
           <Entry view="restrictions" label="Restrictions" icon={ShieldCheck} count={0} active={view === "restrictions"} open={isOpen} />

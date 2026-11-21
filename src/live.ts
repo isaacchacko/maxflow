@@ -6,6 +6,7 @@ import { isRecord } from "../shared/guards";
 import { cursorFrom, fireCursor } from "./cursors/store";
 import { canvasChanged } from "./views/docs/canvas-api";
 import { timelinesChanged } from "./views/timelines/api";
+import { boardChanged } from "./views/board/api";
 import { claim, heldKeys, isHeld, onLand, onRelease } from "./cursors/holds";
 import { reloadResource } from "@/lib/effects";
 
@@ -163,7 +164,8 @@ function isSideMessage(m: unknown) {
   if (cursor) fireCursor(cursor);
   if (m["type"] === "canvas" && typeof m["path"] === "string") canvasChangedWhenItsCursorLands(m["path"], m["claimed"] === true);
   if (m["type"] === "timelines") timelinesChanged();
-  return cursor !== undefined || m["type"] === "canvas" || m["type"] === "timelines";
+  if (m["type"] === "board") boardChanged();
+  return cursor !== undefined || m["type"] === "canvas" || m["type"] === "timelines" || m["type"] === "board";
 }
 
 function onWorldMessage(ws: WebSocket, e: MessageEvent) {

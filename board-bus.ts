@@ -18,9 +18,10 @@ const SENT_KEPT = 500;
 export const agentChannel = (id: string) => `yarn/agent/${id}`;
 export const threadChannel = (id: string) => `yarn/thread/${id}`;
 // constraint: a board profile is a letter, then up to 31 letters, numbers or hyphens
+export const ISAAC_PROFILE = "isaac";
 export const profileOf = (s: Session | undefined) => (s ? `yarn-${s.id}` : "yarn");
 
-type Sent = { to?: string; from?: string; text: string; deliver?: string; at: number; delivered: boolean };
+type Sent = { to?: string; from?: string; text: string; deliver?: string; at: number; delivered: boolean; isIsaac?: true };
 type SentLog = Record<string, Sent>;
 const isSentLog = (value: unknown): value is SentLog => isRecord(value);
 const sent: SentLog = readStateJson(SENT_FILE, isSentLog) ?? {};
@@ -41,7 +42,7 @@ type Posted = { id: string } | { error: string };
 // constraint: the sentry can see a post before this server has recorded it, and must not take it for someone else's
 const inFlight = { posts: 0 };
 
-async function postToBoard(body: Record<string, unknown>, as: Session | undefined): Promise<Posted> {
+async function postToBoard(body: Record<string, unknown>, as: Session | "isaac" | undefined): Promise<Posted> {
   inFlight.posts += 1;
   try {
     return await postAndRead(body, as);
@@ -50,11 +51,11 @@ async function postToBoard(body: Record<string, unknown>, as: Session | undefine
   }
 }
 
-async function postAndRead(body: Record<string, unknown>, as: Session | undefined): Promise<Posted> {
+async function postAndRead(body: Record<string, unknown>, as: Session | "isaac" | undefined): Promise<Posted> {
   const url = boardUrl();
   if (url === undefined) return { error: `no board configured (${AGENT_BOARD_CONFIG} in yarn's state folder)` };
   try {
-    const res = await fetch(`${url}/messages`, { method: "POST", headers: { "content-type": "application/json", "x-board-profile": profileOf(as) }, body: JSON.stringify(body), signal: AbortSignal.timeout(POST_MS) });
+    const res = await fetch(`${url}/messages`, { method: "POST", headers: { "content-type": "application/json", "x-board-profile": as === "isaac" ? ISAAC_PROFILE : profileOf(as) }, body: JSON.stringify(body), signal: AbortSignal.timeout(POST_MS) });
     if (!res.ok) return { error: `board answered ${String(res.status)}: ${(await res.text()).slice(0, 200)}` };
     const reply: unknown = await res.json();
     const id = isRecord(reply) && isRecord(reply["message"]) ? reply["message"]["id"] : undefined;
@@ -69,7 +70,7 @@ const isOpen = (t: Thread) => t.mergedInto === undefined && t.resolved === undef
 const FELL_BACK = `\n[yarn] The board didn't hand this over within ${String(SENTRY_GRACE_MS / 1000)}s, so it came directly.`;
 
 function typeInto(to: Session, from: Session | undefined, record: Sent, isDirect: boolean) {
-  dispatch({ ...(from && { from }), to: [to], text: record.text, deliver: `${record.deliver ?? record.text}${isDirect ? FELL_BACK : ""}` });
+  dispatch({ ...(from && { from }), ...(record.isIsaac && { source: "isaac" as const }), to: [to], text: record.text, deliver: `${record.deliver ?? record.text}${isDirect ? FELL_BACK : ""}` });
   if (from && isWaitingOn(to, from.id)) endWait(to);
 }
 
@@ -153,4 +154,38 @@ export function handOver(p: BoardPost): string {
   if (!t) return "not a channel for this yarn";
   deliverToThread(p, t);
   return "handed to the thread owner unverified";
+}
+
+export async function readBoard(path: string, timeoutMs = POST_MS * 2): Promise<{ body: unknown } | { error: string }> {
+  const url = boardUrl();
+  if (url === undefined) return { error: `no board configured (${AGENT_BOARD_CONFIG} in yarn's state folder)` };
+  try {
+    const res = await fetch(`${url}${path}`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return { error: `board answered ${String(res.status)}: ${(await res.text()).slice(0, 200)}` };
+    const body: unknown = await res.json();
+    return { body };
+  } catch (error) {
+    return { error: `board unreachable: ${String(error)}` };
+  }
+}
+
+// constraint: who wrote a message is known only for what this server posted; the board's profile is the poster's own word
+export const postedBy = (ids: string[]) => Object.fromEntries(ids.flatMap((id) => {
+  const record = sent[id];
+  if (!record) return [];
+  return [[id, record.isIsaac ? "isaac" : (record.from ?? "yarn")]];
+}));
+
+const AGENT_CHANNEL = /^yarn\/agent\/([\w-]+)$/;
+const isaacSaid = (id: string, channel: string, text: string) =>
+  `[yarn · Isaac, on the agent board, message ${id} in ${channel}] ${text}\n[yarn] He wrote this in yarn's Board tab and reads the answer there: reply on the board with \`${CLI} board reply ${id} '<text>'\`.`;
+
+export async function postAsIsaac(where: { channel: string } | { re: string; channel: string }, text: string): Promise<Carried> {
+  const posted = await postToBoard({ ...where, text }, "isaac");
+  if ("error" in posted) return { via: "direct", error: posted.error };
+  const to = AGENT_CHANNEL.exec(where.channel)?.[1];
+  const agent = sessions.get(to ?? "");
+  const isForAnAgent = agent !== undefined && isReachable(agent);
+  keep(posted.id, { ...(isForAnAgent && { to: agent.id, deliver: isaacSaid(posted.id, where.channel, text) }), text, at: Date.now(), delivered: !isForAnAgent, isIsaac: true });
+  return { via: "board", id: posted.id };
 }

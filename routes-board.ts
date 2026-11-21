@@ -1,6 +1,8 @@
-import { type BoardPost, handOver, replyOnBoard } from "./board-bus";
+import { type BoardPost, boardUrl, handOver, postAsIsaac, postedBy, readBoard, replyOnBoard } from "./board-bus";
+import { isRecord } from "./shared/guards";
+import { worldClients } from "./world";
 import { isSentry } from "./sessions";
-import { type Route, exactly, firstAnswer, jsonBody, sender, textOf } from "./route-kit";
+import { type Route, exactly, firstAnswer, isIsaacsBrowser, jsonBody, sender, textOf } from "./route-kit";
 
 const orUnknown = (value = "?") => value;
 
@@ -22,6 +24,94 @@ async function replyAsTheCaller(req: Request): Promise<Response> {
   return carried.via === "board" ? Response.json(carried) : new Response(carried.error, { status: 502 });
 }
 
-const ROUTES: Route[] = [exactly("POST", "/api/board-bus/deliver", handOverFromTheSentry), exactly("POST", "/api/board-bus/reply", replyAsTheCaller)];
+const CHANNEL_PAGES = 20;
+const THREADS_SHOWN = "60";
+const REPLIES_SHOWN = "200";
+const LIVE_WAIT_S = 25;
+const LIVE_BACKOFF_MS = 15_000;
+
+const answered = (read: { body: unknown } | { error: string }) => ("error" in read ? new Response(read.error, { status: 502 }) : Response.json(read.body));
+
+async function channels(): Promise<Response> {
+  const all: unknown[] = [];
+  let after = "";
+  for (let page = 0; page < CHANNEL_PAGES; page += 1) {
+    const read = await readBoard(`/channels?limit=500${after === "" ? "" : `&after=${encodeURIComponent(after)}`}`);
+    if ("error" in read) return answered(read);
+    const listed = isRecord(read.body) && Array.isArray(read.body["channels"]) ? read.body["channels"] : [];
+    all.push(...listed);
+    const next = isRecord(read.body) ? read.body["next"] : null;
+    if (typeof next !== "string" || next === "") break;
+    after = next;
+  }
+  return Response.json({ channels: all });
+}
+
+const idsIn = (messages: unknown[]) => messages.flatMap((m) => (isRecord(m) && typeof m["id"] === "string" ? [m["id"]] : []));
+const rootsOf = (threads: unknown[]) => threads.map((x) => (isRecord(x) ? x["message"] : undefined));
+
+async function threads(url: URL): Promise<Response> {
+  const query = new URLSearchParams({ limit: THREADS_SHOWN });
+  for (const [key, as] of [["channel", "channel"], ["q", "text"], ["older", "before"]] as const) {
+    const value = url.searchParams.get(key);
+    if (value !== null && value !== "") query.set(as, value);
+  }
+  const read = await readBoard(`/threads?${query.toString()}`);
+  if ("error" in read) return answered(read);
+  const listed = isRecord(read.body) && Array.isArray(read.body["threads"]) ? read.body["threads"] : [];
+  return Response.json({ ...(isRecord(read.body) && read.body), yarn: postedBy(idsIn(rootsOf(listed))) });
+}
+
+async function thread(url: URL): Promise<Response> {
+  const id = url.searchParams.get("id") ?? "";
+  if (!/^[\w-]+$/.test(id)) return new Response("id required", { status: 400 });
+  const read = await readBoard(`/messages/${id}?limit=${REPLIES_SHOWN}`);
+  if ("error" in read || !isRecord(read.body)) return answered(read);
+  const replies = Array.isArray(read.body["replies"]) ? read.body["replies"] : [];
+  return Response.json({ ...read.body, yarn: postedBy(idsIn([read.body["message"], ...replies])) });
+}
+
+async function postFromHisBrowser(req: Request): Promise<Response> {
+  if (!isIsaacsBrowser(req)) return new Response("only Isaac, from his browser, posts as himself", { status: 403 });
+  const body = await jsonBody(req);
+  const [channel, re, text] = [textOf(body, "channel"), textOf(body, "re"), textOf(body, "text")?.trim()];
+  if (channel === undefined || text === undefined || text === "") return new Response("channel and text required", { status: 400 });
+  const carried = await postAsIsaac(re === undefined ? { channel } : { re, channel }, text);
+  return carried.via === "board" ? Response.json(carried) : new Response(carried.error, { status: 502 });
+}
+
+function sayBoardChanged(event: unknown) {
+  const message = isRecord(event) && isRecord(event["message"]) ? event["message"] : {};
+  const said = JSON.stringify({ type: "board", channel: message["channel"] ?? null, thread: message["thread"] ?? null });
+  for (const ws of worldClients) ws.sendText(said);
+}
+
+async function followTheBoardForTheTab() {
+  let cursor = "";
+  for (;;) {
+    if (boardUrl() === undefined) {
+      await Bun.sleep(LIVE_BACKOFF_MS);
+      continue;
+    }
+    const read = await readBoard(cursor === "" ? "/events?last=1" : `/events?after=${encodeURIComponent(cursor)}&wait=${String(LIVE_WAIT_S)}`, (LIVE_WAIT_S + 10) * 1000);
+    if ("error" in read || !isRecord(read.body)) {
+      await Bun.sleep(LIVE_BACKOFF_MS);
+      continue;
+    }
+    const events = Array.isArray(read.body["events"]) ? read.body["events"] : [];
+    if (cursor !== "") for (const event of events) sayBoardChanged(event);
+    cursor = typeof read.body["cursor"] === "string" ? read.body["cursor"] : cursor;
+  }
+}
+void followTheBoardForTheTab();
+
+const ROUTES: Route[] = [
+  exactly("POST", "/api/board-bus/deliver", handOverFromTheSentry),
+  exactly("POST", "/api/board-bus/reply", replyAsTheCaller),
+  exactly("GET", "/api/board/channels", channels),
+  exactly("GET", "/api/board/threads", async (_req, url) => threads(url)),
+  exactly("GET", "/api/board/thread", async (_req, url) => thread(url)),
+  exactly("POST", "/api/board/post", postFromHisBrowser),
+];
 
 export const boardRoute = async (req: Request, url: URL, path: string) => firstAnswer(ROUTES, req, url, path);
