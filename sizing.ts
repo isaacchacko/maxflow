@@ -158,7 +158,7 @@ function sizeFyi(record: SizeRecord, body: SizeBody) {
 }
 
 const isSize = (value: unknown): value is Size => SIZES.some((s) => s === value);
-const isRetiredWithOwners = (size: Size) => areOwnersOn() && (size === "direct" || size === "area");
+const isRetiredWithOwners = (asked: Size) => areOwnersOn() && (asked === "direct" || asked === "area");
 
 async function size(seq: number, body: SizeBody) {
   const thread = threads.find((t) => t.signal === seq);

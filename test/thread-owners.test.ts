@@ -25,7 +25,10 @@ async function send(path: string, body: object, from?: string) {
   return await fetch(`${instance.base}${path}`, withTimeout({ method: "POST", headers: from === undefined ? {} : { "x-yarn-from": from }, body: JSON.stringify(body) }));
 }
 const json = async <T>(res: Response) => (await res.json()) as T;
-const agent = async (id: string) => (await json<Agent[]>(await fetch(`${instance.base}/api/sessions`, withTimeout()))).find((s) => s.id === id);
+async function agent(id: string) {
+  const all = await json<Agent[]>(await fetch(`${instance.base}/api/sessions`, withTimeout()));
+  return all.find((s) => s.id === id);
+}
 const signal = async (text: string) => (await json<{ seq: number }>(await send("/api/signals", { text }))).seq;
 
 describe("thread owners (docs: yarn/thread-owners.md)", () => {
