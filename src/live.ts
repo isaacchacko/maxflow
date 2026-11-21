@@ -164,7 +164,7 @@ function isSideMessage(m: unknown) {
   if (cursor) fireCursor(cursor);
   if (m["type"] === "canvas" && typeof m["path"] === "string") canvasChangedWhenItsCursorLands(m["path"], m["claimed"] === true);
   if (m["type"] === "timelines") timelinesChanged();
-  if (m["type"] === "board") boardChanged();
+  else if (m["type"] === "board") boardChanged();
   return cursor !== undefined || m["type"] === "canvas" || m["type"] === "timelines" || m["type"] === "board";
 }
 

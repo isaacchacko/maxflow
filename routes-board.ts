@@ -38,8 +38,8 @@ async function channels(): Promise<Response> {
   for (let page = 0; page < CHANNEL_PAGES; page += 1) {
     const read = await readBoard(`/channels?limit=500${after === "" ? "" : `&after=${encodeURIComponent(after)}`}`);
     if ("error" in read) return answered(read);
-    const listed = isRecord(read.body) && Array.isArray(read.body["channels"]) ? read.body["channels"] : [];
-    all.push(...listed);
+    const listed: unknown = isRecord(read.body) ? read.body["channels"] : undefined;
+    if (Array.isArray(listed)) for (const channel of listed as unknown[]) all.push(channel);
     const next = isRecord(read.body) ? read.body["next"] : null;
     if (typeof next !== "string" || next === "") break;
     after = next;
@@ -47,8 +47,9 @@ async function channels(): Promise<Response> {
   return Response.json({ channels: all });
 }
 
-const idsIn = (messages: unknown[]) => messages.flatMap((m) => (isRecord(m) && typeof m["id"] === "string" ? [m["id"]] : []));
-const rootsOf = (threads: unknown[]) => threads.map((x) => (isRecord(x) ? x["message"] : undefined));
+const idOf = (m: unknown) => (isRecord(m) && typeof m["id"] === "string" ? m["id"] : undefined);
+const idsIn = (messages: unknown[]) => messages.map(idOf).filter((id) => id !== undefined);
+const rootsOf = (listed: unknown[]) => listed.map((x) => (isRecord(x) ? x["message"] : undefined));
 
 async function threads(url: URL): Promise<Response> {
   const query = new URLSearchParams({ limit: THREADS_SHOWN });
@@ -58,8 +59,10 @@ async function threads(url: URL): Promise<Response> {
   }
   const read = await readBoard(`/threads?${query.toString()}`);
   if ("error" in read) return answered(read);
-  const listed = isRecord(read.body) && Array.isArray(read.body["threads"]) ? read.body["threads"] : [];
-  return Response.json({ ...(isRecord(read.body) && read.body), yarn: postedBy(idsIn(rootsOf(listed))) });
+  const listed: unknown = isRecord(read.body) ? read.body["threads"] : undefined;
+  const roots = rootsOf(Array.isArray(listed) ? (listed as unknown[]) : []);
+  const yarn = postedBy(idsIn(roots));
+  return Response.json({ ...(isRecord(read.body) && read.body), yarn });
 }
 
 async function thread(url: URL): Promise<Response> {
@@ -67,8 +70,10 @@ async function thread(url: URL): Promise<Response> {
   if (!/^[\w-]+$/.test(id)) return new Response("id required", { status: 400 });
   const read = await readBoard(`/messages/${id}?limit=${REPLIES_SHOWN}`);
   if ("error" in read || !isRecord(read.body)) return answered(read);
-  const replies = Array.isArray(read.body["replies"]) ? read.body["replies"] : [];
-  return Response.json({ ...read.body, yarn: postedBy(idsIn([read.body["message"], ...replies])) });
+  const replies: unknown = read.body["replies"];
+  const messages: unknown[] = [read.body["message"]];
+  if (Array.isArray(replies)) for (const reply of replies as unknown[]) messages.push(reply);
+  return Response.json({ ...read.body, yarn: postedBy(idsIn(messages)) });
 }
 
 async function postFromHisBrowser(req: Request): Promise<Response> {

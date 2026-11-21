@@ -75,18 +75,28 @@ function TreeNode({ node, depth, selected }: { node: Node; depth: number; select
   );
 }
 
+const handleOf = (m: BoardMessage) => m.author?.handle ?? m.by?.actor ?? "?";
+const deviceOf = (m: BoardMessage) => m.author?.via?.name ?? handleOf(m).split("/", 1)[0] ?? "";
+const agentOf = (m: BoardMessage, vouched: string | undefined) => (vouched === undefined || vouched === "yarn" ? AGENT_PROFILE.exec(handleOf(m))?.[1] : vouched);
+const isClaimedName = (m: BoardMessage, agent: string | undefined) => agent !== undefined || m.author?.name === "isaac";
+
+function Unverified() {
+  return (
+    <span className="rounded border px-1 text-[10px] text-muted-foreground uppercase" title="posted straight onto the board: the name is the poster's own word">
+      unverified
+    </span>
+  );
+}
+
 function Author({ m, yarn }: { m: BoardMessage; yarn: Vouched }) {
-  const handle = m.author?.handle ?? m.by?.actor ?? "?";
-  const device = m.author?.via?.name ?? handle.split("/")[0] ?? "";
   const vouched = yarn[m.id];
   if (vouched === "isaac") return <span className="font-semibold text-foreground" title="you, from yarn's Board tab">you</span>;
-  const agent = vouched !== undefined && vouched !== "yarn" ? vouched : AGENT_PROFILE.exec(handle)?.[1];
-  const isUnvouched = vouched === undefined;
+  const agent = agentOf(m, vouched);
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
-      {agent === undefined ? <span className="font-medium text-foreground">{m.author?.name ?? handle}</span> : <RefChip r={{ kind: "agent", id: agent }} />}
-      <span className="text-xs text-muted-foreground">via {device}</span>
-      {isUnvouched && (agent !== undefined || m.author?.name === "isaac") && <span className="rounded border px-1 text-[10px] text-muted-foreground uppercase" title="posted straight onto the board: the name is the poster's own word">unverified</span>}
+      {agent === undefined ? <span className="font-medium text-foreground">{m.author?.name ?? handleOf(m)}</span> : <RefChip r={{ kind: "agent", id: agent }} />}
+      <span className="text-xs text-muted-foreground">via {deviceOf(m)}</span>
+      {vouched === undefined && isClaimedName(m, agent) && <Unverified />}
     </span>
   );
 }
@@ -108,24 +118,26 @@ function MessageCard({ m, yarn }: { m: BoardMessage; yarn: Vouched }) {
 function Composer({ channel, re, placeholder }: { channel: string; re?: string; placeholder: string }) {
   const [text, setText] = useState("");
   const [state, setState] = useState<{ isSending: boolean; error?: string }>({ isSending: false });
-  const send = async () => {
+  const send = () => {
     if (text.trim() === "") return;
     setState({ isSending: true });
-    try {
-      await postAsHim({ channel, ...(re !== undefined && { re }), text: text.trim() });
-      setText("");
-      setState({ isSending: false });
-    } catch (error) {
-      setState({ isSending: false, error: String(error) });
-    }
+    postAsHim({ channel, ...(re !== undefined && { re }), text: text.trim() })
+      .then(() => {
+        setText("");
+        setState({ isSending: false });
+      })
+      .catch((error: unknown) => {
+        setState({ isSending: false, error: String(error) });
+      });
   };
+  const label = re === undefined ? "Post" : "Reply";
   return (
     <div className="space-y-1.5 rounded-md border p-2" data-agent="board:composer">
       <textarea
         value={text}
         onChange={e => setText(e.target.value)}
         onKeyDown={e => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send();
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();
         }}
         placeholder={placeholder}
         rows={3}
@@ -134,8 +146,8 @@ function Composer({ channel, re, placeholder }: { channel: string; re?: string; 
       <div className="flex items-center gap-2">
         <span className="text-xs text-muted-foreground">Posts as you (isaac), from this browser only</span>
         {hasText(state.error) && <span className="truncate text-xs text-destructive">{state.error}</span>}
-        <button type="button" onClick={() => void send()} disabled={state.isSending || text.trim() === ""} className="ml-auto rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50">
-          {state.isSending ? "Posting…" : re === undefined ? "Post" : "Reply"}
+        <button type="button" onClick={send} disabled={state.isSending || text.trim() === ""} className="ml-auto rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-50">
+          {state.isSending ? "Posting…" : label}
         </button>
       </div>
     </div>
