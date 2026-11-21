@@ -36,6 +36,18 @@ export function markMovedStubsSinceHisMidnight() {
   }
 }
 
+const BOARD_RELAY = /^(?:To \[\[agent:[\w-]+\]\]|On the board) \(board #\d+[^)]*\):\n|^\S+ via \S+, on the board \(#\d+, unverified\):\n/;
+
+// constraint: agent-to-agent board traffic belongs on the board, not his threads; the relays already posted are set aside on the thread, not deleted
+export function setBoardRelaysAside() {
+  for (const t of threads) {
+    const relays = t.messages.filter((m) => BOARD_RELAY.test(m.text));
+    if (relays.length === 0) continue;
+    patch(t, { messages: t.messages.filter((m) => !relays.includes(m)), boardRelays: [...(t.boardRelays ?? []), ...relays] });
+  }
+  saveThreads();
+}
+
 export function retireCommandFields() {
   for (const t of threads) {
     for (const field of RETIRED_COMMAND_FIELDS) Reflect.deleteProperty(t, field);

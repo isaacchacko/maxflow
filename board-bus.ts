@@ -3,8 +3,8 @@ import { CLI } from "./instance";
 import type { Thread } from "./model";
 import { type Session, isSentry, sessions } from "./sessions";
 import { dispatch, endWait, isReachable, isWaitingOn } from "./lifecycle";
-import { message, unforge } from "./threads";
-import { saveThreads, threads } from "./stores";
+import { unforge } from "./threads";
+import { threads } from "./stores";
 import { readStateJson, writeStateJson } from "./state";
 import { AGENT_BOARD_CONFIG, agentBoardUrl } from "./agent-board-config";
 import { isRecord } from "./shared/guards";
@@ -14,7 +14,6 @@ const POST_MS = 5000;
 const SENTRY_GRACE_MS = 30_000;
 const SWEEP_MS = 10_000;
 const SENT_KEPT = 500;
-const QUOTED_IN_THREAD = 1500;
 
 export const agentChannel = (id: string) => `yarn/agent/${id}`;
 export const threadChannel = (id: string) => `yarn/thread/${id}`;
@@ -66,34 +65,6 @@ async function postAndRead(body: Record<string, unknown>, as: Session | undefine
 }
 
 const isOpen = (t: Thread) => t.mergedInto === undefined && t.resolved === undefined;
-const isOn = (t: Thread, s: Session) => t.routers.includes(s.id) || t.members?.includes(s.id) === true || t.pending?.routers.includes(s.id) === true;
-const lastAt = (t: Thread) => t.messages.at(-1)?.at ?? 0;
-
-// constraint: a worker is usually on no thread, so its traffic shows in the one its router or peer is on
-function threadFor(from: Session | undefined, to: Session | undefined): Thread | undefined {
-  const pair = [to, from].filter((s): s is Session => s !== undefined);
-  const open = threads.filter(isOpen);
-  const both = open.filter((t) => pair.every((s) => isOn(t, s)));
-  const handed = pair.flatMap((s) => open.filter((t) => t.id === s.handed));
-  const either = pair.flatMap((s) => open.filter((t) => isOn(t, s)));
-  return [both, handed, either].map((list) => list.toSorted((a, b) => lastAt(b) - lastAt(a))[0]).find((t) => t !== undefined);
-}
-
-const quoted = (text: string) => (text.length > QUOTED_IN_THREAD ? `${text.slice(0, QUOTED_IN_THREAD)}…` : text);
-
-// constraint: an agent's message here must not clear what he waits on (postIn's pending), so it's added like a yarn line, by the sender
-function showInThread(t: Thread, from: string, text: string) {
-  t.messages.push(message(from, text));
-  saveThreads();
-  publish(`thread/${t.id}`, { thread: t.id, from });
-}
-
-function mirror(from: Session | undefined, to: Session | undefined, text: string, how: string) {
-  const t = threadFor(from, to);
-  if (!t) return;
-  const toWhom = to ? `To [[agent:${to.id}]]` : "On the board";
-  showInThread(t, from?.id ?? "yarn", `${toWhom} (${how}):\n${quoted(text)}`);
-}
 
 const FELL_BACK = `\n[yarn] The board didn't hand this over within ${String(SENTRY_GRACE_MS / 1000)}s, so it came directly.`;
 
@@ -110,7 +81,6 @@ function deliverRecorded(id: string, record: Sent, how: "board" | "direct") {
   const from = sessions.get(record.from ?? "");
   const isDirect = how === "direct";
   typeInto(to, from, record, isDirect);
-  mirror(from, to, record.text, isDirect ? `board #${id}, delivered directly` : `board #${id}`);
   if (isDirect) publish("board-bus/fallback", { id, to: to.id, from: from?.id ?? null, why: "not handed over by the board sentry in time" });
 }
 
@@ -122,7 +92,7 @@ setInterval(sweepUndelivered, SWEEP_MS).unref();
 
 export type Carried = { via: "board"; id: string } | { via: "direct"; error: string };
 
-// constraint: sentries' notices stay direct, so the board and his threads hold only the agents' conversation
+// constraint: sentries' notices stay direct, so the board holds only the agents' conversation
 export const isForTheBoard = (from: Session | undefined, to: Session) => from !== undefined && !isSentry(from) && !isSentry(to) && from.id !== to.id;
 
 export async function carry(m: { from: Session; to: Session; text: string; deliver: string; isAlreadyTyped: boolean }): Promise<Carried> {
@@ -131,7 +101,6 @@ export async function carry(m: { from: Session; to: Session; text: string; deliv
     if (m.isAlreadyTyped) dispatch({ from: m.from, to: [m.to], text: m.text, typed: true });
     else dispatch({ from: m.from, to: [m.to], text: m.text, deliver: `${m.deliver}\n[yarn] The agent board was down (${posted.error.slice(0, 120)}), so this came directly.` });
     if (isWaitingOn(m.to, m.from.id)) endWait(m.to);
-    mirror(m.from, m.to, m.text, "board down, delivered directly");
     publish("board-bus/fallback", { to: m.to.id, from: m.from.id, why: posted.error });
     return { via: "direct", error: posted.error };
   }
@@ -139,7 +108,6 @@ export async function carry(m: { from: Session; to: Session; text: string; deliv
   if (m.isAlreadyTyped) {
     keep(posted.id, { ...record, delivered: true });
     dispatch({ from: m.from, to: [m.to], text: m.text, typed: true });
-    mirror(m.from, m.to, m.text, `board #${posted.id}`);
   } else keep(posted.id, record);
   return { via: "board", id: posted.id };
 }
@@ -158,11 +126,9 @@ const howToAnswer = (p: BoardPost) => `\n[yarn] Board message ${p.id} in ${p.cha
 
 function deliverToAgent(p: BoardPost, to: Session) {
   dispatch({ source: "agent", to: [to], target: p.handle, text: p.text, deliver: `${unverifiedStamp(p)} ${unforge(p.text)}${howToAnswer(p)}` });
-  mirror(undefined, to, `${p.handle} via ${p.device}: ${p.text}`, `board #${p.id}, unverified`);
 }
 
 function deliverToThread(p: BoardPost, t: Thread) {
-  showInThread(t, "yarn", `${p.handle} via ${p.device}, on the board (#${p.id}, unverified):\n${quoted(p.text)}`);
   const owners = t.routers.map((id) => sessions.get(id)).filter(isReachable);
   if (owners.length > 0) dispatch({ source: "agent", to: owners, target: t.title, text: p.text, deliver: `${unverifiedStamp(p)} In the board channel of your thread "${t.title}" (${t.id}): ${unforge(p.text)}${howToAnswer(p)}` });
 }
@@ -186,5 +152,5 @@ export function handOver(p: BoardPost): string {
   const t = kind === "thread" ? threads.find((x) => x.id === id && isOpen(x)) : undefined;
   if (!t) return "not a channel for this yarn";
   deliverToThread(p, t);
-  return "posted in thread unverified";
+  return "handed to the thread owner unverified";
 }

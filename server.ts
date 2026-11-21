@@ -42,6 +42,7 @@ import {
   markMovedStubsSinceHisMidnight,
   migrateOpenQuestionsIntoThreads,
   retireCommandFields,
+  setBoardRelaysAside,
   settleColumnsOfTasksFromBeforeSettling,
 } from "./boot-thread-migrations";
 import { splitFeedHandoffsIntoTheirMessages } from "./feed-handoff-split";
@@ -89,6 +90,7 @@ keepPrStatesFresh();
 setTimeout(backfillExternalSignals, EXTERNAL_BACKFILL_AFTER_MS);
 markMovedStubsSinceHisMidnight();
 retireCommandFields();
+setBoardRelaysAside();
 splitFeedHandoffsIntoTheirMessages();
 process.on("exit", flushPendingThreads);
 for (const sig of ["SIGTERM", "SIGINT"] as const)
