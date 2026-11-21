@@ -1,5 +1,5 @@
 import { Eye } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useInterval, useResource } from "@/lib/effects";
 import { hasText } from "@/lib/utils";
@@ -16,7 +16,9 @@ async function loadPreview(): Promise<Preview | null> {
   const res = await fetch("/api/preview");
   if (!res.ok) return null;
   const answer: unknown = await res.json();
-  return isPreview(answer) ? answer : null;
+  if (!isPreview(answer)) return null;
+  document.title = `Preview: ${answer.branch}`;
+  return answer;
 }
 
 function markSeenWhileHeLooks() {
@@ -90,9 +92,6 @@ function Verdicts({ preview }: { preview: Preview }) {
 
 function Banner({ preview }: { preview: Preview }) {
   useInterval(markSeenWhileHeLooks, SEEN_EVERY_MS);
-  useEffect(() => {
-    document.title = `Preview: ${preview.branch}`;
-  }, [preview.branch]);
   return (
     <div data-agent="preview-banner" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs [app-region:no-drag]">
       <span className="flex items-center gap-1.5 font-semibold">

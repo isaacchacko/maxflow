@@ -3,7 +3,7 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { previewName, snapshotLive } from "../previews";
+import { previewName, snapshotLiveWithoutSlackInboxesOrCredentials } from "../previews";
 
 const scratch = mkdtempSync(join(tmpdir(), "yarn-previews-"));
 
@@ -31,7 +31,7 @@ test("a live snapshot keeps threads, tasks and timelines and leaves Slack messag
   db.close();
 
   const preview = join(scratch, "preview");
-  snapshotLive(live, timelines, preview);
+  snapshotLiveWithoutSlackInboxesOrCredentials({ db: join(live, "yarn.db"), uploads: join(live, "uploads"), timelines }, preview);
 
   const copy = new Database(join(preview, "yarn.db"), { readonly: true });
   const count = (table: string) => (copy.query(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;

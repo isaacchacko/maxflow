@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { DIR, IS_LIVE, STATE_DIR } from "./instance";
+import { DIR, IS_LIVE } from "./instance";
+import { stateDisplayPath } from "./state";
 import { TIMELINES_DIR } from "./timelines";
-import { PREVIEW_CAP, PREVIEW_IDLE_MS, type Preview, endPreview, freePort, isPortTaken, isServing, previewDir, previewName, previews, readPreview, snapshotLive, stopServer, writePreview } from "./previews";
+import { PREVIEW_CAP, PREVIEW_IDLE_MS, type Preview, endPreview, freePort, isPortTaken, isServing, previewDir, previewName, previews, readPreview, snapshotLiveWithoutSlackInboxesOrCredentials, stopServer, writePreview } from "./previews";
 import { base, fail, flag, mySession, post, replyOf, str, type Verb } from "./cli-shared";
 
 const BOOT_DEADLINE_MS = 180_000;
@@ -25,14 +26,14 @@ function refuseOverTheCap(name: string) {
 
 function prepareState(dir: string, args: string[]) {
   if (args.includes("--copy-live")) {
-    snapshotLive(STATE_DIR, TIMELINES_DIR, dir);
+    snapshotLiveWithoutSlackInboxesOrCredentials({ db: stateDisplayPath("yarn.db"), uploads: stateDisplayPath("uploads"), timelines: TIMELINES_DIR }, dir);
     return "a snapshot of live's threads, tasks, objectives, todos and timelines";
   }
   if (args.includes("--seed") || !existsSync(join(dir, "yarn.db"))) return "the fixture seed";
   return "the state it had";
 }
 
-async function answersAs(port: number, name: string) {
+async function isAnsweringAs(port: number, name: string) {
   try {
     const r = await fetch(`http://localhost:${String(port)}/api/instance`, { signal: AbortSignal.timeout(BOOT_POLL_MS) });
     return r.ok && str(replyOf(await r.json()), "instance") === name;
@@ -42,7 +43,10 @@ async function answersAs(port: number, name: string) {
 }
 
 async function waitForBoot(p: Preview) {
-  for (const end = Date.now() + BOOT_DEADLINE_MS; Date.now() < end; await Bun.sleep(BOOT_POLL_MS)) if (await answersAs(p.port, p.name)) return;
+  for (const end = Date.now() + BOOT_DEADLINE_MS; Date.now() < end; ) {
+    if (await isAnsweringAs(p.port, p.name)) return;
+    await Bun.sleep(BOOT_POLL_MS);
+  }
   fail(`${p.name} didn't answer on port ${String(p.port)} within ${String(BOOT_DEADLINE_MS / 1000)}s; its log is ${join(previewDir(p.name), "preview.log")}`);
 }
 
@@ -58,15 +62,24 @@ function launch(p: Preview, isSeeding: boolean) {
   Bun.spawnSync(["sh", "-c", script], { cwd: p.worktree });
 }
 
-async function startPreview(args: string[]) {
-  const what = flag(args, "--what");
-  const tryThis = flag(args, "--try");
-  if (what === undefined || tryThis === undefined) fail(USAGE);
-  const agent = mySession();
-  if (agent === undefined) fail("run this from your yarn session: YARN_SESSION names the agent his verdict goes back to");
+function worktreeToPreview() {
   const worktree = git(process.cwd(), ["rev-parse", "--show-toplevel"]);
   if (worktree === "" || !existsSync(join(worktree, "dev.sh"))) fail(`run this from a worktree of yarn; ${process.cwd()} isn't one`);
   if (worktree === DIR && IS_LIVE) fail(`${DIR} is the checkout live runs from, so it is live already; preview your own worktree`);
+  return worktree;
+}
+
+function askedFor(args: string[]) {
+  const what = flag(args, "--what");
+  const tryThis = flag(args, "--try");
+  if (what === undefined || tryThis === undefined) fail(USAGE);
+  const agent = mySession() ?? fail("run this from your yarn session: YARN_SESSION names the agent his verdict goes back to");
+  return { what, tryThis, agent };
+}
+
+async function startPreview(args: string[]) {
+  const { what, tryThis, agent } = askedFor(args);
+  const worktree = worktreeToPreview();
   const branch = git(worktree, ["branch", "--show-current"]) || git(worktree, ["rev-parse", "--short", "HEAD"]);
   const name = previewName(branch);
   refuseOverTheCap(name);

@@ -1,6 +1,7 @@
-import { CLI, IS_LIVE, STATE_DIR } from "./instance";
+import { CLI, IS_LIVE } from "./instance";
+import { peekStateJson } from "./state";
 import { dispatch, live_thread } from "./lifecycle";
-import { PREVIEW_IDLE_MS, VERDICTS, VERDICT_LABELS, type Preview, type Verdict, endPreview, isServing, previewDir, previews, readPreview, writePreview } from "./previews";
+import { PREVIEW_IDLE_MS, VERDICTS, VERDICT_LABELS, type Preview, type Verdict, asPreview, endPreview, isServing, previewDir, previews, readPreview, writePreview } from "./previews";
 import { type Route, firstAnswer, isIsaacsBrowser, jsonBody, matching, exactly, sender, textOf } from "./route-kit";
 import { sessions } from "./sessions";
 import { threads } from "./stores";
@@ -82,8 +83,7 @@ export function keepSweepingPreviews() {
   if (IS_LIVE) setInterval(sweep, SWEEP_MS);
 }
 
-// The preview's own server: the banner reads what it previews, marks it seen while his tab shows it, and sends his verdict to live.
-const thisPreview = () => (IS_LIVE ? undefined : readPreview(STATE_DIR));
+const thisPreview = () => (IS_LIVE ? undefined : asPreview(peekStateJson("preview.json")));
 const isHisBrowser = (req: Request) => isIsaacsBrowser(req) && req.headers.get("user-agent")?.includes("HeadlessChrome") !== true;
 const lastSeen = { at: 0 };
 
