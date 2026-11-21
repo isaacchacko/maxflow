@@ -42,7 +42,8 @@ async function gated() {
 
 test("once he has a passkey, a browser without his token is refused everywhere he alone may act, and an agent is refused outright", async () => {
   await waitUntilAnswering(instance, server);
-  for (const [path, body, method] of await gated()) {
+  const routes = await gated();
+  for (const [path, body, method] of routes) {
     const asABrowser = await send(path, body, aBrowser, method);
     expect([path, asABrowser.status, asABrowser.headers.get("x-yarn-isaac")]).toEqual([path, 401, "sign-in"]);
     const asAnAgent = await send(path, body, { ...aBrowser, "x-yarn-from": "dd2cf747" }, method);

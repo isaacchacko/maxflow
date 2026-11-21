@@ -76,7 +76,7 @@ function refreshSession(req: Request): string | undefined {
   return undefined;
 }
 
-function takeChallenge(kind: "register" | "login", challenge: string) {
+function isChallengeTaken(kind: "register" | "login", challenge: string) {
   const held = challenges.get(challenge);
   challenges.delete(challenge);
   return held?.kind === kind && Date.now() - held.at < CHALLENGE_MS;
@@ -91,7 +91,7 @@ export const status = (req: Request) => ({
 });
 
 // constraint: the first passkey can be enrolled by whoever asks first, so only while none exists; another one needs him already signed in, with Touch ID just now
-export const mayEnroll = (req: Request) => callerOf(req) === "" && (isEnrolled() ? isIsaacsFresh(req) : isTheOldBrowserTest(req));
+export const canEnroll = (req: Request) => callerOf(req) === "" && (isEnrolled() ? isIsaacsFresh(req) : isTheOldBrowserTest(req));
 
 export async function registrationOptions() {
   const options = await generateRegistrationOptions({
@@ -115,7 +115,7 @@ const challengeIn = (response: unknown) => {
 
 export async function enroll(response: unknown, label: string): Promise<{ token: string } | { error: string }> {
   const challenge = challengeIn(response);
-  if (!takeChallenge("register", challenge)) return { error: "that enrollment expired; start again" };
+  if (!isChallengeTaken("register", challenge)) return { error: "that enrollment expired; start again" };
   const verified = await verifyRegistrationResponse({ response: response as Parameters<typeof verifyRegistrationResponse>[0]["response"], expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP_ID, requireUserVerification: true });
   if (!verified.verified || !verified.registrationInfo) return { error: "the passkey didn't verify" };
   const { credential } = verified.registrationInfo;
@@ -132,7 +132,7 @@ export async function loginOptions() {
 
 export async function signIn(req: Request, response: unknown): Promise<{ token?: string } | { error: string }> {
   const challenge = challengeIn(response);
-  if (!takeChallenge("login", challenge)) return { error: "that sign-in expired; start again" };
+  if (!isChallengeTaken("login", challenge)) return { error: "that sign-in expired; start again" };
   const id = isRecord(response) ? response["id"] : undefined;
   const passkey = passkeys.find((p) => p.id === id);
   if (!passkey) return { error: "not one of his passkeys" };

@@ -147,7 +147,7 @@ export const postIn = (t: Thread, from: Session | string | undefined, text: stri
   postMessage(t, typeof from === "string" ? { outsideLabel: from, text, nudge } : { from, text, nudge });
 type Refusal = { refusal: string; signIn?: true };
 export const refusalOf = (r: Refusal) => new Response(r.refusal, { status: r.signIn ? 401 : 403, headers: r.signIn ? { [NEEDS_HEADER]: "sign-in" } : {} });
-export function sessionless(req: Request, as: string | undefined): { label: string } | { isaac: true } | Refusal {
+export function sessionless(req: Request, as: string | undefined): Refusal | { label: string } | { isaac: true } {
   if (as !== undefined) return /^[\w.-]+\/[\w.-]+$/.test(as) ? { label: as } : { refusal: `--as takes <device>/<name>, like cleopatra/yarn-browser, not "${as}"` };
   const claimed = callerOf(req);
   if (claimed === "" && isIsaacsBrowser(req)) return { isaac: true };

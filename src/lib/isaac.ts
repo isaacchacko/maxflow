@@ -73,8 +73,9 @@ async function fetchAsIsaac(input: RequestInfo | URL, init?: RequestInit): Promi
   return original(input, withToken(input, init));
 }
 
-// constraint: his proof is a token in this origin's storage, sent as a header; a cookie on localhost would reach every port, agent-run preview and dev servers included
+// constraint: a cookie on localhost reaches every port, agent-run previews too, so his token stays in this origin's storage
 export function installIsaacFetch() {
+  // eslint-disable-next-line unicorn/no-global-object-property-assignment -- every request the page makes must carry his token, and 18 call sites use fetch directly
   globalThis.fetch = fetchAsIsaac as typeof fetch;
   void refreshIsaac();
 }

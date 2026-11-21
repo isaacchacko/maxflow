@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 const browserLabel = () => `${navigator.platform} · ${/Chrome\/\d+/.exec(navigator.userAgent)?.[0] ?? "browser"}`;
 
 function lookOf(status: ReturnType<typeof isaacStore.get>) {
-  if (status === undefined) return undefined;
+  if (status === undefined) return;
   if (status.enrolled.length === 0) return { icon: KeyRound, label: "Set up your passkey", title: "Enroll this browser's Touch ID passkey, so only you can act as Isaac here", isWarn: true };
   if (!status.signedIn) return { icon: Fingerprint, label: "Sign in with Touch ID", title: "Sign in with your passkey to post, merge and flip the gate as yourself", isWarn: true };
   return { icon: ShieldCheck, label: "Signed in as you", title: `Signed in with your passkey (${status.enrolled.map(p => p.label).join(", ")})`, isWarn: false };
@@ -21,8 +21,8 @@ export function IsaacButton({ open }: { open: boolean }) {
     setError("");
     try {
       await (status.enrolled.length === 0 ? enrollAsIsaac(browserLabel()) : signInAsIsaac());
-    } catch (failed) {
-      setError(String(failed));
+    } catch (error_) {
+      setError(String(error_));
     }
   };
   const Icon = look.icon;

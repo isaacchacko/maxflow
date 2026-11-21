@@ -1,16 +1,16 @@
-import { enroll, loginOptions, mayEnroll, registrationOptions, signIn, status } from "./isaac-auth";
+import { canEnroll, enroll, loginOptions, registrationOptions, signIn, status } from "./isaac-auth";
 import { callerOf } from "./shared/legacy-maxflow";
 import { type Route, exactly, firstAnswer, jsonBody, textOf } from "./route-kit";
 
 const notForAgents = () => new Response("an agent can't sign in as Isaac", { status: 403 });
 
 async function enrollOptions(req: Request) {
-  if (!mayEnroll(req)) return new Response("a passkey is enrolled already: sign in with it, then add another", { status: 403 });
+  if (!canEnroll(req)) return new Response("a passkey is enrolled already: sign in with it, then add another", { status: 403 });
   return Response.json(await registrationOptions());
 }
 
 async function enrollVerify(req: Request) {
-  if (!mayEnroll(req)) return new Response("a passkey is enrolled already: sign in with it, then add another", { status: 403 });
+  if (!canEnroll(req)) return new Response("a passkey is enrolled already: sign in with it, then add another", { status: 403 });
   const body = await jsonBody(req);
   const done = await enroll(body["response"], textOf(body, "label") ?? "a browser");
   return "error" in done ? new Response(done.error, { status: 400 }) : Response.json({ enrolled: true, token: done.token });
