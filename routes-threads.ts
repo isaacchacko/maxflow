@@ -50,13 +50,13 @@ async function feedItemNoAgentOwnsToTheFunnel(from: Session, feed: Feed, text: s
   return Response.json(t, { status: 201 });
 }
 
+const ownedBy = (t: Thread) => (t.routers.length > 0 ? `, owner ${t.routers.join(", ")}` : ", no live owner");
 function quotedThreadsLine(text: string, seq: number) {
   if (!areOwnersOn()) return "";
   const ids = new Set(text.matchAll(/\[\[msg:(th-[\w-]+)\//g).map((m) => m[1] ?? ""));
   const quoted = [...ids].flatMap((id) => live_thread(threads.find((t) => t.id === id)) ?? []);
   if (quoted.length === 0) return "";
-  const owned = (t: Thread) => (t.routers.length > 0 ? `, owner ${t.routers.join(", ")}` : ", no live owner");
-  return `\n[yarn] He quotes ${quoted.map((t) => `${t.id} "${t.title}"${owned(t)}`).join("; ")}. By default it continues the quoted thread (\`${CLI} route ${seq} --thread ${quoted[0]?.id ?? ""}\`), unless what he asks is about something else.`;
+  return `\n[yarn] He quotes ${quoted.map((t) => `${t.id} "${t.title}"${ownedBy(t)}`).join("; ")}. By default it continues the quoted thread (\`${CLI} route ${seq} --thread ${quoted[0]?.id ?? ""}\`), unless what he asks is about something else.`;
 }
 
 function hisInboxMessageForTheFunnelToRoute(text: string): Response {
