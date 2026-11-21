@@ -1,4 +1,3 @@
-
 const KEPT = 200;
 export const squash = (text: string) => text.replaceAll(/<\/?pasted_content[^>]*>/g, "").replaceAll(/\s+/g, " ").trim();
 const KEPT_MS = 24 * 3_600_000;
@@ -15,7 +14,7 @@ export function recordIsaacSaid(text: string) {
 export const isaacSaidLately = () => said.filter((s) => Date.now() - s.at < KEPT_MS).map((s) => s.text);
 
 const typing = new Map<string, string>();
-const BACKSPACE = /[\u0008\u007F]/;
+const BACKSPACES = new Set(["\u{8}", "\u{7F}"]);
 
 export function recordIsaacTyped(session: string, keys: string) {
   let line = typing.get(session) ?? "";
@@ -23,7 +22,7 @@ export function recordIsaacTyped(session: string, keys: string) {
     if (key === "\r" || key === "\n") {
       recordIsaacSaid(line);
       line = "";
-    } else if (BACKSPACE.test(key)) line = line.slice(0, -1);
+    } else if (BACKSPACES.has(key)) line = line.slice(0, -1);
     else if (key >= " ") line += key;
   }
   typing.set(session, line);

@@ -169,7 +169,8 @@ function websocketUpgrade(req: Request, path: string, server: Server<WsData>): U
   const id = /^\/ws\/([\w-]+)$/.exec(path)?.[1];
   if (id === undefined) return undefined;
   if (!sessions.has(id)) return { response: new Response("no such session", { status: 404 }) };
-  return upgraded(server.upgrade(req, { data: { id, isIsaac: isIsaacsSocket(new URL(req.url)) } }));
+  const isIsaac = isIsaacsSocket(new URL(req.url));
+  return upgraded(server.upgrade(req, { data: { id, isIsaac } }));
 }
 
 async function mockOrRealWorkKeptOutOfTheRepo() {

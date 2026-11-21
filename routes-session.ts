@@ -56,14 +56,21 @@ const isTextForAPlainSentry = (s: Session, text: string | undefined) => isFilled
 // constraint: text typed with no calling session lands in the prompt unstamped, which reads as his own words
 const isHisTyping = (req: Request, s: Session, body: Body) => sender(req) === undefined && isAgent(s) && (isFilled(textOf(body, "text")) || (textsOf(body, "keys") ?? []).length > 0);
 
+function refusedUnlessHisOwnTyping(req: Request, s: Session, body: Body) {
+  if (!isHisTyping(req, s, body)) return;
+  const refused = isaacRefusal(req, "types into an agent as himself");
+  const text = textOf(body, "text");
+  if (!refused && isFilled(text)) recordIsaacSaid(text);
+  return refused;
+}
+
 async function typeInto(req: Request, s: Session): Promise<Response> {
   const body = await jsonBody(req);
   if (s.exitCode !== null) return new Response("session ended", { status: 409 });
   const text = textOf(body, "text");
   if (isTextForAPlainSentry(s, text)) return nobodyReads(s);
-  const refused = isHisTyping(req, s, body) ? isaacRefusal(req, "types into an agent as himself") : undefined;
+  const refused = refusedUnlessHisOwnTyping(req, s, body);
   if (refused) return refused;
-  if (isHisTyping(req, s, body) && isFilled(text)) recordIsaacSaid(text);
   const typed = typedFor(req, s, text, body);
   if ("error" in typed) return new Response(typed.error, { status: 409 });
   touchFrom(req, s, "write");
