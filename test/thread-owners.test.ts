@@ -34,7 +34,8 @@ const signal = async (text: string) => (await json<{ seq: number }>(await send("
 describe("thread owners (docs: yarn/thread-owners.md)", () => {
   test("with the switch on, a new signal gets an owner, routers are refused, and a follow-up reaches the same owner", async () => {
     await waitUntilAnswering(instance, server);
-    expect(await json<{ on: boolean }>(await fetch(`${instance.base}/api/thread-owners`, withTimeout()))).toMatchObject({ on: false });
+    const before = await fetch(`${instance.base}/api/thread-owners`, withTimeout());
+    expect(await json<{ on: boolean }>(before)).toMatchObject({ on: false });
     expect(await json<{ on: boolean }>(await send("/api/thread-owners", { on: true }))).toMatchObject({ on: true });
 
     const first = await signal("ping");
